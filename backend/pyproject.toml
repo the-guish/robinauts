@@ -48,7 +48,7 @@ dependencies = [
     # The upper bound is the ten-day cooldown (.github/dependabot.yml): 0.53.0
     # was published on 2026-09-14 and this was adopted on 2026-09-23. Dependabot
     # raises it once the window has passed.
-    "uvicorn>=0.52.4,<0.53",
+    "uvicorn>=0.52.4,<0.54",
 ]
 
 # PEP 639. The three files a wheel of this project distributes other people's
