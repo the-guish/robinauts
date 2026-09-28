@@ -7,6 +7,7 @@ import time
 import uuid
 from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime, timedelta, timezone
+from types import MappingProxyType
 
 import pytest
 
@@ -266,6 +267,10 @@ def test_a_tool_calls_arguments_are_a_copy_of_plain_data() -> None:
     written["nested"]["list"].append("later")  # type: ignore[index]
     assert made.arguments == {"nested": {"list": [1, "two", None, True]}}
     assert isinstance(made.arguments, dict)
+    # A mapping of another kind and a tuple are taken, and kept as dict and list.
+    read_only = MappingProxyType({"inner": MappingProxyType({"pair": (1, 2)})})
+    assert ToolCallPart("c", "t", read_only).arguments == {"inner": {"pair": [1, 2]}}
+    assert isinstance(ToolCallPart("c", "t", read_only).arguments["inner"], dict)
 
 
 @pytest.mark.parametrize(

@@ -85,6 +85,8 @@ from robinauts.domain import (
     Role,
     RunState,
     TextPart,
+    ToolCallPart,
+    ToolResultPart,
     User,
 )
 from robinauts.ports import Snapshot
@@ -490,6 +492,62 @@ async def test_an_empty_conversation_opens_on_nothing() -> None:
         opened = await it.client.get(f"/api/conversations/{kept.id}")
 
     assert opened.json()["messages"] == []
+
+
+@asyncio_test
+async def test_a_turn_with_tools_is_served_as_data() -> None:
+    """The answer's calls and the tool message's results are sent as parts of
+    their own kind, with the arguments as an object and the error flag as a
+    boolean, and never as text (``docs/specs/wire.md``)."""
+    asked = question("look it up", seconds=1)
+    calling = answer(
+        asked,
+        seconds=2,
+        parts=(
+            TextPart("Let me look."),
+            ToolCallPart("toolu_01", "github__search", {"q": "robinauts", "n": 3}),
+        ),
+        extras={"anthropic": {"thinking": [{"signature": "sig"}]}},
+    )
+    results = Message(
+        id=uuid.uuid4(),
+        conversation_id=asked.conversation_id,
+        parent_id=calling.id,
+        role=Role.TOOL,
+        parts=(ToolResultPart("toolu_01", "found <b>3</b>", is_error=True),),
+        created_at=at(3),
+    )
+    final = answer(results, "Found three.", seconds=4)
+
+    async with served() as it:
+        kept = await it.written(asked, calling, results, final)
+
+        opened = await it.client.get(f"/api/conversations/{kept.id}")
+
+    body = opened.json()
+    assert opened.status_code == 200
+    assert [message["role"] for message in body["messages"]] == [
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+    ]
+    assert body["messages"][1]["parts"] == [
+        {"kind": "text", "text": "Let me look."},
+        {
+            "kind": "tool_call",
+            "call_id": "toolu_01",
+            "name": "github__search",
+            "arguments": {"q": "robinauts", "n": 3},
+        },
+    ]
+    assert body["messages"][2]["parts"] == [
+        {"kind": "tool_result", "call_id": "toolu_01", "text": "found <b>3</b>", "is_error": True}
+    ]
+    assert body["messages"][2]["provenance"] is None
+    # The vendor's extras are the store's and the adapter's, never the browser's.
+    assert "extras" not in body["messages"][1]
+    assert "sig" not in opened.text
 
 
 @asyncio_test
@@ -1429,8 +1487,8 @@ def test_the_wire_declares_exactly_the_values_it_sends() -> None:
     """An enum on the wire is a promise, so it names what is really sent.
 
     ``domain``'s own enums name more: every kind of content the stored format
-    reserves a discriminator for, the ``tool`` role no message of this build
-    carries, and the states a run can be in that are not a bad end. A document
+    reserves a discriminator for -- reasoning among the carried ones, which is
+    never sent -- and the states a run can be in that are not a bad end. A document
     that offered those would have every generated client branch on values it
     can never be sent. A value added here later is a change to the committed
     snapshot, which is what the snapshot is for.

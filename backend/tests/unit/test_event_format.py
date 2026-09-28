@@ -22,15 +22,20 @@ from robinauts.domain import (
     FIRST_POSITION,
     FORMAT_VERSION,
     InvalidValueError,
+    Message,
     MessageCompleted,
     MessageStarted,
     ReasoningDelta,
+    Role,
     RunEnded,
     RunEvent,
     RunStarted,
     RunState,
     StoredDataError,
     TextDelta,
+    TextPart,
+    ToolCallPart,
+    ToolResultPart,
     TurnEvent,
     UnsupportedFormatError,
     clean_text,
@@ -41,14 +46,30 @@ PARENT = uuid.UUID("1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e")
 
 
 def every_event() -> list[TurnEvent]:
-    """One of each, as a run produces them."""
+    """One of each, as a run produces them -- a turn with tools included."""
     said = answer(question(), "Some one")
+    calling = answer(
+        question(),
+        parts=(TextPart("Let me look."), ToolCallPart("toolu_01", "github__search", {"q": "x"})),
+        extras={"anthropic": {"thinking": [{"signature": "sig"}]}},
+    )
+    results = Message(
+        id=uuid.uuid4(),
+        conversation_id=CONVERSATION,
+        parent_id=calling.id,
+        role=Role.TOOL,
+        parts=(ToolResultPart("toolu_01", "found", is_error=True),),
+        created_at=calling.created_at,
+    )
     return [
         RunStarted(run_id=RUN, conversation_id=CONVERSATION),
         MessageStarted(run_id=RUN, message_id=MESSAGE, parent_id=PARENT),
+        MessageStarted(run_id=RUN, message_id=MESSAGE, parent_id=PARENT, role=Role.TOOL),
         TextDelta(run_id=RUN, message_id=MESSAGE, text="Some "),
         ReasoningDelta(run_id=RUN, message_id=MESSAGE, text="thinking"),
         MessageCompleted(run_id=RUN, message=said),
+        MessageCompleted(run_id=RUN, message=calling),
+        MessageCompleted(run_id=RUN, message=results),
         RunEnded(run_id=RUN, state=RunState.FINISHED),
         RunEnded(run_id=RUN, state=RunState.FAILED, error="the provider said no"),
         RunEnded(run_id=RUN, state=RunState.CANCELLED),

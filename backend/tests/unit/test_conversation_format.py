@@ -152,6 +152,12 @@ def test_extras_are_written_when_there_are_some_and_left_out_when_not() -> None:
     """A message with nothing of a vendor's is written as it always was."""
     plain = question("one")
     assert EXTRAS not in message_to_data(plain)
+    # Written as null, or as an empty object, it reads as nothing and is not
+    # written back.
+    for nothing in (None, {}):
+        read = message_from_data(data_of(plain, extras=nothing))
+        assert read.extras == {}
+        assert EXTRAS not in message_to_data(read)
     kept = answer(question(), extras=BLOCKS)
     assert message_to_data(kept)[EXTRAS] == BLOCKS
     assert message_from_data(message_to_data(kept)).extras == BLOCKS
@@ -617,6 +623,15 @@ def test_stored_content_of_a_kind_this_build_lacks_is_a_fault_of_ours() -> None:
     stored = data_of(question(), parts=[{"kind": "image", "sha256": "ab"}])
     with pytest.raises(StoredDataError):
         message_from_stored(stored)
+    # And so is a tool part a row holds badly: ours, never the request's.
+    broken = data_of(
+        answer(question()),
+        parts=[{"kind": "tool_call", "call_id": "c", "name": "not a name", "arguments": {}}],
+    )
+    with pytest.raises(StoredDataError):
+        message_from_stored(broken)
+    with pytest.raises(InvalidValueError):
+        message_from_data(broken)
     # On the request path the same content is the request's business.
     with pytest.raises(UnsupportedContentError):
         message_from_data(stored)

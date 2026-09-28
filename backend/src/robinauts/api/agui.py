@@ -264,11 +264,11 @@ class AguiMapper:
         if isinstance(inner, RunStarted):
             return (RunStartedEvent(thread_id=self._thread_id, run_id=str(inner.run_id)),)
         if isinstance(inner, MessageStarted):
-            # A run answers a question and never asks one, so this is always
-            # ``assistant`` today. It goes through ``SENT_ROLE`` all the same:
-            # the platform's roles and AG-UI's are two sets that happen to
-            # overlap, and ``tool`` -- which ``domain.Role`` has reserved -- is
-            # in ours and not in theirs.
+            # A run answers a question and never asks one, so this is
+            # ``assistant`` until the tool loop announces tool messages too.
+            # It goes through ``SENT_ROLE`` all the same: the platform's roles
+            # and AG-UI's are two sets that happen to overlap, and ``tool`` is
+            # in ours and has no text-message word in theirs (``SENT_ROLE``).
             #
             # **Resolved before anything is closed.** ``closing`` is a write:
             # it hands back the end of the thinking and forgets it. Building

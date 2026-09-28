@@ -309,9 +309,10 @@ def checked_data(
     stored in a ``jsonb`` column and a lone surrogate cannot be encoded at
     all, and this is the walk that is already looking at every one of them.
 
-    What comes back is a **copy**, as plain ``dict`` and ``list``: a caller's
-    mapping of another kind is not kept, and a caller that goes on editing
-    what it passed edits nothing of the record's.
+    What comes back is a **copy**, as plain ``dict`` and ``list``: a mapping
+    of another kind (a ``MappingProxyType``, say) and a tuple are taken and
+    written as an object and a list, and a caller that goes on editing what it
+    passed edits nothing of the record's.
     """
     if not isinstance(data, Mapping):
         raise InvalidValueError(f"{what} is an object, not {describe(data)}")
@@ -346,7 +347,13 @@ def checked_data(
         # reads back. ``ensure_ascii=False``: the bound is on the UTF-8 this
         # would really be written as -- and the encoding is inside the guard,
         # because that is the step that can fail.
-        written = json.dumps(data, separators=(",", ":"), allow_nan=False, ensure_ascii=False)
+        written = json.dumps(
+            data,
+            separators=(",", ":"),
+            allow_nan=False,
+            ensure_ascii=False,
+            default=_as_object,
+        )
         size = len(written.encode("utf-8"))
     except (TypeError, ValueError, UnicodeError):
         raise InvalidValueError(f"{what} is plain data an export can write") from None
@@ -356,6 +363,19 @@ def checked_data(
     # exactly what would be written, as ``dict`` and ``list``, whatever
     # mapping or sequence types the caller built it from.
     return deepcopy(json.loads(written))
+
+
+def _as_object(value: object) -> dict[str, Any]:
+    """A mapping of another kind, as the object JSON writes; anything else is refused.
+
+    ``json.dumps`` asks this for a value it cannot write itself. The walk in
+    ``checked_data`` has already let only mappings, sequences and scalars
+    through, so what arrives here is a mapping that is not a ``dict``; the
+    ``TypeError`` for anything else is the refusal ``checked_data`` catches.
+    """
+    if isinstance(value, Mapping):
+        return dict(value)
+    raise TypeError(f"{describe(value)} is not plain data")
 
 
 def checked_line(value: object, what: str, limit: int) -> str:

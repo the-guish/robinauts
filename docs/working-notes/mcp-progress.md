@@ -155,12 +155,34 @@ call's arguments share it. Nothing produces these messages yet; a stored one
 round-trips through both stores (`contracts/conversation_store.py`). Larger
 than the five hundred lines a step aims for, by the snapshot and the tests.
 
-Review: pending.
+Review: 1 round.
+- High: 1 (0/1) — step 4a's uncommitted edits were in the tree the reviewer
+  read; step 3's commit holds none of them, so nothing to fix.
+- Medium: 7 (5/2) — fixed: the tree refuses a second tool message under one
+  answer (the spec's "never side by side" is a rule now); the module header
+  of `conversation_tree.py` names the rule and no longer says the role is
+  refused; a route test serves a turn with tools as data, and the events'
+  round trips carry a tool message and an answer's `extras`; the mapper's
+  comment. Left: `AnswerCompleted.extras` is not carried to the stored
+  message yet (step 4a, the application's step); the engines' docstrings
+  still say the role is not translated (steps 4b and 4c rewrite them).
+- Low: 6 (4/2) — fixed: `checked_data` takes a mapping of another kind as
+  an object; `extras: null` reads as nothing; a broken stored tool part is
+  a fault of ours; the vendor ids checked against the call-id rule are
+  noted below. Left: reads validate `extras` and arguments twice (once in
+  the encoding, once in the record), a cost accepted for one rule in one
+  place; a module-header line about `check_parent` reading content.
 
-Checks: lint; the whole suite against a throwaway PostgreSQL.
+Checks: lint; the whole suite against a throwaway PostgreSQL (3019 passed);
+the frontend's regenerated types and its 413 tests.
 Not done / to watch: `core.runs._check_completed` accepts a completed tool
 message but does not yet hold it to its parent's calls or to what was
-published for it (step 5c); the AG-UI mapper refuses a tool announcement
-until step 6a; `datastore/schema.sql`'s comment on the `tool` role still
-says "reserved and refused" and is left alone, since every edit of that file
-re-pins `SCHEMA_SHA256` and makes operators recreate their database.
+published for it, and **both stores refuse to `complete_message` a tool
+message** (they demand an assistant message with the run's provenance),
+which step 5c relaxes with the contract suite; the AG-UI mapper refuses a
+tool announcement until step 6a; `datastore/schema.sql`'s comment on the
+`tool` role still says "reserved and refused" and is left alone, since
+every edit of that file re-pins `SCHEMA_SHA256` and makes operators
+recreate their database. Gemini sends no tool call id at all, so an adapter
+reaching it would have to mint one (Pydantic AI does); the call-id rule
+takes Anthropic's, OpenAI's, Bedrock's and Pydantic AI's minted ids.

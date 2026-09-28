@@ -30,17 +30,19 @@ The invariants, all of them refused loudly rather than worked around:
 - every parent is present: a message whose parent is elsewhere is an orphan,
   and its branch cannot be read;
 - no cycles, which is also what guarantees a root exists;
-- the roles follow the one rule in ``may_follow``.
+- the roles follow the one rule in ``may_follow``;
+- a tool message answers exactly the calls of its parent, once each, and an
+  answer that made calls has at most one tool message under it
+  (``check_answers_calls``).
 
 **A turn is a chain.** A root is a question. A question follows an answer, or
-nothing. An answer follows a question, another answer, or a tool result -- a
-turn may produce several messages, and with tools it will produce a call and a
-result between them (``docs/specs/runs.md``). A tool message follows the
-answer that made the call. So a turn is one question and everything the run
-produced under it, and ``turn_start`` is what finds the question again from
-anywhere inside it. The ``tool`` role is refused by this build where a message
-is built; its rule is written here all the same, so that carrying it later
-changes nothing about the shape of a conversation.
+nothing. An answer follows a question, another answer, or a tool message -- a
+turn may produce several messages, and with tools it produces an answer that
+calls, the one tool message holding the results of that batch, and the answer
+that goes on from them (``docs/specs/runs.md``). A tool message follows the
+answer that made the calls, and holds one result per call. So a turn is one
+question and everything the run produced under it, and ``turn_start`` is what
+finds the question again from anywhere inside it.
 
 **More than one root is legal.** Editing the first question of a conversation
 gives the new question the same parent as the old one -- which is nothing --
@@ -153,7 +155,8 @@ def check_answers_calls(message: Message, parent: Message) -> None:
 
     Applied where the tree is built, as every rule of the shape is, and by the
     application before it writes a tool message -- the same check, so the two
-    cannot part company.
+    cannot part company. That an answer has at most **one** tool message under
+    it is the tree's to see, since it takes the siblings (``_check_shape``).
     """
     if not isinstance(message, Message) or not isinstance(parent, Message):
         raise InvalidMessageTreeError(
@@ -233,7 +236,7 @@ class ConversationTree:
 
     def _check_shape(self) -> None:
         """Parents present, roles as ``may_follow`` says, tool messages answering
-        their parent's calls, no cycles."""
+        their parent's calls and one to a parent, no cycles."""
         for message in self.messages:
             if message.parent_id is not None and message.parent_id not in self.at:
                 raise InvalidMessageTreeError(
@@ -243,6 +246,17 @@ class ConversationTree:
             check_parent(message.role, parent)
             if parent is not None:
                 check_answers_calls(message, parent)
+        # The results of one call batch are one tool message: two under one
+        # answer would read as one replacing the other, which the spec says
+        # never happens (``docs/specs/conversations.md``). Nothing legitimate
+        # writes a second -- a retry is a new run from the question -- so a
+        # second one is rows that are no conversation.
+        for parent_id, children in self.below.items():
+            if parent_id is not None and sum(child.role is Role.TOOL for child in children) > 1:
+                raise InvalidMessageTreeError(
+                    f"message {parent_id} has more than one tool message under it; the"
+                    " results of one call batch are one tool message"
+                )
         # Walked once per message with the settled ones remembered, so a deep
         # conversation is not re-walked from every leaf.
         settled: set[uuid.UUID] = set()

@@ -179,11 +179,13 @@ def test_the_tree_holds_a_tool_message_to_its_parents_calls() -> None:
     plain = answer(asked, "plain", seconds=1)
     with pytest.raises(InvalidMessageTreeError, match="made tool calls"):
         tree([asked, plain, results(plain, "c1")])
-    # Two tool messages under one answer would read as one replacing the other.
+    # The results of one call batch are one tool message: two under one
+    # answer would read as one replacing the other, and nothing legitimate
+    # writes a second, so they are rows that are no conversation.
     first = results(calling, "c1", "c2", seconds=2)
     second = results(calling, "c1", "c2", seconds=2.5)
-    both = tree([asked, calling, first, second])
-    assert both.visible_path() == (asked, calling, second)
+    with pytest.raises(InvalidMessageTreeError, match="more than one tool message"):
+        tree([asked, calling, first, second])
     # A call left without a result is a run that stopped, and the format allows it.
     assert tree([asked, calling]).visible_path() == (asked, calling)
     with pytest.raises(StoredDataError):

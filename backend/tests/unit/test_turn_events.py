@@ -13,6 +13,7 @@ from robinauts.domain import (
     ACTIVE_RUN_STATES,
     ENDED_RUN_STATES,
     FIRST_POSITION,
+    MAX_EXTRAS_BYTES,
     MAX_PART_CHARS,
     MAX_POSITION,
     AnswerCompleted,
@@ -287,6 +288,22 @@ def test_an_engines_delta_may_carry_half_a_character() -> None:
         AnswerTextDelta(text="a" * (MAX_PART_CHARS + 1))
     with pytest.raises(InvalidValueError):
         AnswerTextDelta(text=7)
+
+
+def test_a_completed_answer_carries_the_vendors_extras_as_a_bounded_copy() -> None:
+    """What a vendor needs back with the history, and the platform never
+    reads: kept as a copy, bounded as every ``extras`` is, and empty unless
+    the engine said otherwise."""
+    assert AnswerCompleted(parts=(TextPart("hi"),)).extras == {}
+    given: dict[str, object] = {"anthropic": {"thinking": [{"signature": "sig"}]}}
+    completed = AnswerCompleted(parts=(TextPart("hi"),), extras=given)
+    given["anthropic"] = "changed"
+    assert completed.extras == {"anthropic": {"thinking": [{"signature": "sig"}]}}
+    with pytest.raises(InvalidValueError, match="at most"):
+        AnswerCompleted(parts=(TextPart("hi"),), extras={"v": "x" * MAX_EXTRAS_BYTES})
+    for broken in ("text", ["a"], {"a": object()}):
+        with pytest.raises(InvalidValueError):
+            AnswerCompleted(parts=(TextPart("hi"),), extras=broken)  # type: ignore[arg-type]
 
 
 def test_a_completed_answer_is_the_platforms_own_content() -> None:
