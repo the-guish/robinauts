@@ -45,6 +45,7 @@ from robinauts.domain.conversation import (
     MAX_MESSAGE_CHARS,
     MAX_PARTS,
     MAX_TITLE_CHARS,
+    NO_LONGER_OFFERED,
     SUPPORTED_PART_KINDS,
     SUPPORTED_ROLES,
     Channel,
@@ -63,6 +64,7 @@ from robinauts.domain.conversation import (
     checked_parts,
     kept_parts,
     text_parts,
+    tools_for_request,
     unanswered_calls,
 )
 from robinauts.domain.errors import (
@@ -278,6 +280,7 @@ __all__ = [
     "MAX_TOOL_PREFIX_CHARS",
     "MAX_TOOL_SCHEMA_BYTES",
     "MAX_TOOL_TIMEOUT_SECONDS",
+    "NO_LONGER_OFFERED",
     "NO_RESULT",
     "NUL",
     "PENDING_LOGIN_MINUTES",
@@ -410,6 +413,7 @@ __all__ = [
     "sends_alone",
     "shown",
     "text_parts",
+    "tools_for_request",
     "unanswered_calls",
     "where",
     "without_secrets",

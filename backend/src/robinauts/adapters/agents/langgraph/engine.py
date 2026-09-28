@@ -152,6 +152,7 @@ from robinauts.domain import (
     checked_data,
     clean_text,
     text_parts,
+    tools_for_request,
     unanswered_calls,
 )
 from robinauts.ports import Agent
@@ -599,8 +600,12 @@ class LangGraphAgent(Agent):
         for tool in tools:
             if not isinstance(tool, ToolDefinition):
                 raise InvalidValueError(f"a run's tools are ToolDefinitions, not {tool!r}")
+        # With a stub for every name the history calls that the run lacks:
+        # the vendor refuses tool blocks its request defines no tool for
+        # (``core.tools_for_request``).
+        defined = tools_for_request(tools, history)
         bound: Runnable[Any, Any] = (
-            chat.bind_tools([_anthropic_tool(tool) for tool in tools]) if tools else chat
+            chat.bind_tools([_anthropic_tool(tool) for tool in defined]) if defined else chat
         )
         graph = _compiled(bound)
         answer = _Answer()
@@ -665,13 +670,15 @@ def _anthropic_tool(tool: ToolDefinition) -> dict[str, Any]:
 
     Anthropic's own shape -- ``name``, ``description``, ``input_schema`` --
     which ``bind_tools`` passes through untouched. The name is the full name
-    the platform gave it, and the schema is the server's, as plain data.
+    the platform gave it, and the schema is the server's, as plain data. An
+    empty description is left out rather than sent as ``""``: MCP's is
+    optional, the vendor takes a tool without one, and the other engine sends
+    the same bytes for the same definition (``docs/specs/agents.md``).
     """
-    return {
-        "name": tool.name,
-        "description": tool.description,
-        "input_schema": dict(tool.input_schema),
-    }
+    definition: dict[str, Any] = {"name": tool.name, "input_schema": dict(tool.input_schema)}
+    if tool.description:
+        definition["description"] = tool.description
+    return definition
 
 
 def _messages(

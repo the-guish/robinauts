@@ -80,6 +80,7 @@ from robinauts.adapters.agents.pydantic_ai import (
 from robinauts.core import check_engine_events
 from robinauts.domain import (
     KINDS_WITH_BASE_URL,
+    NO_LONGER_OFFERED,
     NO_RESULT,
     AgentDefinition,
     AnswerCompleted,
@@ -644,6 +645,21 @@ async def test_the_tools_a_run_has_are_declared_to_the_model_and_a_run_without_d
     # Declared as the framework's kind for tools something else runs.
     assert [tool.kind for tool in with_tools] == ["external"]
     assert without == []
+
+
+@asyncio_test
+async def test_a_history_that_called_a_tool_the_run_lacks_declares_a_stub_for_it() -> None:
+    """The vendor refuses tool blocks its request defines no tool for
+    (``domain.tools_for_request``); the same stub the other engine binds."""
+    model = ScriptedModel("Found it.")
+    asked, calling_, results = turn_with_tools()
+
+    await turn_of(engine(model), (asked, calling_, results))
+
+    (declared,) = model.bound
+    assert [(tool.name, tool.description, tool.parameters_json_schema) for tool in declared] == [
+        ("github__search", NO_LONGER_OFFERED, {"type": "object"})
+    ]
 
 
 @asyncio_test

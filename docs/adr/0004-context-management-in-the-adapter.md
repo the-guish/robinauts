@@ -51,7 +51,9 @@ has. The adapter decides what the model sees.**
   and the `history_chars` setting go, and the "maximum context per agent"
   limit of [operations.md](../specs/operations.md) is a setting an adapter
   reads, when one exists, and not a bound the application applies.
-- **One invariant stays above the port, and the contract suite keeps it**:
+- **One invariant stays above the port, and each adapter's own tests keep it**
+  (the shared contract suite has no hook for what the scripted model was
+  shown; the two engine test modules each pin it):
   the question being answered is whole in what the model sees. An adapter
   may drop or fold anything before it; it never cuts the turn it is
   answering, because dropping what was just asked answers nothing.

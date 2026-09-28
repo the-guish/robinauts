@@ -420,9 +420,20 @@ class Turns:
         max_tool_rounds: int = DEFAULT_MAX_TOOL_ROUNDS,
     ) -> None:
         servers = dict(servers or {})
+        by_prefix: dict[str, str] = {}
         for server_id, server in servers.items():
             if not isinstance(server, ToolServerConfig) or server.id != server_id:
                 raise InvalidValueError(f"the tool server under {server_id!r} is not that server")
+            # A call is routed to its server by the prefix alone, so two
+            # servers under one prefix would be one that never gets a call:
+            # what the parser refuses for the file is refused for servers
+            # handed in as well.
+            other = by_prefix.setdefault(server.prefix, server_id)
+            if other != server_id:
+                raise InvalidValueError(
+                    f"tool servers {other!r} and {server_id!r} share the prefix"
+                    f" {server.prefix!r}; a call is routed by the prefix alone"
+                )
         for model_id, model in models.items():
             if not isinstance(model, ModelConfig) or model.id != model_id:
                 raise InvalidValueError(f"the model under {model_id!r} is not that model")
@@ -1224,6 +1235,11 @@ class Turns:
                 over = True
             else:
                 raise InvalidValueError(f"an engine yields engine events, not {describe(event)}")
+        if calling is not None and not over and open_id is None:
+            # The port's contract: a turn that asked for tools says so before
+            # it ends, and one that did not is one the loop would otherwise
+            # answer on a word the engine never said.
+            raise InvalidValueError("a turn that asked for tools ends waiting on them")
         return _Round(answers=answers, unfinished=open_id is not None, calling=calling)
 
     async def _tools_for(self, definition: AgentDefinition) -> tuple[ToolDefinition, ...]:
@@ -1231,8 +1247,10 @@ class Turns:
 
         Fetched once, in parallel, before the engine is called; a server that
         will not list fails the run here, naming the server
-        (``ToolServerError``). A tool left out is said in the log by name
-        (``core.tools_for_run``): nothing about a tool's text is logged.
+        (``ToolServerError``). A tool left out is said in the log by the
+        server's id, the tool's own name -- one bounded line, the one part of
+        a listing the log holds -- and a fixed reason (``core.tools_for_run``);
+        nothing of a description or a schema is logged.
         """
         if not definition.tools:
             return ()

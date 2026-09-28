@@ -65,6 +65,7 @@ from robinauts.domain import (
     AnswerStarted,
     AnswerTextDelta,
     IllegalTransitionError,
+    InvalidValueError,
     Message,
     MessageCompleted,
     MessageStarted,
@@ -900,6 +901,41 @@ async def test_the_next_turn_is_handed_the_tool_round_in_its_path() -> None:
 
 
 @asyncio_test
+async def test_a_question_may_follow_the_tool_message_a_stopped_turn_ended_on() -> None:
+    """A turn stopped after its results were in leaves the tool message as
+    the leaf; the next question hangs under it, so that the results stay on
+    the path the model sees (``docs/specs/conversations.md``) -- which is
+    where the chat sends it."""
+    wiring = tooled(*calls(SEARCH_CALL))
+    wiring.agent.then(*says("Found three."))
+    first = await begun(wiring)
+    await wiring.turns.execute(first)
+    _, _, results, _ = await stored_messages(wiring.store, first.conversation_id)
+    wiring.agent.steps = says("Three, I said.")
+    second = await wiring.turns.start(
+        AUTHOR, conversation_id=first.conversation_id, text="How many?", parent_id=results.id
+    )
+
+    await wiring.turns.execute(second.run)
+
+    assert [message.role for message in wiring.agent.history] == [
+        Role.USER,
+        Role.ASSISTANT,
+        Role.TOOL,
+        Role.USER,
+    ]
+    assert (await wiring.store.run_by_id(second.run.id)).state is RunState.FINISHED
+
+
+def test_two_servers_under_one_prefix_are_refused_when_handed_in() -> None:
+    twin = ToolServerConfig(
+        id="gh", url="https://gh.example.test/mcp/", secret_env="ROBINAUTS_GH", prefix="github"
+    )
+    with pytest.raises(InvalidValueError, match="share the prefix 'github'"):
+        wired(definition=agent_definition(), servers={GITHUB.id: GITHUB, "gh": twin})
+
+
+@asyncio_test
 async def test_results_are_published_as_they_land_and_the_batch_completes_with_the_last() -> None:
     """Decision 7: each result is published the moment it lands, and the one
     tool message completes when the last is in -- so a watcher sees the fast
@@ -1219,6 +1255,11 @@ async def test_a_name_the_run_was_not_handed_is_never_sent_to_a_server() -> None
         (
             [*says("Nothing to do."), WaitingOnTools()],
             "waits on the tools an answer asked for",
+        ),
+        # An answer that asked for tools, and a turn that ended without saying so.
+        (
+            calls(SEARCH_CALL)[:-1],
+            "ends waiting on them",
         ),
     ],
 )

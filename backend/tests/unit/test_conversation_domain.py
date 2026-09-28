@@ -31,6 +31,7 @@ from robinauts.domain import (
     MAX_PARTS,
     MAX_TITLE_CHARS,
     MAX_TOOL_NAME_CHARS,
+    NO_LONGER_OFFERED,
     SUPPORTED_PART_KINDS,
     SUPPORTED_ROLES,
     Channel,
@@ -44,6 +45,7 @@ from robinauts.domain import (
     Role,
     TextPart,
     ToolCallPart,
+    ToolDefinition,
     ToolResultPart,
     UnsupportedContentError,
     check_supported,
@@ -58,6 +60,7 @@ from robinauts.domain import (
     is_config_id,
     is_tool_name,
     kept_parts,
+    tools_for_request,
     unanswered_calls,
 )
 
@@ -693,6 +696,45 @@ def test_a_calls_answer_is_answered_when_the_next_message_on_the_path_is_a_tool_
     again = question("thanks", parent=done, seconds=4)
 
     assert unanswered_calls((asked, first, results, second, more, done, again)) == {}
+
+
+def test_a_request_defines_the_runs_tools_and_a_stub_per_other_name_the_history_calls() -> None:
+    """The vendor refuses tool blocks its request defines no tool for, so a
+    name the history calls and the run lacks is defined as a stub the model
+    is told not to call: once per name, after the run's own, in the order
+    the history first named them."""
+    asked = question("look", seconds=0)
+    first = calling(asked, "toolu_01", "toolu_02", seconds=1)
+    results = answering(first, "toolu_01", "toolu_02")
+    other = answer(
+        results,
+        seconds=2,
+        parts=(
+            ToolCallPart("toolu_03", "jira__find", {}),
+            ToolCallPart("toolu_04", "github__search", {"q": "again"}),
+        ),
+    )
+    offered = ToolDefinition(
+        name="github__search", description="Search.", input_schema={"type": "object"}
+    )
+
+    assert tools_for_request((offered,), (asked, first, results, other)) == (
+        offered,
+        ToolDefinition(
+            name="jira__find", description=NO_LONGER_OFFERED, input_schema={"type": "object"}
+        ),
+    )
+    assert tools_for_request((), (asked, first, results, other)) == (
+        ToolDefinition(
+            name="github__search", description=NO_LONGER_OFFERED, input_schema={"type": "object"}
+        ),
+        ToolDefinition(
+            name="jira__find", description=NO_LONGER_OFFERED, input_schema={"type": "object"}
+        ),
+    )
+    # A history with no calls adds nothing, tools or none.
+    assert tools_for_request((offered,), (asked,)) == (offered,)
+    assert tools_for_request((), (asked, answer(asked, "Hi.", seconds=1))) == ()
 
 
 def test_a_calls_answer_followed_by_anything_else_is_unanswered_by_every_call() -> None:

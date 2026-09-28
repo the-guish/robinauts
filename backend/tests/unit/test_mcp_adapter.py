@@ -65,6 +65,10 @@ class Script:
     session_id: str | None = "session-1"
     page_size: int = 100
     status: int | None = None
+    location: str | None = None
+    """Where a ``status`` in the 300s points; the client must not follow it."""
+    encoding: str | None = None
+    """A ``Content-Encoding`` the server answers with, which the client did not ask for."""
     """An HTTP status to answer everything with, for a server that refuses."""
     call_status: int | None = None
     """An HTTP status to answer ``tools/call`` alone with."""
@@ -102,7 +106,8 @@ class ScriptedServers:
         script = self.scripts[host]
         script.headers.append({key.lower(): value for key, value in request.headers.items()})
         if script.status is not None:
-            return httpx.Response(script.status, request=request)
+            headers = {"location": script.location} if script.location else {}
+            return httpx.Response(script.status, request=request, headers=headers)
         if request.method == "DELETE":
             script.deleted += 1
             return httpx.Response(200, request=request)
@@ -122,6 +127,8 @@ class ScriptedServers:
         headers = {}
         if message["method"] == "initialize" and script.session_id:
             headers["mcp-session-id"] = script.session_id
+        if script.encoding:
+            headers["content-encoding"] = script.encoding
         if script.as_stream:
             events = []
             if script.noise:
@@ -138,6 +145,15 @@ class ScriptedServers:
                 )
             return httpx.Response(
                 200, content=framed, headers={**headers, "content-type": "text/event-stream"}
+            )
+        if script.encoding:
+            # As a raw stream: a response built with `json=` reads itself
+            # through the decoder the header names, which is the client's
+            # mistake to make and not the fake's.
+            return httpx.Response(
+                200,
+                stream=httpx.ByteStream(json.dumps(answer).encode()),
+                headers={**headers, "content-type": "application/json"},
             )
         return httpx.Response(200, json=answer, headers=headers)
 
@@ -324,6 +340,31 @@ async def test_the_credential_is_a_bearer_header_or_a_basic_one_or_none_at_all()
     # A public server is sent no header at all, and no secret is looked for.
     assert all("authorization" not in h for h in servers.scripts["public"].headers)
     assert servers.scripts["public"].headers[0]["user-agent"].startswith("robinauts")
+
+
+@asyncio_test
+async def test_a_redirect_is_not_followed_and_fails_as_the_servers() -> None:
+    """A redirect could carry the credential to another host, so none is
+    followed: a 3xx is a status the protocol has no meaning for, reported by
+    number, and the host it points at is never asked."""
+    servers = ScriptedServers()
+    servers.scripts["scripted"] = Script(tools=[], status=302, location="https://elsewhere/mcp")
+    servers.scripts["elsewhere"] = Script(tools=[])
+    tools = adapter(servers, scripted=SECRET, elsewhere=SECRET)
+
+    with pytest.raises(ToolServerError, match="302"):
+        await tools.list_tools(server("scripted"))
+
+    assert servers.scripts["elsewhere"].headers == []
+    assert len(servers.scripts["scripted"].headers) == 1
+
+
+@asyncio_test
+async def test_an_encoding_the_client_did_not_ask_for_is_refused_before_the_body_is_read() -> None:
+    servers, tools, script = scripted(encoding="gzip")
+
+    with pytest.raises(ToolServerError, match="content encoding"):
+        await tools.list_tools(server("scripted"))
 
 
 @asyncio_test

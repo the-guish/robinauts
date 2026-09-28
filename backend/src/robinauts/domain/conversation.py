@@ -60,7 +60,7 @@ from typing import Any, ClassVar
 
 from robinauts.domain.agents import Engine, checked_config_id
 from robinauts.domain.errors import InvalidValueError, UnsupportedContentError
-from robinauts.domain.tools import checked_call_id, checked_tool_name
+from robinauts.domain.tools import ToolDefinition, checked_call_id, checked_tool_name
 from robinauts.domain.values import (
     MAX_PART_CHARS,
     checked_data,
@@ -524,6 +524,41 @@ class Conversation:
         checked_line(self.title, "a conversation's title", MAX_TITLE_CHARS)
         checked_instant(self.created_at, "created_at")
         checked_instant(self.updated_at, "updated_at")
+
+
+NO_LONGER_OFFERED = "This tool is no longer offered to this agent; a call to it is not run."
+"""The description of a stub definition for a tool the history names and the run lacks."""
+
+
+def tools_for_request(
+    tools: Sequence[ToolDefinition], history: Sequence[Message]
+) -> tuple[ToolDefinition, ...]:
+    """The definitions a request carries: the run's, and a stub per other name the history calls.
+
+    Anthropic refuses a request whose messages hold ``tool_use`` or
+    ``tool_result`` blocks and whose ``tools`` do not define them, so a
+    conversation that once used a tool would fail every later turn once the
+    agent's servers list nothing, the tool was left out, or the agent's
+    ``tools`` line was removed -- the operator's edit between turns that must
+    not break a conversation. Each such name is defined as a stub the model
+    is told not to call (``NO_LONGER_OFFERED``); a call to one is answered by
+    the loop as a name the run was not handed, and no server is asked. The
+    run's own list comes first, unchanged, and the stubs follow in the order
+    the history first named them. Here rather than in an adapter because
+    both adapters serve the same vendor and must send the same definitions
+    (``docs/specs/agents.md``, "Tools").
+    """
+    offered = {tool.name for tool in tools}
+    stubs: dict[str, ToolDefinition] = {}
+    for message in history:
+        for call in message.tool_calls:
+            if call.name not in offered and call.name not in stubs:
+                stubs[call.name] = ToolDefinition(
+                    name=call.name,
+                    description=NO_LONGER_OFFERED,
+                    input_schema={"type": "object"},
+                )
+    return (*tools, *stubs.values())
 
 
 def unanswered_calls(history: Sequence[Message]) -> dict[uuid.UUID, tuple[ToolCallPart, ...]]:

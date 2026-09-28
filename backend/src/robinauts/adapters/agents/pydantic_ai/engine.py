@@ -173,6 +173,7 @@ from robinauts.domain import (
     checked_data,
     clean_text,
     text_parts,
+    tools_for_request,
     unanswered_calls,
 )
 from robinauts.ports import Agent
@@ -617,7 +618,7 @@ class PydanticAIAgent(Agent):
         model = self._models.model_by_id(model_id)
         provider = self._models.provider_for(model)
         client = self._model_for(model, provider, self._keys.key_for(provider.id))
-        runner = _runner(agent, client, tools)
+        runner = _runner(agent, client, tools, history)
         settings = _settings(model)
         # The vendor's own name for itself is the key its blocks are kept
         # under (``VENDOR`` for the two kinds this engine reaches).
@@ -660,7 +661,10 @@ class PydanticAIAgent(Agent):
 
 
 def _runner(
-    agent: AgentDefinition, model: Model, tools: tuple[ToolDefinition, ...]
+    agent: AgentDefinition,
+    model: Model,
+    tools: tuple[ToolDefinition, ...],
+    history: Sequence[Message],
 ) -> FrameworkAgent[None, str]:
     """The framework's agent for one turn: this model, this prompt, these tools.
 
@@ -689,11 +693,15 @@ def _runner(
     for tool in tools:
         if not isinstance(tool, ToolDefinition):
             raise InvalidValueError(f"a run's tools are ToolDefinitions, not {tool!r}")
+    # With a stub for every name the history calls that the run lacks: the
+    # vendor refuses tool blocks its request defines no tool for
+    # (``core.tools_for_request``).
+    defined = tools_for_request(tools, history)
     runner: FrameworkAgent[None, str] = FrameworkAgent(
         model=model,
         name=agent.id,
         instructions=agent.system_prompt or None,
-        toolsets=[ExternalToolset([_declared(tool) for tool in tools])] if tools else None,
+        toolsets=[ExternalToolset([_declared(tool) for tool in defined])] if defined else None,
     )
     runner.instrument = False
     return runner

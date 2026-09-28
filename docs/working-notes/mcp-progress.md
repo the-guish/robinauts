@@ -89,9 +89,10 @@ hundred lines; the plan's numbering is kept where a step is named.
   client it builds) in the same two shapes as the other engine, replaying
   them as `ThinkingPart`s only to the model that made them. Both engines'
   contract tool test runs; nothing above the port changed.
-- **A call no tool message answers is shown as one that was not run** (step
-  4d): `domain.NOT_RUN`, `domain.unanswered_calls`; both adapters add the
-  tool turn the vendor requires after such an answer, never stored.
+- **A call no tool message answers is shown as one whose result was not
+  recorded** (step 4d): `domain.NO_RESULT`, `domain.unanswered_calls`; both
+  adapters add the tool turn the vendor requires after such an answer, never
+  stored.
 - **The configuration knows tool servers.** `domain/agents.py`:
   `ToolServerConfig(id, url, secret_env, auth, user, prefix, timeout_seconds)`
   and `ToolServerAuth` (`bearer` | `basic`, and `none` from step 8),
@@ -1137,6 +1138,10 @@ reading it, in one pass over the range::
 
 which makes them the author and the committer of every commit and adds
 their sign-off; `git cherry-pick -s` does the same one commit at a time.
+Each commit's body ends with the agent's attribution trailers
+(`Co-Authored-By` and the session link), which the rebase keeps; they are
+the record of who wrote what, and whether they stay is the repository's
+call.
 
 **Deferred from the reviews**, for whoever takes it up (each is a Medium or
 a Low the step's review judged not to block): 4b's tool history on a run
@@ -1146,7 +1151,46 @@ contract hooks (M2); 5d's adopted message not checked at its completion
 message (L4), the export asymmetry (L6) and the spec's additivity rule not
 naming a new event kind (L7); 5a's `named()` residual (an all-upper-case
 token would still be printed as a variable's name); the schema-pin byte
-test of 4c. Nothing in that list changes what a person sees or what a
-server is sent.
+test of 4c; and, from the final review, a redirect test and the
+content-encoding test the adapter now has, the tree's leniency on an
+adopted message's completion, and the `schema.sql` comment that still
+calls the `tool` role reserved (left so as not to re-pin the schema's
+hash; carried into the next schema edit). Nothing in that list changes
+what a person sees or what a server is sent.
 
-Final review: pending.
+Final review: 1 round over the whole range (read after the closing notes;
+the fixes are the commit "mcp: fixes from the final review").
+- Blocker: 1 (0/1) — the commits carry no DCO sign-off, which is the
+  taker-over's to give (above), and CI's `check-dco` job refuses the
+  branch until they do. Left, by design.
+- High: 2 (2/0) — **a question sent under the tool message a stopped turn
+  ended on was refused by the tree** (`_MAY_FOLLOW[USER]` had no `TOOL`),
+  while the chat sends exactly that: a question may follow the tool message
+  a turn ended on, so that the results stay on the path the model sees;
+  `conversations.md` says so, and both engines already fold a tool message
+  and the question after it into one user turn for the vendor. **A tool
+  history on a run handed no tools reached the vendor with no `tools`**,
+  which Anthropic refuses, so an agent whose servers listed nothing, or
+  whose `tools` line was removed, would fail every later turn of every
+  conversation that used a tool: `domain.tools_for_request` defines a stub
+  for each name the history calls that the run lacks (the model told not
+  to call it, the loop answering a call to it without a server), and both
+  engines bind them. Not verified live (no vendor key here): the vendor's
+  refusal is the API's documented rule.
+- Medium: 3 (3/0) — `conversations.md` promised the adapters ask the
+  vendor to drop a block they can no longer match and called the bound
+  question open: it says what they do (dropped and logged; the Pydantic AI
+  framework retries once with the blocks marked dropped on a refusal, the
+  LangGraph adapter fails that turn); ADR 0004 and `agents.md` said the
+  contract suite keeps the one invariant above the port when each adapter's
+  own tests do; the two engines sent different bytes for a tool without a
+  description (`""` against none): both send none.
+- Low: 9 (6/3) — a redirect is never followed and an encoding the client
+  did not ask for is refused, each with a test now; two servers handed in
+  under one prefix are refused as the file's are; `_tools_for`'s docstring
+  says what the log holds; a calling answer whose turn ended without
+  waiting is refused as the port's contract says; the notes' `NOT_RUN`
+  reads `NO_RESULT`, the take-over recipe says what it keeps, and the
+  deferred list is honest. Left: `schema.sql`'s comment on the `tool`
+  role (the schema's hash), the `named()` residual (5a), and the tree's
+  leniency on an adopted message's completion (5d M1).

@@ -102,16 +102,19 @@ UNREADABLE = "a stored conversation is not a tree this build can read"
 """What anyone outside is told when our own rows are no conversation."""
 
 _MAY_FOLLOW: Mapping[Role, frozenset[Role | None]] = {
-    Role.USER: frozenset({None, Role.ASSISTANT}),
+    Role.USER: frozenset({None, Role.ASSISTANT, Role.TOOL}),
     Role.ASSISTANT: frozenset({Role.USER, Role.ASSISTANT, Role.TOOL}),
     Role.TOOL: frozenset({Role.ASSISTANT}),
 }
 """What each role may hang under; ``None`` is "it is a root".
 
 The whole rule of the shape of a conversation, in one table: only a question
-is a root, a question follows an answer, an answer follows the question or
-whatever the run has produced since, and a tool message follows the answer
-that called the tool.
+is a root; a question follows an answer, or the tool message a turn ended on
+-- a turn stopped or failed after its results were in leaves the tool
+message as the leaf, and the next question hangs under it so that the
+results stay on the path the model sees (``docs/specs/conversations.md``);
+an answer follows the question or whatever the run has produced since; and a
+tool message follows the answer that called the tool.
 """
 
 

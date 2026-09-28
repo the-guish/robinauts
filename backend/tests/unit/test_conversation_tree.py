@@ -94,7 +94,7 @@ def tree(messages: Iterable[Message], **changes: object) -> ConversationTree:
         # A question follows an answer, and nothing else.
         (Role.USER, Role.ASSISTANT, True),
         (Role.USER, Role.USER, False),
-        (Role.USER, Role.TOOL, False),
+        (Role.USER, Role.TOOL, True),
         # A turn is a chain: an answer follows the question, another answer,
         # or the result of a tool it called.
         (Role.ASSISTANT, Role.USER, True),

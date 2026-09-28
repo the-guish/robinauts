@@ -74,6 +74,7 @@ from robinauts.core import check_engine_events
 from robinauts.domain import (
     KINDS_WITH_BASE_URL,
     MAX_EXTRAS_BYTES,
+    NO_LONGER_OFFERED,
     NO_RESULT,
     AgentDefinition,
     AnswerCompleted,
@@ -572,6 +573,35 @@ async def test_the_tools_a_run_has_are_bound_as_the_vendor_takes_them() -> None:
         ],
         None,
     ]
+    # An empty description is left out, not sent as "": the other engine
+    # sends none either, and the two send the same definition.
+    bare = ToolDefinition(name="github__echo", description="", input_schema={"type": "object"})
+    await turn_of(engine(model), (question(),), tools=(bare,))
+    assert model.bound[-1] == [{"name": "github__echo", "input_schema": {"type": "object"}}]
+
+
+@asyncio_test
+async def test_a_history_that_called_a_tool_the_run_lacks_binds_a_stub_for_it() -> None:
+    """The vendor refuses tool blocks its request defines no tool for, so a
+    conversation that used a tool would fail every later turn once the agent
+    lost it: the name is defined as a stub the model is told not to call
+    (``domain.tools_for_request``)."""
+    model = ScriptedChatModel(chunks=["Found it."])
+    asked, calling_, results = turn_with_tools()
+
+    await turn_of(engine(model), (asked, calling_, results))
+    await turn_of(engine(model), (asked, calling_, results), tools=(SEARCH,))
+
+    assert model.bound[0] == [
+        {
+            "name": "github__search",
+            "description": NO_LONGER_OFFERED,
+            "input_schema": {"type": "object"},
+        }
+    ]
+    # Offered, the run's own definition is what is bound, and no stub.
+    assert [tool["name"] for tool in model.bound[1]] == ["github__search"]
+    assert model.bound[1][0]["description"] == SEARCH.description
 
 
 @asyncio_test

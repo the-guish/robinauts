@@ -15,7 +15,10 @@
   had, which is nothing: a conversation then has more than one root, and
   the visible thread begins at the newest.
 - **A turn is a chain.** A root is a user message. A user message's parent
-  is an assistant message, or nothing. An assistant message's parent is a
+  is an assistant message, or the tool message a turn ended on — a turn
+  stopped or failed after its results were in leaves that tool message as
+  the leaf, and the next question hangs under it so that the results stay
+  on the path the model sees — or nothing. An assistant message's parent is a
   user message, another assistant message, or a tool message: one turn may
   produce several messages, and with tools it produces a call and a result
   among them ([runs.md](runs.md)). A tool message's parent is the
@@ -166,11 +169,15 @@ from it on every turn ([agents.md](agents.md)).
   it, no Markdown export writes it, and no other vendor is sent it. A JSON
   export writes the document whole, `extras` included. The blocks are bound
   to the model that made them, so a conversation moved to another model
-  loses them and nothing else; where they are also bound to the prompt, the
-  adapter asks the vendor to drop a block it can no longer match rather than
-  refuse the request, since an operator editing an agent's prompt between
-  turns must not break its conversations. What is done with blocks that do
-  not fit the bound is **open**
+  loses them and nothing else. Blocks that do not fit the bound are left
+  out and the answer is stored without them, with a line in the log saying
+  what that may cost (the vendor may refuse the next round of a tool turn
+  replayed without its thinking). Where the blocks are also bound to the
+  prompt, what happens when the vendor refuses them is the adapter's: the
+  Pydantic AI adapter's framework retries once with the blocks marked as
+  dropped, the LangGraph adapter fails that turn — so on that engine an
+  operator editing an agent's prompt between turns does break a
+  conversation with bound blocks in it, which is known and not yet fixed
   ([working-notes/mcp-plan.md](../working-notes/mcp-plan.md), "Open").
 
 **What crosses a swap of engine or vendor**
