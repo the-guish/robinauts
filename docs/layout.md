@@ -157,7 +157,8 @@ There so far:
   tools of a server, call one with arguments under a timeout, answer with
   the platform's own result. Its docstring says what the vendor clients'
   do: no environment fallbacks, nothing phones home, no arguments or
-  results in a log. Implementation: the MCP adapter, over the SDK.
+  results in a log. Implementation: the MCP adapter, a client of our own
+  over `httpx` (below).
 
 Still to come:
 
@@ -231,8 +232,11 @@ order, with which cache breakpoints (ADR 0004). The MCP adapter
 (`adapters/tools/mcp/`) is the one `ToolServers` implementation, pinned as
 the vendor clients are: endpoint from the configuration, credential as a
 header, no retries the application cannot see, `HTTPS_PROXY` obeyed and
-nothing vendor-specific. The frameworks and the SDK are confined to their own
-sub-package:
+nothing vendor-specific. It is a **client of our own over `httpx`**: the MCP
+Python SDK's dependency tree fails the licence gate
+([DEPENDENCIES.md](../DEPENDENCIES.md), "Known exclusions"), and the plan's
+fallback for that case is the three JSON-RPC calls a client needs, written
+here. The frameworks and the SDK are confined to their own sub-package:
 
 - only `adapters/agents/langgraph/` may import `langgraph`, `langchain`,
   `langchain_core`, a `langchain_*` provider client, or `langsmith` — which
@@ -243,7 +247,9 @@ sub-package:
   `pydantic_graph`, `logfire`, `logfire_api` or `opentelemetry` — the last
   three arrive with the framework, are imported by nothing in the platform,
   and are named in the rule for the same reason `langsmith` is;
-- only `adapters/tools/mcp/` may import `mcp`, the MCP Python SDK;
+- only `adapters/tools/mcp/` may import `mcp`, the MCP Python SDK — a rule
+  written before the import exists, since the SDK is not adopted today, so
+  that the day its tree passes the gate it belongs there and nowhere else;
 - the two agent adapters do not import each other.
 
 **How that is enforced**, which matters as much as the rule: the contract's

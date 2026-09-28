@@ -396,6 +396,19 @@ api_key_env = "ROBINAUTS_GATEWAY_KEY"
 
 ## Known findings
 
+- **The MCP Python SDK (`mcp`) is not adopted**: its tree fails the licence
+  gate. `pyjwt[crypto]` brings `cryptography`, which brings `cffi`, whose
+  metadata states `MIT-0` -- a licence on no list of
+  [DEPENDENCIES.md](../../DEPENDENCIES.md) -- and `pywin32`, Windows-only,
+  states a licence family and no licence (checked 2026-09-28, at 2.2.0). The
+  plan named the fallback for this case
+  ([working-notes/mcp-plan.md](../working-notes/mcp-plan.md), step 2): the
+  MCP adapter is a client of our own over `httpx` for the three calls a
+  client needs -- `initialize`, `tools/list`, `tools/call` -- over Streamable
+  HTTP, with session ids, protocol-version negotiation and an SSE response
+  read by hand. The import rule confining the SDK to `adapters/tools/mcp/` is
+  written all the same, before the fact ([layout.md](../layout.md)).
+
 - `langgraph-checkpoint-postgres` depends on `psycopg`, which is
   LGPL-3.0-only. It cannot be adopted as it is (ADR 0002). The LangGraph
   core is not affected.

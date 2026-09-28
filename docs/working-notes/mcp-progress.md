@@ -5,7 +5,9 @@ recipe (`recipes/three-agent-steps.md`, beside this repository), one stacked
 branch per step, reviewed and committed one at a time. The codebase map is
 "What exists" in [poc-progress.md](poc-progress.md) and
 [model-selection-progress.md](model-selection-progress.md); this file
-records only what the tools add to it.
+records only what the tools add to it. The plan's steps 4 and 5 are split
+here into 4a-c and 5a-c, so that each branch stays around five hundred
+lines; the plan's numbering is kept where a step is named.
 
 ## What exists
 
@@ -77,3 +79,37 @@ again with the sketch out; the whole suite against a throwaway PostgreSQL
 otherwise unchanged (2969 passed, 13 skipped, before the review's fixes).
 Not done / to watch: until step 4 the code contradicts `agents.md` on
 trimming, and until step 5 on tools; the plan's "Order of work" says so.
+
+### Step 2 — the dependency   (feature/mcp-2-dependency)
+
+Summary: the MCP Python SDK's tree was put through the licence gate on a
+copy of the lock, and **fails**: `cffi` (through `pyjwt[crypto]` and
+`cryptography`) states `MIT-0`, which is on no list, and `pywin32`
+(Windows-only) states a licence family and no licence. Everything else in
+the tree passes. The plan's fallback for this case is taken: no dependency
+is added, the two packages and the SDK are rows of DEPENDENCIES.md's "Known
+exclusions", the specs say the adapter is a client of our own over `httpx`,
+and the import contract confining the SDK to `adapters/tools/mcp/` is
+written before the fact -- with the probe tests the framework rules have,
+which prove a probe importing an uninstalled `mcp` still breaks it -- and
+the sub-package exists, empty but for its docstring.
+
+Checks: `tests/unit/test_architecture.py` (12 passed, the SDK's three
+probes among them); the licence gate over the unchanged lock; lint.
+Not done / to watch: the client of our own is step 5b's, and is what the
+plan warned about -- a hand-written parser of a protocol -- so its review
+reads the SSE reading and the session handling first. Two decisions would
+let the SDK in and are a person's, recorded in the plan's "Open": `MIT-0`
+on the allowed list settles `cffi`, and `pywin32` -- runtime, Windows-only,
+family-only metadata -- needs a policy answer of its own.
+
+Review: 1 round.
+- High: 0
+- Medium: 4 (4/0) — the `cffi` row dated the licence change wrongly (2.1.0,
+  not 2.0); the notes said one edit would let the SDK in (it takes two); the
+  port bullet of `layout.md` still said "over the SDK"; the decisions the
+  step met are the plan's "Open" now, not a line in these notes.
+- Low: 4 (4/0) — the `mcp` row names the whole of the tree that passes; a
+  comment cited the wrong section; the probe's docstring said "framework";
+  these notes say why the steps are lettered, and the plan's logging note
+  names `httpx`'s loggers rather than the SDK's.

@@ -54,7 +54,7 @@ PROBE = """# SPDX-License-Identifier: Apache-2.0
 
 \"\"\"Written by a test, into a copy of the package; see test_architecture.py.
 
-It imports an agent framework from the wrong place on purpose.
+It imports a confined library from the wrong place on purpose.
 \"\"\"
 
 import {module}  # noqa: F401
@@ -74,10 +74,17 @@ is a habit worth not having.
 
 @dataclass(frozen=True, slots=True)
 class Framework:
-    """One agent framework, its contract, and the sub-package it belongs to."""
+    """One confined library, its contract, and the sub-package it belongs to.
+
+    The two agent frameworks, and the MCP SDK -- which is confined the same
+    way, to ``adapters/tools/mcp/``, before it is a dependency at all
+    (``backend/pyproject.toml``): a probe that imports a package nobody has
+    installed is still an import the contract sees, which is the point of
+    writing the rule first.
+    """
 
     module: str
-    """What the probe imports: the framework's top-level module."""
+    """What the probe imports: the library's top-level module."""
     contract: str
     """The contract's **whole** name, as ``backend/pyproject.toml`` states it.
 
@@ -87,7 +94,7 @@ class Framework:
     that quietly checks nothing (``verdict``).
     """
     sub_package: str
-    """The directory under ``adapters/agents/`` the exception names."""
+    """The directory under ``adapters/`` the exception names, as a relative path."""
     probe: str
     """A name for this framework's probe module, unique so that two can coexist."""
 
@@ -99,17 +106,23 @@ FRAMEWORKS = (
             "LangGraph, LangChain, its provider clients and langsmith only under"
             " adapters.agents.langgraph"
         ),
-        sub_package="langgraph",
+        sub_package="agents/langgraph",
         probe="langgraph",
     ),
     Framework(
         module="pydantic_ai",
         contract=("Pydantic AI, logfire and OpenTelemetry only under adapters.agents.pydantic_ai"),
-        sub_package="pydantic_ai",
+        sub_package="agents/pydantic_ai",
         probe="pydantic_ai",
     ),
+    Framework(
+        module="mcp",
+        contract="the MCP SDK only under adapters.tools.mcp",
+        sub_package="tools/mcp",
+        probe="mcp",
+    ),
 )
-"""Both frameworks, so that every probe below runs against both contracts."""
+"""Both frameworks and the SDK, so that every probe below runs against every contract."""
 
 
 def lint_imports(tree: Path = ROOT) -> subprocess.CompletedProcess[str]:
@@ -215,7 +228,7 @@ def only_broken(result: subprocess.CompletedProcess[str], tree: Path, contract: 
 by_framework = pytest.mark.parametrize(
     "framework", FRAMEWORKS, ids=[framework.module for framework in FRAMEWORKS]
 )
-"""Every probe below, once per framework: two engines, two contracts, two probes."""
+"""Every probe below, once per confined library: two engines and the SDK, three contracts."""
 
 
 def test_import_contracts() -> None:
@@ -276,18 +289,20 @@ def test_the_exception_covers_the_sub_package_and_nothing_beside_it(
 ) -> None:
     """The same module, one directory further in, is still outside the exception.
 
-    ``adapters/agents/`` is not ``adapters/agents/<framework>/``: the exception
-    names one sub-package, and a module beside it is held to the rule like
-    every other.
+    ``adapters/agents/`` is not ``adapters/agents/<framework>/``, and
+    ``adapters/tools/`` is not ``adapters/tools/mcp/``: the exception names one
+    sub-package, and a module beside it is held to the rule like every other.
     """
+    beside = Path(framework.sub_package).parent
     where = f"_probe_beside_the_exception_{framework.probe}"
-    probe(copied_package, ADAPTERS / "agents" / f"{where}.py", framework)
+    probe(copied_package, ADAPTERS / beside / f"{where}.py", framework)
 
     result = lint_imports(copied_package)
 
     assert result.returncode != 0, result.stdout + result.stderr
     only_broken(result, copied_package, framework.contract)
-    assert broken_import(f"robinauts.adapters.agents.{where}", framework) in squashed(result.stdout)
+    module = ".".join(("robinauts", "adapters", *beside.parts, where))
+    assert broken_import(module, framework) in squashed(result.stdout)
 
 
 @pytest.mark.io
@@ -300,7 +315,7 @@ def test_the_probe_is_allowed_inside_the_sub_package_the_exception_names(
     A rule that refused everywhere would pass the two tests above and be
     useless; this is the other half of the claim.
     """
-    inside = ADAPTERS / "agents" / framework.sub_package / "_probe_inside_the_exception.py"
+    inside = ADAPTERS / framework.sub_package / "_probe_inside_the_exception.py"
     probe(copied_package, inside, framework)
 
     result = lint_imports(copied_package)

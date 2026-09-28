@@ -225,6 +225,21 @@ it here rather than deciding it in passing.
   can no longer match, or asking the vendor for the shorter display of its
   thinking -- is made there, on what the vendor's API allows, and recorded
   here.
+- **Whether `MIT-0` joins the allowed list, and what a runtime, Windows-only
+  package with family-only metadata gets** (added in step 2, 2026-09-28).
+  The SDK's tree fails the gate on `cffi` (`MIT-0`) and `pywin32` (a licence
+  family and no licence). `MIT-0` is strictly more permissive than MIT, is
+  Category A of the ASF model DEPENDENCIES.md adopts, and is already carried
+  twice in that document's JavaScript table; adding the identifier to the
+  allowed list is a one-line edit and a person's decision. `pywin32` needs
+  an answer of its own -- a runtime exception by name for family-only
+  metadata, with the version read, as the development table has for
+  `colorama`; or a platform decision (`[tool.uv] environments` dropping
+  Windows from the lock, which also drops `colorama` and says Windows is not
+  supported); or leaving it. Both decisions together would let the SDK in
+  and take step 5's hand-written client out, which is the cost the plan
+  named for the fallback. Step 2 took the fallback pending them.
+
 
 ## The seams, by layer
 
@@ -379,6 +394,15 @@ is the first turn that calls one.
    gate, the fallback is a client of our own over `httpx` for the three
    calls a client needs (`initialize`, `tools/list`, `tools/call`), and this
    step says so rather than excepting a licence.
+   **Outcome (2026-09-28): the tree fails the gate, and the fallback is
+   taken.** `pyjwt[crypto]` brings `cryptography`, which brings `cffi`, whose
+   metadata states `MIT-0` (on no list); and `pywin32`, Windows-only, states
+   a licence family and no licence. Both are rows of DEPENDENCIES.md's
+   "Known exclusions" now, no dependency is added, and step 5 writes the
+   client over `httpx`. The import contract for the SDK is written all the
+   same, before the fact, with the probe tests the two framework rules have
+   (`tests/unit/test_architecture.py`), and `adapters/tools/mcp/` exists as
+   the sub-package it names.
 
 3. **The format.** `ToolCallPart`, `ToolResultPart`, `Role.TOOL` supported,
    their encoding, one tool message per call batch and the check that it
@@ -530,9 +554,11 @@ Kept from the notes this plan replaces, condensed.
 - **The vendor clients are pinned** -- endpoint from the configuration, key
   as a header, proxy left to `HTTPS_PROXY`, `max_retries=0`, tracing forced
   off, request-body loggers held at `WARNING`. The MCP adapter follows every
-  one of those rules; check what the SDK logs at `DEBUG` before it is
-  adopted, since `ANTHROPIC_LOG=debug` wrote whole conversations to standard
-  error before the vendor loggers were pinned.
+  one of those rules; being a client of our own over `httpx` (step 2), what
+  it has to pin are `httpx`'s and `httpcore`'s loggers, which log request
+  lines and headers -- the credential among them -- at `DEBUG`, since
+  `ANTHROPIC_LOG=debug` wrote whole conversations to standard error before
+  the vendor loggers were pinned.
 - **Every `schema.sql` edit re-pins the hash and leaves `SCHEMA_VERSION` at
   1**; there are no migrations before the first release.
 - **Tool arguments and results are attacker-influenced text** going to a

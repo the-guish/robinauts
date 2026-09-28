@@ -487,6 +487,39 @@ ignore_imports = [
 ]
 unmatched_ignore_imports_alerting = "none"
 
+# The MCP Python SDK, confined to the one adapter that speaks the protocol --
+# and **not adopted**: its tree fails the licence gate (DEPENDENCIES.md, "Known
+# exclusions": `cffi` states MIT-0, which is on no list, and `pywin32` a
+# licence family only), so `adapters/tools/mcp/` is a client of our own over
+# `httpx` for the three calls a client needs (docs/specs/agents.md, "Known
+# findings").
+# The rule is written all the same, before the import exists, as `uvicorn`'s
+# was: the day the tree passes, the SDK belongs here and nowhere else, and a
+# contract written the day the import is written is a contract written after
+# the fact. Same shape as the two framework rules above -- `robinauts.adapters`
+# named as a package, the exception written as an exception.
+[[tool.importlinter.contracts]]
+name = "the MCP SDK only under adapters.tools.mcp"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = [
+    "robinauts.domain",
+    "robinauts.core",
+    "robinauts.ports",
+    "robinauts.application",
+    "robinauts.api",
+    "robinauts.datastore",
+    "robinauts.adapters",
+    "robinauts.app",
+    "robinauts.cli",
+]
+forbidden_modules = ["mcp"]
+ignore_imports = [
+    "robinauts.adapters.tools.mcp -> *",
+    "robinauts.adapters.tools.mcp.** -> *",
+]
+unmatched_ignore_imports_alerting = "none"
+
 [[tool.importlinter.contracts]]
 name = "the two agent adapters do not import each other"
 type = "independence"
