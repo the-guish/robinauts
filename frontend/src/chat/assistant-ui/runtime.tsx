@@ -76,6 +76,7 @@ import {
   reduce,
   STOP_DID_NOT_ARRIVE,
   storedParent,
+  turnStart,
   under,
   UNSENT,
   type ChatAction,
@@ -431,6 +432,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
         opened.ended_badly === null
           ? null
           : (ENDED_BADLY.get(opened.ended_badly.state) ?? null),
+      endedState: opened.ended_badly === null ? null : opened.ended_badly.state,
     });
     // Every complete message has just been loaded, so attaching at
     // `resume.after` replays exactly the one still being produced and none
@@ -679,10 +681,16 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
       return;
     }
     // A regeneration carries no new message: it answers the question that
-    // turn already had (`docs/specs/conversations.md`). The old answer comes
-    // off the screen with everything after it, which is what `parentId` --
-    // the question -- cuts the thread after.
-    dispatch({ kind: "again", after: parentId });
+    // turn already had, and **replaces the turn**
+    // (`docs/specs/conversations.md`). Everything the turn produced comes
+    // off the screen, so the cut is after its question -- which is not
+    // always `parentId`, the message before the regenerated one: a turn
+    // with tools in it has an answer that called before the answer after
+    // the results (`turnStart`).
+    dispatch({
+      kind: "again",
+      after: turnStart(state, regenerate) ?? parentId,
+    });
     await follow((signal) =>
       startTurn(conversationId, { regenerate }, { signal }),
     );

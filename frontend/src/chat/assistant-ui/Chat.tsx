@@ -32,6 +32,7 @@ import { createContext, useContext, type ReactNode } from "react";
 
 import type { ChatProps } from "../index";
 import { useChat } from "./runtime";
+import { ToolCall } from "./ToolCall";
 import { Thread } from "./vendor/components/assistant-ui/elements/thread.aui";
 
 /** What the welcome slot draws, handed down past the Thread. */
@@ -48,7 +49,7 @@ function Welcome() {
  * that is remounted loses the focus: at a keystroke in the box beside it, or
  * at every step of a keyboard arrowing through the picker itself.
  */
-const COMPONENTS = { Welcome };
+const COMPONENTS = { Welcome, ToolFallback: ToolCall };
 
 export function Chat(props: ChatProps) {
   const { state, runtime } = useChat(props);

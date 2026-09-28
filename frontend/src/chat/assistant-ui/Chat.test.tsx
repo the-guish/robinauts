@@ -21,6 +21,7 @@ import {
   results,
 } from "../../test/conversations";
 import { event, streamed, streamHeaders, writable } from "../../test/stream";
+import { TOOL_FAILED } from "./ToolCall";
 import {
   Chat,
   type AgentId,
@@ -121,6 +122,9 @@ test("a tool call is drawn as data: the name, the arguments and the result as te
   expect(
     screen.getByText('{"q":"<script>alert(1)</script>"}'),
   ).toBeInTheDocument();
+  // The tool said it failed, and the chat says so rather than drawing a
+  // check mark over the answer.
+  expect(screen.getByText(TOOL_FAILED)).toBeInTheDocument();
   // The one <b> is the trigger's own, around the name; the result's is text.
   expect(
     [...document.querySelectorAll("b")].map((bold) => bold.textContent),

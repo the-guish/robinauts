@@ -302,6 +302,24 @@ function storedEnd(message: ChatMessage): string {
   return message.resultsId ?? message.id;
 }
 
+/**
+ * The question of the turn that message is part of, or `null` for none.
+ *
+ * **A regeneration replaces the turn** (`docs/specs/conversations.md`), and
+ * a turn with tools in it is several answers -- the one that called, the
+ * one after the results -- so the message before the regenerated one on the
+ * screen is not always the question. The cut is made at the question: the
+ * nearest one at or before the message.
+ */
+export function turnStart(state: ChatState, messageId: string): string | null {
+  const at = state.messages.findIndex((message) => message.id === messageId);
+  for (let back = at; back >= 0; back -= 1) {
+    const message = state.messages[back];
+    if (message?.role === "user") return message.id;
+  }
+  return null;
+}
+
 /** Everything that can change the chat. */
 export type ChatAction =
   /** An empty chat: nothing opened, nothing being read. */
@@ -316,6 +334,11 @@ export type ChatAction =
       runId: string | null;
       /** How the last run ended, when it ended badly. */
       endedBadly: string | null;
+      /**
+       * The state it ended in, when it ended badly: what an answer whose
+       * calls were never answered is shown as (`folded`).
+       */
+      endedState?: string | null;
     }
   /** It could not be read. */
   | { kind: "unopened"; detail: string; missing: boolean }
@@ -369,7 +392,12 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
       // object on the read that ends a turn would convert a whole
       // conversation again -- and move every `createdAt` -- over one answer.
       const before = new Map(state.messages.map((each) => [each.id, each]));
-      const messages = folded(action.messages).map((fresh) => {
+      const messages = folded(
+        action.messages,
+        action.runId,
+        action.endedState ?? null,
+        action.endedBadly,
+      ).map((fresh) => {
         const already = before.get(fresh.id);
         return already !== undefined && unchanged(already, fresh)
           ? already
@@ -545,11 +573,16 @@ function applied(state: ChatState, event: AguiEvent): ChatState {
       // Not held: the no-op for an end a re-attach derived for a message this
       // client never had open.
       if (ending === null || ending.state !== "running") return state;
+      // **An answer that asked for tools is not over when its text is.** The
+      // backend completes it before it runs the calls, and their results
+      // land on it afterwards: it stays running until the last one has,
+      // so that the calls are drawn as in progress and a run that ends
+      // before that marks them as it marks any answer left open.
       return {
         ...state,
         messages: state.messages.map((message) =>
           message.id === event.messageId
-            ? { ...message, state: "stored" }
+            ? { ...message, state: unanswered(message) ? "running" : "stored" }
             : message,
         ),
         writing: null,
@@ -676,15 +709,18 @@ function applied(state: ChatState, event: AguiEvent): ChatState {
       const holder = holding(state, event.toolCallId);
       if (holder === null) return state;
       if (callOf(holder, event.toolCallId)?.result !== undefined) return state;
-      return withMessage(state, holder.id, (message) => ({
-        ...message,
-        resultsId: event.messageId,
-        parts: message.parts.map((part) =>
+      return withMessage(state, holder.id, (message) => {
+        const parts = message.parts.map((part) =>
           part.kind === "tool-call" && part.id === event.toolCallId
             ? { ...part, result: event.content, isError: event.isError }
             : part,
-        ),
-      }));
+        );
+        // The last result of the batch is what ends the answer's running.
+        const answered = { ...message, resultsId: event.messageId, parts };
+        return message.state === "running" && !unanswered(answered)
+          ? { ...answered, state: "stored" }
+          : answered;
+      });
     }
 
     case "RUN_FINISHED": {
@@ -726,6 +762,13 @@ function opening(messageId: string): AguiEvent {
 /** That message, or `null`. */
 function find(state: ChatState, id: string): ChatMessage | null {
   return state.messages.find((message) => message.id === id) ?? null;
+}
+
+/** Whether that message made a call nothing has answered yet. */
+function unanswered(message: ChatMessage): boolean {
+  return message.parts.some(
+    (part) => part.kind === "tool-call" && part.result === undefined,
+  );
 }
 
 /** That call of that message, or `null`. */
@@ -898,7 +941,7 @@ function unchanged(already: ChatMessage, fresh: ChatMessage): boolean {
           other.kind === "tool-call" &&
           part.id === other.id &&
           part.name === other.name &&
-          part.argsText === other.argsText &&
+          sameArguments(part, other) &&
           part.result === other.result &&
           part.isError === other.isError
         );
@@ -913,16 +956,68 @@ function unchanged(already: ChatMessage, fresh: ChatMessage): boolean {
 }
 
 /**
+ * Whether two calls have the same arguments: as data where both sides have
+ * them, which the store's spelling of the JSON and the model's need not
+ * share, and as the text otherwise.
+ */
+function sameArguments(one: ChatToolCall, other: ChatToolCall): boolean {
+  return one.args !== undefined && other.args !== undefined
+    ? sameData(one.args, other.args)
+    : one.argsText === other.argsText;
+}
+
+/** Whether two JSON values are the same value. */
+function sameData(one: unknown, other: unknown): boolean {
+  if (one === other) return true;
+  if (Array.isArray(one) || Array.isArray(other)) {
+    return (
+      Array.isArray(one) &&
+      Array.isArray(other) &&
+      one.length === other.length &&
+      one.every((item, at) => sameData(item, other[at]))
+    );
+  }
+  if (
+    typeof one !== "object" ||
+    typeof other !== "object" ||
+    one === null ||
+    other === null
+  ) {
+    return false;
+  }
+  const left = one as Record<string, unknown>;
+  const right = other as Record<string, unknown>;
+  const keys = Object.keys(left);
+  return (
+    keys.length === Object.keys(right).length &&
+    keys.every(
+      (key) => Object.hasOwn(right, key) && sameData(left[key], right[key]),
+    )
+  );
+}
+
+/**
  * The thread as the chat holds it: every tool message folded into the
  * answer before it.
  *
  * A tool message is the store's (`docs/specs/conversations.md`) and no
  * bubble on the screen: its results are drawn on the calls that made them,
  * and the answer remembers it as what the next message hangs under
- * (`resultsId`). One that follows no answer -- which the format does not
- * allow -- is dropped rather than drawn under nothing.
+ * (`resultsId`). One that follows anything but an answer -- which the
+ * format does not allow -- is dropped rather than drawn under it.
+ *
+ * **An answer whose calls were never answered** is the store's record of a
+ * batch that did not finish: still running when it is the last message and
+ * a run is in flight (its results are what the stream will bring), and
+ * otherwise over the way the run was -- failed, with the sentence that says
+ * so, or cancelled -- so that its calls are drawn as what they are.
  */
-function folded(messages: readonly Message[]): ChatMessage[] {
+function folded(
+  messages: readonly Message[],
+  runId: string | null,
+  endedState: string | null,
+  endedBadly: string | null,
+): ChatMessage[] {
   const thread: ChatMessage[] = [];
   for (const message of messages) {
     if (message.role !== "tool") {
@@ -930,10 +1025,25 @@ function folded(messages: readonly Message[]): ChatMessage[] {
       continue;
     }
     const answer = thread.at(-1);
-    if (answer === undefined) continue;
+    if (answer === undefined || answer.role !== "assistant") continue;
     thread[thread.length - 1] = answered(answer, message);
   }
-  return thread;
+  return thread.map((message, at) => {
+    if (message.role !== "assistant" || !unanswered(message)) return message;
+    if (at === thread.length - 1 && runId !== null) {
+      return { ...message, state: "running" };
+    }
+    const failed =
+      at === thread.length - 1 &&
+      (endedState === "failed" || endedState === "interrupted");
+    return failed
+      ? {
+          ...message,
+          state: "failed",
+          ...(endedBadly === null ? {} : { detail: endedBadly }),
+        }
+      : { ...message, state: "cancelled" };
+  });
 }
 
 /** That answer with the results of that tool message on its calls. */
@@ -966,14 +1076,13 @@ function held(message: Message): ChatMessage {
     parts: message.parts.flatMap((part): ChatPart[] => {
       if (part.kind === "text") return [{ kind: "text", text: part.text }];
       if (part.kind === "tool_call") {
-        const args = part.arguments ?? {};
         return [
           {
             kind: "tool-call",
             id: part.call_id,
             name: part.name,
-            argsText: JSON.stringify(args),
-            args,
+            argsText: JSON.stringify(part.arguments),
+            args: part.arguments,
           },
         ];
       }

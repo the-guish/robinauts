@@ -1031,15 +1031,38 @@ rules, the part handed over, an edit after a round through the hook),
 text and makes no element). The frontend's typecheck, red since step 3
 added the `tool` role to the API's enum, is green again.
 
-Review: pending.
+Review: 1 round (read after the commit; the fixes are a commit of their
+own, "mcp 6b: fixes from the review", on step 8's branch).
+- High: 0.
+- Medium: 3 (3/0) — **regenerating the answer after a tool round** cut
+  the thread at the message before it on the screen, the calling answer,
+  which stayed on the screen under the new answer until the re-read: a
+  regeneration replaces the turn, so the cut is at the turn's question
+  (`turnStart`); **a call without a result in a completed answer was
+  drawn as done** -- during the batch, and after a cancellation or a
+  failure in the middle of one: an answer whose calls are unanswered stays
+  `running` until its last result lands, a run ending before that marks it
+  as it marks any answer left open, and a conversation read back shows
+  such an answer as the run left it (running with a run in flight, else
+  cancelled, or failed with the sentence); **`isError` was decoded and
+  handed over and nothing drew it**: a `ToolCall` component composed from
+  the vendored fallback's parts, outside `vendor/`, gives a failed call the
+  icon of one and a line saying the tool answered that the call failed.
+- Low: 4 (4/0) — the guards a mutation run found unpinned have cases (a
+  cut under a tool message in the middle of a thread, a call naming no
+  answer, an end for a call nothing holds); a tool message after anything
+  but an answer is dropped, as the comment said; the calling answer is no
+  longer rebuilt on every re-read (the arguments are compared as data,
+  since the store's spelling of the JSON is not the model's); the dead
+  fallback on the arguments is gone and this entry's claim about
+  "Cancelled tool" is true now.
 
 Checks: frontend typecheck, lint, prettier, tests (424); the backend suite
 runs again with the 5e and 6a fixes on this branch (3238 passed, 6 skipped).
-Not done / to watch: a call's status is the message's (running,
-cancelled, complete); a cancelled batch shows its calls as "Cancelled
-tool"; two answers of one turn are two bubbles, the round's answer with
-its calls and the answer after; nothing renders `args` beyond the
-fallback's text; the demo and the operator's page (step 8).
+Not done / to watch: a call's status is the message's, which stays running
+while the batch is; two answers of one turn are two bubbles, the round's
+answer with its calls and the answer after; nothing renders `args` beyond
+the fallback's text; the demo and the operator's page (step 8).
 
 ### Step 8 — the demo's tool servers, a public server, the operator's page   (feature/mcp-8-demo)
 

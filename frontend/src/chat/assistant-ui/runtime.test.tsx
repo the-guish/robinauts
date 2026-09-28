@@ -33,6 +33,7 @@ import {
   saidFor,
   STOP_DID_NOT_ARRIVE,
   storedParent,
+  turnStart,
   under,
   type ChatAction,
   type ChatMessage,
@@ -312,7 +313,8 @@ test("the no-ops a re-attach relies on hold for a call too", () => {
       sent({ type: "TOOL_CALL_ARGS", toolCallId: "never", delta: "{" }),
     ),
   ).toBe(open);
-  const complete = after(asked, started, ...round.slice(0, 7));
+  // Complete, its results in: an answer with a batch still open is running.
+  const complete = after(asked, started, ...round.slice(0, 8));
   expect(reduce(complete, round[4]!)).toBe(complete);
   // A start for a call of a message that is complete: the store has it.
   expect(reduce(complete, round[2]!)).toBe(complete);
@@ -340,6 +342,23 @@ test("a call whose answer's start went missing opens the answer", () => {
   const state = after(asked, started, toolRound()[2]!, toolRound()[5]!);
   expect(state.writing).toBe(ANSWER);
   expect(parts(state, ANSWER)).toEqual([["tool-call", "github__search"]]);
+  // A call that names no answer belongs to the one being written.
+  const unnamed = after(
+    asked,
+    started,
+    toolRound()[0]!,
+    sent({
+      type: "TOOL_CALL_START",
+      toolCallId: "toolu_09",
+      toolCallName: "github__echo",
+      parentMessageId: null,
+    }),
+  );
+  expect(parts(unnamed, ANSWER)).toEqual([["tool-call", "github__echo"]]);
+  // An end for a call nothing here holds changes nothing.
+  expect(
+    reduce(unnamed, sent({ type: "TOOL_CALL_END", toolCallId: "never" })),
+  ).toBe(unnamed);
   // Arguments that never parse as an object are left to the renderer as text.
   const odd = after(
     asked,
@@ -352,6 +371,45 @@ test("a call whose answer's start went missing opens the answer", () => {
   expect(call(odd, ANSWER, "toolu_01")).not.toHaveProperty("args");
 });
 
+test("an answer that asked for tools is running until its last result has landed", () => {
+  // The backend completes the answer's text before it runs the calls, and
+  // the results land on it afterwards: drawn as in progress until then.
+  const round = toolRound();
+  const ended = after(asked, started, ...round.slice(0, 7));
+  expect(ended.writing).toBeNull();
+  expect(ended.messages[1]?.state).toBe("running");
+  const answered = reduce(ended, round[7]!);
+  expect(answered.messages[1]?.state).toBe("stored");
+  // With two calls, the first result does not end it; the second does.
+  const two = after(
+    asked,
+    started,
+    ...round.slice(0, 6),
+    sent({
+      type: "TOOL_CALL_START",
+      toolCallId: "toolu_02",
+      toolCallName: "github__echo",
+      parentMessageId: ANSWER,
+    }),
+    sent({ type: "TOOL_CALL_END", toolCallId: "toolu_02" }),
+    sent({ type: "TEXT_MESSAGE_END", messageId: ANSWER }),
+    round[7]!,
+  );
+  expect(two.messages[1]?.state).toBe("running");
+  expect(
+    reduce(
+      two,
+      sent({
+        type: "TOOL_CALL_RESULT",
+        messageId: RESULTS,
+        toolCallId: "toolu_02",
+        content: "echoed",
+        isError: false,
+      }),
+    ).messages[1]?.state,
+  ).toBe("stored");
+});
+
 test("a run cancelled in the middle of a batch leaves the call without a result", () => {
   const state = after(
     asked,
@@ -360,11 +418,118 @@ test("a run cancelled in the middle of a batch leaves the call without a result"
     sent({ type: "RUN_FINISHED", runId: RUN, cancelled: true }),
   );
   expect(call(state, ANSWER, "toolu_01")).not.toHaveProperty("result");
-  expect(state.messages[1]?.state).toBe("stored");
+  // The answer was still running -- its calls were unanswered -- so the
+  // ending marks it, and its calls are drawn as cancelled.
+  expect(state.messages[1]?.state).toBe("cancelled");
   expect(state.messages[1]?.resultsId).toBeUndefined();
   // The question after it hangs under the answer itself: there is no tool
   // message (`docs/specs/runs.md`).
   expect(under(state)).toBe(ANSWER);
+  // A failure in the middle of a batch says so on the answer.
+  const failed = after(
+    asked,
+    started,
+    ...toolRound().slice(0, 7),
+    sent({ type: "RUN_ERROR", code: "failed", message: "x" }),
+  );
+  expect(failed.messages[1]?.state).toBe("failed");
+  expect(failed.messages[1]?.detail).toBe(saidFor("failed"));
+});
+
+test("opened, an answer whose calls were never answered is shown as the run left it", () => {
+  const stored = [
+    message("m1", "user", "why?"),
+    calling("m2", "", [
+      { call_id: "toolu_01", name: "github__search", arguments: {} },
+    ]),
+  ];
+  // The last message, with a run in flight: its results are on their way.
+  const running = after({
+    kind: "opened",
+    conversationId: CONVERSATION,
+    messages: stored,
+    runId: RUN,
+    endedBadly: null,
+  });
+  expect(running.messages[1]?.state).toBe("running");
+  // No run: the batch was cancelled, or the run failed and says so.
+  const cancelled = after({
+    kind: "opened",
+    conversationId: CONVERSATION,
+    messages: stored,
+    runId: null,
+    endedBadly: "stopped",
+    endedState: "cancelled",
+  });
+  expect(cancelled.messages[1]?.state).toBe("cancelled");
+  const failed = after({
+    kind: "opened",
+    conversationId: CONVERSATION,
+    messages: stored,
+    runId: null,
+    endedBadly: "went wrong",
+    endedState: "failed",
+  });
+  expect(failed.messages[1]?.state).toBe("failed");
+  expect(failed.messages[1]?.detail).toBe("went wrong");
+  // Earlier in the thread, whatever the last run did: that batch is over.
+  const earlier = after({
+    kind: "opened",
+    conversationId: CONVERSATION,
+    messages: [...stored, message("m3", "user", "and?")],
+    runId: RUN,
+    endedBadly: null,
+  });
+  expect(earlier.messages[1]?.state).toBe("cancelled");
+  // A batch that was answered is an answer like any other.
+  const whole = after({
+    kind: "opened",
+    conversationId: CONVERSATION,
+    messages: [...stored, results("t1", [{ call_id: "toolu_01", text: "ok" }])],
+    runId: null,
+    endedBadly: null,
+  });
+  expect(whole.messages[1]?.state).toBe("stored");
+  // A tool message after anything but an answer is dropped, not folded.
+  const odd = after({
+    kind: "opened",
+    conversationId: CONVERSATION,
+    messages: [
+      message("m1", "user", "why?"),
+      results("t1", [{ call_id: "toolu_01", text: "ok" }]),
+    ],
+    runId: null,
+    endedBadly: null,
+  });
+  expect(odd.messages.map((each) => each.id)).toEqual(["m1"]);
+  expect(odd.messages[0]?.resultsId).toBeUndefined();
+});
+
+test("a regeneration replaces the turn: the cut is at its question", () => {
+  const state = after({
+    kind: "opened",
+    conversationId: CONVERSATION,
+    messages: [
+      message("m1", "user", "why?"),
+      calling("m2", "Let me look.", [
+        { call_id: "toolu_01", name: "github__search", arguments: {} },
+      ]),
+      results("t1", [{ call_id: "toolu_01", text: "found 3" }]),
+      message("m3", "assistant", "Three."),
+      message("m4", "user", "and?"),
+      message("m5", "assistant", "Four."),
+    ],
+    runId: null,
+    endedBadly: null,
+  });
+  // The answer after the round, whose screen-parent is the calling answer.
+  expect(turnStart(state, "m3")).toBe("m1");
+  expect(turnStart(state, "m2")).toBe("m1");
+  expect(turnStart(state, "m5")).toBe("m4");
+  expect(turnStart(state, "m1")).toBe("m1");
+  expect(turnStart(state, "never")).toBeNull();
+  const again = reduce(state, { kind: "again", after: turnStart(state, "m3") });
+  expect(again.messages.map((each) => each.id)).toEqual(["m1"]);
 });
 
 test("opening a conversation folds each tool message into the answer before it", () => {
@@ -433,6 +598,34 @@ test("opening a conversation folds each tool message into the answer before it",
     text: "and?",
   });
   expect(cut.messages.map((each) => each.id)).toEqual(["m1", "m2", "unsent:q"]);
+  // And in the middle of a thread: an edit under the tool message cuts
+  // after the answer that holds it, not at the end.
+  const longer = after({
+    kind: "opened",
+    conversationId: CONVERSATION,
+    messages: [
+      message("m1", "user", "why?"),
+      calling("m2", "", [
+        { call_id: "toolu_01", name: "github__search", arguments: {} },
+      ]),
+      results("t1", [{ call_id: "toolu_01", text: "found 3" }]),
+      message("m3", "user", "and?"),
+      message("m4", "assistant", "Four."),
+    ],
+    runId: null,
+    endedBadly: null,
+  });
+  const edited = reduce(longer, {
+    kind: "asked",
+    id: "unsent:edit",
+    after: "t1",
+    text: "and then?",
+  });
+  expect(edited.messages.map((each) => each.id)).toEqual([
+    "m1",
+    "m2",
+    "unsent:edit",
+  ]);
 
   // Read again unchanged, the messages are the same objects: nothing is
   // converted twice over one answer.
@@ -1118,6 +1311,51 @@ test("regenerating names the answer to produce again, and sends no message", asy
     await settle();
   });
   expect(posts[0]?.body).toEqual({ regenerate: "m2" });
+});
+
+test("regenerating the answer after a tool round takes the whole turn off the screen", async () => {
+  // The screen-parent of m3 is the calling answer m2; the turn's question is
+  // m1, and a regeneration replaces the turn (`docs/specs/conversations.md`),
+  // so m2 goes too -- or the new answer would stream in under it.
+  const { response, write, close } = writable({
+    headers: streamHeaders(RUN, CONVERSATION),
+  });
+  const posts: Call[] = [];
+  stub((call) => {
+    if (call.url === `/api/conversations/${CONVERSATION}`) {
+      return json(
+        opened(conversation(1), [
+          message("m1", "user", "why?"),
+          calling("m2", "", [
+            { call_id: "toolu_01", name: "github__search", arguments: {} },
+          ]),
+          results("t1", [{ call_id: "toolu_01", text: "found 3" }]),
+          message("m3", "assistant", "Three."),
+        ]),
+      );
+    }
+    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+      posts.push(call);
+      return response;
+    }
+    return undefined;
+  });
+  const { result } = chatting({ conversationId: CONVERSATION });
+  await waitFor(() => {
+    expect(result.current.state.messages).toHaveLength(3);
+  });
+
+  await act(async () => {
+    result.current.runtime.thread.startRun({ parentId: "m2", sourceId: "m3" });
+    await settle();
+  });
+  expect(posts[0]?.body).toEqual({ regenerate: "m3" });
+  expect(result.current.state.messages.map((each) => each.id)).toEqual(["m1"]);
+  await act(async () => {
+    write(event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 9));
+    close();
+    await settle();
+  });
 });
 
 test("cancelling posts to the run and waits for the stream to say so", async () => {
