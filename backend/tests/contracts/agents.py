@@ -74,6 +74,10 @@ from robinauts.domain import (
     EngineEvent,
     Message,
     TextPart,
+    ToolCallCompleted,
+    ToolCallStarted,
+    ToolDefinition,
+    WaitingOnTools,
 )
 from robinauts.ports import Agent
 
@@ -97,6 +101,15 @@ class Ending(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class Call:
+    """One tool the model is to ask for, by the full name it was shown."""
+
+    call_id: str
+    name: str
+    arguments: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class Say:
     """One answer the model is to produce."""
 
@@ -104,6 +117,16 @@ class Say:
     streamed: bool = True
     """Whether it arrives in deltas. An engine that streams must complete with
     exactly what it streamed; one that does not may complete with anything."""
+    calls: tuple[Call, ...] = ()
+    """The tools it asks for, which end the turn waiting; only the last answer may."""
+
+
+SEARCH = ToolDefinition(
+    name="github__search",
+    description="Search the repositories this deployment may see.",
+    input_schema={"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]},
+)
+"""The one tool a scripted turn is handed, named as the platform names one."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +160,14 @@ class AgentContract:
     however the provider sent it: what is then streamed is one piece, which is
     streaming. The half of the promise that still holds -- and that is checked
     -- is that what it streamed is what it completed with.
+    """
+
+    can_call_tools: bool = True
+    """Whether a turn of this engine can be scripted to ask for a tool.
+
+    ``False`` for an engine that does not bind tools yet, whose model can
+    therefore not be scripted to call one; it says which of the port's
+    situations this engine produces and weakens nothing it does produce.
     """
 
     def new_agent(self, script: Script) -> Agent:
@@ -177,11 +208,21 @@ class AgentContract:
         """The history it is given: a path ending in the question to answer."""
         return (question("What is a robinaut?"),)
 
+    def tools(self) -> tuple[ToolDefinition, ...]:
+        """The tools it is handed for the turn: one, so that a call has a name to use.
+
+        None for an engine that does not bind tools yet, which refuses a turn
+        handed any rather than run it without them.
+        """
+        return (SEARCH,) if self.can_call_tools else ()
+
     async def turn(self, script: Script) -> list[EngineEvent]:
         """Every event of one turn, run to its end."""
         agent = self.new_agent(script)
         seen: list[EngineEvent] = []
-        events = agent.run_turn(self.definition(), self.history(), model=self.model_id())
+        events = agent.run_turn(
+            self.definition(), self.history(), self.tools(), model=self.model_id()
+        )
         # The application closes the stream to release what the engine holds,
         # so the stream must be closeable: that is part of the port.
         assert hasattr(events, "aclose")
@@ -231,6 +272,35 @@ class AgentContract:
         streamed = "".join(event.text for event in seen if isinstance(event, AnswerTextDelta))
         assert streamed == _completed(seen)[0]
 
+    # --- a turn that asks for tools ---
+
+    @asyncio_test
+    async def test_an_answer_that_asks_for_tools_ends_the_turn_waiting(self) -> None:
+        """The call is announced and completed inside the answer, the answer
+        completes holding it, and the turn ends waiting: the engine runs no
+        tool (``docs/specs/runs.md``)."""
+        if not self.can_call_tools:
+            pytest.skip("this engine does not bind tools yet")
+        made = Call("toolu_01", SEARCH.name, {"q": "robinauts"})
+        seen = await self.turn(Script(answers=(Say("Let me look.", calls=(made,)),)))
+
+        check_engine_events(seen)
+        assert isinstance(seen[-1], WaitingOnTools)
+        (started,) = [event for event in seen if isinstance(event, ToolCallStarted)]
+        assert (started.call_id, started.name) == (made.call_id, made.name)
+        (completed,) = [event for event in seen if isinstance(event, ToolCallCompleted)]
+        assert completed.call.arguments == made.arguments
+        (answer,) = [event for event in seen if isinstance(event, AnswerCompleted)]
+        assert answer.tool_calls == (completed.call,)
+        assert _completed(seen) == ["Let me look."]
+
+    @asyncio_test
+    async def test_a_turn_without_tools_never_says_it_is_waiting(self) -> None:
+        seen = await self.turn(Script(answers=(Say("Someone who plays fair."),)))
+
+        assert not any(isinstance(event, WaitingOnTools) for event in seen)
+        assert not any(isinstance(event, ToolCallStarted) for event in seen)
+
     # --- how a turn ends badly ---
 
     @asyncio_test
@@ -240,7 +310,9 @@ class AgentContract:
 
         with pytest.raises(Exception) as failure:  # noqa: B017 - an engine raises what it likes
             async with aclosing(
-                agent.run_turn(self.definition(), self.history(), model=self.model_id())
+                agent.run_turn(
+                    self.definition(), self.history(), self.tools(), model=self.model_id()
+                )
             ) as events:
                 async for event in events:
                     seen.append(event)
@@ -260,7 +332,9 @@ class AgentContract:
 
         async def watch() -> None:
             async with aclosing(
-                agent.run_turn(self.definition(), self.history(), model=self.model_id())
+                agent.run_turn(
+                    self.definition(), self.history(), self.tools(), model=self.model_id()
+                )
             ) as events:
                 async for event in events:
                     seen.append(event)

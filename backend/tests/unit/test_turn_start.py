@@ -670,8 +670,6 @@ def test_a_model_filed_under_a_name_that_is_not_its_own_is_refused() -> None:
 
 def test_a_turn_service_refuses_limits_that_are_not_limits() -> None:
     for changes in (
-        {"history_chars": 0},
-        {"history_chars": True},
         {"turn_seconds": 0},
         {"turn_seconds": -1.0},
         {"turn_seconds": "soon"},

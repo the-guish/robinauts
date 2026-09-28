@@ -186,3 +186,32 @@ every edit of that file re-pins `SCHEMA_SHA256` and makes operators
 recreate their database. Gemini sends no tool call id at all, so an adapter
 reaching it would have to mint one (Pydantic AI does); the call-id rule
 takes Anthropic's, OpenAI's, Bedrock's and Pydantic AI's minted ids.
+
+### Step 4a — the port, the tool engine events, trimming gone   (feature/mcp-4a-port)
+
+Summary: `run_turn(agent, history, tools, *, model)`, the history the full
+visible path and never trimmed above the port (ADR 0004): `core.trim_history`,
+`DEFAULT_HISTORY_CHARS` and `Turns(history_chars=)` are gone, and
+`test_conversation_history.py` with them. `ToolDefinition` (the full name,
+a description, the input schema and the MCP annotations, bounded). Four
+engine events -- `ToolCallStarted`, `ToolCallArgumentsDelta`,
+`ToolCallCompleted`, `WaitingOnTools` -- and `check_engine_events` holding
+them to the order: a call inside an answer, one at a time, its streamed
+arguments parsing to the part it completes with, the answer completing with
+exactly the calls it announced, and an answer that asked for tools followed
+by `WaitingOnTools` and by nothing else. The fake engine scripts a tool call
+(`fakes.calls`), the contract suite asks for one (`Say.calls`, skipped by an
+engine whose `can_call_tools` is off), and both real engines take the tools
+argument and refuse a non-empty one until they bind (steps 4b and 4c). The
+application hands the whole path and no tools, fails a turn on the first
+tool event so nothing half-answered is stored, and carries a completed
+answer's `extras` on to the stored message (from step 3's review).
+
+Review: pending.
+
+Checks: lint; the whole suite against a throwaway PostgreSQL.
+Not done / to watch: the real engines still refuse a tool call from the
+model (`NO_TOOLS`) and a turn handed tools (`NO_TOOL_BINDING`) until steps
+4b and 4c, where each also gets its context policy and its own history
+tests; the application's refusal (`NO_TOOLS_YET`) is what step 5c replaces
+with the loop.

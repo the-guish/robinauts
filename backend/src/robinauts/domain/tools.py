@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""Tools: what a tool is called, and how a call is named (``docs/specs/agents.md``).
+"""Tools: what a tool is called, how a call is named, what a run is handed.
 
-The part of the tool vocabulary the conversation format needs first: the
-spelling of a tool's name and of a call's id, which a stored ``ToolCallPart``
-carries and a ``ToolResultPart`` answers. The definitions a run is handed and
-the servers an operator configures join this module with the steps that
-build them (``docs/working-notes/mcp-plan.md``).
+The spelling of a tool's name and of a call's id, which a stored
+``ToolCallPart`` carries and a ``ToolResultPart`` answers; and
+``ToolDefinition``, the tool as the model is shown it -- the list a run
+fetches once from the servers its agent names and hands the agent port for
+the whole turn (``docs/specs/agents.md``, "Tools"). The servers an operator
+configures join this module with the step that reads them
+(``docs/working-notes/mcp-plan.md``).
 
 **A tool's name is the vendors' bound, not ours.** Anthropic and OpenAI both
 take a tool name of at most 64 characters matching ``^[a-zA-Z0-9_-]+$``, and
@@ -26,9 +28,12 @@ one vendor's spelling.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any
 
 from robinauts.domain.errors import InvalidValueError
-from robinauts.domain.values import checked_line, describe
+from robinauts.domain.values import checked_data, checked_line, checked_text, describe
 
 MAX_TOOL_NAME_CHARS = 64
 """The longest a tool's full name may be: the bound the vendors share."""
@@ -70,3 +75,59 @@ def checked_call_id(value: object, what: str) -> str:
     if not text or any(character.isspace() for character in text):
         raise InvalidValueError(f"{what} is one word of printable text, not {describe(value)}")
     return text
+
+
+MAX_TOOL_DESCRIPTION_CHARS = 20_000
+"""The longest a tool's description may be.
+
+A server writes it and a model reads it on every call of the turn, so it is
+bounded like everything the platform carries; twenty thousand characters is
+far past any description a vendor would want in a prompt.
+"""
+
+MAX_TOOL_SCHEMA_BYTES = 256 * 1024
+"""How big a tool's input schema may be, written as canonical JSON.
+
+Larger than ``extras`` and a call's arguments (``MAX_EXTRAS_BYTES``): a
+schema is the server's whole description of what a tool takes, nested
+objects and enumerations included, and it is sent to the model rather than
+stored. Bounded all the same, since it is attacker-influenced text on its
+way into a prompt.
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class ToolDefinition:
+    """One tool as the model is shown it: its full name, what it does, what it takes.
+
+    ``name`` is the **full** name, ``<prefix>__<name>`` -- the server's prefix
+    and the tool's own -- which is how a call is routed to its server from the
+    name alone (``docs/specs/agents.md``, "Tools"). ``input_schema`` is the
+    JSON Schema the server declared, as plain data; the engines hand it to the
+    vendor as it is. ``annotations`` are MCP's hints about the tool
+    (``readOnlyHint``, ``destructiveHint`` and the rest), carried and read by
+    nothing yet: they are what an approval policy would read
+    (``docs/specs/runs.md``, "Tools").
+
+    Copies of the two mappings are kept, as ``dict`` and ``list``; nothing
+    edits them.
+    """
+
+    name: str
+    description: str
+    input_schema: Mapping[str, Any]
+    annotations: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        checked_tool_name(self.name, "a tool's name")
+        checked_text(self.description, "a tool's description", MAX_TOOL_DESCRIPTION_CHARS)
+        object.__setattr__(
+            self,
+            "input_schema",
+            checked_data(
+                self.input_schema, "a tool's input schema", max_bytes=MAX_TOOL_SCHEMA_BYTES
+            ),
+        )
+        object.__setattr__(
+            self, "annotations", checked_data(self.annotations, "a tool's annotations")
+        )

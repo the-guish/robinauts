@@ -24,7 +24,7 @@ import pytest
 from aio import asyncio_test
 from contracts.agents import AgentContract, Ending, Script
 from conversations import MODEL, agent_definition, question
-from fakes import Gate, Raise, ScriptedAgent, Step, says
+from fakes import Gate, Raise, ScriptedAgent, Step, calls, says
 from robinauts.domain import AnswerCompleted, AnswerStarted, AnswerTextDelta, InvalidValueError
 from robinauts.ports import Agent
 
@@ -34,7 +34,15 @@ def steps_for(script: Script) -> list[Step]:
     steps: list[Step] = []
     for at, answer in enumerate(script.answers):
         last = at == len(script.answers) - 1
-        if last and script.ending is not Ending.COMPLETE:
+        if answer.calls:
+            steps.extend(
+                calls(
+                    *((call.call_id, call.name, call.arguments) for call in answer.calls),
+                    text=answer.text,
+                    streamed=answer.streamed,
+                )
+            )
+        elif last and script.ending is not Ending.COMPLETE:
             # Left open: announced, streamed as far as it got, and then the
             # engine either raises or never comes back.
             steps.append(AnswerStarted())
@@ -67,7 +75,7 @@ async def test_a_gate_holds_the_turn_until_the_test_opens_it() -> None:
 
     async def watch() -> None:
         async with aclosing(
-            agent.run_turn(agent_definition(), (question(),), model=MODEL)
+            agent.run_turn(agent_definition(), (question(),), (), model=MODEL)
         ) as events:
             async for event in events:
                 seen.append(event)
@@ -92,7 +100,7 @@ async def test_it_raises_where_the_script_says_and_not_before() -> None:
 
     with pytest.raises(InvalidValueError) as raised:
         async with aclosing(
-            agent.run_turn(agent_definition(), (question(),), model=MODEL)
+            agent.run_turn(agent_definition(), (question(),), (), model=MODEL)
         ) as events:
             async for event in events:
                 seen.append(event)
@@ -106,7 +114,7 @@ async def test_it_records_every_turn_with_the_history_it_was_given() -> None:
     agent = ScriptedAgent(*says("Answered."))
     asked = question("What is a robinaut?")
 
-    async with aclosing(agent.run_turn(agent_definition(), (asked,), model=MODEL)) as events:
+    async with aclosing(agent.run_turn(agent_definition(), (asked,), (), model=MODEL)) as events:
         async for _ in events:
             pass
 
@@ -122,7 +130,9 @@ async def test_a_turn_nobody_finishes_is_released_when_it_is_closed() -> None:
     # whatever it held goes with it.
     agent = ScriptedAgent(AnswerStarted(), Gate())
 
-    async with aclosing(agent.run_turn(agent_definition(), (question(),), model=MODEL)) as events:
+    async with aclosing(
+        agent.run_turn(agent_definition(), (question(),), (), model=MODEL)
+    ) as events:
         assert await anext(events) == AnswerStarted()
         assert agent.held == 1
 

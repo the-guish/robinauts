@@ -8,8 +8,9 @@ is passed in. It depends on ``robinauts.domain`` and on nothing else inside
 the package (``docs/layout.md``). What sign-in needs is here: the allow list,
 the ID token's claims, the URLs, and the configuration's rules. So is what the
 conversation format needs: the rules of the tree, the one canonical encoding
-of a message, the derived title, the history a model is given, and where a run
-may go next. **One file holds two configurations** -- sign-in and models --
+of a message, the derived title, and where a run may go next. Fitting a
+history into a model's context is **not** here: it is each agent adapter's own
+policy (ADR 0004). **One file holds two configurations** -- sign-in and models --
 and each parser is handed the whole of it and reads its own share, which is
 what ``TOP_LEVEL_KEYS`` is for.
 """
@@ -71,7 +72,6 @@ from robinauts.core.hashing import (
     same_secret,
     secret_hash,
 )
-from robinauts.core.history import history_chars, message_chars, trim_history
 from robinauts.core.models_config import (
     AGENT_KEYS,
     ALL_ENGINES,
@@ -194,7 +194,6 @@ __all__ = [
     "event_from_data",
     "event_to_data",
     "first_question",
-    "history_chars",
     "identity_from_claims",
     "identity_from_id_token",
     "instant",
@@ -205,7 +204,6 @@ __all__ = [
     "may_follow",
     "may_start_run",
     "may_transition",
-    "message_chars",
     "message_from_data",
     "message_from_stored",
     "message_to_data",
@@ -231,6 +229,5 @@ __all__ = [
     "transition",
     "tree_of",
     "tree_of_stored",
-    "trim_history",
     "verified_email",
 ]

@@ -15,12 +15,19 @@ engine, read afresh every turn, because editing an agent takes effect at the
 next turn of its existing conversations); the **model**, by the platform's id
 for it, which is the run's and not the agent's -- the agent's model is only
 the default a conversation starts with, and the conversation's may have been
-changed since (``docs/specs/agents.md``); and a **history**: the path from a
-root to the user message being answered, already trimmed to what the model
-will take (``robinauts.core.trim_history``). Trimming is above the port on
-purpose -- both engines must behave the same, and a policy inside an adapter
-would be two policies. Out: ``EngineEvent``s, which carry no ids, no times and
-no provenance, because an engine has none.
+changed since (``docs/specs/agents.md``); a **history**: the **full** visible
+path from a root to the user message being answered, never trimmed above the
+port; and the **tools** the run has, fetched once for the run from the servers
+the agent names (``docs/specs/agents.md``, "Tools"). Out: ``EngineEvent``s,
+which carry no ids of the platform's, no times and no provenance, because an
+engine has none.
+
+**What of the history the model sees is the adapter's to decide** (ADR 0004):
+ordering, trimming and every other kind of context management, and prompt
+caching, are per framework and per vendor, because a real policy counts the
+vendor's tokens and places the vendor's cache breakpoints. The one invariant
+kept above the port, and checked in each adapter's own tests, is that the
+question being answered is whole in what the model sees.
 
 **Both engines are stateless per turn** (ADR 0002). Nothing is remembered
 between calls: the conversation record is the whole of the state, and the
@@ -40,13 +47,14 @@ before it.
   lets it through, and what it holds is released by the ``finally`` of the
   generator, which closing runs.
 
-**Waiting on tool calls is not here.** With tools, a turn ends either
-"finished" or "waiting on these tool calls" (``docs/specs/runs.md``), and the
-run is then suspended until the results are appended to the conversation and
-it is resumed from the history. This version has no tools, so a turn always
-ends finished; when they arrive, what says so is another engine event at the
-end of this stream, and the application's lifecycle is what grows a
-``waiting`` branch. Nothing here needs to change shape for it.
+**Waiting on tool calls.** A turn ends either "finished" or "waiting on these
+tool calls" (``docs/specs/runs.md``). The second is an answer completed with
+``ToolCallPart``s -- each announced, its arguments streamed and completed on
+the way -- followed by ``WaitingOnTools`` and by nothing else: **an engine
+never executes a tool**. The application runs the calls, appends their results
+as one tool message and starts the next engine turn from the stored history,
+so an engine sees a tool round as an ordinary turn whose history ends in a
+tool message rather than in a question.
 
 The contract suite both engines are held to is
 ``backend/tests/contracts/agents.py``, and the order it holds them to is
@@ -58,7 +66,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator, Sequence
 
-from robinauts.domain import AgentDefinition, EngineEvent, Message, ProviderKind
+from robinauts.domain import AgentDefinition, EngineEvent, Message, ProviderKind, ToolDefinition
 
 
 class Agent(ABC):
@@ -86,14 +94,27 @@ class Agent(ABC):
 
     @abstractmethod
     def run_turn(
-        self, agent: AgentDefinition, history: Sequence[Message], *, model: str
+        self,
+        agent: AgentDefinition,
+        history: Sequence[Message],
+        tools: Sequence[ToolDefinition],
+        *,
+        model: str,
     ) -> AsyncGenerator[EngineEvent, None]:
-        """Answer ``history`` as ``agent`` on ``model``, streaming the events of the turn.
+        """Answer ``history`` as ``agent`` on ``model`` with ``tools``, streaming the turn.
 
-        ``history`` is a path of the conversation ending in the **user
-        message being answered**, already trimmed; it is never empty and never
-        ends anywhere else. The system prompt is ``agent``'s and is not one of
-        the messages (``docs/specs/conversations.md``).
+        ``history`` is the visible path of the conversation ending in the
+        **user message being answered** or, inside a tool round, in the
+        **tool message** holding the results the model is to go on from; it
+        is never empty and never ends anywhere else. It is the whole path:
+        what of it the model sees is this engine's to decide (ADR 0004). The
+        system prompt is ``agent``'s and is not one of the messages
+        (``docs/specs/conversations.md``).
+
+        ``tools`` is the list the run fetched once and holds for the turn,
+        sorted by name and bounded (``docs/specs/agents.md``, "Tools");
+        empty for an agent that names no server. The engine binds them to the
+        model as they are and executes none of them.
 
         ``model`` is the id of the model the **run** records
         (``domain.Run.model``), never ``agent.model``: that is the agent's

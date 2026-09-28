@@ -125,7 +125,7 @@ async def test_one_real_turn_against_anthropic_streams_and_completes() -> None:
     agent = LangGraphAgent(models, ProviderKeys({PROVIDER: live_key()}))
     seen: list[EngineEvent] = []
 
-    async for event in agent.run_turn(models.agents[AGENT], (question(ASKED),), model=MODEL):
+    async for event in agent.run_turn(models.agents[AGENT], (question(ASKED),), (), model=MODEL):
         seen.append(event)
 
     check_engine_events(seen)

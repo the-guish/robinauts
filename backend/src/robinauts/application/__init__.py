@@ -44,10 +44,10 @@ from robinauts.application.sign_in import (
     SignIn,
 )
 from robinauts.application.turns import (
-    DEFAULT_HISTORY_CHARS,
     DEFAULT_TURN_SECONDS,
     ENDING_BUDGET_SECONDS,
     NO_ANSWER,
+    NO_TOOLS_YET,
     TIMED_OUT,
     UNFINISHED_ANSWER,
     StartedTurn,
@@ -60,7 +60,6 @@ from robinauts.application.watch import (
 )
 
 __all__ = [
-    "DEFAULT_HISTORY_CHARS",
     "DEFAULT_PAGE",
     "DEFAULT_QUIET_SECONDS",
     "DEFAULT_TURN_SECONDS",
@@ -68,6 +67,7 @@ __all__ = [
     "ENDING_BUDGET_SECONDS",
     "MAX_PAGE",
     "NO_ANSWER",
+    "NO_TOOLS_YET",
     "PENDING_LOGIN_LIFE",
     "SWEEP_SECONDS",
     "TIMED_OUT",

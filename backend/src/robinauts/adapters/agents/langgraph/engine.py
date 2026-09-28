@@ -111,6 +111,7 @@ from robinauts.domain import (
     ProviderKind,
     Role,
     TextPart,
+    ToolDefinition,
     UnsupportedContentError,
     clean_text,
     text_parts,
@@ -490,7 +491,12 @@ class LangGraphAgent(Agent):
         return self._open
 
     def run_turn(
-        self, agent: AgentDefinition, history: Sequence[Message], *, model: str
+        self,
+        agent: AgentDefinition,
+        history: Sequence[Message],
+        tools: Sequence[ToolDefinition],
+        *,
+        model: str,
     ) -> AsyncGenerator[EngineEvent, None]:
         """Answer ``history`` as ``agent`` on ``model``, streaming the events of the turn.
 
@@ -500,11 +506,21 @@ class LangGraphAgent(Agent):
         turn, reported by raising where the caller is iterating, and not an
         exception thrown at whoever asked for the stream.
         """
-        return self._turn(agent, history, model)
+        return self._turn(agent, history, tuple(tools), model)
 
     async def _turn(
-        self, agent: AgentDefinition, history: Sequence[Message], model_id: str
+        self,
+        agent: AgentDefinition,
+        history: Sequence[Message],
+        tools: tuple[ToolDefinition, ...],
+        model_id: str,
     ) -> AsyncGenerator[EngineEvent, None]:
+        if tools:
+            # Binding the definitions to the model is the next step's
+            # (``docs/working-notes/mcp-plan.md``, step 4); until then a turn
+            # handed tools is refused rather than run without them, which
+            # would answer a question the model was meant to use a tool for.
+            raise UnsupportedContentError(NO_TOOL_BINDING)
         # The run's model, never the agent's default: the conversation may
         # have been moved to another (``robinauts.ports.agents``).
         model = self._models.model_by_id(model_id)
@@ -634,6 +650,12 @@ NO_TOOLS = (
     " model or a system prompt that does not, or wait for tool usage"
 )
 """Why a turn that meets a tool call fails, and what an operator can do."""
+
+NO_TOOL_BINDING = (
+    "the LangGraph engine does not bind tools to the model yet; a turn with tools is"
+    " refused rather than run without them"
+)
+"""Why a turn handed tool definitions fails, until this engine binds them."""
 
 
 def _blocks(chunk: Any) -> list[tuple[str, str]]:

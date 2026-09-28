@@ -263,7 +263,7 @@ async def test_an_anthropic_compatible_turn_reaches_the_configured_endpoint(
     )
     try:
         with pytest.raises(Exception) as raised:  # noqa: B017 -- each engine's own
-            async for _ in agent.run_turn(models.agents[AGENT], (question(),), model=MODEL):
+            async for _ in agent.run_turn(models.agents[AGENT], (question(),), (), model=MODEL):
                 pass
     finally:
         # The connection this test really opened, given back here rather than

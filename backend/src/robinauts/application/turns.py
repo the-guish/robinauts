@@ -158,7 +158,6 @@ from robinauts.core import (
     transition,
     tree_of,
     tree_of_stored,
-    trim_history,
 )
 from robinauts.domain import (
     ACTIVE_RUN_STATES,
@@ -192,10 +191,16 @@ from robinauts.domain import (
     RunStarted,
     RunState,
     TextDelta,
+    ToolCallArgumentsDelta,
+    ToolCallCompleted,
+    ToolCallPart,
+    ToolCallStarted,
     TurnEvent,
     UnknownAgentError,
     UnknownModelError,
+    UnsupportedContentError,
     User,
+    WaitingOnTools,
     chain,
     checked_config_id,
     checked_uuid,
@@ -219,16 +224,6 @@ from robinauts.ports import (
 
 _log = logging.getLogger(__name__)
 
-DEFAULT_HISTORY_CHARS = 200_000
-"""How much of a conversation a turn sends, until a real context policy exists.
-
-Characters, not tokens (``core.trim_history``): counting tokens needs to know
-about models and their tokenisers, which is the step that configures them. A
-placeholder, and a generous one -- it is about a fiftieth of what a large
-context window holds -- so that nothing is dropped from a conversation anybody
-is likely to hold in this version.
-"""
-
 DEFAULT_TURN_SECONDS = 600.0
 """How long one turn may take before the run is failed.
 
@@ -247,6 +242,18 @@ NO_ANSWER = "the agent produced no answer"
 
 UNFINISHED_ANSWER = "the agent began an answer and never completed it"
 """What a turn that stopped in the middle of an answer without saying so records."""
+
+NO_TOOLS_YET = (
+    "the model asked to use a tool, and this deployment runs none yet: give the agent"
+    " a model or a system prompt that does not, or wait for the tool loop"
+)
+"""Why a turn that meets a tool call fails, until the loop that runs one is built.
+
+The engines yield a call where they used to refuse one
+(``docs/specs/agents.md``, "Tools"); the application is what does not run it
+yet. Failing here, on the first event about a call, is what keeps a stored
+answer whole: nothing half-answered is completed, and the run says why.
+"""
 
 MAX_WRITE_ATTEMPTS = 3
 """How often one event is offered before the run is failed for it.
@@ -361,7 +368,6 @@ class Turns:
         engines: Mapping[Engine, Agent],
         executor: RunExecutor,
         signals: RunSignals,
-        history_chars: int = DEFAULT_HISTORY_CHARS,
         turn_seconds: float = DEFAULT_TURN_SECONDS,
     ) -> None:
         for model_id, model in models.items():
@@ -384,12 +390,6 @@ class Turns:
                     f" {definition.model!r}, which this deployment does not offer:"
                     " configure the model, or point the agent at one that is"
                 )
-        if isinstance(history_chars, bool) or not isinstance(history_chars, int):
-            raise InvalidValueError(
-                f"a history is bounded in characters, not {describe(history_chars)}"
-            )
-        if history_chars < 1:
-            raise InvalidValueError("a history holds at least one character")
         if isinstance(turn_seconds, bool) or not isinstance(turn_seconds, int | float):
             raise InvalidValueError(f"a turn's timeout is seconds, not {describe(turn_seconds)}")
         if turn_seconds <= 0:
@@ -406,7 +406,6 @@ class Turns:
         """The models a conversation may run on: what ``set_model`` accepts and
         what a turn is refused without. Its agents' defaults are among them."""
         self._engines = dict(engines)
-        self._history_chars = history_chars
         self._turn_seconds = turn_seconds
         self._executing: set[uuid.UUID] = set()
         """Runs whose ``execute`` is under way in this process.
@@ -988,9 +987,16 @@ class Turns:
         # however long the engine then takes to let go, and a provider faster
         # than the database is held back rather than buffered.
         # The run's model, not the conversation's as it now is: a turn taken
-        # up again runs on what it was begun on.
-        pump.begin(self._engine(run.engine).run_turn(definition, history, model=run.model))
+        # up again runs on what it was begun on. No tools yet: the list a run
+        # fetches from its agent's servers arrives with the loop that runs them.
+        pump.begin(self._engine(run.engine).run_turn(definition, history, (), model=run.model))
         while (event := await pump.next()) is not None:
+            if isinstance(event, _TOOL_EVENTS):
+                # The engine yielded a call and nothing here runs one yet: the
+                # turn fails on the first word of it, so that nothing
+                # half-answered is stored (``docs/working-notes/mcp-plan.md``,
+                # step 4).
+                raise UnsupportedContentError(NO_TOOLS_YET)
             if isinstance(event, AnswerStarted):
                 if open_id is not None:
                     raise InvalidValueError("an engine produces one answer at a time")
@@ -1018,6 +1024,8 @@ class Turns:
                     )
             elif isinstance(event, AnswerCompleted):
                 open_id = _inside(open_id, completing=True)
+                if any(isinstance(part, ToolCallPart) for part in event.parts):
+                    raise UnsupportedContentError(NO_TOOLS_YET)
                 for piece in said.rest():
                     await stream.publish(TextDelta(run_id=run.id, message_id=open_id, text=piece))
                 for piece in thought.rest():
@@ -1068,9 +1076,12 @@ class Turns:
         """Store the answer and the event announcing it, in one call.
 
         The message is the platform's: this id, this parent, the provenance
-        the **run** recorded, the clock's time, and what this version keeps of
+        the **run** recorded, the clock's time, what this version keeps of
         what the engine produced (``domain.kept_parts`` -- reasoning dropped,
-        and one empty piece of text if that leaves nothing).
+        and one empty piece of text if that leaves nothing), and the vendor's
+        ``extras`` as the engine returned them -- stored unread, for the
+        adapter that reaches that vendor to replay
+        (``docs/specs/conversations.md``, "Reasoning").
 
         **What was published is what was stored.** An answer that streamed
         text and completed with different text would leave a stream that
@@ -1089,6 +1100,7 @@ class Turns:
             created_at=now,
             channel=Channel.WEB,
             provenance=run.provenance,
+            extras=completed.extras,
         )
         watched = said.published
         if watched and watched != message.text:
@@ -1108,18 +1120,20 @@ class Turns:
         )
 
     async def _history(self, run: Run) -> tuple[Message, ...]:
-        """The path down to the question this run answers, trimmed to fit.
+        """The whole path down to the question this run answers.
 
         Read from the store every turn, which is the whole of ADR 0002: the
         conversation record is the state, so a turn needs nothing an earlier
-        turn left in memory, and either engine can run it.
+        turn left in memory, and either engine can run it. **Untrimmed**: what
+        of it the model sees is the adapter's to decide (ADR 0004), and the
+        one thing kept above the port is that the question is in it.
         """
         documents = await self._store.messages_of(run.conversation_id)
         tree = tree_of_stored(
             [message_from_stored(document) for document in documents],
             conversation_id=run.conversation_id,
         )
-        return trim_history(tree.path_to(run.message_id), max_chars=self._history_chars)
+        return tree.path_to(run.message_id)
 
     def _engine(self, engine: Engine) -> Agent:
         """The engine of that name, as this deployment wired it."""
@@ -1512,6 +1526,10 @@ class Turns:
             chain(failure),
             where(failure),
         )
+
+
+_TOOL_EVENTS = (ToolCallStarted, ToolCallArgumentsDelta, ToolCallCompleted, WaitingOnTools)
+"""The engine events about tools, which the loop of the next step answers."""
 
 
 @dataclass(frozen=True, slots=True)

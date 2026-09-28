@@ -61,7 +61,6 @@ THOUGHT = "let me think"
 BETWEEN_TURNS = 60.0
 """How far the clock moves between turns, so that they are told apart."""
 
-HISTORY_CHARS = 100_000
 TURN_SECONDS = 30.0
 """Far more than any turn here needs: nothing in this file is about a bound."""
 
@@ -92,7 +91,6 @@ def deployment(
         engines=both_engines(said),
         executor=AsyncioRunExecutor(),
         signals=MemoryRunSignals(),
-        history_chars=HISTORY_CHARS,
         turn_seconds=TURN_SECONDS,
     )
 

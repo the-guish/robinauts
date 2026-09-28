@@ -65,6 +65,11 @@ from robinauts.domain import (
     StoredDataError,
     TextDelta,
     TextPart,
+    ToolCallArgumentsDelta,
+    ToolCallCompleted,
+    ToolCallPart,
+    ToolCallStarted,
+    WaitingOnTools,
 )
 
 LEGAL = {
@@ -268,6 +273,121 @@ def answered(text: str = "Some one") -> tuple[object, ...]:
 def test_what_an_engine_yields_for_a_turn() -> None:
     assert check_engine_events(answered()) is None
     assert check_engine_events((*answered("one"), *answered("two"))) is None
+
+
+CALL = ToolCallPart("toolu_01", "github__search", {"q": "robinauts"})
+
+
+def asked_for_tools(*, streamed: bool = True) -> tuple[object, ...]:
+    """One answer that calls a tool, and the turn ending waiting on it."""
+    arguments: tuple[object, ...] = ()
+    if streamed:
+        arguments = (
+            ToolCallArgumentsDelta(call_id=CALL.call_id, text='{"q": "robi'),
+            ToolCallArgumentsDelta(call_id=CALL.call_id, text='nauts"}'),
+        )
+    return (
+        AnswerStarted(),
+        AnswerTextDelta(text="Let me look."),
+        ToolCallStarted(call_id=CALL.call_id, name=CALL.name),
+        *arguments,
+        ToolCallCompleted(call=CALL),
+        AnswerCompleted(parts=(TextPart("Let me look."), CALL)),
+        WaitingOnTools(),
+    )
+
+
+def test_an_answer_that_asks_for_tools_ends_the_turn_waiting() -> None:
+    assert check_engine_events(asked_for_tools()) is None
+    assert check_engine_events(asked_for_tools(streamed=False)) is None
+    # After answers that asked for none, and never before another answer.
+    assert check_engine_events((*answered("first"), *asked_for_tools())) is None
+    with pytest.raises(InvalidValueError, match="ends the turn waiting"):
+        check_engine_events(asked_for_tools()[:-1])
+    with pytest.raises(InvalidValueError, match="ends the turn waiting"):
+        check_engine_events((*asked_for_tools()[:-1], *answered("then more")))
+    with pytest.raises(InvalidValueError, match="nothing follows"):
+        check_engine_events((*asked_for_tools(), *answered("then more")))
+    # And a turn that asked for none never says it is waiting.
+    with pytest.raises(InvalidValueError, match="waits on the tools"):
+        check_engine_events((*answered(), WaitingOnTools()))
+    with pytest.raises(InvalidValueError, match="waits on the tools"):
+        check_engine_events((AnswerStarted(), WaitingOnTools()))
+    # Cut short, a turn may stop before saying so: that is what a failure
+    # between the answer and the waiting looks like.
+    assert check_engine_events(asked_for_tools()[:-1], cut_short=True) is None
+
+
+def test_a_tool_call_is_announced_inside_an_answer_one_at_a_time() -> None:
+    started, said, announced, first, second, completed, answer, waiting = asked_for_tools()
+    with pytest.raises(InvalidValueError, match="belongs to an answer"):
+        check_engine_events((announced, started))
+    with pytest.raises(InvalidValueError, match="one tool call at a time"):
+        check_engine_events((started, announced, announced))
+    other = ToolCallStarted(call_id="toolu_02", name="jira__find")
+    with pytest.raises(InvalidValueError, match="one tool call at a time"):
+        check_engine_events((started, announced, other))
+    # The same id twice in one answer would answer nothing.
+    twice = ToolCallCompleted(call=CALL)
+    with pytest.raises(InvalidValueError, match="each tool call once"):
+        check_engine_events((started, announced, twice, announced, twice, answer, waiting))
+    with pytest.raises(InvalidValueError, match="that was announced is completed"):
+        check_engine_events((started, announced, first, answer))
+    with pytest.raises(InvalidValueError, match="completed once, after it was announced"):
+        check_engine_events((started, completed))
+
+
+def test_a_tool_calls_arguments_belong_to_the_open_call_and_are_what_it_completes_with() -> None:
+    started, said, announced, first, second, completed, answer, waiting = asked_for_tools()
+    with pytest.raises(InvalidValueError, match="belong to the tool call being made"):
+        check_engine_events((started, first))
+    stray = ToolCallArgumentsDelta(call_id="toolu_02", text="{}")
+    with pytest.raises(InvalidValueError, match="belong to the tool call being made"):
+        check_engine_events((started, announced, stray))
+    with pytest.raises(InvalidValueError, match="are the arguments it completed with"):
+        check_engine_events(
+            (
+                started,
+                announced,
+                first,
+                ToolCallArgumentsDelta(call_id=CALL.call_id, text='x"}'),
+                completed,
+            )
+        )
+    with pytest.raises(InvalidValueError, match="are JSON"):
+        check_engine_events(
+            (
+                started,
+                announced,
+                ToolCallArgumentsDelta(call_id=CALL.call_id, text="not json"),
+                completed,
+            )
+        )
+    # Whitespace alone is nothing streamed, as an empty text delta is.
+    blank = ToolCallArgumentsDelta(call_id=CALL.call_id, text=" ")
+    assert check_engine_events((started, announced, blank, completed, answer, waiting)) is None
+
+
+def test_a_tool_call_completes_as_it_was_announced_and_the_answer_holds_exactly_the_calls() -> None:
+    started, said, announced, first, second, completed, answer, waiting = asked_for_tools()
+    renamed = ToolCallCompleted(call=ToolCallPart(CALL.call_id, "other__tool", CALL.arguments))
+    with pytest.raises(InvalidValueError, match="completed as it was announced"):
+        check_engine_events((started, announced, renamed))
+    # The completed answer holds the calls it announced, and no other.
+    with pytest.raises(InvalidValueError, match="exactly the calls it announced"):
+        check_engine_events(
+            (
+                started,
+                announced,
+                first,
+                second,
+                completed,
+                AnswerCompleted(parts=(TextPart("Let me look."),)),
+                waiting,
+            )
+        )
+    with pytest.raises(InvalidValueError, match="exactly the calls it announced"):
+        check_engine_events((AnswerStarted(), AnswerCompleted(parts=(CALL,)), WaitingOnTools()))
 
 
 def test_a_turn_produces_an_answer_and_one_that_produces_none_failed() -> None:

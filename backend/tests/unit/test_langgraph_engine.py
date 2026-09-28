@@ -83,6 +83,7 @@ from robinauts.domain import (
     ReasoningPart,
     Role,
     TextPart,
+    ToolDefinition,
     UnknownModelError,
     UnsupportedContentError,
 )
@@ -235,6 +236,9 @@ class TestLangGraphAgent(AgentContract):
     can_answer_without_streaming = False
     """LangGraph hands the answer over in pieces even when the model sent one."""
 
+    can_call_tools = False
+    """Until this engine binds tools (the next step), its model cannot be scripted to call one."""
+
     def new_agent(self, script: Script) -> Agent:
         self.model = scripted(script)
         return LangGraphAgent(
@@ -261,10 +265,11 @@ async def turn_of(
     *,
     definition_: AgentDefinition | None = None,
     model: str = MODEL,
+    tools: Sequence[ToolDefinition] = (),
 ) -> list[EngineEvent]:
     """Every event of one turn, run to its end."""
     seen: list[EngineEvent] = []
-    events = agent.run_turn(definition_ or definition(), history, model=model)
+    events = agent.run_turn(definition_ or definition(), history, tools, model=model)
     async for event in events:
         seen.append(event)
     return seen
@@ -458,6 +463,47 @@ async def test_a_model_that_asks_to_use_a_tool_fails_the_turn() -> None:
 
 
 @asyncio_test
+async def test_a_turn_handed_tools_is_refused_until_the_engine_binds_them() -> None:
+    # Binding the definitions to the model is the next step's; a turn run
+    # without them would answer a question the model was meant to use a tool
+    # for, so it is refused before the model is reached.
+    model = ScriptedChatModel(chunks=["Never asked."])
+    search = ToolDefinition(name="github__search", description="Search.", input_schema={})
+
+    with pytest.raises(UnsupportedContentError) as raised:
+        await turn_of(engine(model), (question(),), tools=(search,))
+
+    assert "bind tools" in str(raised.value)
+    assert model.seen == []
+
+
+@asyncio_test
+async def test_the_whole_path_reaches_the_model_and_ends_in_the_question() -> None:
+    """This engine's context policy, for now: everything (ADR 0004). What is
+    kept above the port is that the question being answered is whole in what
+    the model sees; it is checked here, where the model can be asked."""
+    model = ScriptedChatModel(chunks=["Three."])
+    first = question("q" * 5_000, seconds=0)
+    said = answer(first, "a" * 5_000, seconds=1)
+    second = question("r" * 5_000, parent=said, seconds=2)
+    replied = answer(second, "b" * 5_000, seconds=3)
+    third = question("Are you sure?", parent=replied, seconds=4)
+
+    await turn_of(engine(model), (first, said, second, replied, third))
+
+    (heard,) = model.seen
+    told = [message for message in heard if message.type != "system"]
+    assert [message.type for message in told] == ["human", "ai", "human", "ai", "human"]
+    assert [str(message.content) for message in told] == [
+        first.text,
+        said.text,
+        second.text,
+        replied.text,
+        "Are you sure?",
+    ]
+
+
+@asyncio_test
 async def test_anthropics_own_spelling_of_a_tool_call_fails_the_turn_too() -> None:
     # Without the metadata langchain-core normalises by, the vendor's own
     # block arrives as it was sent; it means the same thing and is refused.
@@ -518,7 +564,7 @@ async def test_a_model_the_configuration_does_not_have_fails_the_turn() -> None:
     # Where the stream is iterated, like any other failure of a turn, and
     # holding nothing afterwards.
     agent = engine(ScriptedChatModel(chunks=["Done."]))
-    events = agent.run_turn(definition(), (question(),), model="gpt-5-5")
+    events = agent.run_turn(definition(), (question(),), (), model="gpt-5-5")
 
     with pytest.raises(UnknownModelError):
         await anext(events)

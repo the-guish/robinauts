@@ -28,9 +28,9 @@ import pytest
 
 from aio import asyncio_test
 from conversations import AGENT, MODEL, OTHER_MODEL, agent_definition, at, offered
-from fakes import CountingIdSource, FakeClock, Gate, MemoryConversationStore, Raise, says
+from fakes import CountingIdSource, FakeClock, Gate, MemoryConversationStore, Raise, calls, says
 from robinauts.adapters import AsyncioRunExecutor, MemoryRunSignals
-from robinauts.application import Conversations, Turns, Watch
+from robinauts.application import NO_TOOLS_YET, Conversations, Turns, Watch
 from robinauts.application.turns import _Pump
 from robinauts.core import (
     check_event_order,
@@ -62,6 +62,8 @@ from robinauts.domain import (
     RunState,
     TextDelta,
     TextPart,
+    ToolCallPart,
+    ToolDefinition,
     text_parts,
 )
 from robinauts.ports import MAX_SWEPT, Agent
@@ -689,8 +691,11 @@ async def test_a_run_begun_before_the_model_was_changed_runs_on_the_one_it_began
 
 
 @asyncio_test
-async def test_a_history_longer_than_the_limit_drops_whole_turns() -> None:
-    wiring = wired(*says("A" * 20), history_chars=50)
+async def test_the_engine_is_handed_the_whole_path_and_no_tools_yet() -> None:
+    """Nothing is trimmed above the port (ADR 0004): the second turn's engine
+    sees the first question, its answer and the new question, in order. And
+    the tools a run fetches from its agent's servers are the next step's."""
+    wiring = wired(*says("A" * 20))
     first = await begun(wiring, "Q" * 20)
     await wiring.turns.execute(first)
     second = await wiring.turns.start(
@@ -702,9 +707,50 @@ async def test_a_history_longer_than_the_limit_drops_whole_turns() -> None:
 
     await wiring.turns.execute(second.run)
 
-    # Whole turns from the front, never half of one: what is sent still
-    # begins with a question.
-    assert [message.text for message in wiring.agent.history] == ["R" * 20]
+    assert [message.text for message in wiring.agent.history] == ["Q" * 20, "A" * 20, "R" * 20]
+    assert [message.role for message in wiring.agent.history] == [
+        Role.USER,
+        Role.ASSISTANT,
+        Role.USER,
+    ]
+    assert wiring.agent.asked[-1].tools == ()
+
+
+@asyncio_test
+async def test_a_turn_that_asks_for_a_tool_fails_on_the_event_and_stores_no_half_answer() -> None:
+    """The engines yield a call where they used to refuse one; until the loop
+    runs it, the application fails the turn on the first word of it, so that
+    nothing half-answered is stored (``docs/working-notes/mcp-plan.md``)."""
+    wiring = wired(*calls(("toolu_01", "github__search", {"q": "x"}), text="Let me look."))
+    run = await begun(wiring)
+
+    await wiring.turns.execute(run)
+
+    ended = await wiring.store.run_by_id(run.id)
+    assert ended is not None and ended.state is RunState.FAILED
+    assert ended.error is not None and NO_TOOLS_YET in ended.error
+    events = await stored_events(wiring.store, run.id)
+    readable(events, run)
+    # The answer was announced and its text published, and never completed.
+    assert kinds(events) == ["RunStarted", "MessageStarted", "TextDelta", "RunEnded"]
+    assert [
+        message.role for message in await stored_messages(wiring.store, run.conversation_id)
+    ] == [Role.USER]
+
+
+@asyncio_test
+async def test_an_answer_completed_with_calls_but_never_announced_fails_the_turn_too() -> None:
+    made = ToolCallPart("toolu_01", "github__search", {"q": "x"})
+    wiring = wired(AnswerStarted(), AnswerCompleted(parts=(made,)))
+    run = await begun(wiring)
+
+    await wiring.turns.execute(run)
+
+    ended = await wiring.store.run_by_id(run.id)
+    assert ended is not None and ended.state is RunState.FAILED
+    assert [
+        message.role for message in await stored_messages(wiring.store, run.conversation_id)
+    ] == [Role.USER]
 
 
 # --- ending a run, whatever is happening to the task ---------------------------
@@ -860,7 +906,14 @@ async def test_a_run_that_could_not_be_ended_says_so_in_the_log(
 class BreaksWhenLetGo(Agent):
     """An engine whose release fails -- while the turn is being cancelled."""
 
-    def run_turn(self, agent: AgentDefinition, history: Sequence[Message], *, model: str) -> Any:
+    def run_turn(
+        self,
+        agent: AgentDefinition,
+        history: Sequence[Message],
+        tools: Sequence[ToolDefinition],
+        *,
+        model: str,
+    ) -> Any:
         return self._events()
 
     async def _events(self) -> Any:
@@ -885,7 +938,14 @@ class NeverLetsGo(Agent):
         self.closing = asyncio.Event()
         self.free = asyncio.Event()
 
-    def run_turn(self, agent: AgentDefinition, history: Sequence[Message], *, model: str) -> Any:
+    def run_turn(
+        self,
+        agent: AgentDefinition,
+        history: Sequence[Message],
+        tools: Sequence[ToolDefinition],
+        *,
+        model: str,
+    ) -> Any:
         return self._events()
 
     async def _events(self) -> Any:
@@ -1387,7 +1447,14 @@ class SlowToClose(Agent):
         self.closing = asyncio.Event()
         self.free = asyncio.Event()
 
-    def run_turn(self, agent: AgentDefinition, history: Sequence[Message], *, model: str) -> Any:
+    def run_turn(
+        self,
+        agent: AgentDefinition,
+        history: Sequence[Message],
+        tools: Sequence[ToolDefinition],
+        *,
+        model: str,
+    ) -> Any:
         return self._events()
 
     async def _events(self) -> Any:
@@ -1411,7 +1478,7 @@ async def test_a_cancellation_while_a_stream_is_closing_is_not_swallowed(
     # exercises.
     engine = SlowToClose()
     wiring = over(engine)
-    events = engine.run_turn(wiring.definition, (), model=MODEL)
+    events = engine.run_turn(wiring.definition, (), (), model=MODEL)
     assert await anext(events) == AnswerStarted()
     pump = _Pump()
     pump.events = events
