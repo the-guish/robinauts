@@ -1111,3 +1111,42 @@ Not done / to watch: the demo does not exercise a tool server itself (the
 lines are commented); `start.sh` passes no token through on purpose; a
 server that needs a credential of another scheme (a custom header) is
 still a scheme to add.
+
+## Where it stands
+
+Every step of the plan is implemented, reviewed once each and its Highs
+fixed, with the fixes as commits of their own on the branch of the step
+after. Step 7 (a run that suspends on a tool) is deferred as the plan says;
+approval before a tool runs is in the backlog. The branches, one per step
+and stacked in this order:
+
+`feature/mcp-1-decisions`, `-2-dependency`, `-3-format`, `-4a-port`,
+`-4b-langgraph`, `-4c-pydantic-ai`, `-4d-unanswered-calls`, `-5a-config`,
+`-5b-port`, `-5c-adapter`, `-5d-events`, `-5e-loop`, `-6a-wire`,
+`-6b-frontend`, `-8-demo`; `feature/mcp-plan` is the head of the whole
+work, and each fixes commit sits on the branch of the step after the one
+it fixes.
+
+**The commits carry no DCO sign-off.** They were written by an agent, which
+cannot certify the DCO in its own name (CONTRIBUTING.md refuses a
+pseudonymous sign-off), and CI's `check-dco` job fails a pull request
+without one. Whoever takes the work over certifies it as their own after
+reading it, in one pass over the range::
+
+    git rebase --exec 'git commit --amend --no-edit --reset-author -s' de45ca3
+
+which makes them the author and the committer of every commit and adds
+their sign-off; `git cherry-pick -s` does the same one commit at a time.
+
+**Deferred from the reviews**, for whoever takes it up (each is a Medium or
+a Low the step's review judged not to block): 4b's tool history on a run
+whose agent has no tools (M4) and its history test's shape (M5); 5b's
+contract hooks (M2); 5d's adopted message not checked at its completion
+(M1), one adoption helper for the four sites (L1), a delta inside a tool
+message (L4), the export asymmetry (L6) and the spec's additivity rule not
+naming a new event kind (L7); 5a's `named()` residual (an all-upper-case
+token would still be printed as a variable's name); the schema-pin byte
+test of 4c. Nothing in that list changes what a person sees or what a
+server is sent.
+
+Final review: pending.
