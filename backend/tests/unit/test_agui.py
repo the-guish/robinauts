@@ -25,9 +25,10 @@ import pytest
 from ag_ui.core import EventType, TextMessageStartEvent
 from ag_ui.encoder import EventEncoder
 
-from conversations import CONVERSATION, RUN, answer, ended
+from conversations import CONVERSATION, RUN, answer, at, ended
 from robinauts.api import (
     ENDED_BADLY,
+    ERROR_FLAG,
     REASONING_SUFFIX,
     SENT_ROLE,
     SSE_MEDIA_TYPE,
@@ -45,6 +46,7 @@ from robinauts.domain import (
     CallCompleted,
     CallStarted,
     InvalidValueError,
+    Message,
     MessageCompleted,
     MessageStarted,
     ReasoningDelta,
@@ -56,6 +58,7 @@ from robinauts.domain import (
     RunStarted,
     RunState,
     TextDelta,
+    ToolResultPart,
     TurnEvent,
 )
 
@@ -64,6 +67,12 @@ MESSAGE = uuid.UUID("55555555-5555-4555-8555-555555555555")
 
 QUESTION = uuid.UUID("66666666-6666-4666-8666-666666666666")
 """What it hangs under."""
+
+RESULTS = uuid.UUID("77777777-7777-4777-8777-777777777777")
+"""The tool message under the answer, when the answer called a tool."""
+
+CALL = "toolu_01"
+"""The one call the answer makes here: the vendor's id, carried as data."""
 
 SECRET = "psycopg.OperationalError: password=hunter2 refused by 10.0.0.3"
 """A stored error of the shape one really has: an operator's, not a browser's."""
@@ -110,6 +119,40 @@ def thought(said: str) -> ReasoningDelta:
 
 def completed() -> MessageCompleted:
     return MessageCompleted(run_id=RUN, message=answer(QUESTION, id=MESSAGE))
+
+
+def call_started(name: str = "github__search") -> CallStarted:
+    return CallStarted(run_id=RUN, message_id=MESSAGE, call_id=CALL, name=name)
+
+
+def arguments(written: str) -> ArgumentsDelta:
+    return ArgumentsDelta(run_id=RUN, message_id=MESSAGE, call_id=CALL, text=written)
+
+
+def call_completed() -> CallCompleted:
+    return CallCompleted(run_id=RUN, message_id=MESSAGE, call_id=CALL)
+
+
+def results_announced() -> MessageStarted:
+    return MessageStarted(run_id=RUN, message_id=RESULTS, parent_id=MESSAGE, role=Role.TOOL)
+
+
+def landed(text: str = "found 3", *, is_error: bool = False) -> ResultLanded:
+    return ResultLanded(run_id=RUN, message_id=RESULTS, call_id=CALL, text=text, is_error=is_error)
+
+
+def results_completed() -> MessageCompleted:
+    return MessageCompleted(
+        run_id=RUN,
+        message=Message(
+            id=RESULTS,
+            conversation_id=CONVERSATION,
+            parent_id=MESSAGE,
+            role=Role.TOOL,
+            parts=(ToolResultPart(CALL, "found 3"),),
+            created_at=at(1),
+        ),
+    )
 
 
 # --- one event at a time ------------------------------------------------------
@@ -362,12 +405,121 @@ def test_closing_is_nothing_when_no_thinking_is_open() -> None:
     assert one.closing() == ()
 
 
+# --- tool calls and their results ---------------------------------------------
+
+
+def test_a_tool_call_is_ag_uis_tool_events_under_the_calls_own_id() -> None:
+    """Start, arguments, end: the call's id and the tool's full name as the
+    platform stored them, and the answer it is part of (``docs/specs/wire.md``)."""
+    sending = through(
+        announced(), call_started(), arguments('{"q": '), arguments('"x"}'), call_completed()
+    )
+
+    assert types(sending) == [
+        EventType.TEXT_MESSAGE_START.value,
+        EventType.TOOL_CALL_START.value,
+        EventType.TOOL_CALL_ARGS.value,
+        EventType.TOOL_CALL_ARGS.value,
+        EventType.TOOL_CALL_END.value,
+    ]
+    assert sending[1] == {
+        "type": EventType.TOOL_CALL_START.value,
+        "toolCallId": CALL,
+        "toolCallName": "github__search",
+        "parentMessageId": str(MESSAGE),
+    }
+    assert sending[2] == {
+        "type": EventType.TOOL_CALL_ARGS.value,
+        "toolCallId": CALL,
+        "delta": '{"q": ',
+    }
+    assert sending[3] == {
+        "type": EventType.TOOL_CALL_ARGS.value,
+        "toolCallId": CALL,
+        "delta": '"x"}',
+    }
+    assert sending[4] == {"type": EventType.TOOL_CALL_END.value, "toolCallId": CALL}
+
+
+def test_a_result_is_a_tool_call_result_naming_its_call_and_the_tool_message() -> None:
+    (result,) = through(landed())
+
+    assert result == {
+        "type": EventType.TOOL_CALL_RESULT.value,
+        "messageId": str(RESULTS),
+        "toolCallId": CALL,
+        "content": "found 3",
+        "role": "tool",
+    }
+
+
+def test_a_result_that_is_an_error_says_so_in_metadata_and_a_plain_one_carries_none() -> None:
+    """AG-UI 1.0's result has no field for it; the flag is ours, a boolean, and
+    the one thing this wire puts in ``metadata`` (``ERROR_FLAG``)."""
+    (failed,) = through(landed("no such repository", is_error=True))
+    (fine,) = through(landed())
+
+    assert failed["metadata"] == {ERROR_FLAG: True}
+    assert failed["content"] == "no such repository"
+    assert "metadata" not in fine
+    assert ERROR_FLAG == "isError"
+
+
+def test_a_tool_message_sends_nothing_of_its_own() -> None:
+    """Not a text message in AG-UI: its results went out one by one, and the
+    client holds them against their calls. Announced and completed, nothing."""
+    sending = through(
+        announced(),
+        call_started(),
+        call_completed(),
+        completed(),
+        results_announced(),
+        landed(),
+        results_completed(),
+        RunEnded(run_id=RUN, state=RunState.FINISHED),
+    )
+
+    assert types(sending) == [
+        EventType.TEXT_MESSAGE_START.value,
+        EventType.TOOL_CALL_START.value,
+        EventType.TOOL_CALL_END.value,
+        EventType.TEXT_MESSAGE_END.value,
+        EventType.TOOL_CALL_RESULT.value,
+        EventType.RUN_FINISHED.value,
+    ]
+    assert str(RESULTS) not in json.dumps(
+        [body for body in sending if "RESULT" not in str(body["type"])]
+    )
+    assert Role.TOOL not in SENT_ROLE
+
+
+def test_thinking_is_closed_by_a_tool_call_starting_and_by_a_tool_message() -> None:
+    sending = through(announced(), thought("Hmm."), call_started(), call_completed())
+    assert types(sending) == [
+        EventType.TEXT_MESSAGE_START.value,
+        EventType.REASONING_MESSAGE_START.value,
+        EventType.REASONING_MESSAGE_CONTENT.value,
+        EventType.REASONING_MESSAGE_END.value,
+        EventType.TOOL_CALL_START.value,
+        EventType.TOOL_CALL_END.value,
+    ]
+    # A mapper with thinking open is closed by what a tool message sends, which
+    # is nothing else: a client is never left with a block nothing closed.
+    for closer in (results_announced(), landed(), results_completed()):
+        one = mapper()
+        one.of(RunEvent(run_id=RUN, seq=1, event=thought("Hmm.")))
+        closed = one.of(RunEvent(run_id=RUN, seq=2, event=closer))
+        assert closed[0].type.value == EventType.REASONING_MESSAGE_END.value
+        assert one.closing() == ()
+
+
 # --- what is skipped ----------------------------------------------------------
 
 
 def test_an_empty_delta_is_not_sent_at_all() -> None:
     """It appends nothing, and a client that renders each delta does nothing."""
     assert through(text("")) == []
+    assert through(arguments("")) == []
 
 
 def test_an_empty_piece_of_thinking_opens_nothing() -> None:
@@ -380,20 +532,34 @@ def test_an_empty_piece_of_thinking_opens_nothing() -> None:
 
 
 def test_no_event_carries_a_raw_event_or_metadata() -> None:
-    """Where a provider's own payload would otherwise reach a browser."""
+    """Where a provider's own payload would otherwise reach a browser.
+
+    The one exception is the error flag on a result, which is ours and a
+    boolean (``ERROR_FLAG``): nothing else is ever in ``metadata``.
+    """
     sending = through(
         started(),
         announced(),
         thought("Hmm."),
         text("Someone"),
+        call_started(),
+        arguments("{}"),
+        call_completed(),
         completed(),
+        results_announced(),
+        landed(),
+        landed("no", is_error=True),
+        results_completed(),
         RunEnded(run_id=RUN, state=RunState.FINISHED),
     )
 
     for body in sending:
         assert "rawEvent" not in body
-        assert "metadata" not in body
         assert "raw_event" not in body
+        assert body.get("metadata", {ERROR_FLAG: True}) == {ERROR_FLAG: True}
+    assert [body for body in sending if "metadata" in body] == [
+        body for body in sending if body.get("content") == "no"
+    ]
 
 
 # --- the roles the two vocabularies share -------------------------------------
@@ -413,7 +579,12 @@ def test_the_roles_that_cross_are_the_ones_ag_ui_has_a_word_for() -> None:
 def test_a_role_with_no_word_in_ag_ui_stops_the_stream_rather_than_crossing(
     role: object,
 ) -> None:
-    """It ends the stream as ``internal`` and is logged; it invents nothing."""
+    """It ends the stream as ``internal`` and is logged; it invents nothing.
+
+    ``tool`` is never asked for by the mapper -- a tool message sends nothing
+    -- so reaching this with it is a text message of a kind that does not
+    exist.
+    """
     with pytest.raises(InvalidValueError) as raised:
         sent_role(role)  # type: ignore[arg-type]
 
@@ -423,35 +594,31 @@ def test_a_role_with_no_word_in_ag_ui_stops_the_stream_rather_than_crossing(
 # --- the closed set -----------------------------------------------------------
 
 
-NOT_MAPPED_YET: dict[type, TurnEvent] = {
-    CallStarted: CallStarted(run_id=RUN, message_id=MESSAGE, call_id="toolu_01", name="x__y"),
-    ArgumentsDelta: ArgumentsDelta(run_id=RUN, message_id=MESSAGE, call_id="toolu_01", text="{}"),
-    CallCompleted: CallCompleted(run_id=RUN, message_id=MESSAGE, call_id="toolu_01"),
-    ResultLanded: ResultLanded(run_id=RUN, message_id=MESSAGE, call_id="toolu_01", text="ok"),
-}
-"""The tool events a run publishes, which the wire maps in the step that follows
-(``docs/working-notes/mcp-plan.md``, step 6): until then the mapper refuses them
-loudly, as a mistake of ours, rather than sending something it invented."""
+def test_every_kind_of_turn_event_is_mapped() -> None:
+    """The platform's events are a closed set, and this is the whole of it.
 
-
-def test_every_kind_of_turn_event_is_mapped_or_named_as_not_yet() -> None:
-    """The platform's events are a closed set, and this is the whole of it."""
+    Every kind is answered with something, except the two a tool message
+    sends nothing for, which are answered with nothing rather than refused.
+    """
     one = mapper()
     sample: dict[type, TurnEvent] = {
         RunStarted: started(),
         MessageStarted: announced(),
         TextDelta: text("Someone"),
         ReasoningDelta: thought("Hmm."),
+        CallStarted: call_started(),
+        ArgumentsDelta: arguments("{}"),
+        CallCompleted: call_completed(),
         MessageCompleted: completed(),
+        ResultLanded: landed(),
         RunEnded: RunEnded(run_id=RUN, state=RunState.FINISHED),
     }
 
-    assert set(sample) | set(NOT_MAPPED_YET) == set(get_args(TurnEvent))
+    assert set(sample) == set(get_args(TurnEvent))
     for event in sample.values():
         assert one.of(RunEvent(run_id=RUN, seq=1, event=event)) != ()
-    for event in NOT_MAPPED_YET.values():
-        with pytest.raises(RobinautsError, match=UNMAPPED):
-            mapper().of(RunEvent(run_id=RUN, seq=1, event=event))
+    assert mapper().of(RunEvent(run_id=RUN, seq=1, event=results_announced())) == ()
+    assert mapper().of(RunEvent(run_id=RUN, seq=1, event=results_completed())) == ()
 
 
 def test_an_event_kind_nobody_mapped_is_a_mistake_of_ours() -> None:

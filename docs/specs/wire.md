@@ -50,12 +50,16 @@ delivery channel uses ([channels.md](channels.md)).
   the call it answers. The call's id is the one stored on the part — the
   vendor's, carried by the engine as data ([agents.md](agents.md)) — so
   that a result, a re-attach and the conversation loaded afterwards all
-  name one call one way. The re-attach rules below hold for
-  these as for text: a `*_START` for a call the client already holds open
-  and a `*_END` for one it does not are no-ops, and no delta and no result
-  is repeated or lost. **Arguments and results are rendered as data** by the
-  client — text, never Markdown-with-HTML, never a URL turned into a link
-  without the CSP in mind — because both are attacker-influenced text.
+  name one call one way. A result that is an error says so as
+  `metadata: {"isError": true}` on its `TOOL_CALL_RESULT` — AG-UI 1.0 has no
+  field for it there, and this flag, a boolean of ours, is the one thing
+  this wire ever puts in `metadata`; a plain result carries none. The
+  re-attach rules below hold for these as for text: a `*_START` for a call
+  the client already holds open and a `*_END` for one it does not are
+  no-ops, and no delta and no result is repeated or lost. **Arguments and
+  results are rendered as data** by the client — text, never
+  Markdown-with-HTML, never a URL turned into a link without the CSP in mind
+  — because both are attacker-influenced text.
 
 ## The endpoints
 

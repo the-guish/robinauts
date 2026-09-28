@@ -5,9 +5,9 @@
 
 **The mapping is the whole of what AG-UI is to this build** (``docs/specs/wire.md``).
 The application publishes the platform's own events -- ``RunStarted``,
-``MessageStarted``, ``TextDelta``, ``ReasoningDelta``, ``MessageCompleted``,
-``RunEnded`` -- and this turns each of them into the events a chat client
-understands. Nothing below ``api`` knows that AG-UI exists, which is what makes
+``MessageStarted``, ``TextDelta``, ``ReasoningDelta``, the three of a tool
+call and the one of a result, ``MessageCompleted``, ``RunEnded`` -- and this
+turns each of them into the events a chat client understands. Nothing below ``api`` knows that AG-UI exists, which is what makes
 a second wire, or a client that cannot stream at all, a second mapping rather
 than a redesign. The frameworks' AG-UI bridges are not used: every turn goes
 through the agent port and the platform's persistence, and the wire is the same
@@ -55,6 +55,20 @@ would be two more events per answer saying what they already say.
 in the run's events, so a watcher re-attaching in the middle of an answer can
 rebuild what it is watching, and in no message, no export and nothing sent back
 to a model.
+
+**Tool calls are AG-UI's tool events, under the call's own id.** A call the
+model makes is ``TOOL_CALL_START`` (the call's id, the tool's full name, the
+answer it is part of), ``TOOL_CALL_ARGS`` as the arguments stream and
+``TOOL_CALL_END``; each result is ``TOOL_CALL_RESULT`` as it lands, naming
+its call and the tool message it is part of. The ids are the platform's own
+-- the vendor's call id, carried as data -- so nothing is derived and no state
+is kept for them; the one thing a call does to the brackets is close the
+thinking, as text does. **A tool message is not a text message on the wire**:
+its announcement and its completion send nothing, and a client holds its
+results against their calls (``docs/specs/wire.md``). AG-UI 1.0's result has
+no field for a result that is an error, so that flag -- a boolean of ours,
+never a provider's payload -- is the one thing this wire puts in ``metadata``
+(``ERROR_FLAG``).
 """
 
 from __future__ import annotations
@@ -74,14 +88,22 @@ from ag_ui.core import (
     TextMessageContentEvent,
     TextMessageEndEvent,
     TextMessageStartEvent,
+    ToolCallArgsEvent,
+    ToolCallEndEvent,
+    ToolCallResultEvent,
+    ToolCallStartEvent,
 )
 from ag_ui.encoder import EventEncoder
 
 from robinauts.domain import (
+    ArgumentsDelta,
+    CallCompleted,
+    CallStarted,
     InvalidValueError,
     MessageCompleted,
     MessageStarted,
     ReasoningDelta,
+    ResultLanded,
     RobinautsError,
     Role,
     Run,
@@ -143,6 +165,18 @@ UNMAPPED = "no AG-UI event stands for this kind of turn event"
 events are a closed set (``domain.TurnEvent``) and every one of them is here,
 which ``test_agui`` asks of the union itself."""
 
+ERROR_FLAG = "isError"
+"""The key under ``metadata`` that marks a ``TOOL_CALL_RESULT`` as an error.
+
+AG-UI 1.0's ``TOOL_CALL_RESULT`` has a message id, a call id, the content and
+the ``tool`` role, and nothing that says the tool failed -- which the platform
+records (``ToolResultPart.is_error``) and a person watching wants to see
+without reloading. So it rides in ``metadata``, ``true`` on an error result
+and absent otherwise, and it is the one thing this wire puts there: a
+boolean of ours, spelt as the wire spells its fields, and never a provider's
+payload (``docs/specs/wire.md``).
+"""
+
 
 SENT_ROLE: Mapping[Role, str] = {
     Role.ASSISTANT: "assistant",
@@ -154,11 +188,11 @@ Written out rather than taken from the value, because the two sets are not the
 same one: the format holds ``tool`` messages -- the results of one batch of
 calls (``docs/specs/conversations.md``) -- and AG-UI's ``TEXT_MESSAGE_START``
 takes ``developer``, ``system``, ``assistant`` or ``user`` and not ``tool``. A
-tool message is not a text message on the wire: its results go out as
-``TOOL_CALL_RESULT`` events, each naming its call (``docs/specs/wire.md``),
-which is the mapping the wire step writes. Until then a tool message announced
-to this mapper is a role with no word, and it stops the stream rather than the
-wire carrying a lie.
+tool message is not a text message on the wire: its announcement and its
+completion send nothing, and its results go out as ``TOOL_CALL_RESULT``
+events, each naming its call (``docs/specs/wire.md``), so ``tool`` is never
+asked for here. A role that is asked for and has no word stops the stream
+rather than the wire carrying a lie.
 """
 
 UNSENDABLE_ROLE = "no AG-UI role stands for this role of ours"
@@ -171,7 +205,7 @@ def sent_role(role: Role) -> str:
     Raised from inside a stream, so it ends it with the generic ``internal``
     event and the whole of it goes to the log
     (``robinauts.api.stream_routes``). Reaching it is a build that started
-    producing a kind of message the wire was never taught.
+    producing a kind of text message the wire was never taught.
     """
     word = SENT_ROLE.get(role) if isinstance(role, Role) else None
     if word is None:
@@ -259,16 +293,22 @@ class AguiMapper:
         message and opens nothing, so it is a byte on the wire that says
         nothing, and a reasoning delta with nothing in it must not be what opens
         a thinking block.
+
+        **A tool message sends nothing of its own**, announced or completed:
+        it is not a text message in AG-UI, and its results went out one by one
+        as they landed (``ResultLanded``). Both still close the thinking, as
+        everything that is not reasoning does.
         """
         inner = event.event
         if isinstance(inner, RunStarted):
             return (RunStartedEvent(thread_id=self._thread_id, run_id=str(inner.run_id)),)
         if isinstance(inner, MessageStarted):
+            if inner.role is Role.TOOL:
+                return self.closing()
             # A run answers a question and never asks one, so this is
-            # ``assistant`` until the tool loop announces tool messages too.
-            # It goes through ``SENT_ROLE`` all the same: the platform's roles
-            # and AG-UI's are two sets that happen to overlap, and ``tool`` is
-            # in ours and has no text-message word in theirs (``SENT_ROLE``).
+            # ``assistant``. It goes through ``SENT_ROLE`` all the same: the
+            # platform's roles and AG-UI's are two sets that happen to overlap
+            # (``SENT_ROLE``).
             #
             # **Resolved before anything is closed.** ``closing`` is a write:
             # it hands back the end of the thinking and forgets it. Building
@@ -290,7 +330,29 @@ class AguiMapper:
                 *self.closing(),
                 TextMessageContentEvent(message_id=str(inner.message_id), delta=inner.text),
             )
+        if isinstance(inner, CallStarted):
+            return (
+                *self.closing(),
+                ToolCallStartEvent(
+                    tool_call_id=inner.call_id,
+                    tool_call_name=inner.name,
+                    parent_message_id=str(inner.message_id),
+                ),
+            )
+        if isinstance(inner, ArgumentsDelta):
+            if not inner.text:
+                return ()
+            return (
+                *self.closing(),
+                ToolCallArgsEvent(tool_call_id=inner.call_id, delta=inner.text),
+            )
+        if isinstance(inner, CallCompleted):
+            return (*self.closing(), ToolCallEndEvent(tool_call_id=inner.call_id))
+        if isinstance(inner, ResultLanded):
+            return (*self.closing(), _result(inner))
         if isinstance(inner, MessageCompleted):
+            if inner.message.role is Role.TOOL:
+                return self.closing()
             return (*self.closing(), TextMessageEndEvent(message_id=str(inner.message.id)))
         if isinstance(inner, RunEnded):
             return (*self.closing(), self._ended(inner))
@@ -344,9 +406,9 @@ class AguiMapper:
         """The end of the reasoning message, if one is open; nothing otherwise.
 
         Called before everything that follows thinking -- the answer's first
-        text, its completion, the end of the run -- and by the stream itself
-        before an error event, so that a client is never left with a thinking
-        block that nothing closed.
+        text, a tool call, its completion, the end of the run -- and by the
+        stream itself before an error event, so that a client is never left
+        with a thinking block that nothing closed.
         """
         if self._thinking is None:
             return ()
@@ -400,3 +462,19 @@ class AguiMapper:
                 outcome=RunFinishedCancelledOutcome(),
             )
         return RunErrorEvent(message=ENDED_BADLY[ended.state], code=ended.state.value)
+
+
+def _result(landed: ResultLanded) -> BaseEvent:
+    """One result as it landed: its call, the tool message it is part of, its text.
+
+    ``role`` is the one word AG-UI allows there, and it is set so that a
+    client keying on it need not infer it. An error result says so in
+    ``metadata`` (``ERROR_FLAG``); a plain one carries no ``metadata`` at all.
+    """
+    return ToolCallResultEvent(
+        message_id=str(landed.message_id),
+        tool_call_id=landed.call_id,
+        content=landed.text,
+        role="tool",
+        metadata={ERROR_FLAG: True} if landed.is_error else None,
+    )

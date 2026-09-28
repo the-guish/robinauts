@@ -187,6 +187,21 @@ lines; the plan's numbering is kept where a step is named.
   (`Deployment.configured(tool_servers=, servers=, max_tool_rounds=)`).
   `tests/fakes/agents.py`: `ScriptedAgent.then(*steps)` scripts the next
   turn of a run separately from the first.
+- **The wire carries tool calls.** `api/agui.py`: `CallStarted` is
+  `TOOL_CALL_START` (the call's id, the tool's full name, the answer as
+  `parentMessageId`), `ArgumentsDelta` is `TOOL_CALL_ARGS` (empty ones
+  skipped), `CallCompleted` is `TOOL_CALL_END`, `ResultLanded` is
+  `TOOL_CALL_RESULT` (the tool message's id, the call's id, the text as
+  `content`, `role: "tool"`, and `metadata: {"isError": true}` on an error
+  result -- `ERROR_FLAG`, the one thing this wire puts in `metadata`, since
+  AG-UI 1.0's result has no field for it); a tool message announced or
+  completed sends nothing, so those positions carry no `id:`; each of the
+  four closes an open stretch of thinking as text does; nothing is derived
+  and no state is kept for a call. `wire.md` says the same of the error
+  flag. `tests/unit/test_stream_routes.py` runs a whole tool round through
+  the route (the ids, the bodies, the two silent positions) and the
+  re-attach property test has a `tools` shape, cutting inside a call's
+  arguments, on the silent positions and on a result.
 
 ## Corrections to the plan
 
@@ -871,3 +886,39 @@ result does not come inside the run is a cancelled or failed run with the
 calls stored (plan, step 7); a name the run was handed whose server has
 no such tool goes to the server, whose refusal is the error result; the
 `auth = "none"` question for a server that needs no credential (step 8).
+
+### Step 6a — the AG-UI tool events   (feature/mcp-6a-wire)
+
+Summary: the four tool events on the wire, as `wire.md` promised them.
+`AguiMapper.of` maps `CallStarted` to `TOOL_CALL_START` under the call's
+own id with the tool's full name and the answer as `parentMessageId`,
+`ArgumentsDelta` to `TOOL_CALL_ARGS` (an empty one skipped, as an empty
+text delta is), `CallCompleted` to `TOOL_CALL_END`, and `ResultLanded` to
+`TOOL_CALL_RESULT` naming the tool message and the call, with the text as
+`content` and `role: "tool"`; a result that is an error carries
+`metadata: {"isError": true}` (`ERROR_FLAG`), which the spec now names as
+the one thing this wire puts in `metadata`, because AG-UI 1.0's result has
+no field for it and a person watching wants to see a failed call without
+reloading. A tool message announced or completed sends nothing -- it is
+not a text message in AG-UI, and its results went out one by one -- so
+`sent_role` is never asked for `tool` and those two positions carry no
+`id:`, which the re-attach rule already covers (a client re-attaches at
+the last id it saw, and is replayed nothing it had). Every tool event
+closes an open stretch of thinking, as text does; nothing is derived and
+no state is kept for a call, the ids being the platform's own. The
+closed-set test covers all ten kinds; `NOT_MAPPED_YET` is gone. Tests:
+`test_agui.py` (the four events' bodies, the error flag, a tool message
+sending nothing, thinking closed by a call and by a tool message, an empty
+arguments delta skipped, no `metadata` anywhere but the flag);
+`test_stream_routes.py` (a whole tool round through the route with the
+ids and bodies checked, and the drop-anywhere re-attach property over a
+turn with a tool round before its answer). The OpenAPI document is
+unchanged: the streaming routes are outside it, and the content parts
+were step 3's.
+
+Review: pending.
+
+Checks: lint; the whole suite against a throwaway PostgreSQL (3220 passed, 13 skipped).
+Not done / to watch: the frontend decodes none of it yet (6b); the mapper
+sends a result's text as it is, and it is the client that renders it as
+data (`wire.md`); `api/agui.py`'s `UNMAPPED` docstring is true again.

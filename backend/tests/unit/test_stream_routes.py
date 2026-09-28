@@ -35,8 +35,9 @@ import pytest
 from ag_ui.core import EventType
 
 from aio import asyncio_test
-from conversations import AGENT, MODEL, OTHER_MODEL, conversation
-from fakes import Gate, MemoryConversationStore, Step, says
+from contracts.tool_servers import SEARCH
+from conversations import AGENT, MODEL, OTHER_MODEL, agent_definition, conversation
+from fakes import Gate, MemoryConversationStore, MemoryToolServers, Step, calls, says
 from robinauts.api import (
     CONVERSATION_ID_HEADER,
     GENERIC_DETAIL,
@@ -76,6 +77,8 @@ from robinauts.domain import (
     AnswerTextDelta,
     ReasoningPart,
     RunState,
+    ToolResult,
+    ToolServerConfig,
     User,
     text_parts,
 )
@@ -133,12 +136,17 @@ async def served(
     store: MemoryConversationStore | None = None,
     quiet_seconds: float = 300.0,
     wait_seconds: float = 30.0,
+    **changes: Any,
 ) -> AsyncIterator[Served]:
-    """The real application with a session open, over services on the fakes."""
+    """The real application with a session open, over services on the fakes.
+
+    ``changes`` is what else ``turns.wired`` takes: the agent, the tool
+    servers and the port over them, for a turn that calls a tool.
+    """
     deployment = wired()
     secret, user = await open_session(deployment)
     services = wired_services(
-        *steps, store=store, quiet_seconds=quiet_seconds, wait_seconds=wait_seconds
+        *steps, store=store, quiet_seconds=quiet_seconds, wait_seconds=wait_seconds, **changes
     )
     app = create_api(
         deployment.sign_in,
@@ -220,26 +228,39 @@ def said(blocks: Iterable[Sent]) -> str:
     )
 
 
-STARTS = frozenset({EventType.TEXT_MESSAGE_START.value, EventType.REASONING_MESSAGE_START.value})
-ENDS = frozenset({EventType.TEXT_MESSAGE_END.value, EventType.REASONING_MESSAGE_END.value})
+STARTS = frozenset(
+    {
+        EventType.TEXT_MESSAGE_START.value,
+        EventType.REASONING_MESSAGE_START.value,
+        EventType.TOOL_CALL_START.value,
+    }
+)
+ENDS = frozenset(
+    {
+        EventType.TEXT_MESSAGE_END.value,
+        EventType.REASONING_MESSAGE_END.value,
+        EventType.TOOL_CALL_END.value,
+    }
+)
 TERMINAL = frozenset({EventType.RUN_FINISHED.value, EventType.RUN_ERROR.value})
 """The kinds the comparison below has to know about; every other is compared as it is."""
 
 
-def sequence(blocks: Iterable[Sent]) -> list[tuple[str, object, object]]:
+def sequence(blocks: Iterable[Sent]) -> list[tuple[object, ...]]:
     """What those events tell a client, with the documented no-ops taken out.
 
     Each event as everything a client builds a conversation out of: its kind,
-    the message it is about, the text it appends, the thread and run it names,
-    and -- for the event that ends a run -- the outcome, code and message that
-    say how. Three things are dropped, and only those three: a ``*_START`` for
-    a message that is already open, a ``*_END`` for one that is not open, and
-    **the first of two adjacent terminal events**. They are what re-attaching
-    costs -- the bracket around the cut is derived again, and re-attaching at
-    or past the end repeats the ending -- and what a client is told to read as
-    nothing (``docs/specs/wire.md``). A terminal event followed by anything
-    else is kept, so a stream that ended and then went on saying things still
-    fails.
+    the message or the call it is about, the text it appends, the tool it
+    names, a result's content and flag, the thread and run it names, and --
+    for the event that ends a run -- the outcome, code and message that say
+    how. Three things are dropped, and only those three: a ``*_START`` for a
+    message or a call that is already open, a ``*_END`` for one that is not
+    open, and **the first of two adjacent terminal events**. They are what
+    re-attaching costs -- the bracket around the cut is derived again, and
+    re-attaching at or past the end repeats the ending -- and what a client
+    is told to read as nothing (``docs/specs/wire.md``). A terminal event
+    followed by anything else is kept, so a stream that ended and then went
+    on saying things still fails.
     """
     read: list[tuple[object, ...]] = []
     open_ids: set[object] = set()
@@ -247,7 +268,7 @@ def sequence(blocks: Iterable[Sent]) -> list[tuple[str, object, object]]:
         if block.comment is not None:
             continue
         kind, body = block.type, block.body
-        named = body.get("messageId")
+        named = body.get("messageId") if "toolCallId" not in body else body.get("toolCallId")
         if kind in STARTS:
             if named in open_ids:
                 continue
@@ -261,6 +282,11 @@ def sequence(blocks: Iterable[Sent]) -> list[tuple[str, object, object]]:
                 kind,
                 named,
                 body.get("delta"),
+                body.get("toolCallName"),
+                body.get("parentMessageId"),
+                body.get("messageId"),
+                body.get("content"),
+                body.get("metadata"),
                 body.get("threadId"),
                 body.get("runId"),
                 body.get("outcome"),
@@ -291,6 +317,29 @@ def two_stretches(text: str) -> list[Step]:
         AnswerTextDelta(text=text[half:]),
         AnswerCompleted(parts=text_parts(text)),
     ]
+
+
+GITHUB = ToolServerConfig(
+    id="github", url="https://github.example.test/mcp/", secret_env="ROBINAUTS_GITHUB_TOKEN"
+)
+
+SEARCH_CALL = ("toolu_01", "github__search_repositories", {"q": "robinauts"})
+
+
+def tooled() -> dict[str, Any]:
+    """What ``served`` is handed for an agent with the ``github`` server.
+
+    The server lists ``SEARCH`` and answers it with a result; a test that
+    wants an error result changes the fake's answer.
+    """
+    tools = MemoryToolServers()
+    tools.serving(GITHUB.id, SEARCH)
+    tools.answering(GITHUB.id, SEARCH.name, ToolResult("found 3"))
+    return {
+        "definition": agent_definition(tools=(GITHUB.id,)),
+        "servers": {GITHUB.id: GITHUB},
+        "tools": tools,
+    }
 
 
 def refusal(response: httpx.Response) -> tuple[int, dict[str, str], object]:
@@ -362,11 +411,80 @@ async def test_an_id_marks_the_last_event_derived_from_one_platform_event() -> N
     assert numbers == list(range(1, stored + 1))
 
 
+@asyncio_test
+async def test_a_tool_round_is_the_calls_events_the_results_and_nothing_for_the_tool_message() -> (
+    None
+):
+    """One round on the wire (``docs/specs/wire.md``): the call inside the
+    answer under its own id, the result as it lands naming the tool message,
+    and no text message for the tool message -- announced or completed, it
+    sends nothing, so those two positions carry no ``id:`` and a client
+    re-attaching at the last id it saw is replayed nothing it had."""
+    async with served(*calls(SEARCH_CALL, text="Let me look."), **tooled()) as it:
+        it.wiring.agent.then(*says("Found three.", pieces=1))
+        it.wiring.tools.answering(GITHUB.id, SEARCH.name, ToolResult("no such repo", is_error=True))
+        answered = await it.client.post(
+            "/api/turns", json={"agent_id": AGENT, "text": QUESTION}, headers=WRITE
+        )
+        run_id = uuid.UUID(answered.headers[RUN_ID_HEADER])
+        stored = await it.wiring.store.last_position(run_id)
+        question, calling, results, done = await stored_messages(
+            it.wiring.store, it.wiring.agent.asked[-1].history[0].conversation_id
+        )
+
+    blocks = events(answered.text)
+    assert [(block.type, block.id) for block in blocks] == [
+        (EventType.RUN_STARTED.value, "1"),
+        (EventType.TEXT_MESSAGE_START.value, "2"),
+        (EventType.TEXT_MESSAGE_CONTENT.value, "3"),
+        (EventType.TOOL_CALL_START.value, "4"),
+        (EventType.TOOL_CALL_ARGS.value, "5"),
+        (EventType.TOOL_CALL_ARGS.value, "6"),
+        (EventType.TOOL_CALL_END.value, "7"),
+        (EventType.TEXT_MESSAGE_END.value, "8"),
+        # Position 9 is the tool message announced, which sends nothing.
+        (EventType.TOOL_CALL_RESULT.value, "10"),
+        # Position 11 is the tool message completed: nothing again.
+        (EventType.TEXT_MESSAGE_START.value, "12"),
+        (EventType.TEXT_MESSAGE_CONTENT.value, "13"),
+        (EventType.TEXT_MESSAGE_END.value, "14"),
+        (EventType.RUN_FINISHED.value, "15"),
+    ]
+    assert stored == 15
+    start, *args, end = blocks[3:7]
+    assert start.body == {
+        "type": EventType.TOOL_CALL_START.value,
+        "toolCallId": "toolu_01",
+        "toolCallName": "github__search_repositories",
+        "parentMessageId": str(calling.id),
+    }
+    assert "".join(block.body["delta"] for block in args) == '{"q": "robinauts"}'
+    assert end.body == {"type": EventType.TOOL_CALL_END.value, "toolCallId": "toolu_01"}
+    assert blocks[8].body == {
+        "type": EventType.TOOL_CALL_RESULT.value,
+        "messageId": str(results.id),
+        "toolCallId": "toolu_01",
+        "content": "no such repo",
+        "role": "tool",
+        "metadata": {"isError": True},
+    }
+    assert (calling.id, results.id, done.id) == (
+        calling.id,
+        results.parent_id and results.id,
+        done.id,
+    )
+    assert results.parent_id == calling.id and done.parent_id == results.id
+    assert blocks[9].body["messageId"] == str(done.id)
+    # The result's text is on the wire once, as content, and nowhere else.
+    assert answered.text.count("no such repo") == 1
+
+
 @pytest.mark.parametrize("form", ["last-event-id", "after"])
 @pytest.mark.parametrize("ending", [RunState.FINISHED, RunState.CANCELLED])
+@pytest.mark.parametrize("shape", ["thinking", "tools"])
 @asyncio_test
 async def test_dropping_anywhere_and_re_attaching_gives_the_whole_stream_once(
-    ending: RunState, form: str
+    ending: RunState, form: str, shape: str
 ) -> None:
     """The property re-attaching has to have, asked at **every** point of a turn.
 
@@ -387,16 +505,26 @@ async def test_dropping_anywhere_and_re_attaching_gives_the_whole_stream_once(
     between two of them, and streams its answer around them. It is asked of a
     run that **finished** and of one that was **cancelled**, since how a run
     ends is part of what a client is owed, and through both ways of saying
-    where to carry on from.
+    where to carry on from. And of a turn with a **tool round** before that
+    answer (``shape``), so that the cuts fall inside a call's arguments, on
+    the two positions a tool message sends nothing for, and on a result.
     """
     gate = Gate()
     steps = two_stretches(ANSWER)
     if ending is RunState.CANCELLED:
         steps.insert(3, gate)
-    async with served(*steps) as it:
+    changes: dict[str, Any] = {}
+    reached = 4
+    if shape == "tools":
+        changes = tooled()
+        steps, second = list(calls(SEARCH_CALL, text="Let me look.")), steps
+        reached = 4 + 10  # the round before adds ten positions; the run started is shared
+    async with served(*steps, **changes) as it:
+        if shape == "tools":
+            it.wiring.agent.then(*second)
         started = await it.begun()
         if ending is RunState.CANCELLED:
-            await stream_reached(it.wiring.store, started.run.id, 4)
+            await stream_reached(it.wiring.store, started.run.id, reached)
             await it.wiring.turns.cancel(it.user, started.run.id)
             gate.open()
         await settled(it.wiring, started.run)
@@ -420,6 +548,9 @@ async def test_dropping_anywhere_and_re_attaching_gives_the_whole_stream_once(
     assert EventType.REASONING_MESSAGE_END.value in types(blocks)
     assert types(blocks)[-1] in {EventType.RUN_FINISHED.value, EventType.RUN_ERROR.value}
     assert len(blocks) >= 7
+    if shape == "tools":
+        assert EventType.TOOL_CALL_RESULT.value in types(blocks)
+        assert types(blocks).count(EventType.TOOL_CALL_ARGS.value) == 2
     whole_sequence = sequence(blocks)
     for cut, answered in enumerate(rest):
         carried_on = sequence(blocks[: cut + 1] + events(answered.text))

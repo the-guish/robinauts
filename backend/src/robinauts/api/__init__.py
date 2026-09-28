@@ -57,6 +57,7 @@ from robinauts.api.access import (
 from robinauts.api.agent_routes import agent_router, list_agents, list_models
 from robinauts.api.agui import (
     ENDED_BADLY,
+    ERROR_FLAG,
     GONE_CODE,
     INTERNAL_CODE,
     QUIET_CODE,
@@ -314,6 +315,7 @@ __all__ = [
     "QUIET_RUN_DETAIL",
     "READING",
     "READ_METHODS",
+    "ERROR_FLAG",
     "REASONING_SUFFIX",
     "REPEATED_HEADER_DETAIL",
     "ROUTE_LISTS",
