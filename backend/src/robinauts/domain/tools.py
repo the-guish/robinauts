@@ -4,12 +4,14 @@
 """Tools: what a tool is called, how a call is named, what a run is handed.
 
 The spelling of a tool's name and of a call's id, which a stored
-``ToolCallPart`` carries and a ``ToolResultPart`` answers; and
-``ToolDefinition``, the tool as the model is shown it -- the list a run
-fetches once from the servers its agent names and hands the agent port for
-the whole turn (``docs/specs/agents.md``, "Tools"). The servers an operator
-configures join this module with the step that reads them
-(``docs/working-notes/mcp-plan.md``).
+``ToolCallPart`` carries and a ``ToolResultPart`` answers; ``ListedTool``,
+the tool as a server lists it, under the server's own name; ``ToolDefinition``,
+the tool as the model is shown it, under the full name the platform gave it --
+the list a run fetches once from the servers its agent names and hands the
+agent port for the whole turn (``docs/specs/agents.md``, "Tools"); and
+``ToolResult``, what one call came back with. The servers an operator
+configures are ``ToolServerConfig`` (``robinauts.domain.agents``); the
+naming, from listed to shown, is ``robinauts.core.tools``.
 
 **A tool's name is the vendors' bound, not ours.** Anthropic and OpenAI both
 take a tool name of at most 64 characters matching ``^[a-zA-Z0-9_-]+$``, and
@@ -33,7 +35,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from robinauts.domain.errors import InvalidValueError
-from robinauts.domain.values import checked_data, checked_line, checked_text, describe
+from robinauts.domain.values import (
+    MAX_PART_CHARS,
+    checked_data,
+    checked_line,
+    checked_text,
+    describe,
+)
 
 MAX_TOOL_NAME_CHARS = 64
 """The longest a tool's full name may be: the bound the vendors share."""
@@ -141,6 +149,73 @@ way into a prompt.
 """
 
 
+MAX_LISTED_TOOL_NAME_CHARS = 256
+"""The longest a server's own name for a tool may be, as listed.
+
+Not the vendors' bound (``MAX_TOOL_NAME_CHARS``), which the **full** name is
+held to when the platform names the tool (``robinauts.core.tools``): a server
+may list a name of any spelling, and one the vendors would not take is left
+out of a run's list rather than refused at the port.
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class ListedTool:
+    """One tool as a server lists it: its own name, what it does, what it takes.
+
+    What the ``ToolServers`` port hands back for ``tools/list``, before the
+    platform has named it: ``name`` is the server's, one line of text; the
+    rest is what ``ToolDefinition`` carries, bounded the same way, because it
+    is the same attacker-influenced text on its way to a prompt. Copies of the
+    two mappings are kept; nothing edits them.
+    """
+
+    name: str
+    description: str = ""
+    input_schema: Mapping[str, Any] = field(default_factory=dict)
+    annotations: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        checked_line(self.name, "a listed tool's name", MAX_LISTED_TOOL_NAME_CHARS)
+        if not self.name.strip():
+            raise InvalidValueError("a listed tool has a name")
+        checked_text(self.description, "a tool's description", MAX_TOOL_DESCRIPTION_CHARS)
+        object.__setattr__(
+            self,
+            "input_schema",
+            checked_data(
+                self.input_schema, "a tool's input schema", max_bytes=MAX_TOOL_SCHEMA_BYTES
+            ),
+        )
+        object.__setattr__(
+            self, "annotations", checked_data(self.annotations, "a tool's annotations")
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ToolResult:
+    """What one call came back with: text, and whether the server calls it a failure.
+
+    The port's answer to ``tools/call`` (``robinauts.ports.ToolServers``),
+    before the platform has stored it as the ``ToolResultPart`` answering the
+    call: the same text and the same flag, bounded the same way
+    (``MAX_PART_CHARS``), because that is where it goes. ``is_error`` is the
+    server saying the call failed, or a call that ran out of its time; a
+    server that cannot be reached at all is not a result but a
+    ``ToolServerError`` (``docs/specs/runs.md``, "Tools").
+    """
+
+    text: str
+    is_error: bool = False
+
+    def __post_init__(self) -> None:
+        checked_text(self.text, "a tool result's text", MAX_PART_CHARS)
+        if not isinstance(self.is_error, bool):
+            raise InvalidValueError(
+                f"whether a tool result is an error is yes or no, not {describe(self.is_error)}"
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class ToolDefinition:
     """One tool as the model is shown it: its full name, what it does, what it takes.
@@ -178,7 +253,10 @@ class ToolDefinition:
         )
 
 
-NOT_RUN = "this call was not run: the turn that made it ended before its result came"
+NO_RESULT = (
+    "no result of this call was recorded: the turn that made it ended before one came, and"
+    " whether the call ran is not known"
+)
 """What a model is told of a call that no tool message answers.
 
 A stored answer that asked for tools and has no tool message under it on the
@@ -187,11 +265,14 @@ path -- the turn was stopped, or failed, before its results were in
 nothing answering them, which the vendors refuse: a call is followed by its
 result or the request is refused whole. So each agent adapter puts, after such
 an answer, the tool turn the vendor requires -- one **error** result per
-unanswered call, saying this -- which is what a tool message would have said
-had the platform written one, is true of the record at that moment, and is
-**never stored**: the record keeps the calls without results, which is what
-happened, and the client shows exactly that. One sentence, the same under
-both engines, so that a conversation moved across the swap is told the same
-thing about the same call (ADR 0004). Which calls those are is
-``unanswered_calls`` (``robinauts.domain.conversation``).
+unanswered call, saying this -- which is what the record says and no more:
+the platform runs a batch in parallel and writes the tool message when the
+last result is in, so a call without one may have run, and the sentence
+neither says it did nor invites the model to make it again. It is **never
+stored**: the record keeps the calls without results, which is what happened,
+and the client shows exactly that. One sentence, the same under both engines,
+so that a conversation moved across the swap is told the same thing about
+the same call -- a choice of the adapters', not a rule the swap test holds
+them to. Which calls those are is ``unanswered_calls``
+(``robinauts.domain.conversation``).
 """

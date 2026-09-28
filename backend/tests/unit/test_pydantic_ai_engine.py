@@ -53,6 +53,7 @@ from pydantic_ai.models import Model, ModelRequestParameters, StreamedResponse
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.function import AgentInfo, DeltaThinkingPart, DeltaToolCall, FunctionModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
+from pydantic_ai.tools import ToolDefinition as FrameworkToolDefinition
 
 from aio import asyncio_test
 from conftest import VENDOR_LOGGERS
@@ -79,7 +80,7 @@ from robinauts.adapters.agents.pydantic_ai import (
 from robinauts.core import check_engine_events
 from robinauts.domain import (
     KINDS_WITH_BASE_URL,
-    NOT_RUN,
+    NO_RESULT,
     AgentDefinition,
     AnswerCompleted,
     AnswerReasoningDelta,
@@ -504,8 +505,9 @@ def calling(call_id: str, name: str, arguments: dict[str, Any], *, index: int = 
 
     The first carries the name, the id and the first half of the JSON, which
     the framework's parts manager turns into the part starting; the second is
-    the rest as a delta with no name -- the same two events the real client's
-    stream makes of a ``tool_use`` block and its ``input_json_delta``s.
+    the rest as a delta with no name. The real client's start carries no
+    arguments at all (``test_a_call_whose_start_carries_no_arguments...``);
+    this is the shorter script for the tests that are about something else.
     """
     written = json.dumps(arguments)
     half = len(written) // 2
@@ -590,9 +592,10 @@ class Vendor(Model):
 
     ``FunctionModel`` streams text, thinking and tool calls in pieces and
     nothing else; the vendor's client also hands the parts manager a
-    ``redacted_thinking`` block, a call whose arguments arrive whole, and the
-    vendor's name (``Model.system``, which is what the engine keys the blocks
-    by). This one does those, from a script of what the parts manager is
+    ``redacted_thinking`` block and the vendor's name (``Model.system``, which
+    is what the engine keys the blocks by), and a client of another vendor
+    may hand it a call whose arguments arrive whole. This one does those,
+    from a script of what the parts manager is
     told: ``("text", {...})``, ``("thinking", {...})`` or ``("call", {...})``,
     with ``"part"`` naming the block when two steps are pieces of one.
     """
@@ -684,6 +687,34 @@ async def test_a_model_that_asks_for_a_tool_yields_the_call_and_ends_the_turn_wa
     assert seen[-2] == AnswerCompleted(parts=(TextPart("Let me look. "), first, second))
     assert len(model.seen) == 1
     assert (agent.held, model.open_streams) == (0, 0)
+
+
+@asyncio_test
+async def test_a_call_whose_start_carries_no_arguments_is_completed_from_its_deltas() -> None:
+    """The real client's shape: a ``tool_use`` block starts with an empty
+    ``input``, so the part starts with no arguments at all, and the JSON
+    arrives in deltas -- often a first one that is empty."""
+    model = ScriptedModel(
+        {1: DeltaToolCall(name="github__search", tool_call_id="toolu_01")},
+        {1: DeltaToolCall(json_args="")},
+        {1: DeltaToolCall(json_args='{"q": ')},
+        {1: DeltaToolCall(json_args='"x"}')},
+        {2: DeltaToolCall(name="jira__find", tool_call_id="toolu_02")},
+    )
+
+    seen = await turn_of(engine(model), (question(),), tools=(SEARCH,))
+
+    check_engine_events(seen)
+    assert [event.text for event in seen if isinstance(event, ToolCallArgumentsDelta)] == [
+        '{"q": ',
+        '"x"}',
+    ]
+    assert seen[-2] == AnswerCompleted(
+        parts=(
+            ToolCallPart("toolu_01", "github__search", {"q": "x"}),
+            ToolCallPart("toolu_02", "jira__find", {}),
+        )
+    )
 
 
 @asyncio_test
@@ -816,11 +847,12 @@ async def test_what_the_vendors_client_sends_for_a_turn_with_tools_is_the_vendor
 
 
 @asyncio_test
-async def test_a_call_no_tool_message_answers_is_shown_as_one_that_was_not_run() -> None:
+async def test_a_call_no_tool_message_answers_is_answered_with_what_the_record_says() -> None:
     """A stopped or failed tool round leaves the calls stored with no result
     under them; a question asked after it hangs under that answer. The vendor
-    refuses a call with nothing answering it, so the model is told the call
-    was not run -- and the record is not touched (``domain.NOT_RUN``)."""
+    refuses a call with nothing answering it, so the model is told no result
+    of the call was recorded -- and the record is not touched
+    (``domain.NO_RESULT``)."""
     model = Vendor(("text", {"content": "Sorry, once more."}))
     asked, calling_, _ = turn_with_tools(VENDOR)
     again = question("and now?", parent=calling_, seconds=2)
@@ -838,7 +870,7 @@ async def test_a_call_no_tool_message_answers_is_shown_as_one_that_was_not_run()
     returned, _asked = heard[2].parts
     assert (returned.tool_call_id, returned.content, returned.outcome) == (
         "toolu_01",
-        NOT_RUN,
+        NO_RESULT,
         "failed",
     )
     # And the vendor's own mapping takes it: a tool_use answered by an error.
@@ -848,7 +880,7 @@ async def test_a_call_no_tool_message_answers_is_shown_as_one_that_was_not_run()
         {
             "type": "tool_result",
             "tool_use_id": "toolu_01",
-            "content": [{"type": "text", "text": NOT_RUN}],
+            "content": [{"type": "text", "text": NO_RESULT}],
             "is_error": True,
         },
         {"type": "text", "text": "and now?"},
@@ -969,6 +1001,30 @@ async def test_blocks_that_do_not_fit_extras_are_left_out_with_a_line_in_the_log
 
     assert seen[-1] == AnswerCompleted(parts=(TextPart("Hi."),))
     assert any(record.getMessage().startswith(BLOCKS_LEFT_OUT) for record in caplog.records)
+
+
+def test_the_client_the_engine_builds_sends_a_tools_schema_as_the_server_gave_it() -> None:
+    """The framework's Anthropic profile would strip ``title`` and ``$schema``
+    from every tool's schema; the platform hands the vendor the server's schema
+    as it is, on both engines (``docs/specs/agents.md``, "Tools")."""
+    schema = {
+        "type": "object",
+        "title": "Search",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {"q": {"type": "string", "title": "Query", "format": "text"}},
+        "required": ["q"],
+    }
+    built = chat_model(models().models[MODEL], ANTHROPIC_PROVIDER, KEY)
+
+    prepared = built.customize_request_parameters(
+        ModelRequestParameters(
+            function_tools=[FrameworkToolDefinition(name="t", parameters_json_schema=dict(schema))]
+        )
+    )
+
+    assert prepared.function_tools[0].parameters_json_schema == schema
+    # And the rest of what the profile says about the model is kept.
+    assert built.profile.get("thinking_tags") is not None
 
 
 def test_the_client_the_engine_builds_is_the_vendor_the_blocks_are_kept_under() -> None:

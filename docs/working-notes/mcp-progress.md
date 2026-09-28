@@ -103,11 +103,30 @@ lines; the plan's numbering is kept where a step is named.
   reads `[mcp_servers.<id>]` (`TOOL_SERVER_KEYS`) and an agent's `tools`,
   every problem together; `mcp_servers` is one of `MODEL_KEYS`.
   `adapters/config_file.py`: `check_tool_secrets` reads every server's
-  secret at start-up into a `ToolServerSecrets` that prints nothing;
+  secret at start-up into a `ToolServerSecrets` that prints nothing, and
+  every secret check prints a variable's name only when it is spelt as
+  variables are (`named`), so a pasted token is never echoed;
   `app.py` gathers its problems with the rest and holds the result
   (`Deployment.tool_secrets`) for the adapter to come. `agents.md` carries
   the sketch (one `bearer` server, one `basic`, an agent naming both), read
   by `tests/integration/test_config_file.py`.
+- **The `ToolServers` port, and the naming above it.** `ports/tool_servers.py`:
+  `ToolServers.list_tools(server) -> Sequence[ListedTool]` and
+  `call_tool(server, name, arguments) -> ToolResult`, the names the server's,
+  the credential the implementation's, a server that cannot be reached a
+  `ToolServerError` (`domain/errors.py`), a tool's error a result.
+  `domain/tools.py`: `ListedTool(name, description, input_schema,
+  annotations)` (the tool as listed, its name any one line up to
+  `MAX_LISTED_TOOL_NAME_CHARS`) and `ToolResult(text, is_error)` (bounded as
+  the part it becomes). `core/tools.py`: `named_tools(server, listed)`
+  (the full name `<prefix>__<name>`; left out with a `LeftOut` naming the
+  tool and the reason when the full name is not one the vendors take, the
+  schema is not an object at the top, or the server listed it twice),
+  `tools_for_run(servers, listed)` (every server's, sorted by full name),
+  `split_tool_name(full)`. `tests/fakes/tool_servers.py`:
+  `MemoryToolServers` (scripted listings, answers, servers that are gone, a
+  call that waits on an event); `tests/contracts/tool_servers.py`: the
+  port's contract suite, which the MCP adapter's tests subclass next.
 
 ## Corrections to the plan
 
@@ -327,15 +346,15 @@ ride here (above).
 
 Review: 1 round (read after the commit; the fixes ride with step 4d).
 - High: 0.
-- Medium: 5 (1/4) — fixed in 4d: **a user question under an answer whose
+- Medium: 5 (2/3) — fixed in 4d: **a user question under an answer whose
   calls have no result** (a stopped or failed tool round, then the ordinary
   next question) went to the vendor as calls with nothing answering them,
-  which Anthropic refuses whole; both adapters now show such a call as one
-  that was not run (`domain.NOT_RUN`, `unanswered_calls`), and the record
-  is untouched. Left: the non-streamed tests tested the fixture (the
+  which Anthropic refuses whole; both adapters now answer such a call with
+  what the record says (`domain.NO_RESULT`, `unanswered_calls`), and the
+  record is untouched; the non-streamed tests tested the fixture (the
   scripted model handed a chunk where the real client hands a plain
-  message, so the real non-streamed path had no coverage) — fixed in 4d
-  too, as it was cheap; `bind_tools` drops a tool whose schema has a
+  message, so the real non-streamed path had no coverage). Left:
+  `bind_tools` drops a tool whose schema has a
   top-level `anyOf`/`oneOf` with a Python warning and raises when every
   tool is dropped — step 5a's naming and bounding leaves such a tool out
   with a line in the log before an engine sees it; a history with tool
@@ -453,12 +472,12 @@ and has no tool message under it on the path -- the turn was stopped, or
 failed, before its results were in -- followed by the next question, went
 to the vendor as `tool_use` blocks with nothing answering them, which
 Anthropic refuses whole; once step 5c stores calls, every later turn of
-such a branch would fail. Both adapters now show such a call as one that
-was not run: after that answer they put the tool turn the vendor requires,
-one error result per unanswered call whose text is `domain.NOT_RUN`, which
-is what a tool message would have said, is true of the record at that
-moment, and is never stored (the record keeps the calls without results;
-the client shows exactly that). Which calls those are is
+such a branch would fail. Both adapters now answer such a call with what
+the record says: after that answer they put the tool turn the vendor
+requires, one error result per unanswered call whose text is
+`domain.NO_RESULT` (reworded from "not run" by the review, see below), which
+is never stored (the record keeps the calls without results; the client
+shows exactly that). Which calls those are is
 `domain.unanswered_calls` (a path rule: an answer's calls are answered when
 the next message on the path is a tool message). Each engine's test maps
 the result through the framework's real vendor mapping. The fixes from
@@ -467,14 +486,31 @@ non-streamed path hands over a plain `AIMessage` as the real client does,
 the tests expect the no-delta shape and `can_answer_without_streaming` is
 on for LangGraph too.
 
-Review: pending.
+Review: 1 round (read after the commit; the fixes ride with step 5b).
+- High: 0.
+- Medium: 3 (3/0), fixed in 5b: the sentence said the call **was not run**,
+  which the record cannot know (a batch runs in parallel and the tool
+  message is written when the last result is in) and which would invite the
+  model to make the call again -- it now says no result was recorded and
+  whether the call ran is not known (`NO_RESULT`); `unanswered_calls` had no
+  test of its own -- a table test over the path shapes; the decision was in
+  the working notes and nowhere the layout or the specs promise -- a clause
+  in `layout.md`'s domain list, a sentence in the module's docstring, the
+  spec sentence in `runs.md` "Tools".
+- Low: 6 (5/1) — fixed in 5b: the 4b entry's counts; the stale comment on
+  the off-contract path in the Pydantic AI engine; the LangGraph double's
+  docstring claims only the type of the real client's message; ADR 0004 is
+  no longer cited for a choice it does not make; the plan's step 7 notes
+  that `unanswered_calls` trusts the tree and would compare call ids under
+  a partial tool message. Left as a note: Pydantic AI's framework would
+  synthesize a sentence of its own for a dangling call not in the last
+  response; with the adapter's inserted, nothing dangles (recorded in the
+  plan).
 
 Checks: lint; the whole suite against a throwaway PostgreSQL (3052 passed,
 13 skipped).
-Not done / to watch: the choice (an error result saying "not run" rather
-than dropping the calls from what the model sees) is recorded in the plan;
-whether Anthropic takes a history with tool parts on a run handed no
-`tools` at all is still unverified (4b's review, M4).
+Not done / to watch: whether Anthropic takes a history with tool parts on a
+run handed no `tools` at all is still unverified (4b's review, M4).
 
 ### Step 5a — the configuration knows tool servers   (feature/mcp-5a-config)
 
@@ -504,7 +540,26 @@ port, the listed tool as a record, naming/sorting/bounding in core and the
 in-memory fake; 5c the MCP adapter over httpx with its scripted-server and
 live tests; 5d the loop in `Turns`, the turn events and the composition.
 
-Review: pending.
+Review: 1 round (read after the commit; the fixes are a commit of their
+own on step 5b's branch, "mcp 5a: fixes from the review").
+- High: 1 (1/0) — a **GitHub token pasted into `secret_env`** is letters,
+  digits and underscores, which is a valid variable name as far as the
+  spelling rule can tell, so it was accepted as a name and then **echoed by
+  the start-up refusal** into the log. Fixed where the message is written
+  (`adapters.config_file.named`, used by all three secret checks): a name
+  spelt as variables conventionally are -- upper case, digits, underscores
+  -- is printed, and anything else is described rather than repeated. The
+  claim above that "a secret pasted there is refused" holds for a token with
+  a `-` in it and not for one without; the test says so now.
+- Medium: 1 (1/0) — the sketch's Atlassian line pointed at a Jira site host,
+  where no MCP endpoint answers; it is `https://mcp.atlassian.com/v2/mcp`.
+- Low: 5 (5/0) — stale docstrings (`domain/agents.py`, four records and two
+  carriers); the prefix clash is found over the **declared** tables and the
+  `:` in a basic user part in the parser, so both are reported in the same
+  pass as the table's other mistakes; a user part under a misspelt auth is
+  not a second mistake, and an unknown server id named twice is one unknown
+  id; the prefix tests assert the rule's wording; the composition test
+  asserts its string edit found its line.
 
 Checks: lint; the whole suite against a throwaway PostgreSQL (3098 passed,
 13 skipped).
@@ -512,3 +567,39 @@ Not done / to watch: the secrets are read and held (`Deployment.tool_secrets`)
 and handed to nothing until 5c; a `[mcp_servers]` table in a deployment
 with no agent naming it still needs its secret at start-up (as a provider no
 model uses needs its key); the demo's TOML is step 8's.
+
+### Step 5b — the port, the listed tool, the naming, the fake   (feature/mcp-5b-port)
+
+Summary: what step 5c's adapter implements and step 5d's loop calls. The
+`ToolServers` port asks two questions of one configured server -- what it
+lists (`ListedTool`s under the server's own names) and what a tool answers
+(`ToolResult`, text and whether the server calls it a failure) -- with the
+credential the implementation's (built with `ToolServerSecrets`), a tool's
+error, a timeout and an unknown tool all results, and only a server that
+cannot be reached or will not list a `ToolServerError` naming it
+(`docs/specs/runs.md`, "Tools"). Naming lives in core, pure: the full name
+`<prefix>__<name>`; a tool left out, named with the reason, when its full
+name is not one the vendors take, when its schema is not a JSON Schema
+object at the top (the vendors' rule, and the top-level `anyOf` that
+`bind_tools` would otherwise drop with a Python warning -- 4b's review), or
+when the server listed it twice; one list per run sorted by full name so
+two engines and two runs send identical lists; a full name split back at
+the first separator, `None` for a name the platform never gave. The
+in-memory fake scripts listings, answers, servers that are gone and a call
+that waits; the contract suite holds the fake and, next, the adapter to
+the same promises. Riding here from the reviews: 4d's rename to
+`NO_RESULT` with its table test and its three documents; 4c's pinning of
+the framework's schema transformer off, so the Pydantic AI engine sends a
+tool's schema as the server gave it (tested), the documented framework
+retry on bound thinking blocks, and the test of a call whose start carries
+no arguments (the real client's shape).
+
+Review: pending.
+
+Checks: lint; the whole suite against a throwaway PostgreSQL (3137 passed,
+13 skipped).
+Not done / to watch: nothing implements the port against a server yet
+(5c); an empty result text (4c's review, M3) is still a question for the
+adapter and the live test; `tools_for_run` takes what each server listed
+and is told nothing about a server that failed to list, which the loop
+turns into a failed run before calling it (5d).

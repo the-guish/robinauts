@@ -121,6 +121,7 @@ from robinauts.core.titles import (
     first_question,
     title_from_text,
 )
+from robinauts.core.tools import LeftOut, named_tools, split_tool_name, tools_for_run
 from robinauts.core.urls import (
     DEFAULT_RETURN_TO,
     MAX_RETURN_TO,
@@ -173,6 +174,7 @@ __all__ = [
     "UNSAID_ERROR",
     "URL_SAFE",
     "ConversationTree",
+    "LeftOut",
     "ResumePoint",
     "accepted_issuers",
     "active_run",
@@ -209,6 +211,7 @@ __all__ = [
     "message_from_data",
     "message_from_stored",
     "message_to_data",
+    "named_tools",
     "normalise_endpoint",
     "normalise_issuer",
     "normalise_origin",
@@ -227,7 +230,9 @@ __all__ = [
     "safe_return_to",
     "same_secret",
     "secret_hash",
+    "split_tool_name",
     "title_from_text",
+    "tools_for_run",
     "transition",
     "tree_of",
     "tree_of_stored",

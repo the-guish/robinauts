@@ -138,13 +138,14 @@ from pydantic_ai.messages import TextPart as FrameworkTextPart
 from pydantic_ai.messages import ToolCallPart as FrameworkToolCallPart
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.profiles import ModelProfile
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.tools import ToolDefinition as FrameworkToolDefinition
 from pydantic_ai.toolsets import ExternalToolset
 
 from robinauts.adapters.config_file import ProviderKeys
 from robinauts.domain import (
-    NOT_RUN,
+    NO_RESULT,
     AgentDefinition,
     AnswerCompleted,
     AnswerReasoningDelta,
@@ -288,6 +289,16 @@ lengthen a turn silently and could send the same prompt twice after a timeout
 the provider had already accepted. A turn is bounded by the application
 (``robinauts.application.Turns``), a failure is reported by raising, and
 retrying is sending the message again (``docs/specs/runs.md``).
+
+**One retry this does not switch off is the framework's own.** For the models
+whose thinking blocks Anthropic binds to a conversation, Pydantic AI answers
+the vendor's refusal of a replayed block ("bound to a different
+conversation") by sending the request once more with the blocks marked to be
+dropped, and says so through ``warnings``. That is the "ask the vendor to
+drop what it can no longer match" of the plan's open question
+(``docs/working-notes/mcp-plan.md``), happening on this engine and not on
+the other, which fails that turn; left as the framework has it, and to be
+seen in a live turn on such a model after the system prompt was edited.
 """
 
 DEFAULT_ANTHROPIC_OUTPUT_TOKENS = 8192
@@ -488,7 +499,23 @@ def chat_model(model: ModelConfig, provider: ModelProviderConfig, key: str) -> M
         max_retries=MAX_RETRIES,
         default_headers={ANTHROPIC_KEY_HEADER: key},
     )
-    return AnthropicModel(model.name, provider=AnthropicProvider(anthropic_client=client))
+    return AnthropicModel(
+        model.name, provider=AnthropicProvider(anthropic_client=client), profile=_schemas_as_given
+    )
+
+
+def _schemas_as_given(profile: ModelProfile) -> ModelProfile:
+    """The framework's profile for the model, less its rewriting of a tool's schema.
+
+    The framework's Anthropic profile runs every tool's input schema through
+    a transformer that strips ``title`` and ``$schema`` at every depth. The
+    platform promises the opposite: a tool's schema is the server's, handed
+    to the vendor as it is, and two engines send byte-identical lists
+    (``docs/specs/agents.md``, "Tools"; ``domain.ToolDefinition``) -- the
+    other engine passes it through untouched, and this one now does too.
+    Everything else the profile says about the model is kept.
+    """
+    return {**profile, "json_schema_transformer": None}
 
 
 class PydanticAIAgent(Agent):
@@ -613,14 +640,15 @@ class PydanticAIAgent(Agent):
                                 yield made
                         response = answering.response
                     break
-            # An **off-contract** history -- one ending in an assistant
-            # message -- leaves the framework with nothing to ask, so no model
-            # request node is reached, the loop above runs no iterations and
-            # ``response`` stays ``None``. The port guarantees a history
-            # ending in the message being answered (``robinauts.ports.agents``),
-            # so this is a turn that produced an empty answer rather than one
-            # that produced none -- which would be a failed run and is the
-            # application's to decide.
+            # ``response`` is ``None`` only if no model request node was
+            # reached, which the framework does not do with a history the
+            # port guarantees -- one ending in the message being answered
+            # (``robinauts.ports.agents``) -- and does not do with an
+            # off-contract one either in this version, which asks the model
+            # once regardless. Kept for a framework that would leave the loop
+            # above with no iterations: that is a turn that produced an empty
+            # answer rather than one that produced none, which would be a
+            # failed run and is the application's to decide.
             for made in answer.complete(response, client.system):
                 yield made
         finally:
@@ -760,7 +788,7 @@ def _messages(history: Sequence[Message], model_id: str, vendor: str) -> list[Mo
     that id, and whether it went wrong -- which the framework folds into the
     one ``user`` turn of ``tool_result`` blocks the vendor wants back. An
     answer whose calls no tool message answers is followed by one error
-    result per call saying it was not run (``domain.NOT_RUN``). The
+    result per call saying no result of it was recorded (``domain.NO_RESULT``). The
     reasoning a previous turn streamed is not carried back: what is stored of
     it is the platform's record, not the vendor's.
 
@@ -797,14 +825,14 @@ def _messages(history: Sequence[Message], model_id: str, vendor: str) -> list[Mo
             messages.append(_response(message, model_id, vendor))
             named = {call.call_id: call.name for call in message.tool_calls}
             if message.id in unanswered:
-                # A call no tool message answers is shown as one that was
-                # not run (``domain.NOT_RUN``): the vendor refuses a call
-                # with nothing answering it, and the record, which keeps the
-                # call without a result, is not what is edited.
+                # A call no tool message answers is answered here with what
+                # the record says of it (``domain.NO_RESULT``): the vendor
+                # refuses a call with nothing answering it, and the record,
+                # which keeps the call without a result, is not what is edited.
                 messages.append(
                     ModelRequest(
                         parts=[
-                            _returned(ToolResultPart(call.call_id, NOT_RUN, is_error=True), named)
+                            _returned(ToolResultPart(call.call_id, NO_RESULT, is_error=True), named)
                             for call in unanswered[message.id]
                         ]
                     )

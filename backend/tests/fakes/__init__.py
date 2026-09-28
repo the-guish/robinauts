@@ -16,6 +16,7 @@ from fakes.credentials import MemoryCredentialStore
 from fakes.identity_provider import Answer, ScriptedIdentityProvider, discovery_for
 from fakes.ids import CountingIdSource
 from fakes.secrets import LENGTH, CountingSecretSource, StuntedSecretSource
+from fakes.tool_servers import MemoryToolServers
 
 __all__ = [
     "LENGTH",
@@ -28,12 +29,13 @@ __all__ = [
     "Gate",
     "MemoryConversationStore",
     "MemoryCredentialStore",
+    "MemoryToolServers",
     "Raise",
     "ScriptedAgent",
     "ScriptedIdentityProvider",
     "Step",
     "StuntedSecretSource",
-    "discovery_for",
     "calls",
+    "discovery_for",
     "says",
 ]

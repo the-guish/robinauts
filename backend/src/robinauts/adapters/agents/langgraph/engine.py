@@ -125,7 +125,7 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 
 from robinauts.adapters.config_file import ProviderKeys
 from robinauts.domain import (
-    NOT_RUN,
+    NO_RESULT,
     AgentDefinition,
     AnswerCompleted,
     AnswerReasoningDelta,
@@ -702,7 +702,7 @@ def _messages(
     call and whether it went wrong -- which langchain-anthropic folds into the
     one ``user`` turn of ``tool_result`` blocks the vendor wants back. An
     answer whose calls no tool message answers is followed by one error
-    result per call saying it was not run (``domain.NOT_RUN``).
+    result per call saying no result of it was recorded (``domain.NO_RESULT``).
     """
     messages: list[BaseMessage] = []
     if agent.system_prompt:
@@ -713,12 +713,12 @@ def _messages(
             messages.append(HumanMessage(message.text))
         elif message.role is Role.ASSISTANT:
             messages.append(_assistant(message, model_id))
-            # A call no tool message answers is shown as one that was not
-            # run (``domain.NOT_RUN``): the vendor refuses a call with nothing
-            # answering it, and the record, which keeps the call without a
-            # result, is not what is edited.
+            # A call no tool message answers is answered here with what the
+            # record says of it (``domain.NO_RESULT``): the vendor refuses a
+            # call with nothing answering it, and the record, which keeps the
+            # call without a result, is not what is edited.
             messages.extend(
-                _tool_message(call.call_id, NOT_RUN, is_error=True)
+                _tool_message(call.call_id, NO_RESULT, is_error=True)
                 for call in unanswered.get(message.id, ())
             )
         else:

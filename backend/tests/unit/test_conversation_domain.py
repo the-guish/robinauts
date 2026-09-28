@@ -58,6 +58,7 @@ from robinauts.domain import (
     is_config_id,
     is_tool_name,
     kept_parts,
+    unanswered_calls,
 )
 
 NAIVE = datetime(2026, 9, 21, 9, 0)
@@ -654,3 +655,82 @@ def test_the_records_are_frozen() -> None:
         provenance().model = "haiku"  # type: ignore[misc]
     with pytest.raises(FrozenInstanceError):
         conversation().title = "renamed"  # type: ignore[misc]
+
+
+# --- the calls of a path no tool message answers --------------------------------
+
+
+def calling(parent: Message, *call_ids: str, seconds: float) -> Message:
+    """An answer that made those calls."""
+    return answer(
+        parent,
+        seconds=seconds,
+        parts=tuple(
+            ToolCallPart(call_id, "github__search", {"q": call_id}) for call_id in call_ids
+        ),
+    )
+
+
+def answering(parent: Message, *call_ids: str) -> Message:
+    """The tool message answering that answer's calls."""
+    return Message(
+        id=uuid.uuid4(),
+        conversation_id=parent.conversation_id,
+        parent_id=parent.id,
+        role=Role.TOOL,
+        parts=tuple(ToolResultPart(call_id, "found") for call_id in call_ids),
+        created_at=parent.created_at,
+    )
+
+
+def test_a_calls_answer_is_answered_when_the_next_message_on_the_path_is_a_tool_message() -> None:
+    asked = question("look", seconds=0)
+    first = calling(asked, "toolu_01", "toolu_02", seconds=1)
+    results = answering(first, "toolu_01", "toolu_02")
+    second = calling(results, "toolu_03", seconds=2)
+    more = answering(second, "toolu_03")
+    done = answer(more, "Found.", seconds=3)
+    again = question("thanks", parent=done, seconds=4)
+
+    assert unanswered_calls((asked, first, results, second, more, done, again)) == {}
+
+
+def test_a_calls_answer_followed_by_anything_else_is_unanswered_by_every_call() -> None:
+    asked = question("look", seconds=0)
+    stopped = calling(asked, "toolu_01", "toolu_02", seconds=1)
+    again = question("and now?", parent=stopped, seconds=2)
+
+    found = unanswered_calls((asked, stopped, again))
+
+    assert found == {stopped.id: stopped.tool_calls}
+    assert [call.call_id for call in found[stopped.id]] == ["toolu_01", "toolu_02"]
+
+
+def test_an_earlier_unanswered_round_stays_unanswered_however_the_path_goes_on() -> None:
+    asked = question("look", seconds=0)
+    stopped = calling(asked, "toolu_01", seconds=1)
+    again = question("and now?", parent=stopped, seconds=2)
+    later = calling(again, "toolu_02", seconds=3)
+    results = answering(later, "toolu_02")
+    done = answer(results, "Found.", seconds=4)
+
+    assert unanswered_calls((asked, stopped, again, later, results, done)) == {
+        stopped.id: stopped.tool_calls
+    }
+
+
+def test_an_answer_that_made_no_calls_and_a_path_with_none_are_not_in_it() -> None:
+    asked = question("hi", seconds=0)
+    replied = answer(asked, "Hello.", seconds=1)
+
+    assert unanswered_calls((asked, replied)) == {}
+    assert unanswered_calls(()) == {}
+
+
+def test_a_calls_answer_that_ends_the_path_is_unanswered() -> None:
+    # The port forbids the shape (a path ends in the message being answered),
+    # and the one vendor-valid history for it is still "no result yet".
+    asked = question("look", seconds=0)
+    last = calling(asked, "toolu_01", seconds=1)
+
+    assert unanswered_calls((asked, last)) == {last.id: last.tool_calls}

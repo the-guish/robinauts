@@ -65,7 +65,10 @@ provider's text into content this format can hold — `clean_text`, which
 repairs it, and `text_parts`, which splits what is longer than one part. The
 rule about what the format may hold and the operations that satisfy it are one
 subject, and their callers are the agent adapters, which may import domain and
-must not import core. Anything more belongs in core.
+must not import core. For the same reason — its callers are the agent adapters
+— one rule over a path is here too: `unanswered_calls`, which calls of a
+visible path no tool message answers, with `NO_RESULT`, what a model is told
+of one (`domain.tools`). Anything more belongs in core.
 
 Depends on nothing inside robinauts. Everything may depend on it.
 

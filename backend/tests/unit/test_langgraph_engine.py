@@ -74,7 +74,7 @@ from robinauts.core import check_engine_events
 from robinauts.domain import (
     KINDS_WITH_BASE_URL,
     MAX_EXTRAS_BYTES,
-    NOT_RUN,
+    NO_RESULT,
     AgentDefinition,
     AnswerCompleted,
     AnswerReasoningDelta,
@@ -200,9 +200,12 @@ class ScriptedChatModel(BaseChatModel):
     ) -> ChatResult:
         """The whole answer at once: what a model that does not stream does.
 
-        A plain ``AIMessage`` and not a chunk, which is what the real client's
-        ``_generate`` returns and what LangGraph then passes through its
-        message stream unchanged.
+        A plain ``AIMessage`` and not a chunk -- the same **type** the real
+        client's ``_generate`` returns, which is what LangGraph passes through
+        its message stream unchanged. Its content is the merged chunks', with
+        the stream's own keys still in it, where the real client's carries the
+        parsed blocks; the engine reads ``tool_calls``, the thinking blocks
+        and ``.text``, which are the same either way.
         """
         self.seen.append(list(messages))
         self.bound.append(kwargs.get("tools"))
@@ -777,11 +780,12 @@ async def test_a_turn_with_tools_in_its_history_is_translated_for_the_model() ->
 
 
 @asyncio_test
-async def test_a_call_no_tool_message_answers_is_shown_as_one_that_was_not_run() -> None:
+async def test_a_call_no_tool_message_answers_is_answered_with_what_the_record_says() -> None:
     """A stopped or failed tool round leaves the calls stored with no result
     under them; a question asked after it hangs under that answer. The vendor
-    refuses a call with nothing answering it, so the model is told the call
-    was not run -- and the record is not touched (``domain.NOT_RUN``)."""
+    refuses a call with nothing answering it, so the model is told no result
+    of the call was recorded -- and the record is not touched
+    (``domain.NO_RESULT``)."""
     model = ScriptedChatModel(chunks=["Sorry, once more."])
     asked, calling_, _ = turn_with_tools()
     again = question("and now?", parent=calling_, seconds=2)
@@ -792,7 +796,7 @@ async def test_a_call_no_tool_message_answers_is_shown_as_one_that_was_not_run()
     assert [message.type for message in heard] == ["system", "human", "ai", "tool", "human"]
     assert (heard[3].tool_call_id, heard[3].content, heard[3].status) == (
         "toolu_01",
-        NOT_RUN,
+        NO_RESULT,
         "error",
     )
     # And the vendor's own mapping takes it: a tool_use answered by an error,
@@ -801,7 +805,7 @@ async def test_a_call_no_tool_message_answers_is_shown_as_one_that_was_not_run()
 
     _system, sent = _format_messages(heard)
     assert sent[2]["content"] == [
-        {"type": "tool_result", "tool_use_id": "toolu_01", "content": NOT_RUN, "is_error": True},
+        {"type": "tool_result", "tool_use_id": "toolu_01", "content": NO_RESULT, "is_error": True},
         {"type": "text", "text": "and now?"},
     ]
 

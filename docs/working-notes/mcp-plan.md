@@ -232,16 +232,26 @@ it here rather than deciding it in passing.
   not raised for this key. The case is left to a live test of a long-thinking
   tool turn, and to the final review if one shows the vendor refusing.
 - **A call no tool message answers** (added by step 4b's review, answered in
-  step 4d, 2026-09-28). A stopped or failed tool round leaves an answer with
-  calls and no tool message under it; the next question hangs under that
-  answer, and the vendor refuses `tool_use` blocks with nothing answering
-  them. Decided: each adapter shows such a call as **one that was not run**
-  -- after that answer, the tool turn the vendor requires, one error result
-  per unanswered call saying `domain.NOT_RUN` -- rather than dropping the
-  calls from what the model sees (the model would then read its own "let me
-  look" as done) or writing a tool message the platform never produced.
-  Nothing is stored: the record keeps the calls without results, and the
-  client shows exactly that. Both adapters, one sentence (ADR 0004).
+  step 4d, reworded by 4d's review, 2026-09-28). A stopped or failed tool
+  round leaves an answer with calls and no tool message under it; the next
+  question hangs under that answer, and the vendor refuses `tool_use` blocks
+  with nothing answering them. Decided: each adapter answers such a call
+  with **what the record says** -- after that answer, the tool turn the
+  vendor requires, one error result per unanswered call saying
+  `domain.NO_RESULT` ("no result of this call was recorded ... whether the
+  call ran is not known") -- rather than dropping the calls from what the
+  model sees (the model would then read its own "let me look" as done),
+  writing a tool message the platform never produced, or saying the call was
+  not run (a batch runs in parallel and the message is written when the last
+  result is in, so a call without one may have run, and a sentence saying
+  otherwise would invite making it again; re-execution is the policy that
+  reads `destructiveHint`, and none does yet). Nothing is stored: the record
+  keeps the calls without results, and the client shows exactly that. Both
+  adapters, one sentence: the adapters' own choice, since ADR 0004 lets
+  them differ. Pydantic AI's framework would synthesize a sentence of its
+  own for a dangling call that is not in the last response; with the
+  adapter's inserted, nothing dangles and the engine's sentence is what the
+  model sees in every shape. The spec sentence is in `runs.md`, "Tools".
 - **Whether `MIT-0` joins the allowed list, and what a runtime, Windows-only
   package with family-only metadata gets** (added in step 2, 2026-09-28).
   The SDK's tree fails the gate on `cffi` (`MIT-0`) and `pywin32` (a licence
@@ -472,7 +482,7 @@ is the first turn that calls one.
    **5c** the MCP adapter over `httpx` with the scripted-server tests and
    the live test; **5d** the loop in `Turns`, the turn events and the
    composition. A step the reviews added sits before them: **4d**, a call
-   no tool message answers shown to the model as one that was not run
+   no tool message answers answered to the model with what the record says
    ("Open").
 
 6. **Wire and interface.** The four AG-UI tool events in `AguiMapper` with
@@ -492,6 +502,10 @@ is the first turn that calls one.
    ("Backlog"); the loop of step 5 is written all the same so that "the
    result arrives later" is the same code path as "the result arrives now",
    and a batch with one result missing is what a suspended run looks like.
+   When it is built: `domain.unanswered_calls` treats a following tool
+   message as answering every call of the answer, which `check_answers_calls`
+   guarantees today; a tree that allows a partial tool message makes it
+   compare call ids.
 
 8. **Demo and the operator's page.** `demo/robinauts.toml.in` with a
    commented `[mcp_servers.*]` table; `agents.md`'s configuration sketch

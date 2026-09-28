@@ -170,7 +170,12 @@ them.
   message ends the run with the calls stored and no result. Nothing is
   re-executed on its own: a retry is a new run from the question, which
   puts the unanswered calls off the visible path
-  ([conversations.md](conversations.md)). The MCP annotations a server
+  ([conversations.md](conversations.md)). When such an answer is on the
+  visible path of a later turn — a question asked after the stop — the
+  model is told, for each call, that no result of it was recorded and
+  whether it ran is not known; that sentence is the adapter's, the same
+  under both engines, and is never stored
+  ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)). The MCP annotations a server
   sends with a tool (`readOnlyHint`, `destructiveHint`, `idempotentHint`)
   are carried on the definition and are what a policy would read — to
   re-execute a safe call after an interruption, or to ask a person before

@@ -557,3 +557,16 @@ class ProviderUnavailableError(SignInError):
 
     def __init__(self, detail: str) -> None:
         super().__init__(SignInErrorCode.PROVIDER_UNAVAILABLE, detail)
+
+
+class ToolServerError(RobinautsError):
+    """A tool server that cannot be reached, or that will not list its tools.
+
+    The one failure of a tool that is the run's and not the model's
+    (``docs/specs/runs.md``, "Tools"): a server answering that a call failed,
+    or a call that ran out of its time, is a result marked as an error and the
+    model is told; a server that is not there at all, or will not say what it
+    offers when the run begins, fails the run, and this names the server. The
+    message names the server by its configured id and says what was tried,
+    and never carries the credential that was sent.
+    """

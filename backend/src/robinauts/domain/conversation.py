@@ -17,7 +17,10 @@ reader sees is one path of it. The rules over a collection of messages --
 which parents are legal, which path is the visible one -- are pure functions
 in ``robinauts.core.conversation_tree``, and the one
 encoding of all this is ``robinauts.core.conversation_format``. A record here
-holds and checks; it does not decide and it does not serialise.
+holds and checks; it does not decide and it does not serialise. The one
+rule over a path that is here, ``unanswered_calls``, is here because its
+callers are the agent adapters, which may import domain and not core
+(``docs/layout.md``).
 
 **Room without building it.** The format names every kind of content the
 specs give a message -- text, image, file, reasoning, tool call, tool result
@@ -530,7 +533,7 @@ def unanswered_calls(history: Sequence[Message]) -> dict[uuid.UUID, tuple[ToolCa
     the answer whose calls it answers and answers all of them, so an answer's
     calls are answered when the next message on the path is a tool message
     and unanswered otherwise. An answer that made no calls is not here. What
-    a model is told of such a call is ``NOT_RUN`` (``robinauts.domain.tools``).
+    a model is told of such a call is ``NO_RESULT`` (``robinauts.domain.tools``).
     """
     found: dict[uuid.UUID, tuple[ToolCallPart, ...]] = {}
     for position, message in enumerate(history):
