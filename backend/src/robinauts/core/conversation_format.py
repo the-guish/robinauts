@@ -87,6 +87,9 @@ from robinauts.domain import (
     MAX_EXTRAS_DEPTH,
     MAX_EXTRAS_NODES,
     MAX_PARTS,
+    ArgumentsDelta,
+    CallCompleted,
+    CallStarted,
     Channel,
     Engine,
     InvalidValueError,
@@ -98,6 +101,7 @@ from robinauts.domain import (
     Provenance,
     ReasoningDelta,
     ReasoningPart,
+    ResultLanded,
     Role,
     RunEnded,
     RunEvent,
@@ -527,6 +531,10 @@ RUN_STARTED = "run_started"
 MESSAGE_STARTED = "message_started"
 TEXT_DELTA = "text_delta"
 REASONING_DELTA = "reasoning_delta"
+CALL_STARTED = "call_started"
+ARGUMENTS_DELTA = "arguments_delta"
+CALL_COMPLETED = "call_completed"
+RESULT_LANDED = "result_landed"
 MESSAGE_COMPLETED = "message_completed"
 RUN_ENDED = "run_ended"
 
@@ -535,6 +543,10 @@ _EVENT_KIND: Mapping[type, str] = {
     MessageStarted: MESSAGE_STARTED,
     TextDelta: TEXT_DELTA,
     ReasoningDelta: REASONING_DELTA,
+    CallStarted: CALL_STARTED,
+    ArgumentsDelta: ARGUMENTS_DELTA,
+    CallCompleted: CALL_COMPLETED,
+    ResultLanded: RESULT_LANDED,
     MessageCompleted: MESSAGE_COMPLETED,
     RunEnded: RUN_ENDED,
 }
@@ -547,6 +559,12 @@ _EVENT_KEYS: Mapping[str, frozenset[str]] = {
     MESSAGE_STARTED: frozenset({"kind", "run_id", "message_id", "parent_id", "role", EXTRAS}),
     TEXT_DELTA: frozenset({"kind", "run_id", "message_id", "text", EXTRAS}),
     REASONING_DELTA: frozenset({"kind", "run_id", "message_id", "text", EXTRAS}),
+    CALL_STARTED: frozenset({"kind", "run_id", "message_id", "call_id", "name", EXTRAS}),
+    ARGUMENTS_DELTA: frozenset({"kind", "run_id", "message_id", "call_id", "text", EXTRAS}),
+    CALL_COMPLETED: frozenset({"kind", "run_id", "message_id", "call_id", EXTRAS}),
+    RESULT_LANDED: frozenset(
+        {"kind", "run_id", "message_id", "call_id", "text", "is_error", EXTRAS}
+    ),
     MESSAGE_COMPLETED: frozenset({"kind", "run_id", "message", EXTRAS}),
     RUN_ENDED: frozenset({"kind", "run_id", "state", "error", EXTRAS}),
 }
@@ -584,6 +602,38 @@ def event_to_data(event: TurnEvent) -> dict[str, Any]:
             "run_id": str(event.run_id),
             "message_id": str(event.message_id),
             "text": event.text,
+        }
+    if isinstance(event, CallStarted):
+        return {
+            "kind": CALL_STARTED,
+            "run_id": str(event.run_id),
+            "message_id": str(event.message_id),
+            "call_id": event.call_id,
+            "name": event.name,
+        }
+    if isinstance(event, ArgumentsDelta):
+        return {
+            "kind": ARGUMENTS_DELTA,
+            "run_id": str(event.run_id),
+            "message_id": str(event.message_id),
+            "call_id": event.call_id,
+            "text": event.text,
+        }
+    if isinstance(event, CallCompleted):
+        return {
+            "kind": CALL_COMPLETED,
+            "run_id": str(event.run_id),
+            "message_id": str(event.message_id),
+            "call_id": event.call_id,
+        }
+    if isinstance(event, ResultLanded):
+        return {
+            "kind": RESULT_LANDED,
+            "run_id": str(event.run_id),
+            "message_id": str(event.message_id),
+            "call_id": event.call_id,
+            "text": event.text,
+            "is_error": event.is_error,
         }
     if isinstance(event, MessageCompleted):
         return {
@@ -645,6 +695,39 @@ def event_from_data(data: object) -> TurnEvent:
             run_id=run_id,
             message_id=_uuid(fields.get("message_id"), "a message's id"),
             text=_required(fields, "text", "a delta's text"),
+        )
+    if kind == CALL_STARTED:
+        return CallStarted(
+            run_id=run_id,
+            message_id=_uuid(fields.get("message_id"), "a message's id"),
+            call_id=_required(fields, "call_id", "a tool call's id"),
+            name=_required(fields, "name", "a tool's name"),
+        )
+    if kind == ARGUMENTS_DELTA:
+        return ArgumentsDelta(
+            run_id=run_id,
+            message_id=_uuid(fields.get("message_id"), "a message's id"),
+            call_id=_required(fields, "call_id", "a tool call's id"),
+            text=_required(fields, "text", "a delta's text"),
+        )
+    if kind == CALL_COMPLETED:
+        return CallCompleted(
+            run_id=run_id,
+            message_id=_uuid(fields.get("message_id"), "a message's id"),
+            call_id=_required(fields, "call_id", "a tool call's id"),
+        )
+    if kind == RESULT_LANDED:
+        is_error = fields.get("is_error", False)
+        if not isinstance(is_error, bool):
+            raise InvalidValueError(
+                f"whether a result is an error is yes or no, not {describe(is_error)}"
+            )
+        return ResultLanded(
+            run_id=run_id,
+            message_id=_uuid(fields.get("message_id"), "a message's id"),
+            call_id=_required(fields, "call_id", "a tool call's id"),
+            text=_required(fields, "text", "a result's text"),
+            is_error=is_error,
         )
     if kind == MESSAGE_COMPLETED:
         return MessageCompleted(run_id=run_id, message=message_from_data(fields.get("message")))

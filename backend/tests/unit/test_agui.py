@@ -41,10 +41,14 @@ from robinauts.api import (
 from robinauts.domain import (
     ENDED_RUN_STATES,
     FAULTED_RUN_STATES,
+    ArgumentsDelta,
+    CallCompleted,
+    CallStarted,
     InvalidValueError,
     MessageCompleted,
     MessageStarted,
     ReasoningDelta,
+    ResultLanded,
     RobinautsError,
     Role,
     RunEnded,
@@ -419,7 +423,18 @@ def test_a_role_with_no_word_in_ag_ui_stops_the_stream_rather_than_crossing(
 # --- the closed set -----------------------------------------------------------
 
 
-def test_every_kind_of_turn_event_is_mapped() -> None:
+NOT_MAPPED_YET: dict[type, TurnEvent] = {
+    CallStarted: CallStarted(run_id=RUN, message_id=MESSAGE, call_id="toolu_01", name="x__y"),
+    ArgumentsDelta: ArgumentsDelta(run_id=RUN, message_id=MESSAGE, call_id="toolu_01", text="{}"),
+    CallCompleted: CallCompleted(run_id=RUN, message_id=MESSAGE, call_id="toolu_01"),
+    ResultLanded: ResultLanded(run_id=RUN, message_id=MESSAGE, call_id="toolu_01", text="ok"),
+}
+"""The tool events a run publishes, which the wire maps in the step that follows
+(``docs/working-notes/mcp-plan.md``, step 6): until then the mapper refuses them
+loudly, as a mistake of ours, rather than sending something it invented."""
+
+
+def test_every_kind_of_turn_event_is_mapped_or_named_as_not_yet() -> None:
     """The platform's events are a closed set, and this is the whole of it."""
     one = mapper()
     sample: dict[type, TurnEvent] = {
@@ -431,9 +446,12 @@ def test_every_kind_of_turn_event_is_mapped() -> None:
         RunEnded: RunEnded(run_id=RUN, state=RunState.FINISHED),
     }
 
-    assert set(sample) == set(get_args(TurnEvent))
+    assert set(sample) | set(NOT_MAPPED_YET) == set(get_args(TurnEvent))
     for event in sample.values():
         assert one.of(RunEvent(run_id=RUN, seq=1, event=event)) != ()
+    for event in NOT_MAPPED_YET.values():
+        with pytest.raises(RobinautsError, match=UNMAPPED):
+            mapper().of(RunEvent(run_id=RUN, seq=1, event=event))
 
 
 def test_an_event_kind_nobody_mapped_is_a_mistake_of_ours() -> None:

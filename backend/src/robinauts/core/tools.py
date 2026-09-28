@@ -32,6 +32,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from robinauts.domain import (
+    MAX_TOOL_NAME_CHARS,
     TOOL_NAME_SEPARATOR,
     ListedTool,
     ToolDefinition,
@@ -70,7 +71,7 @@ def named_tools(
                     server.id,
                     tool.name,
                     f"its full name {full!r} is not one the vendors take: letters, digits,"
-                    f" '_' and '-', at most 64 of them",
+                    f" '_' and '-', at most {MAX_TOOL_NAME_CHARS} of them",
                 )
             )
         elif tool.input_schema.get("type") != "object":
@@ -100,7 +101,7 @@ def tools_for_run(
 ) -> tuple[tuple[ToolDefinition, ...], tuple[LeftOut, ...]]:
     """The one list a run is handed: every server's tools, named, sorted by full name.
 
-    ``listed`` is what each server answered ``tools/list`` with, by server id;
+    ``listed`` is what each server listed, by server id;
     a server the agent names that is not in it listed nothing. The prefixes are
     distinct by configuration (``domain.ModelsConfig``), so two full names are
     equal only when one server listed one name twice, and that one is left

@@ -163,8 +163,8 @@ out of a run's list rather than refused at the port.
 class ListedTool:
     """One tool as a server lists it: its own name, what it does, what it takes.
 
-    What the ``ToolServers`` port hands back for ``tools/list``, before the
-    platform has named it: ``name`` is the server's, one line of text; the
+    What the ``ToolServers`` port hands back for what a server lists, before
+    the platform has named it: ``name`` is the server's, one line of text; the
     rest is what ``ToolDefinition`` carries, bounded the same way, because it
     is the same attacker-influenced text on its way to a prompt. Copies of the
     two mappings are kept; nothing edits them.
@@ -196,8 +196,8 @@ class ListedTool:
 class ToolResult:
     """What one call came back with: text, and whether the server calls it a failure.
 
-    The port's answer to ``tools/call`` (``robinauts.ports.ToolServers``),
-    before the platform has stored it as the ``ToolResultPart`` answering the
+    The port's answer to a call (``robinauts.ports.ToolServers``), before
+    the platform has stored it as the ``ToolResultPart`` answering the
     call: the same text and the same flag, bounded the same way
     (``MAX_PART_CHARS``), because that is where it goes. ``is_error`` is the
     server saying the call failed, or a call that ran out of its time; a

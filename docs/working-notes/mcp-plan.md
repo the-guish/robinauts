@@ -305,7 +305,7 @@ carrying a call out and a result back.
   is a pure function here, over the lists the servers answered. `trim_history` leaves core: what
   replaces it is per adapter (below).
 
-- **Ports** (`ports/agents.py`, a new `ports/tools.py`): `run_turn(agent,
+- **Ports** (`ports/agents.py`, a new `ports/tool_servers.py`): `run_turn(agent,
   history, tools, *, model)` -- the full visible path, never trimmed above
   the port, and the `ToolDefinition`s the run has. A new port,
   `ToolServers`: list the tools of a server, call one with arguments under a

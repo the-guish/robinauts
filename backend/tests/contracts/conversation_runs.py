@@ -57,6 +57,7 @@ from conversations import (
 )
 from robinauts.core import (
     check_event_order,
+    message_from_data,
     message_to_data,
     run_event_from_stored,
     run_event_to_data,
@@ -73,6 +74,7 @@ from robinauts.domain import (
     MessageStarted,
     NotFoundError,
     PositionTakenError,
+    Role,
     Run,
     RunAlreadyActiveError,
     RunEnded,
@@ -81,6 +83,9 @@ from robinauts.domain import (
     RunStarted,
     RunState,
     TextDelta,
+    TextPart,
+    ToolCallPart,
+    ToolResultPart,
 )
 from robinauts.ports import MAX_PAGE, MAX_SWEPT, ConversationStore, Document, Snapshot
 
@@ -720,6 +725,58 @@ class ConversationRunsContract(ConversationStoreContract):
             found = await store.conversation_by_id(CONVERSATION)
             assert found is not None
             assert found.updated_at == at(3)
+
+    @asyncio_test
+    async def test_a_tool_message_completes_as_an_answer_does_and_reads_back(self) -> None:
+        """The one tool message of a batch is stored with the event that says so,
+        under the answer that made the calls, and carries no provenance: it is
+        the platform's own (``docs/specs/runs.md``, "Tools")."""
+        async with self.opened() as store:
+            asked = await _begun(store)
+            calling = answer(
+                asked,
+                seconds=3,
+                parts=(TextPart("Let me look."), ToolCallPart("toolu_01", "github__search", {})),
+            )
+            await store.complete_message(
+                calling,
+                message_to_data(calling),
+                completed(RUN, FIRST_POSITION + 1, calling),
+                run_event_to_data(completed(RUN, FIRST_POSITION + 1, calling)),
+                now=at(3),
+            )
+            results = Message(
+                id=uuid.uuid4(),
+                conversation_id=CONVERSATION,
+                parent_id=calling.id,
+                role=Role.TOOL,
+                parts=(ToolResultPart("toolu_01", "found 3"),),
+                created_at=at(4),
+            )
+            event = completed(RUN, FIRST_POSITION + 2, results)
+
+            await store.complete_message(
+                results, message_to_data(results), event, run_event_to_data(event), now=at(4)
+            )
+
+            documents = await store.messages_of(CONVERSATION)
+            assert [message_from_data(document) for document in documents][-2:] == [
+                calling,
+                results,
+            ]
+            assert await store.last_position(RUN) == FIRST_POSITION + 2
+
+    @asyncio_test
+    async def test_a_question_is_never_completed_by_a_run(self) -> None:
+        async with self.opened() as store:
+            asked = await _begun(store)
+            again = question("and?", parent=asked, seconds=3)
+            event = completed(RUN, FIRST_POSITION + 1, again)
+
+            with pytest.raises(InvalidValueError, match="question"):
+                await store.complete_message(
+                    again, message_to_data(again), event, run_event_to_data(event), now=at(3)
+                )
 
     @asyncio_test
     async def test_a_completion_at_the_wrong_position_stores_neither_half(self) -> None:

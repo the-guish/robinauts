@@ -50,6 +50,9 @@ from robinauts.domain import (
     AnswerReasoningDelta,
     AnswerStarted,
     AnswerTextDelta,
+    ArgumentsDelta,
+    CallCompleted,
+    CallStarted,
     IllegalTransitionError,
     InvalidValueError,
     Message,
@@ -57,6 +60,8 @@ from robinauts.domain import (
     MessageStarted,
     ReasoningDelta,
     ReasoningPart,
+    ResultLanded,
+    Role,
     RunAlreadyActiveError,
     RunEnded,
     RunEvent,
@@ -69,6 +74,7 @@ from robinauts.domain import (
     ToolCallCompleted,
     ToolCallPart,
     ToolCallStarted,
+    ToolResultPart,
     WaitingOnTools,
 )
 
@@ -1061,3 +1067,201 @@ def test_every_prefix_of_a_run_can_be_attached_to_after() -> None:
     # The generator is worth its seed only if it really varies.
     assert seen_states == ENDED_RUN_STATES, seen_states
     assert seen_open > 5, seen_open
+
+
+# --- the order of a run's tool events -------------------------------------------
+
+
+def tool_round(*, streamed: bool = True) -> tuple[Message, Message, Message, tuple[object, ...]]:
+    """A whole run with one tool round: the answer that calls, its results, the answer after."""
+    asked = question()
+    calling = answer(
+        asked,
+        seconds=1,
+        parts=(
+            TextPart("Let me look."),
+            ToolCallPart("toolu_01", "github__search", {"q": "robinauts"}),
+            ToolCallPart("toolu_02", "jira__find", {}),
+        ),
+    )
+    results = Message(
+        id=uuid.uuid4(),
+        conversation_id=CONVERSATION,
+        parent_id=calling.id,
+        role=Role.TOOL,
+        parts=(
+            ToolResultPart("toolu_02", "nothing", is_error=True),
+            ToolResultPart("toolu_01", "found 3"),
+        ),
+        created_at=calling.created_at,
+    )
+    done = answer(results, "Found three.", seconds=2)
+    arguments: tuple[object, ...] = ()
+    if streamed:
+        arguments = (
+            ArgumentsDelta(
+                run_id=RUN, message_id=calling.id, call_id="toolu_01", text='{"q": "robi'
+            ),
+            ArgumentsDelta(run_id=RUN, message_id=calling.id, call_id="toolu_01", text='nauts"}'),
+        )
+    events: tuple[object, ...] = (
+        RunStarted(run_id=RUN, conversation_id=CONVERSATION),
+        MessageStarted(run_id=RUN, message_id=calling.id, parent_id=asked.id),
+        TextDelta(run_id=RUN, message_id=calling.id, text="Let me look."),
+        CallStarted(run_id=RUN, message_id=calling.id, call_id="toolu_01", name="github__search"),
+        *arguments,
+        CallCompleted(run_id=RUN, message_id=calling.id, call_id="toolu_01"),
+        CallStarted(run_id=RUN, message_id=calling.id, call_id="toolu_02", name="jira__find"),
+        CallCompleted(run_id=RUN, message_id=calling.id, call_id="toolu_02"),
+        MessageCompleted(run_id=RUN, message=calling),
+        MessageStarted(run_id=RUN, message_id=results.id, parent_id=calling.id, role=Role.TOOL),
+        ResultLanded(
+            run_id=RUN, message_id=results.id, call_id="toolu_02", text="nothing", is_error=True
+        ),
+        ResultLanded(run_id=RUN, message_id=results.id, call_id="toolu_01", text="found 3"),
+        MessageCompleted(run_id=RUN, message=results),
+        MessageStarted(run_id=RUN, message_id=done.id, parent_id=results.id),
+        TextDelta(run_id=RUN, message_id=done.id, text="Found three."),
+        MessageCompleted(run_id=RUN, message=done),
+        RunEnded(run_id=RUN, state=RunState.FINISHED),
+    )
+    return asked, calling, results, events
+
+
+def test_a_run_with_a_tool_round_is_in_order_streamed_or_not() -> None:
+    asked, _, _, events = tool_round()
+    assert ordered(events, follows=asked.id) is None
+    assert ordered(stream(events), follows=asked.id) is None
+    asked, _, _, events = tool_round(streamed=False)
+    assert ordered(events, follows=asked.id) is None
+
+
+def without(events: tuple[object, ...], *kinds: type) -> tuple[object, ...]:
+    return tuple(event for event in events if not isinstance(event, kinds))
+
+
+def replacing(events: tuple[object, ...], old: object, new: object) -> tuple[object, ...]:
+    return tuple(new if event is old else event for event in events)
+
+
+def test_a_tool_call_is_announced_inside_an_answer_one_at_a_time_and_completed() -> None:
+    asked, calling, _, events = tool_round()
+    first = events[3]
+    assert isinstance(first, CallStarted)
+    # Before the answer is announced.
+    with pytest.raises(InvalidValueError, match="belongs to an answer being produced"):
+        ordered((events[0], first, *events[1:]), follows=asked.id)
+    # Two at once.
+    second = events[7]
+    assert isinstance(second, CallStarted)
+    with pytest.raises(InvalidValueError, match="one tool call at a time"):
+        ordered((*events[:4], second, *events[4:]), follows=asked.id)
+    # Announced twice.
+    with pytest.raises(InvalidValueError, match="announced once per message"):
+        ordered((*events[:7], first, *events[7:]), follows=asked.id)
+    # Never completed before the answer is.
+    last_completed = events[8]
+    assert isinstance(last_completed, CallCompleted)
+    with pytest.raises(InvalidValueError, match="completed before its answer"):
+        ordered(tuple(event for event in events if event is not last_completed), follows=asked.id)
+    # Arguments for a call that is not the one being made.
+    stray = ArgumentsDelta(run_id=RUN, message_id=calling.id, call_id="toolu_02", text="{}")
+    with pytest.raises(InvalidValueError, match="belong to the tool call being made"):
+        ordered((*events[:4], stray, *events[4:]), follows=asked.id)
+
+
+def test_an_answer_completes_holding_exactly_the_calls_it_announced_as_streamed() -> None:
+    asked, calling, _, events = tool_round()
+    completed = events[9]
+    assert isinstance(completed, MessageCompleted)
+    fewer = replace(calling, parts=(TextPart("Let me look."), calling.tool_calls[0]))
+    with pytest.raises(InvalidValueError, match="exactly the calls it announced"):
+        ordered(
+            replacing(events, completed, MessageCompleted(run_id=RUN, message=fewer)),
+            follows=asked.id,
+        )
+    other = replace(
+        calling,
+        parts=(
+            TextPart("Let me look."),
+            ToolCallPart("toolu_01", "github__search", {"q": "x"}),
+            calling.tool_calls[1],
+        ),
+    )
+    with pytest.raises(InvalidValueError, match="are the arguments it completed with"):
+        ordered(
+            replacing(events, completed, MessageCompleted(run_id=RUN, message=other)),
+            follows=asked.id,
+        )
+    # A tool call in a message that was announced as a tool message.
+    asked, calling, results, events = tool_round()
+    inside_results = CallStarted(run_id=RUN, message_id=results.id, call_id="toolu_09", name="x__y")
+    with pytest.raises(InvalidValueError, match="belongs to an answer being produced"):
+        ordered((*events[:11], inside_results, *events[11:]), follows=asked.id)
+
+
+def test_a_result_lands_inside_a_tool_message_once_per_call_of_the_answer_before() -> None:
+    asked, calling, results, events = tool_round()
+    landed = events[11]
+    assert isinstance(landed, ResultLanded)
+    # Inside the answer rather than the tool message.
+    with pytest.raises(InvalidValueError, match="belongs to a tool message being produced"):
+        ordered((*events[:4], landed, *events[4:]), follows=asked.id)
+    # Twice.
+    with pytest.raises(InvalidValueError, match="lands once per call"):
+        ordered((*events[:12], landed, *events[12:]), follows=asked.id)
+    # For no call of the answer before.
+    stray = ResultLanded(run_id=RUN, message_id=results.id, call_id="toolu_09", text="?")
+    with pytest.raises(InvalidValueError, match="answers a call of the answer before it"):
+        ordered((*events[:11], stray, *events[11:]), follows=asked.id)
+    # A tool message under an answer that made no calls.
+    plain = answer(asked, "Hello.", seconds=1)
+    results_under_plain = replace(results, parent_id=plain.id)
+    with pytest.raises(InvalidValueError, match="answers an answer that made calls"):
+        ordered(
+            (
+                RunStarted(run_id=RUN, conversation_id=CONVERSATION),
+                MessageStarted(run_id=RUN, message_id=plain.id, parent_id=asked.id),
+                MessageCompleted(run_id=RUN, message=plain),
+                MessageStarted(
+                    run_id=RUN, message_id=results.id, parent_id=plain.id, role=Role.TOOL
+                ),
+                MessageCompleted(run_id=RUN, message=results_under_plain),
+                RunEnded(run_id=RUN, state=RunState.FINISHED),
+            ),
+            follows=asked.id,
+        )
+
+
+def test_a_tool_message_completes_holding_exactly_the_results_that_landed() -> None:
+    asked, calling, results, events = tool_round()
+    completed = events[13]
+    assert isinstance(completed, MessageCompleted)
+    differing = replace(
+        results,
+        parts=(
+            ToolResultPart("toolu_02", "nothing", is_error=True),
+            ToolResultPart("toolu_01", "found 4"),
+        ),
+    )
+    with pytest.raises(InvalidValueError, match="exactly the results that landed"):
+        ordered(
+            replacing(events, completed, MessageCompleted(run_id=RUN, message=differing)),
+            follows=asked.id,
+        )
+    # One that never landed.
+    with pytest.raises(InvalidValueError, match="exactly the results that landed"):
+        ordered(without(events, ResultLanded), follows=asked.id)
+
+
+def test_a_slice_may_begin_inside_a_tool_round_and_is_checked_from_there() -> None:
+    asked, calling, results, events = tool_round()
+    numbered = stream(events)
+    # Inside the answer's second call: the rest of it, the results, the end.
+    inside = numbered[8:]
+    assert isinstance(inside[0].event, CallCompleted)
+    assert ordered(inside, follows=asked.id, after=numbered[7].seq) is None
+    # Inside the tool message: a result, its completion, the answer after.
+    inside = numbered[12:]
+    assert isinstance(inside[0].event, ResultLanded)
+    assert ordered(inside, follows=calling.id, after=numbered[11].seq) is None

@@ -250,10 +250,12 @@ The decisions behind this, and their order of work, are in
   64 characters of `[a-zA-Z0-9_-]`, and that is the platform's bound on the
   full name; the prefix is bounded at configuration time so that a real name
   fits after it, and a server's tool whose full name still does not fit is
-  left out of that run's list with a line in the log naming the tool. The
-  list is sorted by full name, so two engines and two runs send
-  byte-identical lists. The run records nothing about its tools: the
-  messages already record every call and result by name.
+  left out of that run's list with a line in the log naming the tool — as
+  is one whose input schema is not a JSON Schema object at the top, which
+  both vendors require of a tool's parameters, and one the server listed
+  twice (the second time). The list is sorted by full name, so two engines
+  and two runs send byte-identical lists. The run records nothing about its
+  tools: the messages already record every call and result by name.
 - **The results of one call batch are one tool message.** A model may ask
   for several tools in one answer; the platform runs them in parallel,
   publishes each result as it lands, and stores one `tool` message under the

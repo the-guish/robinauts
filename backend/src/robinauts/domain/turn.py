@@ -204,7 +204,104 @@ class RunEnded:
                 raise InvalidValueError(f"a run that ended {self.state.value} has no error")
 
 
-TurnEvent = RunStarted | MessageStarted | TextDelta | ReasoningDelta | MessageCompleted | RunEnded
+@dataclass(frozen=True, slots=True)
+class CallStarted:
+    """The answer being produced is making a tool call: its id, and the tool's full name.
+
+    Inside an assistant message, after its announcement and before its
+    completion, as the engine announced it (``ToolCallStarted``) and with the
+    platform's facts attached. The id is the vendor's, carried as data, and
+    is what the call's arguments, its completion and its result are matched
+    by -- on the wire, in the events and in the conversation
+    (``docs/specs/wire.md``).
+    """
+
+    run_id: uuid.UUID
+    message_id: uuid.UUID
+    call_id: str
+    name: str
+
+    def __post_init__(self) -> None:
+        checked_uuid(self.run_id, "a run's id")
+        checked_uuid(self.message_id, "a message's id")
+        checked_call_id(self.call_id, "a tool call's id")
+        checked_tool_name(self.name, "a tool's name")
+
+
+@dataclass(frozen=True, slots=True)
+class ArgumentsDelta:
+    """More of the arguments of the call being made, as the model writes them.
+
+    Storable text, like ``TextDelta``, and for the same reason; JSON once the
+    pieces are joined, which the completed message's part is the parsed form
+    of (``docs/specs/runs.md``, "what was published is what was stored").
+    """
+
+    run_id: uuid.UUID
+    message_id: uuid.UUID
+    call_id: str
+    text: str
+
+    def __post_init__(self) -> None:
+        checked_uuid(self.run_id, "a run's id")
+        checked_uuid(self.message_id, "a message's id")
+        checked_call_id(self.call_id, "a tool call's id")
+        checked_text(self.text, "a delta's text", MAX_PART_CHARS)
+
+
+@dataclass(frozen=True, slots=True)
+class CallCompleted:
+    """The call being made is whole; the part it became is in the message that completes."""
+
+    run_id: uuid.UUID
+    message_id: uuid.UUID
+    call_id: str
+
+    def __post_init__(self) -> None:
+        checked_uuid(self.run_id, "a run's id")
+        checked_uuid(self.message_id, "a message's id")
+        checked_call_id(self.call_id, "a tool call's id")
+
+
+@dataclass(frozen=True, slots=True)
+class ResultLanded:
+    """One result of the tool message being produced, as it landed.
+
+    Inside a **tool** message, announced under the answer that made the calls
+    and completed when the last result is in; each names the call it answers,
+    and the completed message holds exactly these, as ``ToolResultPart``s
+    (``docs/specs/runs.md``, "Tools"). Storable text, bounded as a part is.
+    """
+
+    run_id: uuid.UUID
+    message_id: uuid.UUID
+    call_id: str
+    text: str
+    is_error: bool = False
+
+    def __post_init__(self) -> None:
+        checked_uuid(self.run_id, "a run's id")
+        checked_uuid(self.message_id, "a message's id")
+        checked_call_id(self.call_id, "a tool call's id")
+        checked_text(self.text, "a result's text", MAX_PART_CHARS)
+        if not isinstance(self.is_error, bool):
+            raise InvalidValueError(
+                f"whether a result is an error is yes or no, not {describe(self.is_error)}"
+            )
+
+
+TurnEvent = (
+    RunStarted
+    | MessageStarted
+    | TextDelta
+    | ReasoningDelta
+    | CallStarted
+    | ArgumentsDelta
+    | CallCompleted
+    | ResultLanded
+    | MessageCompleted
+    | RunEnded
+)
 """Everything the application publishes for a running turn, as a closed set."""
 
 

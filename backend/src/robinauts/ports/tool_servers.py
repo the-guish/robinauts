@@ -62,7 +62,8 @@ class ToolServers(ABC):
         ``name`` is the server's own name for the tool. A server that says the
         call failed, one that does not answer inside its ``timeout_seconds``,
         and one that does not know the tool all come back as a ``ToolResult``
-        marked as an error whose text says so; ``ToolServerError`` is for a
+        marked as an error whose text says so and names the tool where the
+        tool is what went wrong; ``ToolServerError`` is for a
         server that cannot be reached at all. ``CancelledError`` is let
         through, and what the call holds is released on the way out.
         """

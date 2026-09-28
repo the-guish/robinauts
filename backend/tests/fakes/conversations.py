@@ -665,10 +665,14 @@ class MemoryConversationStore(ConversationStore):
             raise InvalidValueError(
                 f"the event announces message {event.event.message.id}, not {message.id}"
             )
-        if message.role is not Role.ASSISTANT:
+        if message.role is Role.USER:
             raise InvalidValueError(
-                f"a run completes answers; message {message.id} is a {message.role.value} message"
+                f"a run completes answers and tool messages; message {message.id} is a question"
             )
+        if message.role is Role.TOOL:
+            # A tool message is the platform's own and carries no provenance
+            # (``domain.Message``); the run it belongs to is the event's.
+            return
         if message.provenance is None or message.provenance.run_id != run.id:
             raise InvalidValueError(
                 f"message {message.id} does not record run {run.id} as what produced it"

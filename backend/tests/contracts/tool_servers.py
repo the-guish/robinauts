@@ -3,17 +3,19 @@
 
 """What every ``ToolServers`` must do, whatever reaches the servers.
 
-Subclass ``ToolServersContract`` and override the three hooks: ``serving``
-hands the implementation a server that lists those tools and answers those
-calls -- the fake keeps them in a dictionary, the MCP adapter's suite stands a
-scripted server up -- ``gone`` a server nobody answers for, and ``run`` runs a
-coroutine. What is checked is the port's promises
+Subclass ``ToolServersContract`` and override the three required hooks:
+``new_servers`` builds the implementation under test; ``serving`` hands it a
+server that lists those tools and answers those calls -- the fake keeps them
+in a dictionary, the MCP adapter's suite stands a scripted server up -- and
+``gone`` a server nobody answers for. ``run`` runs a coroutine and may be left
+alone. What is checked is the port's promises
 (``robinauts.ports.tool_servers``): the tools come back as listed, under the
 server's names; a call comes back as its result, an error marked as one; a
-tool the server does not know is an error result and not a failure; a server
-that cannot be reached is a ``ToolServerError`` naming it, from both
-questions; and a call still waiting when it is cancelled lets go of what it
-holds.
+tool the server does not know is an error result naming the tool, not a
+failure; a server that cannot be reached is a ``ToolServerError`` naming it,
+from both questions. A call that runs out of its time and one cancelled while
+it waits are each implementation's own to prove, with the clock or the gate
+it has (``tests/unit/test_fake_tool_servers.py``, ``test_mcp_adapter.py``).
 """
 
 from __future__ import annotations

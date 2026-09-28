@@ -21,11 +21,15 @@ from robinauts.core import conversation_format as format_module
 from robinauts.domain import (
     FIRST_POSITION,
     FORMAT_VERSION,
+    ArgumentsDelta,
+    CallCompleted,
+    CallStarted,
     InvalidValueError,
     Message,
     MessageCompleted,
     MessageStarted,
     ReasoningDelta,
+    ResultLanded,
     Role,
     RunEnded,
     RunEvent,
@@ -67,6 +71,11 @@ def every_event() -> list[TurnEvent]:
         MessageStarted(run_id=RUN, message_id=MESSAGE, parent_id=PARENT, role=Role.TOOL),
         TextDelta(run_id=RUN, message_id=MESSAGE, text="Some "),
         ReasoningDelta(run_id=RUN, message_id=MESSAGE, text="thinking"),
+        CallStarted(run_id=RUN, message_id=MESSAGE, call_id="toolu_01", name="github__search"),
+        ArgumentsDelta(run_id=RUN, message_id=MESSAGE, call_id="toolu_01", text='{"q": '),
+        CallCompleted(run_id=RUN, message_id=MESSAGE, call_id="toolu_01"),
+        ResultLanded(run_id=RUN, message_id=MESSAGE, call_id="toolu_01", text="found"),
+        ResultLanded(run_id=RUN, message_id=MESSAGE, call_id="toolu_02", text="", is_error=True),
         MessageCompleted(run_id=RUN, message=said),
         MessageCompleted(run_id=RUN, message=calling),
         MessageCompleted(run_id=RUN, message=results),
@@ -284,3 +293,16 @@ def test_only_the_formats_own_events_are_encoded() -> None:
             event_to_data(value)
         with pytest.raises(InvalidValueError):
             run_event_to_data(value)
+
+
+def test_a_result_is_written_with_its_flag_and_a_flag_that_is_not_yes_or_no_is_refused() -> None:
+    written = event_to_data(
+        ResultLanded(run_id=RUN, message_id=MESSAGE, call_id="toolu_01", text="found")
+    )
+    assert written["is_error"] is False
+    with pytest.raises(InvalidValueError, match="yes or no"):
+        event_from_data({**written, "is_error": "no"})
+    # Present, not merely allowed, as every key of a document is.
+    del written["is_error"]
+    with pytest.raises(InvalidValueError, match="is written with is_error"):
+        event_from_data(written)

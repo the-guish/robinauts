@@ -20,11 +20,15 @@ from robinauts.domain import (
     AnswerReasoningDelta,
     AnswerStarted,
     AnswerTextDelta,
+    ArgumentsDelta,
+    CallCompleted,
+    CallStarted,
     EngineEvent,
     InvalidValueError,
     MessageCompleted,
     MessageStarted,
     ReasoningDelta,
+    ResultLanded,
     Role,
     RunEnded,
     RunEvent,
@@ -320,3 +324,40 @@ def test_the_two_vocabularies_do_not_overlap() -> None:
     assert not isinstance(RunStarted(run_id=RUN, conversation_id=CONVERSATION), EngineEvent)
     assert not isinstance(started(), EngineEvent)
     assert not isinstance(AnswerStarted(), TurnEvent)
+
+
+# --- the tool events a run publishes ----------------------------------------------
+
+
+def test_a_call_is_announced_inside_a_message_with_the_vendors_id_and_the_full_name() -> None:
+    made = CallStarted(run_id=RUN, message_id=MESSAGE, call_id="toolu_01", name="github__search")
+
+    assert (made.call_id, made.name) == ("toolu_01", "github__search")
+    with pytest.raises(InvalidValueError):
+        CallStarted(run_id=RUN, message_id=MESSAGE, call_id="", name="github__search")
+    with pytest.raises(InvalidValueError):
+        CallStarted(run_id=RUN, message_id=MESSAGE, call_id="toolu_01", name="has space")
+    with pytest.raises(InvalidValueError):
+        CallStarted(run_id="run", message_id=MESSAGE, call_id="toolu_01", name="x")  # type: ignore[arg-type]
+
+
+def test_arguments_and_results_are_storable_text_bounded_as_a_part_is() -> None:
+    assert (
+        ArgumentsDelta(run_id=RUN, message_id=MESSAGE, call_id="c", text='{"q": ').text == '{"q": '
+    )
+    with pytest.raises(InvalidValueError):
+        ArgumentsDelta(run_id=RUN, message_id=MESSAGE, call_id="c", text="x" * (MAX_PART_CHARS + 1))
+    with pytest.raises(InvalidValueError):
+        ArgumentsDelta(run_id=RUN, message_id=MESSAGE, call_id="c", text="half \ud83d")
+    landed = ResultLanded(run_id=RUN, message_id=MESSAGE, call_id="c", text="found")
+    assert landed.is_error is False
+    with pytest.raises(InvalidValueError, match="yes or no"):
+        ResultLanded(run_id=RUN, message_id=MESSAGE, call_id="c", text="x", is_error="no")  # type: ignore[arg-type]
+    with pytest.raises(InvalidValueError):
+        ResultLanded(run_id=RUN, message_id=MESSAGE, call_id="c", text="x" * (MAX_PART_CHARS + 1))
+
+
+def test_a_call_completes_by_id_alone() -> None:
+    assert CallCompleted(run_id=RUN, message_id=MESSAGE, call_id="toolu_01").call_id == "toolu_01"
+    with pytest.raises(InvalidValueError):
+        CallCompleted(run_id=RUN, message_id=MESSAGE, call_id="two words")

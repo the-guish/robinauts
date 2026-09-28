@@ -51,6 +51,9 @@ from robinauts.domain import (
     AnswerReasoningDelta,
     AnswerStarted,
     AnswerTextDelta,
+    ArgumentsDelta,
+    CallCompleted,
+    CallStarted,
     EngineEvent,
     IllegalTransitionError,
     InvalidValueError,
@@ -58,6 +61,7 @@ from robinauts.domain import (
     MessageCompleted,
     MessageStarted,
     ReasoningDelta,
+    ResultLanded,
     Role,
     Run,
     RunAlreadyActiveError,
@@ -379,16 +383,8 @@ def _check_call(call: ToolCallPart, started: ToolCallStarted, arguments: Sequenc
     if call.call_id != started.call_id or call.name != started.name:
         raise InvalidValueError("a tool call is completed as it was announced")
     joined = clean_text("".join(arguments))
-    if not joined.strip():
-        return
-    try:
-        parsed = json.loads(joined)
-    except (ValueError, RecursionError):
-        raise InvalidValueError("a tool call's streamed arguments are JSON") from None
-    if json.dumps(parsed, sort_keys=True) != json.dumps(call.arguments, sort_keys=True):
-        raise InvalidValueError(
-            "a tool call's streamed arguments are the arguments it completed with"
-        )
+    if joined.strip():
+        _check_arguments(joined, call)
 
 
 @dataclass(frozen=True, slots=True)
@@ -445,6 +441,7 @@ def resume_point(events: Sequence[RunEvent], *, answering: uuid.UUID) -> ResumeP
 # --- the order of a run's events --------------------------------------------
 
 _DELTAS = (TextDelta, ReasoningDelta)
+_CALL_EVENTS = (CallStarted, ArgumentsDelta, CallCompleted)
 
 
 def check_event_order(
@@ -481,6 +478,16 @@ def check_event_order(
       for a message, the deltas joined are the text of the message that
       completed it. A watcher that saw an answer arrive has the answer that
       is in the conversation, character for character;
+    - **tool calls are inside an answer**, one at a time: ``CallStarted``
+      after the answer's announcement, its ``ArgumentsDelta``s, its
+      ``CallCompleted``, then the next; each call id once per message; the
+      answer completes holding exactly the calls it announced, in that order,
+      and the arguments streamed for a call parse to the arguments stored on
+      it (a call that streamed nothing may hold anything);
+    - **results are inside a tool message**, announced under the answer that
+      made the calls: each ``ResultLanded`` names one of that answer's calls,
+      once, and the tool message completes holding exactly the results that
+      landed, text and flag alike (``docs/specs/runs.md``, "Tools");
     - every event names ``run_id``, and, where they are numbered
       (``RunEvent``), the numbers continue from ``after`` by one with no gaps.
 
@@ -526,6 +533,10 @@ def check_event_order(
     # there is nothing here to compare it with.
     began_inside = open_message is not None
     last_completed: uuid.UUID | None = None
+    calls_of_last: tuple[ToolCallPart, ...] | None = None
+    """The calls of the last completed message, when it was seen completed here."""
+    calls = _Calls(lenient=began_inside)
+    results: dict[str, ResultLanded] = {}
     over: RunEnded | None = None
 
     for at, event in enumerate(bare):
@@ -546,8 +557,11 @@ def check_event_order(
             if event.message_id in announced:
                 raise InvalidValueError("a message is announced once")
             _check_chain(event, last_completed, follows, began_inside)
+            if event.role is Role.TOOL and calls_of_last is not None and not calls_of_last:
+                raise InvalidValueError("a tool message answers an answer that made calls")
             announced[event.message_id] = event
             open_id, published = event.message_id, []
+            calls, results = _Calls(), {}
         elif isinstance(event, _DELTAS):
             if open_id is None:
                 if not (may_adopt and not announced and last_completed is None):
@@ -557,6 +571,35 @@ def check_event_order(
                 raise InvalidValueError("a delta belongs to a message being produced")
             if isinstance(event, TextDelta):
                 published.append(event.text)
+        elif isinstance(event, _CALL_EVENTS):
+            if open_id is None:
+                if not (may_adopt and not announced and last_completed is None):
+                    raise InvalidValueError("a tool call belongs to an answer being produced")
+                open_id, may_adopt, began_inside = event.message_id, False, True
+                calls = _Calls(lenient=True)
+            if event.message_id != open_id:
+                raise InvalidValueError("a tool call belongs to an answer being produced")
+            started_as = announced.get(open_id)
+            if started_as is not None and started_as.role is not Role.ASSISTANT:
+                raise InvalidValueError("a tool call belongs to an answer being produced")
+            calls.take(event)
+        elif isinstance(event, ResultLanded):
+            if open_id is None:
+                if not (may_adopt and not announced and last_completed is None):
+                    raise InvalidValueError("a result belongs to a tool message being produced")
+                open_id, may_adopt, began_inside = event.message_id, False, True
+            if event.message_id != open_id:
+                raise InvalidValueError("a result belongs to a tool message being produced")
+            started_as = announced.get(open_id)
+            if started_as is not None and started_as.role is not Role.TOOL:
+                raise InvalidValueError("a result belongs to a tool message being produced")
+            if event.call_id in results:
+                raise InvalidValueError("a result lands once per call")
+            if calls_of_last is not None and event.call_id not in {
+                call.call_id for call in calls_of_last
+            }:
+                raise InvalidValueError("a result answers a call of the answer before it")
+            results[event.call_id] = event
         elif isinstance(event, MessageCompleted):
             message = event.message
             if open_id is None:
@@ -575,7 +618,14 @@ def check_event_order(
                 raise InvalidValueError(
                     "what was published for a message is the message that was stored"
                 )
+            if message.id in announced:
+                calls.check_completed(message)
+                _check_results(message, results)
+            elif message.role is Role.ASSISTANT:
+                calls.check_streamed(message)
+            calls_of_last = message.tool_calls if message.role is Role.ASSISTANT else ()
             last_completed, open_id, published = message.id, None, []
+            calls, results = _Calls(), {}
             completed += 1
 
     if not a_slice and (started != 1 or (over_count != 1 and ended)) and (bare or ended):
@@ -606,6 +656,93 @@ def _check_chain(
     expected = last_completed if last_completed is not None else (None if began_inside else follows)
     if expected is not None and event.parent_id != expected:
         raise InvalidValueError("a run's messages follow one another in a chain")
+
+
+class _Calls:
+    """The tool calls one answer announced so far, and what was streamed for each.
+
+    ``lenient`` is a slice that began inside the answer: a call announced
+    before the cut may be seen here only by its arguments or its completion,
+    and the first such call is taken as the one that was open at the cut.
+    """
+
+    def __init__(self, *, lenient: bool = False) -> None:
+        self.announced: list[CallStarted] = []
+        self.streamed: dict[str, list[str]] = {}
+        self.open: str | None = None
+        self.lenient = lenient
+
+    def take(self, event: CallStarted | ArgumentsDelta | CallCompleted) -> None:
+        if isinstance(event, CallStarted):
+            if self.open is not None:
+                raise InvalidValueError("an answer makes one tool call at a time")
+            if event.call_id in self.streamed:
+                raise InvalidValueError("a tool call is announced once per message")
+            self.announced.append(event)
+            self.streamed[event.call_id] = []
+            self.open = event.call_id
+            return
+        if (
+            self.lenient
+            and self.open is None
+            and not self.announced
+            and event.call_id not in self.streamed
+        ):
+            # The call that was open at the cut, seen for the first time.
+            self.open = event.call_id
+            self.streamed[event.call_id] = []
+        if isinstance(event, ArgumentsDelta):
+            if self.open is None or event.call_id != self.open:
+                raise InvalidValueError("arguments belong to the tool call being made")
+            self.streamed[event.call_id].append(event.text)
+        else:
+            if self.open is None or event.call_id != self.open:
+                raise InvalidValueError("a tool call is completed once, after it was announced")
+            self.open = None
+
+    def check_completed(self, message: Message) -> None:
+        """The completed message holds exactly the calls announced, as streamed."""
+        if self.open is not None:
+            raise InvalidValueError("a tool call is completed before its answer is")
+        made = message.tool_calls
+        if [(call.call_id, call.name) for call in made] != [
+            (event.call_id, event.name) for event in self.announced
+        ]:
+            raise InvalidValueError("an answer completes holding exactly the calls it announced")
+        self.check_streamed(message)
+
+    def check_streamed(self, message: Message) -> None:
+        """What was streamed for each call parses to what was stored on it."""
+        for call in message.tool_calls:
+            joined = clean_text("".join(self.streamed.get(call.call_id, ())))
+            if joined.strip():
+                _check_arguments(joined, call)
+
+
+def _check_arguments(joined: str, call: ToolCallPart) -> None:
+    """The text streamed for a call parses to its stored arguments, as JSON."""
+    try:
+        parsed = json.loads(joined)
+    except (ValueError, RecursionError):
+        raise InvalidValueError("a tool call's streamed arguments are JSON") from None
+    if json.dumps(parsed, sort_keys=True) != json.dumps(call.arguments, sort_keys=True):
+        raise InvalidValueError(
+            "a tool call's streamed arguments are the arguments it completed with"
+        )
+
+
+def _check_results(message: Message, landed: Mapping[str, ResultLanded]) -> None:
+    """A completed tool message holds exactly the results that landed, as they landed."""
+    if message.role is not Role.TOOL:
+        if landed:
+            raise InvalidValueError("a result belongs to a tool message being produced")
+        return
+    stored = {part.call_id: part for part in message.tool_results}
+    if set(stored) != set(landed) or any(
+        (part.text, part.is_error) != (landed[call_id].text, landed[call_id].is_error)
+        for call_id, part in stored.items()
+    ):
+        raise InvalidValueError("a tool message completes holding exactly the results that landed")
 
 
 def _check_completed(

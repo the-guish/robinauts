@@ -54,6 +54,7 @@ from robinauts.domain import (
     SignInError,
     SignInErrorCode,
     StoredDataError,
+    ToolServerError,
     UnknownModelError,
     UnsupportedFormatError,
     reading_stored,
@@ -124,6 +125,9 @@ def test_the_statuses_are_what_they_should_be() -> None:
     assert status_of(StoredDataError("a row of ours")) == 500
     assert status_of(InvalidValueError("no")) == 422
     assert status_of(ConfigError(["no"])) == 500
+    # Somebody else's server, not this deployment: a bad gateway, beside the
+    # identity provider that cannot be reached.
+    assert status_of(ToolServerError("tool server 'x' cannot be reached")) == 502
     assert status_of(SchemaError.missing(expected=1)) == 500
     # A model the request named is a value refused; a conversation's model
     # that is gone is the conversation's state, and neither is "not there".

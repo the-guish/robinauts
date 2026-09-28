@@ -143,6 +143,21 @@ lines; the plan's numbering is kept where a step is named.
   drives it through a scripted Streamable HTTP server over
   `httpx.MockTransport` and subclasses the port's contract;
   `tests/live/test_mcp_live.py` reaches Microsoft Learn's public server.
+- **A run's tool events.** `domain/turn.py`: `CallStarted(run_id,
+  message_id, call_id, name)`, `ArgumentsDelta(..., call_id, text)`,
+  `CallCompleted(..., call_id)` inside an assistant message, and
+  `ResultLanded(run_id, message_id, call_id, text, is_error)` inside a
+  **tool** message announced under the answer that made the calls; stored
+  and sent in the one written form (`core/conversation_format.py`:
+  `call_started`, `arguments_delta`, `call_completed`, `result_landed`);
+  `core.check_event_order` holds a stream to them (one call at a time,
+  each once, the answer completing with exactly the calls it announced and
+  the streamed arguments parsing to the stored ones; a result once per call
+  of the answer before, the tool message completing with exactly the
+  results that landed; a slice may begin inside either). Both stores
+  complete a tool message as they complete an answer (no provenance: it is
+  the platform's own). The wire refuses the four kinds loudly until the
+  step that maps them (`NOT_MAPPED_YET` in `test_agui.py`).
 
 ## Corrections to the plan
 
@@ -443,8 +458,8 @@ the blocks the vendor is sent.
 
 Review: 1 round (read after the commit).
 - High: 0.
-- Medium: 3 (0/3), all for step 5b, which is where the tool list's shape is
-  settled: the framework's Anthropic profile **rewrites a tool's schema**
+- Medium: 3 (2/1) — fixed in 5b: the framework's Anthropic profile
+  **rewrites a tool's schema**
   (`AnthropicJsonSchemaTransformer` strips `title` and `$schema` at every
   depth), so the two engines send different bytes for one `ToolDefinition`
   where the spec promises byte-identical lists -- pin the profile's
@@ -454,15 +469,16 @@ Review: 1 round (read after the commit).
   thinking blocks (`block_binding = drop`, reported through `warnings`),
   which is the "ask the vendor to drop what it can no longer match" of the
   plan's open question happening on this engine and not on the other --
-  document it, correct the plan's entry, decide whether to make it
-  deliberate; a **tool result with empty text** goes to Anthropic as an
+  documented in 5b (pinned off; the framework's retry documented in the
+  engine). Left: a **tool result with empty text** goes to Anthropic as an
   empty `text` block, which the API refuses (langchain-anthropic sends
   `content: ""` for the same record) -- what an empty result is stored as
-  is 5c's, the MCP adapter's, and the live test's.
-- Low: 5 (1/4) — fixed in 4d: the test repeating `BLOCK_NOT_REPLAYED`'s
-  text. Left: the test fixtures put JSON on a call's start and hand whole
-  arguments where the real client never does (the engine handles the real
-  shape, verified by the reviewer's probes; a test mirroring it is 5b's);
+  is the loop's and the live test's (5e).
+- Low: 5 (2/3) — fixed in 4d: the test repeating `BLOCK_NOT_REPLAYED`'s
+  text; fixed in 5b: a test of a call whose start carries no arguments,
+  the real client's shape. Left: the fixtures still put JSON on a call's
+  start elsewhere (the engine handles the real shape, verified by the
+  reviewer's probes);
   "the vendor's server-side tools are refused" overstates it, since the
   real client drops an unrequested `server_tool_use` before the parts
   manager sees it; no test has two results in one tool message or maps a
@@ -610,7 +626,23 @@ tool's schema as the server gave it (tested), the documented framework
 retry on bound thinking blocks, and the test of a call whose start carries
 no arguments (the real client's shape).
 
-Review: pending.
+Review: 1 round (read after the commit; the fixes ride with step 5d).
+- High: 0.
+- Medium: 3 (1/2) — fixed in 5d: the spec's "Tools" names the two other
+  reasons a tool is left out (a schema that is not an object at the top;
+  listed twice). Left for 5e and the final review: the contract suite does
+  not hold an implementation to the timeout, the cancellation or the
+  arguments reaching the server (each implementation proves those with its
+  own clock or gate; the suite's prose now says so); an **empty result
+  text** is a value the domain accepts and the port does not speak for --
+  settled in 5e, where the loop stores results.
+- Low: 8 (6/2) — fixed in 5d: the contract's prose named the wrong hooks
+  and a check it does not make; the vendors' bound is named by its
+  constant; the notes' counts for 4c and the plan's port path; protocol
+  names kept out of the domain's and the port's prose; the unknown-tool
+  wording promised by the port. Left: `named()` still repeats a "name"
+  spelt wholly in upper case, digits and `_` (an AWS access key id has
+  that shape); the schema-pin test compares dicts, not bytes.
 
 Checks: lint; the whole suite against a throwaway PostgreSQL (3137 passed,
 13 skipped).
@@ -668,3 +700,36 @@ what the vendors make of it is for the loop's live turn). No cache in front
 of `tools/list` (the plan's backlog). The client does not resume a stream
 (`Last-Event-ID`) and does not handle a server-to-client request inside a
 stream (it passes it over and the stream ends when the server answers).
+
+### Step 5d — the run's tool events, the order, the stores   (feature/mcp-5d-events)
+
+Summary: what the loop of step 5e publishes and what the wire of step 6a
+maps, settled first and alone so that each of those steps is one thing. A
+tool call is inside the answer that makes it -- `CallStarted` with the
+vendor's id and the tool's full name, `ArgumentsDelta`s as the model writes
+the JSON, `CallCompleted` -- and a result is inside the one tool message of
+the batch, announced under that answer (`MessageStarted` with the `tool`
+role) with a `ResultLanded` per call as it lands and completed when the last
+is in; every one of them has the platform's written form, versioned with the
+rest, and `check_event_order` holds a stream to the order (`runs.md`,
+"Behaviour" and "Tools"): one call at a time, each id once per message, an
+answer completing holding exactly the calls it announced with the streamed
+arguments parsing to the stored ones (as JSON, sharing the engine check's
+rule), a result once per call of the answer before it, a tool message
+completing holding exactly the results that landed, text and flag alike,
+and a tool message never under an answer that made no calls; a slice may
+begin inside a call or inside a tool message, adopting the call that was
+open at the cut. Both stores complete a tool message as they complete an
+answer, with the contract test; a question is still never completed by a
+run. The AG-UI mapper does not map the four kinds yet and refuses them as a
+mistake of ours; the closed-set test names them as not-yet, for step 6a to
+take off the list. The fixes from step 5b's review ride here.
+
+Review: pending.
+
+Checks: lint; the whole suite against a throwaway PostgreSQL (3189 passed,
+13 skipped).
+Not done / to watch: nothing publishes these events yet (5e); the wire does
+not map them (6a); `MessageStarted` for a tool message passes
+`check_supported_role`, and the mapper's `sent_role` still refuses the
+`tool` role until 6a maps a tool message to nothing of its own.
