@@ -1,16 +1,41 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""Remote MCP servers over Streamable HTTP: the one place the protocol is spoken.
+"""The MCP adapter: the one ``ToolServers`` implementation, and the only place MCP is spoken.
 
-The adapter itself arrives with the port it implements
-(``docs/working-notes/mcp-plan.md``, step 5). What is here already is the
-sub-package and the rule about it: **the MCP Python SDK, if it is ever
-adopted, is imported here and nowhere else** (``backend/pyproject.toml``).
-It is not adopted today. Its dependency tree fails the licence gate --
-``cffi`` states ``MIT-0``, which is on no list of ``DEPENDENCIES.md``, and
-``pywin32`` states a licence family and no licence -- so this adapter is a
-client of our own over ``httpx``, for the three calls a client needs:
-``initialize``, ``tools/list`` and ``tools/call`` (``DEPENDENCIES.md``,
-"Known exclusions"; ``docs/specs/agents.md``, "Tools").
+A client of our own over ``httpx`` (``docs/layout.md``): the MCP Python SDK's
+tree fails the licence gate (``DEPENDENCIES.md``, "Known exclusions"), and the
+import contract that would confine the SDK here is written all the same, for
+the day its tree passes. Importing this imports nothing beyond what the
+adapters already have.
 """
+
+from robinauts.adapters.tools.mcp.client import (
+    CLIENT_INFO,
+    CONNECT_TIMEOUT_SECONDS,
+    MAX_PAGES,
+    MAX_RESPONSE_BYTES,
+    PROTOCOL_VERSION,
+    QUIET_CLIENT_LEVEL,
+    QUIET_CLIENT_LOGGERS,
+    READ_TIMEOUT_SECONDS,
+    SUPPORTED_VERSIONS,
+    McpToolServers,
+    open_client,
+    quiet_client_logging,
+)
+
+__all__ = [
+    "CLIENT_INFO",
+    "CONNECT_TIMEOUT_SECONDS",
+    "MAX_PAGES",
+    "MAX_RESPONSE_BYTES",
+    "PROTOCOL_VERSION",
+    "QUIET_CLIENT_LEVEL",
+    "QUIET_CLIENT_LOGGERS",
+    "READ_TIMEOUT_SECONDS",
+    "SUPPORTED_VERSIONS",
+    "McpToolServers",
+    "open_client",
+    "quiet_client_logging",
+]

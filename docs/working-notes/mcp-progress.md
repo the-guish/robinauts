@@ -127,6 +127,22 @@ lines; the plan's numbering is kept where a step is named.
   `MemoryToolServers` (scripted listings, answers, servers that are gone, a
   call that waits on an event); `tests/contracts/tool_servers.py`: the
   port's contract suite, which the MCP adapter's tests subclass next.
+- **The MCP adapter.** `adapters/tools/mcp/client.py`: `McpToolServers`, the
+  port over Streamable HTTP as a client of our own over `httpx` -- one
+  session per question (`initialize`, the `initialized` notification, the
+  one request, `DELETE`), answers read as JSON or as an event stream, the
+  session id and the negotiated protocol revision carried on every request,
+  the credential a `Bearer` or `Basic` header built from `ToolServerSecrets`,
+  no redirects, bodies bounded (`MAX_RESPONSE_BYTES`), listings paged and
+  bounded (`MAX_PAGES`), a call bounded by the server's `timeout_seconds`
+  into an error result, a JSON-RPC error on a call an error result, every
+  other failure a `ToolServerError` naming the server and the exception's
+  type and never the request; a result's text parts joined with notes for
+  the rest and cut to a part's bound; `httpx`'s and `httpcore`'s loggers
+  held at `WARNING` when the adapter is built. `tests/unit/test_mcp_adapter.py`
+  drives it through a scripted Streamable HTTP server over
+  `httpx.MockTransport` and subclasses the port's contract;
+  `tests/live/test_mcp_live.py` reaches Microsoft Learn's public server.
 
 ## Corrections to the plan
 
@@ -603,3 +619,52 @@ Not done / to watch: nothing implements the port against a server yet
 adapter and the live test; `tools_for_run` takes what each server listed
 and is told nothing about a server that failed to list, which the loop
 turns into a failed run before calling it (5d).
+
+### Step 5c — the MCP adapter over httpx   (feature/mcp-5c-adapter)
+
+Summary: the one `ToolServers` implementation, a client of our own for the
+three calls a client needs, since the SDK's tree fails the licence gate.
+Streamable HTTP as the protocol has it: one `POST` per JSON-RPC message to
+the server's URL, `Accept: application/json, text/event-stream`, the answer
+read as a JSON body or as an event stream whose `message` events are read
+past notifications and unrelated messages to the response with our id; a
+session per question -- `initialize` (offering `2025-06-18`, refusing a
+revision this build does not know), the `initialized` notification, the
+request, and a `DELETE` when the server handed out an `Mcp-Session-Id`,
+which goes back on every request with `MCP-Protocol-Version`. Pinned as the
+vendor clients are: the URL is the configuration's, the credential a header
+built from what start-up read, no redirects, no retries, `HTTPS_PROXY`
+obeyed, `httpx`/`httpcore` loggers at `WARNING`. Bounded before parsed: a
+body past `MAX_RESPONSE_BYTES`, a listing past `MAX_PAGES` pages, a
+result's text past a part's bound (cut with a note saying how much). What
+comes back: `tools/list` entries as `ListedTool`s (an entry this build
+cannot carry left out with a line in the log naming the server and the
+entry's position, never its content); `tools/call` results as their text
+parts joined, a note for an image, audio, a resource without text, a link or
+a kind unknown, `structuredContent` as JSON when there is no content,
+`isError` as the flag; a JSON-RPC error on a call (an unknown tool, bad
+arguments) and a call past the server's `timeout_seconds` are error
+results; a server that cannot be reached, refuses the credential (401/403,
+said by status), answers another status, something that is not the protocol
+or an unknown revision, or closes the stream without answering is a
+`ToolServerError` naming the server and the exception's type, never the
+request. The tests script a Streamable HTTP server over `httpx.MockTransport`
+(JSON and event-stream modes, sessions or none, pages, a hanging tool,
+refusals, bare bodies) and subclass the port's contract suite; the live test
+lists and calls Microsoft Learn's public server, which needs no credential.
+
+Review: pending.
+
+Checks: lint; the whole suite against a throwaway PostgreSQL (3165 passed,
+13 skipped); the live test against `https://learn.microsoft.com/api/mcp`
+from this machine (1 passed: a real listing of three tools and a real
+`microsoft_docs_search` call, over an event-stream answer with a session
+id).
+Not done / to watch: a server that takes **no** credential still needs a
+`secret_env` in the configuration and is sent a bearer token it ignores
+(Microsoft Learn does); an `auth = "none"` is a spec question for step 8 or
+the final review. An empty result text is stored as `""` (4c's review, M3:
+what the vendors make of it is for the loop's live turn). No cache in front
+of `tools/list` (the plan's backlog). The client does not resume a stream
+(`Last-Event-ID`) and does not handle a server-to-client request inside a
+stream (it passes it over and the stream ends when the server answers).
