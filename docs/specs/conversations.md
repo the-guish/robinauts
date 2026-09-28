@@ -19,8 +19,17 @@
   user message, another assistant message, or a tool message: one turn may
   produce several messages, and with tools it produces a call and a result
   among them ([runs.md](runs.md)). A tool message's parent is the
-  assistant message that made the call. So a turn is one user message and
-  everything the run produced under it.
+  assistant message that made the calls, and **it answers exactly the calls
+  of its parent, once each**: the results of one call batch are one tool
+  message, holding one result per call, so that the visible path holds
+  every result and no two tool messages ever stand side by side as one
+  replacing the other. A tool message holds nothing but results; a user
+  message holds no tool part; an assistant message holds no result. A
+  stored conversation that breaks any of this is refused where it is read,
+  as every other fault of the tree is. Tool messages are ordinary messages
+  everywhere else: on the visible path, shown to whoever may read the
+  conversation, in both exports, deleted with it. So a turn is one user
+  message and everything the run produced under it.
 - Regenerating replaces the **turn**: the new answer hangs under the user
   message that began it, beside the answer that was produced before, not
   under whatever the old answer happened to follow.
@@ -57,7 +66,7 @@ from it on every turn ([agents.md](agents.md)).
 | image | passed to the model where the model accepts images |
 | file | an attachment, stored in the database |
 | reasoning | the thinking some models emit, kept apart from the answer |
-| tool call, tool result | planned with tools; a call may stand without a result while its run waits |
+| tool call, tool result | a call is a part of the assistant message that made it — the call's id, the tool's full name, its arguments as data; the results of one call batch are one `tool` message under that assistant message, one result per call, each naming the call it answers, its text and whether it is an error. A call may stand without a result while its run waits, or after its run was stopped ([runs.md](runs.md)) |
 
 **The version**
 
@@ -118,18 +127,20 @@ from it on every turn ([agents.md](agents.md)).
 **Reasoning**
 
 - It is stored, as its own kind of content.
-- **Not in this version**, which keeps none of it **in a message**: an engine
-  may stream it, every watcher sees it arrive, and what an engine returns as
-  reasoning with a finished answer is dropped rather than refused — an engine
-  is not asked to know what the platform keeps.
-- **It is in the run's events all the same, and only there.** What is
-  published while an answer is being produced is what a watcher re-attaching
-  in the middle of it is replayed ([runs.md](runs.md)), so the reasoning
-  deltas are stored with the other deltas of that run — and nowhere else. No
-  message holds any of it, so it is in no conversation, is never sent back to
-  a model on a later turn, and is in no export; and a run's events are
+- **Not in this version**, which keeps none of it **as content of a
+  message**: an engine may stream it, every watcher sees it arrive, and what
+  an engine returns as reasoning with a finished answer is dropped rather
+  than refused — an engine is not asked to know what the platform keeps. The
+  one thing a message may carry is the vendor's signed blocks, below, which
+  the platform never reads as reasoning.
+- **It is in the run's events all the same, and only there as reasoning.**
+  What is published while an answer is being produced is what a watcher
+  re-attaching in the middle of it is replayed ([runs.md](runs.md)), so the
+  reasoning deltas are stored with the other deltas of that run. No message
+  holds a reasoning part, so nothing shows one, no Markdown export carries
+  one, and no engine is handed one as content; and a run's events are
   removed once nobody can re-attach to them. "Stored nowhere" means "in no
-  message", and the difference is the life of a run's events.
+  message as content", and the difference is the life of a run's events.
 - If dropping it leaves an answer with nothing in it — a model that only
   thought, or that said nothing at all — what is stored is one empty piece
   of text. A message always has content, and a turn where the agent
@@ -139,15 +150,45 @@ from it on every turn ([agents.md](agents.md)).
   conversation.
 - It is included in a JSON export and left out of a Markdown export.
 - It is never sent to a vendor other than the one that produced it.
+- **The vendor's signed blocks are the one exception to "in no message",
+  and they are data to the platform, not reasoning.** On the models both
+  engines reach, thinking is on unless turned off, and an answer that makes
+  a tool call carries signed thinking blocks the vendor requires back,
+  unchanged, when the results go back. They are stored in the assistant
+  message's `extras` under the vendor's key (`extras.anthropic`), which is
+  exactly what that key was reserved for: the engine returns them with the
+  completed answer, the application stores them **unread** and bounded (the
+  64 KiB rule), the adapter that reaches that vendor replays them to it, and
+  every other reader reads past them. A block may carry the text of the
+  thinking the person was shown — that is the vendor's shape, and the
+  signature is over it — so what the platform promises is not that the text
+  is absent but that it is **never read as reasoning**: no reader renders
+  it, no Markdown export writes it, and no other vendor is sent it. A JSON
+  export writes the document whole, `extras` included. The blocks are bound
+  to the model that made them, so a conversation moved to another model
+  loses them and nothing else; where they are also bound to the prompt, the
+  adapter asks the vendor to drop a block it can no longer match rather than
+  refuse the request, since an operator editing an agent's prompt between
+  turns must not break its conversations. What is done with blocks that do
+  not fit the bound is **open**
+  ([working-notes/mcp-plan.md](../working-notes/mcp-plan.md), "Open").
 
 **What crosses a swap of engine or vendor**
 
 - The portable content always crosses: text, images, files, the tool
   history.
 - Vendor-specific extras — signed reasoning, provider message ids, cache
-  hints — are kept with the message as opaque vendor data. They are
-  replayed only to the vendor that produced them, and ignored otherwise.
-- A swap never fails because of them.
+  hints — are kept with the message as opaque vendor data, in `extras`
+  keyed by vendor. They are replayed only by the adapter that reaches the
+  vendor that produced them, and read past otherwise.
+- A swap never fails because of them, and it promises nothing about them:
+  a conversation started on one engine can be continued on the other, which
+  is the claim the swap test makes about the record, and what an adapter's
+  own context policy or a vendor's extras make of it is not part of that
+  claim ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)).
+  There is no intention to swap engines in the middle of a conversation;
+  models may change, and losing context when the model changes is
+  accepted.
 
 **What an answer records**
 
@@ -289,12 +330,12 @@ from it on every turn ([agents.md](agents.md)).
 - Attachments are stored as `bytea`. The maximum size is an operator limit
   ([operations.md](operations.md)). An object store could later sit behind
   the same port.
-- Fitting a long history into a model's context is done above the agent
-  port, so that both engines behave the same. The first version measures
-  characters rather than tokens and drops whole **turns** from the front of
-  the history; what it sends always begins with a user message, so no turn
-  is ever cut in half, and the turn being answered is always whole in it,
-  whatever its size.
+- Fitting a long history into a model's context is each agent adapter's
+  own policy ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)):
+  the application hands the port the full visible path, and what the model
+  sees of it — how much, in what order, with which cache breakpoints — is
+  decided per framework and per vendor. The one invariant kept above the
+  port is that the turn being answered is whole in what the model sees.
 
 ## Open
 

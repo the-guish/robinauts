@@ -14,7 +14,8 @@ depend on the request that started it.
 - A conversation has **at most one active run**. While one is active, a new
   message in that conversation is refused; the person can cancel the run.
 - Everything a run produces is **persisted as it is produced**, not at the
-  end: each message, each tool call, each tool result is appended when it
+  end: each message — an answer with the tool calls it made, and the one
+  tool message of a batch once its last result is in — is appended when it
   is complete. A message still being produced is in the run's events and
   not yet in the conversation. At any moment the conversation in the
   database is consistent and complete up to that moment.
@@ -126,36 +127,63 @@ the engine is handed, so a run keeps it however the conversation's changes
 
 ## Tools
 
-Tool usage is planned ([agents.md](agents.md)); runs are designed for it.
+Tools are in [agents.md](agents.md) ("Tools"); runs were designed for
+them.
 
-- A tool call and its result are messages of the conversation, persisted
-  like any other.
-- **Short tools** run inside the run: the model calls the tool, gets the
-  result and continues, in one execution.
+- A tool call is part of the assistant message that made it, and its result
+  is a message of the conversation, persisted like any other: **the results
+  of one call batch are one tool message** under that assistant message,
+  one result per call ([conversations.md](conversations.md)).
+- **Short tools** run inside the run: the model calls the tools, the
+  platform runs them in parallel, publishes each result as it lands, writes
+  the tool message when the last one is in, and continues the turn from the
+  stored history — in one execution, as many rounds as the turn needs up
+  to `max_tool_rounds`. **The run stays `running` through the loop**; the
+  engine's "waiting on these calls" is how one round ends, and the `waiting`
+  state below is a run that holds no process. Every call has its own
+  timeout; the turn's timeout holds over the whole turn.
 - **Long tools** need nothing more: the run outlives the request, the UI
   shows it as running and re-attaches at will.
 - **Tools that outlast a process** — an external job, a person's approval —
   suspend the run. The conversation holds a tool call without a result, the
   run is `waiting`, and no process holds anything. When the result arrives
-  it is appended as a tool-result message, and execution resumes from the
-  history.
+  it is appended as the tool message, and execution resumes from the
+  history. **Deferred in this iteration**: the loop is written so that "the
+  result arrives later" is the same code path as "the result arrives now",
+  and a batch with one result missing is what a suspended run looks like,
+  but nothing suspends a run yet and no route appends a result
+  ([working-notes/mcp-plan.md](../working-notes/mcp-plan.md), step 7).
 - Resuming is therefore the ordinary stateless turn
   ([ADR 0002](../adr/0002-conversation-persistence.md)): **the conversation
   record is the checkpoint.** It works the same with either engine and
   needs no framework persistence.
 - The agent port's result is either "finished" or "waiting on these tool
   calls". Without tools it is always "finished".
-- A tool declares whether it is safe to execute again. After an
-  interruption, a pending call of a safe tool is re-executed; any other is
-  recorded as failed, and the model is told.
+- **A tool's error is a result, not a failure.** A server answering that
+  the call failed, or a call that ran out of its time, becomes a result
+  marked as an error, and the model is told. Only a server that cannot be
+  reached at all — or that will not list its tools when the run begins —
+  fails the run, naming the server.
+- **A run stopped in the middle of a batch leaves the calls without a
+  result message**, which the format allows: a cancellation, an
+  interruption or a failure between the assistant message and the tool
+  message ends the run with the calls stored and no result. Nothing is
+  re-executed on its own: a retry is a new run from the question, which
+  puts the unanswered calls off the visible path
+  ([conversations.md](conversations.md)). The MCP annotations a server
+  sends with a tool (`readOnlyHint`, `destructiveHint`, `idempotentHint`)
+  are carried on the definition and are what a policy would read — to
+  re-execute a safe call after an interruption, or to ask a person before
+  a destructive one — and no policy reads them yet
+  ([agents.md](agents.md), "Tools").
 
 ## Where the work happens
 
 - In the backend process, as asyncio tasks on the same event loop that
   serves requests. There is no separate worker, queue or scheduler
   (goal 6).
-- Runs are I/O-bound: they wait on model providers and, later, on tool
-  servers. CPU-bound work of our own goes to a thread, never on the loop.
+- Runs are I/O-bound: they wait on model providers and on tool servers.
+  CPU-bound work of our own goes to a thread, never on the loop.
 - The database holds everything that matters — the run, its state, its
   messages, its events. The process only executes.
 - Periodic housekeeping — retention, emptying the trash, expiring sessions,
@@ -191,7 +219,8 @@ Tool usage is planned ([agents.md](agents.md)); runs are designed for it.
 - With several backend processes a run lives in exactly one. A watcher
   connected to another process receives the run's events through the
   database.
-- Every model call, every tool call and every run has a timeout.
+- Every model call, every tool call and every run has a timeout; so has
+  listing a server's tools when a run begins.
 
 ## In the layout
 
@@ -207,8 +236,13 @@ Tool usage is planned ([agents.md](agents.md)); runs are designed for it.
   - the run started, once, before anything else;
   - for each message: it is announced — with its role and the message it
     hangs under, so that a watcher can place it before any of it exists —
-    then the pieces of its text and of its reasoning as they arrive, then
-    the message completed, carrying the message as it was stored;
+    then the pieces of it as they arrive, then the message completed,
+    carrying the message as it was stored. For an **assistant** message
+    the pieces are its text, its reasoning, and its tool calls: each call
+    announced with its id and name, then its arguments as they stream. For
+    a **tool** message — announced with the `tool` role under the assistant
+    message that made the calls — the pieces are the results, each
+    published as it lands, in the order they land;
   - the run ended, once, last, with the state it ended in. Nothing follows
     it.
 
@@ -221,7 +255,11 @@ Tool usage is planned ([agents.md](agents.md)); runs are designed for it.
   A run that ended `finished` completed at least one message and left none
   half-written. One that failed, was cancelled or was interrupted may leave a
   message announced and never completed: that is what a cancellation in the
-  middle of an answer looks like.
+  middle of an answer, or in the middle of a batch of tool calls, looks
+  like. **What was published is what was stored** holds for a tool message
+  too: the results published for it are the results of the message that
+  completed it, and the arguments streamed for a call parse to the
+  arguments stored on it.
 - **Two ports and a watcher**, where this document first said one port. A
   `RunExecutor` carries the work of a run in the background and cancels it,
   and knows nothing else: it is handed a run's id and something to run, and

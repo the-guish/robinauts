@@ -1,7 +1,8 @@
 # Plan: tools over MCP
 
 Written 2026-09-28, replacing the notes of 2026-09-27 that closed the POC
-session. Not a spec: the decisions that are settled, the one deferred,
+session. Progress against it is in [mcp-progress.md](mcp-progress.md). Not a
+spec: the decisions that are settled, the one deferred,
 what the work costs across the codebase, and the order to build it in. The
 wanted behaviour is in [specs/runs.md](../specs/runs.md),
 [specs/agents.md](../specs/agents.md) and
@@ -136,6 +137,12 @@ changes (listed at the end).
    request, since an operator editing an agent's prompt between turns must
    not break its conversations. Turning thinking off when tools are bound
    was the alternative, and it is not allowed on the newest models.
+   **Corrected in step 1's review (2026-09-28)**: the vendor's block carries
+   the text of the thinking with its signature, so "no reasoning text enters
+   a message" is not a promise the platform can make. What it promises is
+   that the blocks are **never read as reasoning** -- stored unread, never
+   rendered, in no Markdown export, sent to no other vendor -- and a JSON
+   export writes the document whole (`specs/conversations.md`).
 
 9. **Four defaults**, settled 2026-09-28 with the above, each small enough
    to change later without a decision on paper.
@@ -202,12 +209,22 @@ What they decide about the design:
 
 ## Open
 
-Nothing, at the time of writing. The questions this plan opened with were
-settled as decisions 5 to 9, except **approval before a tool runs**, which
-was **deferred** rather than decided: it is in the backlog with what the
-deferral costs, and step 7 is where it would be built. A step that meets a
-question this plan does not answer adds it here rather than deciding it in
-passing.
+The questions this plan opened with were settled as decisions 5 to 9, except
+**approval before a tool runs**, which was **deferred** rather than decided:
+it is in the backlog with what the deferral costs, and step 7 is where it
+would be built. A step that meets a question this plan does not answer adds
+it here rather than deciding it in passing.
+
+- **Signed blocks that do not fit `extras`** (added in step 1's review,
+  2026-09-28). `extras` is bounded at 64 KiB written out, and a vendor's
+  thinking blocks carry the thinking's text, so a long-thinking tool turn
+  can produce more than fits. Refusing the message fails every such turn;
+  dropping the blocks breaks the replay the vendor requires. Not decided:
+  step 4's adapters meet it first, and the choice -- a larger bound for this
+  key alone, dropping what does not fit and asking the vendor to drop what it
+  can no longer match, or asking the vendor for the shorter display of its
+  thinking -- is made there, on what the vendor's API allows, and recorded
+  here.
 
 ## The seams, by layer
 
@@ -306,10 +323,12 @@ carrying a call out and a result back.
 
 - **API** (`api/agui.py`, `api/schemas.py`): `AguiMapper` maps a tool-call
   message to `TOOL_CALL_START` / `TOOL_CALL_ARGS` / `TOOL_CALL_END` and each
-  result, as it lands, to `TOOL_CALL_RESULT`, with ids derived from the message id
-  and the position as the reasoning brackets are, the id on the last derived
-  event, and the same re-attach no-ops (a `*_START` for an open call, a
-  `*_END` for a closed one). `sent_role` learns `tool`. The messages a
+  result, as it lands, to `TOOL_CALL_RESULT`, under the call's own id -- the
+  vendor's, stored on the part, which is how a result and a loaded
+  conversation name one call one way (corrected in step 1's review: not
+  derived from the message id and the position as the reasoning brackets
+  are) -- the SSE id on the last derived event, and the same re-attach
+  no-ops (a `*_START` for an open call, a `*_END` for a closed one). `sent_role` learns `tool`. The messages a
   conversation is served with carry the new parts; the OpenAPI snapshot
   changes and is regenerated with `scripts/update-openapi.sh`.
 

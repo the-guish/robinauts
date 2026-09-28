@@ -35,7 +35,8 @@ topic documents listed under [Documents](#documents).
 - The platform sends nothing to the Robinauts project or to any third party:
   no telemetry, no CDN, no hosted service it depends on.
 - The only data that leaves is what a conversation sends to the model
-  providers the operator has configured (goal 5).
+  providers the operator has configured (goal 5), and what a model asks a
+  configured tool server ([agents.md](agents.md), "Tools").
 
 ### 4. Compose over build
 
@@ -124,8 +125,9 @@ topic documents listed under [Documents](#documents).
 ### Nothing phones home
 
 - No telemetry, no CDN, no hosted service, no framework's hosted tracing.
-  The only outbound traffic is to the identity providers at sign-in and to
-  the model providers the operator configured.
+  The only outbound traffic is to the identity providers at sign-in, to the
+  model providers the operator configured, and to the tool servers the
+  operator configured.
 
 ## The system in one page
 
@@ -140,13 +142,19 @@ topic documents listed under [Documents](#documents).
   this project owns, and the chat in the middle; the application opens on
   an empty chat. [frontend.md](frontend.md).
 - **Conversations.** A tree of messages in the platform's own format —
-  text, images, files, reasoning, and later tool calls — portable across
-  engines and vendors; with attachments, search and export. [conversations.md](conversations.md).
+  text, images, files, reasoning, tool calls and their results — portable
+  across engines and vendors; with attachments, search and export.
+  [conversations.md](conversations.md).
 - **Privacy.** Private by default; projects; share links; admins see
   metadata and never content; soft delete, retention, audit.
   [privacy.md](privacy.md).
 - **Agents.** Named agents defined by the operator — a prompt, a model, an
-  engine. Users pick one per conversation. [agents.md](agents.md).
+  engine, and the tool servers it may use. Users pick one per conversation.
+  [agents.md](agents.md).
+- **Tools.** Remote MCP servers the operator configures like model
+  providers; the platform owns the loop — it calls the tool, stores the
+  result and runs the engine again from the record — and no framework ever
+  executes one. [agents.md](agents.md), [runs.md](runs.md).
 - **A turn.** The UI posts a message, which starts a **run**: the
   controller loads the history from the database, calls the agent port,
   publishes the answer as AG-UI events, and appends each new message as it
@@ -166,9 +174,9 @@ topic documents listed under [Documents](#documents).
 Named, not yet specified. Where a decision today would make one of them
 hard, the decision is taken with them in mind.
 
-- Tool usage, over MCP. The first version has none; the agent port, the
-  conversation format, the wire and runs are designed for tool calls of
-  any duration.
+- Tools that suspend a run — a person's approval before a tool runs, an
+  external job whose result arrives later — and per-user credentials to a
+  tool server ([runs.md](runs.md), [agents.md](agents.md)).
 - Memories. When they come they live in the one database and are
   framework-neutral, like conversations.
 - Usage reporting (goal 7).

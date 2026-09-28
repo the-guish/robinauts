@@ -33,6 +33,8 @@ robinauts/
         agents/
           langgraph/          # the ONLY place LangGraph / LangChain are imported
           pydantic_ai/        # the ONLY place Pydantic AI is imported
+        tools/
+          mcp/                # the ONLY place the MCP SDK is imported
       datastore/              # adapters for owned state (the database)
     tests/
 ```
@@ -72,11 +74,12 @@ Depends on nothing inside robinauts. Everything may depend on it.
 Pure functions. No IO, no clock, no randomness, no global state. Every
 function is testable with input and output alone.
 
-Complicated logic must live here: validating a conversation, trimming or
-summarising-selection of a history to fit a context window, aggregating
+Complicated logic must live here: validating a conversation, aggregating
 usage records, matching an identity against the sign-in allow list,
 checking ID token claims (with `now` passed in), config validation from raw
-dicts into domain objects.
+dicts into domain objects, naming and bounding the tools a run is handed.
+**Not** fitting a history into a context window: that is each agent
+adapter's own policy ([ADR 0004](adr/0004-context-management-in-the-adapter.md)).
 
 What it owns for conversations and runs: the **one canonical encoding** of
 the format and its versions (`message_to_data` / `message_from_data`,
@@ -86,8 +89,9 @@ shapes and no more), the rules of the **tree** (`ConversationTree`, built by
 what, paths, which path is the visible thread, where an edit or a
 regeneration attaches), the **run state machine** and "one active run", the
 **two order checks** (what an engine yields, what the application publishes,
-and where a watcher re-attaches), the derived **title**, and **history
-trimming**. Reading our own rows goes through the `*_stored` readers, so a fault in
+and where a watcher re-attaches), the derived **title**, and the **naming of
+a run's tools** (`<prefix>__<name>`, sorted, a name that does not fit left
+out). Reading our own rows goes through the `*_stored` readers, so a fault in
 stored data is never answered as a fault of the request. Their callers are
 the **application**: `datastore` may not import core, so a store is handed
 the document core wrote and hands it back unread.
@@ -138,13 +142,22 @@ There so far:
   one: an id is public and goes in a URL, and a test's id source may be
   predictable where a test's secrets may not.
 
-- `Agent`: run one turn — given the agent's definition and a history whose
-  last message is the user message being answered, already trimmed, stream the
-  engine's own `EngineEvent`s as an **async generator**, which the application
-  closes to release what the engine holds. Failure is reported by raising and
-  a cancellation is let through. The application turns those events into
+- `Agent`: run one turn — given the agent's definition, the full visible
+  path ending in the user message being answered (never trimmed above the
+  port, [ADR 0004](adr/0004-context-management-in-the-adapter.md)) and the
+  tools the run has, stream the engine's own `EngineEvent`s as an **async
+  generator**, which the application closes to release what the engine
+  holds. A turn ends finished, or waiting on the tool calls it yielded; an
+  engine never executes a tool. Failure is reported by raising and a
+  cancellation is let through. The application turns those events into
   messages and `TurnEvent`s: an engine has no ids, no clock and no rows.
   Implementations: LangGraph and Pydantic AI.
+- `ToolServers`: the configured MCP servers, one port over all of them keyed
+  by server id, because the application never holds a client — list the
+  tools of a server, call one with arguments under a timeout, answer with
+  the platform's own result. Its docstring says what the vendor clients'
+  do: no environment fallbacks, nothing phones home, no arguments or
+  results in a log. Implementation: the MCP adapter, over the SDK.
 
 Still to come:
 
@@ -212,8 +225,14 @@ Communication with the external world: the two agent engines, the OIDC
 client, the config reader.
 
 Each agent adapter translates between the platform's conversation format
-and its framework's format, in both directions, on every turn (ADR 0002).
-The frameworks are confined to their own sub-package:
+and its framework's format, in both directions, on every turn (ADR 0002),
+and owns its **context policy** — what of the full path it sends, in what
+order, with which cache breakpoints (ADR 0004). The MCP adapter
+(`adapters/tools/mcp/`) is the one `ToolServers` implementation, pinned as
+the vendor clients are: endpoint from the configuration, credential as a
+header, no retries the application cannot see, `HTTPS_PROXY` obeyed and
+nothing vendor-specific. The frameworks and the SDK are confined to their own
+sub-package:
 
 - only `adapters/agents/langgraph/` may import `langgraph`, `langchain`,
   `langchain_core`, a `langchain_*` provider client, or `langsmith` — which
@@ -224,7 +243,8 @@ The frameworks are confined to their own sub-package:
   `pydantic_graph`, `logfire`, `logfire_api` or `opentelemetry` — the last
   three arrive with the framework, are imported by nothing in the platform,
   and are named in the rule for the same reason `langsmith` is;
-- the two do not import each other.
+- only `adapters/tools/mcp/` may import `mcp`, the MCP Python SDK;
+- the two agent adapters do not import each other.
 
 **How that is enforced**, which matters as much as the rule: the contract's
 source is the whole `robinauts.adapters` **package**, so a module added to
@@ -305,7 +325,8 @@ free of IO. The web framework (FastAPI) is confined to api and
 infrastructure; `ag-ui-protocol` is confined to **api alone**, since nothing
 outside it has an AG-UI event to build — the composition root included. The
 database driver (`asyncpg`) is confined to datastore. Agent frameworks are
-confined to their adapter sub-package. HTTP clients are confined to adapters.
+confined to their adapter sub-package, and so is the MCP SDK. HTTP clients
+are confined to adapters.
 
 ## 4. Responsibilities by concern
 
@@ -318,7 +339,10 @@ confined to their adapter sub-package. HTTP clients are confined to adapters.
 | the derived title | core |
 | reading our own rows: flat records from columns (`domain.reading_stored`) | datastore |
 | reading our own rows: messages and events from their documents | core's `*_stored` readers, called by application |
-| fitting a history into a context window | core, called by application |
+| fitting a history into a context window, prompt caching | adapters (each agent adapter, its own policy; ADR 0004) |
+| the tool loop: fetching the run's tools, calling them, appending the result, running the engine again | application |
+| naming, sorting and bounding a run's tools | core, called by application |
+| talking to tool servers, the credential in use | adapters (the MCP adapter) |
 | the turn and run lifecycle (ADR 0002, specs/runs.md) | application |
 | executing runs in the background | adapters (run executor) |
 | saying that a run has stored something new | adapters (run signals) |
@@ -358,6 +382,7 @@ cover:
   only under `adapters/agents/langgraph`
 - Pydantic AI, `pydantic_graph`, logfire and OpenTelemetry are imported only
   under `adapters/agents/pydantic_ai`
+- the MCP SDK (`mcp`) is imported only under `adapters/tools/mcp`
 - the two agent adapters do not import each other
 
 ## 6. Testing strategy

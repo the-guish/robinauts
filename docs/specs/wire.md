@@ -41,7 +41,21 @@ delivery channel uses ([channels.md](channels.md)).
   `ag-ui-langgraph` nor Pydantic AI's `ag-ui` extra. Every turn goes
   through the agent port, the controller and the platform's persistence,
   and the wire is the same whatever the engine.
-- Tool calls, when they come, already have AG-UI events.
+- **Tool calls are AG-UI's tool events.** A call the model makes is part of
+  the assistant message that made it ([conversations.md](conversations.md)),
+  and is sent as `TOOL_CALL_START` (the call's id, the tool's full name, the
+  assistant message it belongs to), `TOOL_CALL_ARGS` (its arguments as they
+  stream, as JSON text) and `TOOL_CALL_END`; each result of the tool message
+  that answers the batch is sent as `TOOL_CALL_RESULT` as it lands, naming
+  the call it answers. The call's id is the one stored on the part — the
+  vendor's, carried by the engine as data ([agents.md](agents.md)) — so
+  that a result, a re-attach and the conversation loaded afterwards all
+  name one call one way. The re-attach rules below hold for
+  these as for text: a `*_START` for a call the client already holds open
+  and a `*_END` for one it does not are no-ops, and no delta and no result
+  is repeated or lost. **Arguments and results are rendered as data** by the
+  client — text, never Markdown-with-HTML, never a URL turned into a link
+  without the CSP in mind — because both are attacker-influenced text.
 
 ## The endpoints
 
@@ -100,10 +114,12 @@ checks as every other write.
 - The events are AG-UI's: `RUN_STARTED`, `TEXT_MESSAGE_START` /
   `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_END`, the `REASONING_MESSAGE_*`
   events for thinking — under an id derived from the answer's, and never
-  stored ([conversations.md](conversations.md)) — and `RUN_FINISHED` or
-  `RUN_ERROR`. A completed message is a bare `TEXT_MESSAGE_END`: the client
-  built it from the deltas, and one that did not receive every delta reloads
-  the conversation, which is what the store is for.
+  stored ([conversations.md](conversations.md)) — the `TOOL_CALL_*` events
+  above, and `RUN_FINISHED` or `RUN_ERROR`. A completed message is a bare
+  `TEXT_MESSAGE_END`: the client built it from the deltas, and one that did
+  not receive every delta reloads the conversation, which is what the store
+  is for. A completed tool message sends nothing of its own: its results
+  went out one by one, and the client holds them against their calls.
 - **Thinking is bracketed, and the brackets survive a re-attach.** Each
   stretch of thinking inside an answer is a reasoning message of its own,
   under an id derived from the answer's and from the position it opened at, so
@@ -194,10 +210,11 @@ at least ten days before that day, `contributing/js-dependencies.md`):
   of a protocol that is at 1.0. Nothing about the wire turned on the answer,
   which is what the seam was for; if the bridge catches up, taking it is a
   change inside `src/chat/assistant-ui/` and nowhere else.
-- What the client does **not** do, because nothing needs it yet: tool-call
-  events, AG-UI's `STATE_*` and `STEP_*` events, and the `RunAgentInput` a
-  stock AG-UI server is handed -- the profile is ours and the history comes
-  from the store.
+- What the client does **not** do, because nothing needs it yet: AG-UI's
+  `STATE_*` and `STEP_*` events, and the `RunAgentInput` a stock AG-UI
+  server is handed -- the profile is ours and the history comes from the
+  store. It decodes the four tool events, and an older client that does not
+  ignores them, since unknown event types were always ignored.
 - The copy of the styled components is a release behind the registry for the
   same reason — the registry serves files written against the newest
   library, and the cooldown pins the one before it. What that cost is one

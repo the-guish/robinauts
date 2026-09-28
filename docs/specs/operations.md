@@ -24,8 +24,18 @@ What an internal platform team deploys and controls.
   them and giving back what the process holds, not for finishing
   them. Several backend processes may run against
   the one database.
-- Outbound traffic: the identity providers at sign-in, and the model
-  providers the operator configured. Nothing else.
+- Outbound traffic: the identity providers at sign-in, the model providers
+  the operator configured, and the MCP tool servers the operator configured
+  ([agents.md](agents.md)). Nothing else.
+- **What a tool server sees is one identity per deployment.** A server's
+  credential is the operator's, read from the environment variable its table
+  names, so every user's turns act as that service account and the server's
+  own audit log names it and not the person. That is the scope of this
+  iteration and is said in [agents.md](agents.md); an operator who needs the
+  server to know the person waits for per-user credentials. What an agent
+  may do through a server is bounded by the credential's scopes and by the
+  server's own admin gates, and by nothing here: every tool the agent's
+  servers offer runs without asking.
 
 ## Configuration
 
@@ -36,8 +46,9 @@ What an internal platform team deploys and controls.
   name is still read, with a warning at start-up, and is deprecated. If both
   are set, `ROBINAUTS_CONFIG` is what is read and the start-up log says so.
 - What the operator configures: sign-in providers, the allow list and the
-  admins ([sign-in.md](sign-in.md)); model providers, models and agents
-  ([agents.md](agents.md)); limits and retention (below).
+  admins ([sign-in.md](sign-in.md)); model providers, models, agents and
+  the MCP tool servers agents may use ([agents.md](agents.md)); limits and
+  retention (below).
 - The **local development mode** ([sign-in.md](sign-in.md)) may be given the
   same file and reads only its model tables; a file that also holds sign-in
   tables is a start-up refusal there.
@@ -50,9 +61,11 @@ All optional, all set by the operator:
 
 - requests per minute per user;
 - a maximum attachment size;
-- timeouts for a model call, a tool call and a whole run;
-- a maximum context per agent. A history that exceeds it is trimmed above
-  the agent port, so both engines behave the same;
+- timeouts for a model call, a tool call and a whole run; the bound on the
+  tool rounds one turn may take has a default and is not a setting yet;
+- a maximum context per agent. Fitting a history into it is each agent
+  adapter's own policy ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)),
+  so the setting is one an adapter reads;
 - a token budget per user per period, which refuses new turns once spent
   and is shown to the user. It depends on usage recording and arrives with
   it.

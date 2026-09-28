@@ -3,7 +3,8 @@
 ## Agents
 
 - The operator defines named **agents** in the configuration: a name, a
-  system prompt, a **default** model, and the engine that runs it.
+  system prompt, a **default** model, the engine that runs it, and the tool
+  servers it may use ("Tools" below).
 - A user chooses an agent when starting a conversation.
 - Users do not create agents. That is planned.
 - **The model is the conversation's.** When a conversation starts it takes
@@ -35,26 +36,37 @@
 
 - The controller knows one port, `Agent`: given the agent's definition, the
   model the run records (the conversation's when the run began, never read
-  off the agent) and a history, **stream the engine's own events** — an
-  answer has begun, more of its text, more of its thinking, the answer is
-  complete and here are its parts — and end either "finished" or "waiting on
-  these tool calls" ([runs.md](runs.md)). **No usage**: what a turn cost is
+  off the agent), a history and the **tools** the run has, **stream the
+  engine's own events** — an answer has begun, more of its text, more of its
+  thinking, a tool call announced with its id and name, its arguments as
+  they stream, the call complete, the answer is complete and here are its
+  parts — and end either "finished" or "waiting on these tool calls"
+  ([runs.md](runs.md), "Tools" below). **No usage**: what a turn cost is
   reported in the platform's own terms when usage reporting is built, and
   until then an engine's events carry none and no field is written for one.
-- **The history is a path of the conversation ending in the user message being
-  answered**, already trimmed to what the model will take, and the system
-  prompt is the agent's and is not one of the messages. So there is no second
-  argument for "the new message": the message to answer is the last of the
-  history, which is also what a resumed turn and a regenerated one look like,
-  and an engine has one thing to translate rather than two.
+- **The history is the full visible path of the conversation, ending in the
+  user message being answered** — never trimmed above the port — and the
+  system prompt is the agent's and is not one of the messages. So there is no
+  second argument for "the new message": the message to answer is the last
+  of the history, which is also what a resumed turn, a regenerated one and
+  the next round of a tool loop look like, and an engine has one thing to
+  translate rather than two. **What of that path the model sees is the
+  adapter's to decide** ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)):
+  ordering, trimming and other context management, and prompt caching, are
+  per framework and per vendor. The one invariant the contract suite keeps
+  is that the question being answered is whole in what the model sees.
 - **An agent named by a request that this deployment does not have is not
   there**: it is refused exactly as an id that reaches nothing is refused, and
   so is a conversation bound to an agent the operator has since removed.
-- Those events carry no ids, no times and no provenance, because an engine
-  has none: it was given a history and a model. The application turns them
-  into the platform's messages and its own turn events, which is where an id,
-  a parent, a run and a row come from. An engine that had to invent one would
-  be deciding something that is not its to decide.
+- Those events carry no ids of the platform's, no times and no provenance,
+  because an engine has none: it was given a history and a model. The
+  application turns them into the platform's messages and its own turn
+  events, which is where a message's id, a parent, a run and a row come from.
+  An engine that had to invent one would be deciding something that is not
+  its to decide. **A tool call's id is the vendor's**, chosen by the model
+  and carried by the engine as data: it is stored on the call's part, the
+  result names it, the wire sends it as it is, and the adapter replays it to
+  the vendor unchanged ([conversations.md](conversations.md)).
 - Both engines are held to the order of their events by the shared contract
   suite: an answer is announced, then streamed, then completed, one at a
   time.
@@ -106,20 +118,30 @@ runs every turn the same way:
 
 1. Load the conversation's messages from the database, and take the path
    down to the message being answered.
-2. Call the agent port with the agent, the run's model and that history,
-   trimmed; publish the events, which the UI watches ([wire.md](wire.md)).
+2. Fetch the tools of the servers the agent names, once for the run, and
+   call the agent port with the agent, the run's model, that history and
+   those tools; publish the events, which the UI watches
+   ([wire.md](wire.md)).
 3. Translate each new message into the platform's format and append it to
    the conversation as it is produced.
-4. The next turn starts again from step 1, with whichever engine the agent
+4. If the engine ended waiting on tool calls, call the tools, append their
+   results as one tool message, and go back to step 2's call with the
+   history read from the store again — which is also what a resumed run
+   does, so there is one path. Bounded by `max_tool_rounds` and by the
+   turn's timeout ("Tools" below).
+5. The next turn starts again from step 1, with whichever engine the agent
    has at that moment and whichever model the conversation names.
 
 - The LangGraph engine compiles its graph without a checkpointer; the
   Pydantic AI engine passes `message_history`. Neither remembers anything
   between turns.
-- Anything that must behave the same under both engines lives above the
-  port. Fitting a long history into a context window is the first example.
-- No framework persistence is used. Whether to use one for the state of a
-  run is not decided and not planned (ADR 0002).
+- **Each adapter owns its context policy**: what of the full path it sends,
+  in what order, with which cache breakpoints
+  ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)). What must
+  behave the same under both engines is the record — what is stored, and
+  the order of a run's events — and that lives above the port.
+- No framework persistence is used, and none is needed for tools: the
+  conversation record is the checkpoint (ADR 0002).
 
 ## Model providers
 
@@ -176,14 +198,101 @@ runs every turn the same way:
 
 ## Tools
 
-- The first version has no tool usage. It is planned, over MCP. The port,
-  the conversation format and the wire leave room for tool calls and
-  results, and runs are designed for tools of any duration
-  ([runs.md](runs.md)).
-- Until then, a model that **asks** to use a tool fails the turn: an engine
-  raises rather than passing the call over. Everything after the call would
-  belong to an answer that cannot be produced, so a turn that carried on
-  would store half an answer that looks whole.
+An agent can use tools served by **remote MCP servers** the operator
+configured. A model asks for a tool, the platform calls it, the result goes
+back to the model, and the model answers — as many times as the turn needs.
+The decisions behind this, and their order of work, are in
+[working-notes/mcp-plan.md](../working-notes/mcp-plan.md).
+
+- **Servers are remote, over Streamable HTTP, and nothing else.** No stdio,
+  no sidecars, and the platform runs no MCP server of its own. A server is
+  configured the way a model provider is: a `[mcp_servers.<id>]` table with
+  its `url` — checked as every configured endpoint is: https, or http on the
+  loopback interface, no query, no fragment, no credential in it — the
+  **name** of the environment variable its secret is read from, and how the
+  secret is sent: `bearer` (the default, `Authorization: Bearer <secret>`)
+  or `basic` (`Authorization: Basic base64(<user>:<secret>)`, where the
+  table also names the user part and the secret is the token). Nothing about
+  a particular vendor's server is written into the platform: GitHub's and
+  Atlassian's remote servers are the two the shape was designed against, and
+  both are connected with configuration alone (the sketch below).
+- An agent names the servers it may use (`tools`). An agent naming a server
+  the deployment has not got is refused at start-up, as one naming an engine
+  that is not wired is. The secrets are read at start-up by variable name,
+  every missing one reported together, and printed nowhere.
+- **The platform owns the tool loop.** The application calls the tool,
+  appends the result to the conversation and starts the next engine turn
+  from the stored history. Neither framework ever executes a tool, and no
+  framework checkpointer is used: an engine yields a tool call as an event
+  and its turn ends there, "waiting on these calls". LangGraph's `ToolNode`
+  and Pydantic AI's own tool execution and retry prompts stay out. This is
+  ADR 0002 kept — the conversation record is the checkpoint
+  ([runs.md](runs.md)) — and it answers the question ADR 0002 left open for
+  the day tools came ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)).
+- **The tool set is fetched once per run and holds for the run.** When a
+  turn begins the application asks each server the agent names for its
+  tools (`tools/list`), in parallel, and every model call inside that run's
+  loop is handed that one list: a stable list for the whole turn, which is
+  what a cached prefix wants, and the same list under both engines. There is
+  **no cache**: nothing in the process, nothing to size or expire. A server
+  that will not list fails the run before the engine is called and before
+  any answer is written, naming the server; one that refuses the credential is reported the same way, by name,
+  at the first turn of an agent naming it — start-up does not connect to a
+  server. A run taken up again after `waiting` lists again, which is the
+  ordinary stateless turn.
+- **A tool is shown to the model as `<prefix>__<name>`**, where the prefix
+  is the server's — written in its table, and defaulting to the server's id
+  — so that a call is routed to its server from the name alone and two
+  servers offering `search` never collide. Two servers with one prefix are
+  refused at start-up, with the rest of the configuration's problems, and so
+  is a prefix a name could not be told apart from (one holding `__`, or
+  ending in `_`). The vendors bound a tool name at
+  64 characters of `[a-zA-Z0-9_-]`, and that is the platform's bound on the
+  full name; the prefix is bounded at configuration time so that a real name
+  fits after it, and a server's tool whose full name still does not fit is
+  left out of that run's list with a line in the log naming the tool. The
+  list is sorted by full name, so two engines and two runs send
+  byte-identical lists. The run records nothing about its tools: the
+  messages already record every call and result by name.
+- **The results of one call batch are one tool message.** A model may ask
+  for several tools in one answer; the platform runs them in parallel,
+  publishes each result as it lands, and stores one `tool` message under the
+  assistant message that made the calls, holding one result per call, once
+  the last one is in ([conversations.md](conversations.md)).
+- **A tool's error is a result, not a failure.** A server answering
+  `isError`, or one call timing out, becomes a result marked as an error,
+  and the model is told. Only a server that cannot be reached at all fails
+  the run. Result content is text in this iteration: a text result is stored
+  as it is, and a part of another kind (an image, an embedded resource)
+  becomes a text note saying what was left out.
+- **Every call has its own timeout** (`timeout_seconds` on the server, with
+  a default), the turn's timeout holds over the whole turn, and
+  `max_tool_rounds` bounds how many times one turn may go back to the model
+  with results; a run that reaches it fails saying so.
+- **One identity per deployment.** The secret in the operator's
+  configuration means every user's turns act as that principal, and the
+  server's audit log names the service account and not the person. Per-user
+  credentials (OAuth) are a later iteration
+  ([operations.md](operations.md)).
+- **Every tool the agent's servers offer runs without asking.** Approval
+  before a tool runs is deferred: in this iteration the operator's control
+  over what an agent may do is the credential's scopes and the server's own
+  admin gates. The MCP annotations a server sends with a tool
+  (`readOnlyHint`, `destructiveHint` and the rest) are carried on the
+  definition and read by nothing yet; they are what an approval policy would
+  read ([runs.md](runs.md)).
+- **The engine's share**: bind the definitions to the model; yield a call
+  where it used to refuse one — announced with its id and name, its
+  arguments as they stream, then complete — and end the turn "waiting on
+  these calls", which is the port's word for how one round ended and not the
+  run's `waiting` state: the run stays `running` through the loop
+  ([runs.md](runs.md)); translate `tool` messages and the two tool parts in
+  both directions; and
+  carry the vendor's signed reasoning out with the answer and back with the
+  history ([conversations.md](conversations.md), "Reasoning").
+- Tool arguments and results are attacker-influenced text going to a model
+  and to a browser: bounded on the way in like every part, stored as data,
+  rendered as data ([wire.md](wire.md)).
 
 ## Details likely to change
 
@@ -271,6 +380,19 @@ kind = "openai-compatible"
 base_url = "https://gateway.example.com/v1"
 api_key_env = "ROBINAUTS_GATEWAY_KEY"
 ```
+
+  A tool server is a table beside the providers, `[mcp_servers.<id>]`, and
+  an agent names the servers it may use in `tools`: the server's `url`;
+  `auth`, which is `bearer` unless said otherwise, or `basic`, which also
+  names the `user` part and takes the token from the variable; `secret_env`,
+  the **name** of the variable the secret is read from; `prefix`, what the
+  server's tools are shown to the model under, the server's id when left
+  out; and `timeout_seconds`, per tool call and optional. The token's
+  scopes, and the organisation's own policy on tokens, bound what the server
+  will do; nothing here does. A worked example, spelt so that an operator
+  connecting GitHub or Atlassian copies it and changes the url and the
+  variable name, arrives with the parser that reads it
+  ([working-notes/mcp-plan.md](../working-notes/mcp-plan.md), step 5).
 
 ## Known findings
 

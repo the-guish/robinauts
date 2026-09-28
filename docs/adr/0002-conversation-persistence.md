@@ -1,6 +1,8 @@
 # ADR 0002 — Conversation persistence: the platform owns the record, agent frameworks are stateless per turn
 
-- Status: accepted
+- Status: accepted; superseded in part by
+  [ADR 0004](0004-context-management-in-the-adapter.md) (the paragraph on
+  what lives above the agent port, and its trimming example)
 - Date: 2026-09-20
 
 ## Context
@@ -77,6 +79,12 @@ Anything that must behave identically under both frameworks lives above the
 agent port, not inside an adapter. Trimming or summarising a long history
 to fit a context window is the first example.
 
+> The paragraph above is superseded by
+> [ADR 0004](0004-context-management-in-the-adapter.md) (2026-09-28): the
+> application hands the port the full visible path and the tools, and each
+> adapter owns its context policy. What stays above the port is the turn
+> lifecycle and the record.
+
 ### What is not decided
 
 Whether to use a framework's own persistence at all — for example a
@@ -87,7 +95,9 @@ nothing of that kind is needed. It will be evaluated if and when a feature
 requires it.
 
 How such persistence would sit beside the platform's store is part of that
-evaluation and is open. **Dual write** — LangGraph storing its checkpoints
+evaluation and is open. (Tools came on 2026-09-28 and met the question:
+the platform owns the tool loop and needs no framework persistence for it,
+[ADR 0004](0004-context-management-in-the-adapter.md).) **Dual write** — LangGraph storing its checkpoints
 its own way while the platform also writes its own record — is one of the
 options to discuss then. It is neither adopted nor rejected by this ADR. Its
 known difficulty is keeping the two in step: when a user edits, regenerates
