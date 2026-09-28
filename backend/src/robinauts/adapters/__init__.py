@@ -27,8 +27,10 @@ from robinauts.adapters.clock import SystemClock
 from robinauts.adapters.config_file import (
     ProviderKeys,
     SecretLookup,
+    ToolServerSecrets,
     check_api_keys,
     check_client_secrets,
+    check_tool_secrets,
     environment,
     read_toml,
 )
@@ -80,8 +82,10 @@ __all__ = [
     "ProviderKeys",
     "SecretLookup",
     "SystemClock",
+    "ToolServerSecrets",
     "check_api_keys",
     "check_client_secrets",
+    "check_tool_secrets",
     "environment",
     "open_client",
     "read_toml",

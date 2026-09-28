@@ -165,6 +165,70 @@ class ProviderKeys:
         return f"ProviderKeys({', '.join(sorted(self._keys))})"
 
 
+class ToolServerSecrets:
+    """The tool servers' secrets, as this process read them, and nothing else.
+
+    ``ProviderKeys`` for the tool servers, with the same promises and for the
+    same reasons: it **prints nothing**, it holds a **copy**, it is **not
+    iterable**, and the one question it answers is "the secret for this
+    server". It carries the values rather than the lookup they came from,
+    because the promise made at start-up is that the environment was read
+    *then* (``docs/specs/agents.md``, "Tools").
+    """
+
+    __slots__ = ("_secrets",)
+
+    def __init__(self, secrets: Mapping[str, str]) -> None:
+        self._secrets = dict(secrets)
+
+    def secret_for(self, server_id: str) -> str:
+        """The secret of that server; ``ConfigError`` if this process has none.
+
+        Unreachable in a deployment that started, because ``check_tool_secrets``
+        is what lets one start; it is here so that a mistake in the wiring is a
+        refusal naming the server rather than a ``KeyError`` in the middle of
+        somebody's turn.
+        """
+        try:
+            return self._secrets[server_id]
+        except KeyError:
+            raise ConfigError(
+                [f"mcp_servers.{server_id}: no secret was read for this tool server"]
+            ) from None
+
+    def __repr__(self) -> str:
+        """The servers, never the secrets: this is what a log line would hold."""
+        return f"ToolServerSecrets({', '.join(sorted(self._secrets))})"
+
+
+def check_tool_secrets(
+    config: ModelsConfig, *, secret_for: SecretLookup = environment
+) -> ToolServerSecrets:
+    """Read every tool server's secret, refusing if any variable is unset.
+
+    ``check_api_keys`` for the tool servers: **every** missing variable at
+    once, in one ``ConfigError``, only the variable's **name** in the message,
+    and every **declared** server looked at whether or not an agent names it
+    (``docs/specs/agents.md``, "Tools"). Start-up reads the secret and does
+    not connect: whether the server takes it is found out at the first turn
+    of an agent naming it, by name.
+    """
+    problems: list[str] = []
+    secrets: dict[str, str] = {}
+    for server in config.tool_servers.values():
+        secret = secret_for(server.secret_env)
+        if secret:
+            secrets[server.id] = secret
+        else:
+            problems.append(
+                f"mcp_servers.{server.id}: the secret is read from the environment variable"
+                f" {server.secret_env}, which is unset or empty"
+            )
+    if problems:
+        raise ConfigError(problems)
+    return ToolServerSecrets(secrets)
+
+
 def check_api_keys(config: ModelsConfig, *, secret_for: SecretLookup = environment) -> ProviderKeys:
     """Read every model provider's key, refusing if any variable is unset.
 

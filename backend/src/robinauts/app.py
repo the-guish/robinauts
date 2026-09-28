@@ -82,8 +82,10 @@ from robinauts.adapters import (
     ProviderKeys,
     SecretLookup,
     SystemClock,
+    ToolServerSecrets,
     check_api_keys,
     check_client_secrets,
+    check_tool_secrets,
     environment,
     read_toml,
 )
@@ -388,6 +390,7 @@ class Deployment:
         models: Mapping[str, ModelConfig] | None = None,
         engines: Mapping[Engine, Agent] | None = None,
         turn_seconds: float = DEFAULT_TURN_SECONDS,
+        tool_secrets: ToolServerSecrets | None = None,
     ) -> None:
         if (config is None) == (local_development_host is None):
             raise ConfigError([BOTH_MODES] if config is not None else [NO_MODE])
@@ -455,6 +458,14 @@ class Deployment:
         self._clock = clock or SystemClock()
         self._secrets = secrets or OsSecretSource()
         self._secret_for = secret_for
+        self.tool_secrets = tool_secrets if tool_secrets is not None else ToolServerSecrets({})
+        """The tool servers' secrets, as start-up read them (``check_tool_secrets``).
+
+        Read at start-up so that a deployment refuses to start with one
+        unset, naming every one; handed to the adapter that reaches the
+        servers when the tool loop is wired (``docs/working-notes/mcp-plan.md``,
+        step 5). A deployment built without them has none to hand over.
+        """
         self._agents = dict(agents or {})
         """The agents this deployment offers, as the operator defined them.
 
@@ -597,6 +608,11 @@ class Deployment:
             keys = check_api_keys(configured_models, secret_for=secret_for)
         except ConfigError as exc:
             problems.extend(exc.problems)
+        tool_secrets: ToolServerSecrets | None = None
+        try:
+            tool_secrets = check_tool_secrets(configured_models, secret_for=secret_for)
+        except ConfigError as exc:
+            problems.extend(exc.problems)
         if agents is not None and engines is None:
             # Agents handed in, engines not: they will be run by the engines
             # built below, out of the model configuration read above. So each
@@ -644,7 +660,8 @@ class Deployment:
             )
         if problems or (config is None and local_development_host is None):
             raise ConfigError(problems)
-        assert keys is not None  # every failure above is a problem, and we raised
+        # Every failure above is a problem, and we raised.
+        assert keys is not None and tool_secrets is not None
         if not configured_models.agents:
             _log.info(NO_AGENTS)
         return cls(
@@ -669,6 +686,7 @@ class Deployment:
                 else {name: adapter(configured_models, keys) for name, adapter in ENGINES.items()}
             ),
             turn_seconds=turn_seconds,
+            tool_secrets=tool_secrets,
         )
 
     async def open(self) -> SignIn | None:

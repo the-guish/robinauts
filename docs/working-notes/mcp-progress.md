@@ -88,6 +88,26 @@ lines; the plan's numbering is kept where a step is named.
   client it builds) in the same two shapes as the other engine, replaying
   them as `ThinkingPart`s only to the model that made them. Both engines'
   contract tool test runs; nothing above the port changed.
+- **A call no tool message answers is shown as one that was not run** (step
+  4d): `domain.NOT_RUN`, `domain.unanswered_calls`; both adapters add the
+  tool turn the vendor requires after such an answer, never stored.
+- **The configuration knows tool servers.** `domain/agents.py`:
+  `ToolServerConfig(id, url, secret_env, auth, user, prefix, timeout_seconds)`
+  and `ToolServerAuth` (`bearer` | `basic`), `DEFAULT_TOOL_TIMEOUT_SECONDS`
+  (60), `MAX_TOOL_TIMEOUT_SECONDS`, `MAX_BASIC_USER_CHARS`;
+  `AgentDefinition.tools` (server ids, each once); `ModelsConfig.tool_servers`
+  with the whole-configuration proof (an agent's servers exist; no two
+  servers share a prefix). `domain/tools.py`: `TOOL_NAME_SEPARATOR` (`__`),
+  `MAX_TOOL_PREFIX_CHARS` (32), `is_tool_prefix` / `checked_tool_prefix` (the
+  vendors' charset, no `__`, not ending in `_`). `core/models_config.py`
+  reads `[mcp_servers.<id>]` (`TOOL_SERVER_KEYS`) and an agent's `tools`,
+  every problem together; `mcp_servers` is one of `MODEL_KEYS`.
+  `adapters/config_file.py`: `check_tool_secrets` reads every server's
+  secret at start-up into a `ToolServerSecrets` that prints nothing;
+  `app.py` gathers its problems with the rest and holds the result
+  (`Deployment.tool_secrets`) for the adapter to come. `agents.md` carries
+  the sketch (one `bearer` server, one `basic`, an agent naming both), read
+  by `tests/integration/test_config_file.py`.
 
 ## Corrections to the plan
 
@@ -386,7 +406,34 @@ redacted block, whole arguments, the vendor's name), and one test maps the
 translated history through the framework's real Anthropic mapping to check
 the blocks the vendor is sent.
 
-Review: pending.
+Review: 1 round (read after the commit).
+- High: 0.
+- Medium: 3 (0/3), all for step 5b, which is where the tool list's shape is
+  settled: the framework's Anthropic profile **rewrites a tool's schema**
+  (`AnthropicJsonSchemaTransformer` strips `title` and `$schema` at every
+  depth), so the two engines send different bytes for one `ToolDefinition`
+  where the spec promises byte-identical lists -- pin the profile's
+  transformer off in `chat_model` and assert the wire schema, or say what
+  is stripped; the framework **retries once** on Anthropic's "block is
+  bound to a different conversation" refusal for the models that bind
+  thinking blocks (`block_binding = drop`, reported through `warnings`),
+  which is the "ask the vendor to drop what it can no longer match" of the
+  plan's open question happening on this engine and not on the other --
+  document it, correct the plan's entry, decide whether to make it
+  deliberate; a **tool result with empty text** goes to Anthropic as an
+  empty `text` block, which the API refuses (langchain-anthropic sends
+  `content: ""` for the same record) -- what an empty result is stored as
+  is 5c's, the MCP adapter's, and the live test's.
+- Low: 5 (1/4) — fixed in 4d: the test repeating `BLOCK_NOT_REPLAYED`'s
+  text. Left: the test fixtures put JSON on a call's start and hand whole
+  arguments where the real client never does (the engine handles the real
+  shape, verified by the reviewer's probes; a test mirroring it is 5b's);
+  "the vendor's server-side tools are refused" overstates it, since the
+  real client drops an unrequested `server_tool_use` before the parts
+  manager sees it; no test has two results in one tool message or maps a
+  calls-only answer through the vendor mapping; the "next part begins" and
+  "answer ends" completions are fallbacks the framework's part-end events
+  make unreachable.
 
 Checks: lint; the whole suite against a throwaway PostgreSQL (3050 passed,
 13 skipped).
@@ -428,3 +475,40 @@ Not done / to watch: the choice (an error result saying "not run" rather
 than dropping the calls from what the model sees) is recorded in the plan;
 whether Anthropic takes a history with tool parts on a run handed no
 `tools` at all is still unverified (4b's review, M4).
+
+### Step 5a — the configuration knows tool servers   (feature/mcp-5a-config)
+
+Summary: `[mcp_servers.<id>]` and an agent's `tools`, as `agents.md`
+describes them, from the file into the records. A server is its `url`
+(checked as every configured endpoint is; the value is never echoed, since
+it may hold the very credential the check refuses), `secret_env` (the
+**name** of the variable; a secret pasted there is refused), `auth`
+(`bearer` by default, or `basic`, which names the `user` part and refuses
+a `:` in it; a `user` under `bearer` is refused), `prefix` (the vendors'
+charset, at most 32 characters, no `__`, not ending in `_`; the server's
+id when left out, and an id that would not do as a prefix -- a long one, or
+one holding `__` -- must have one written) and `timeout_seconds` (per tool
+call, 60 by default, bounded as a model's is). An agent's `tools` is a list
+of configured server ids, each once; two servers under one prefix are
+refused by both names; a server with a mistake in it does not bury it under
+the agents naming it (the declared table is what `tools` is checked
+against, as a model's provider is). The records hold the same rules
+(`ToolServerConfig`, `AgentDefinition.tools`, `ModelsConfig.tool_servers`),
+so a caller building one by hand meets them too. Start-up reads every
+server's secret by variable name into `ToolServerSecrets` (a carrier that
+prints nothing, `ProviderKeys`' twin), reports every unset one together
+with the rest of the file's problems, and does not connect to any server.
+The spec's sketch is a fourth TOML block that the configuration tests read
+and parse. Step 5 is re-cut on the way: 5a is this; 5b the `ToolServers`
+port, the listed tool as a record, naming/sorting/bounding in core and the
+in-memory fake; 5c the MCP adapter over httpx with its scripted-server and
+live tests; 5d the loop in `Turns`, the turn events and the composition.
+
+Review: pending.
+
+Checks: lint; the whole suite against a throwaway PostgreSQL (3098 passed,
+13 skipped).
+Not done / to watch: the secrets are read and held (`Deployment.tool_secrets`)
+and handed to nothing until 5c; a `[mcp_servers]` table in a deployment
+with no agent naming it still needs its secret at start-up (as a provider no
+model uses needs its key); the demo's TOML is step 8's.

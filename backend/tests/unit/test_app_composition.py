@@ -712,6 +712,44 @@ def test_a_model_provider_whose_key_is_unset_stops_the_start_up(tmp_path: Path) 
     ]
 
 
+WITH_TOOLS = (
+    WITH_AGENTS.replace('engine = "langgraph"', 'engine = "langgraph"\ntools = ["github"]') + """
+[mcp_servers.github]
+url = "https://api.githubcopilot.com/mcp/"
+secret_env = "ROBINAUTS_GITHUB_TOKEN"
+"""
+)
+"""The agent of ``WITH_AGENTS`` given a tool server, whose secret is a third variable."""
+
+
+def test_a_tool_server_whose_secret_is_unset_stops_the_start_up_with_the_rest(
+    tmp_path: Path,
+) -> None:
+    # Named by the variable, together with every other start-up problem: a
+    # deployment with two unset variables is fixed in one pass, and start-up
+    # connects to no server to find out.
+    with pytest.raises(ConfigError) as raised:
+        with_agents(tmp_path, WITH_TOOLS, secret_for=reading({"ROBINAUTS_GOOGLE_SECRET": "s"}))
+
+    assert list(raised.value.problems) == [
+        "model_providers.anthropic: the API key is read from the environment variable"
+        " ROBINAUTS_ANTHROPIC_KEY, which is unset or empty",
+        "mcp_servers.github: the secret is read from the environment variable"
+        " ROBINAUTS_GITHUB_TOKEN, which is unset or empty",
+    ]
+
+
+def test_a_deployment_that_started_holds_the_tool_secrets_it_read_and_prints_none(
+    tmp_path: Path,
+) -> None:
+    deployment = with_agents(
+        tmp_path, WITH_TOOLS, secret_for=reading({**BOTH_KEYS, "ROBINAUTS_GITHUB_TOKEN": "ghp-x"})
+    )
+
+    assert deployment.tool_secrets.secret_for("github") == "ghp-x"
+    assert repr(deployment.tool_secrets) == "ToolServerSecrets(github)"
+
+
 def test_the_key_itself_is_in_none_of_what_a_start_up_refusal_says(tmp_path: Path) -> None:
     text = WITH_AGENTS.replace(
         'api_key_env = "ROBINAUTS_ANTHROPIC_KEY"', 'api_key_env = "sk-pasted-by-mistake"'

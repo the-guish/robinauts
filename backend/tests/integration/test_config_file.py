@@ -31,6 +31,7 @@ from robinauts.adapters import (
     ProviderKeys,
     check_api_keys,
     check_client_secrets,
+    check_tool_secrets,
     environment,
     read_toml,
 )
@@ -45,6 +46,8 @@ from robinauts.domain import (
     ProviderConfig,
     ProviderKind,
     SignInConfig,
+    ToolServerAuth,
+    ToolServerConfig,
 )
 
 pytestmark = pytest.mark.io
@@ -353,17 +356,34 @@ def test_the_keys_hold_a_copy_of_what_they_were_given() -> None:
 
 
 def models_examples() -> tuple[str, str, str]:
-    """The three TOML blocks of ``docs/specs/agents.md``, as they are written there.
+    """The three model TOML blocks of ``docs/specs/agents.md``, as they are written there.
 
     The first two are configurations this build runs -- the vendor's own
     endpoint, and an ``anthropic-compatible`` one, which is how OpenRouter is
     reached here. The third shows the shape of an OpenAI-compatible provider,
     which this build refuses. All three are read here, and each is held to the
-    thing it is an example of.
+    thing it is an example of. The fourth block of the file is the tool
+    servers' (``tool_servers_example``).
     """
-    blocks = re.findall(r"```toml\n(.*?)```", AGENTS_SPEC.read_text(encoding="utf-8"), re.DOTALL)
-    assert len(blocks) == 3, f"{AGENTS_SPEC} should hold three TOML examples, not {len(blocks)}"
+    blocks = spec_blocks()
     return blocks[0], blocks[1], blocks[2]
+
+
+def spec_blocks() -> list[str]:
+    """Every TOML block of ``docs/specs/agents.md``, in order."""
+    blocks = re.findall(r"```toml\n(.*?)```", AGENTS_SPEC.read_text(encoding="utf-8"), re.DOTALL)
+    assert len(blocks) == 4, f"{AGENTS_SPEC} should hold four TOML examples, not {len(blocks)}"
+    return blocks
+
+
+def tool_servers_example() -> str:
+    """The tool servers' block: one ``bearer`` server, one ``basic``, an agent naming both.
+
+    It names a model the first block declares, so it is read together with
+    that one, as an operator would write both in one file.
+    """
+    deployable, _, _, servers = spec_blocks()
+    return deployable + servers
 
 
 def test_the_model_example_in_the_specification_reads_and_parses(tmp_path: Path) -> None:
@@ -436,6 +456,92 @@ def test_the_model_example_names_the_variables_rather_than_the_keys(tmp_path: Pa
     with pytest.raises(ConfigError) as raised:
         check_api_keys(config, secret_for=lambda name: None)
     assert len(raised.value.problems) == 3
+
+
+def test_the_tool_servers_example_in_the_specification_reads_and_parses(tmp_path: Path) -> None:
+    config = parse_models_config(
+        read_toml(written(tmp_path, tool_servers_example())),
+        engines=WIRED_ENGINES,
+        kinds=BUILDABLE_KINDS,
+    )
+
+    github, jira = config.tool_servers["github"], config.tool_servers["jira"]
+    assert (github.auth, github.prefix, github.user) == (ToolServerAuth.BEARER, "github", "")
+    assert (jira.auth, jira.prefix, jira.user) == (
+        ToolServerAuth.BASIC,
+        "atlassian",
+        "robinauts@example.com",
+    )
+    assert jira.timeout_seconds == 30.0
+    assert config.agents["assistant-with-tools"].tools == ("github", "jira")
+
+
+def test_the_tool_servers_example_names_the_variables_rather_than_the_secrets(
+    tmp_path: Path,
+) -> None:
+    config = parse_models_config(read_toml(written(tmp_path, tool_servers_example())))
+
+    assert config.tool_servers["github"].secret_env == "ROBINAUTS_GITHUB_TOKEN"
+    assert config.tool_servers["jira"].secret_env == "ROBINAUTS_JIRA_TOKEN"
+    with pytest.raises(ConfigError) as raised:
+        check_tool_secrets(config, secret_for=lambda name: None)
+    assert list(raised.value.problems) == [
+        "mcp_servers.github: the secret is read from the environment variable"
+        " ROBINAUTS_GITHUB_TOKEN, which is unset or empty",
+        "mcp_servers.jira: the secret is read from the environment variable"
+        " ROBINAUTS_JIRA_TOKEN, which is unset or empty",
+    ]
+
+
+# --- the tool servers' secrets, read at start-up ------------------------------
+
+
+def tool_server(name: str, variable: str) -> ToolServerConfig:
+    return ToolServerConfig(id=name, url=f"https://{name}.example/mcp", secret_env=variable)
+
+
+def with_servers(**variables: str) -> ModelsConfig:
+    return ModelsConfig(
+        tool_servers={name: tool_server(name, variable) for name, variable in variables.items()}
+    )
+
+
+def test_every_tool_server_s_secret_is_read_at_start_up() -> None:
+    read = check_tool_secrets(
+        with_servers(github="GH", jira="JI"), secret_for={"GH": "g", "JI": "j"}.get
+    )
+
+    assert (read.secret_for("github"), read.secret_for("jira")) == ("g", "j")
+
+
+def test_every_unset_secret_variable_is_named_at_once_and_never_a_value() -> None:
+    with pytest.raises(ConfigError) as raised:
+        check_tool_secrets(with_servers(github="GH", jira="JI"), secret_for={"GH": ""}.get)
+
+    assert list(raised.value.problems) == [
+        "mcp_servers.github: the secret is read from the environment variable GH, which is"
+        " unset or empty",
+        "mcp_servers.jira: the secret is read from the environment variable JI, which is"
+        " unset or empty",
+    ]
+
+
+def test_the_tool_secrets_print_the_servers_and_never_a_secret() -> None:
+    read = check_tool_secrets(with_servers(github="GH"), secret_for=lambda _: "sk-nobody")
+
+    assert repr(read) == "ToolServerSecrets(github)"
+    assert "sk-nobody" not in repr(read) + str(read)
+    with pytest.raises(ConfigError) as raised:
+        read.secret_for("jira")
+    assert list(raised.value.problems) == [
+        "mcp_servers.jira: no secret was read for this tool server"
+    ]
+
+
+def test_a_deployment_with_no_tool_server_has_no_secret_to_read() -> None:
+    assert repr(check_tool_secrets(ModelsConfig(), secret_for=lambda _: None)) == (
+        "ToolServerSecrets()"
+    )
 
 
 # The deployment guide's file, read through both halves at once.

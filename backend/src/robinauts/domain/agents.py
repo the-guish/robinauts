@@ -32,6 +32,7 @@ from types import MappingProxyType
 from urllib.parse import urlsplit
 
 from robinauts.domain.errors import InvalidValueError, UnknownModelError
+from robinauts.domain.tools import MAX_TOOL_PREFIX_CHARS, checked_tool_prefix, is_tool_prefix
 from robinauts.domain.values import checked_line, checked_text, describe
 
 MAX_CONFIG_ID_CHARS = 40
@@ -125,6 +126,15 @@ class AgentDefinition:
     only.
     """
     engine: Engine
+    tools: tuple[str, ...] = ()
+    """The ids of the tool servers this agent may use (``ToolServerConfig``).
+
+    Read at every turn, so adding a server to an agent reaches its existing
+    conversations at their next turn (``docs/specs/agents.md``, "Tools"); the
+    order is the operator's and means nothing, since the tools a run is shown
+    are sorted by name. ``ModelsConfig`` is what proves every id names a
+    server the deployment has.
+    """
 
     def __post_init__(self) -> None:
         checked_config_id(self.id, "an agent's id")
@@ -135,6 +145,14 @@ class AgentDefinition:
         checked_text(self.system_prompt, "an agent's system prompt", MAX_SYSTEM_PROMPT_CHARS)
         if not isinstance(self.engine, Engine):
             raise InvalidValueError(f"an engine is an Engine, not {describe(self.engine)}")
+        if not isinstance(self.tools, tuple):
+            raise InvalidValueError(
+                f"an agent's tools are a tuple of ids, not {describe(self.tools)}"
+            )
+        for server_id in self.tools:
+            checked_config_id(server_id, "a tool server's id")
+        if len(set(self.tools)) != len(self.tools):
+            raise InvalidValueError("an agent names each tool server once")
 
 
 class ProviderKind(StrEnum):
@@ -437,15 +455,122 @@ class ModelConfig:
             )
 
 
+class ToolServerAuth(StrEnum):
+    """How a tool server is sent the secret its table names (``docs/specs/agents.md``).
+
+    ``BEARER`` is ``Authorization: Bearer <secret>``, and the default; ``BASIC``
+    is ``Authorization: Basic base64(<user>:<secret>)``, where the table names
+    the user part too and the secret is the token. The values are the ones the
+    configuration is written with.
+    """
+
+    BEARER = "bearer"
+    BASIC = "basic"
+
+
+DEFAULT_TOOL_TIMEOUT_SECONDS = 60.0
+"""How long one call to a tool may take when the configuration does not say.
+
+Per **tool call**, as a model's is per model call, and for the same reason
+shorter than the turn: a tool that hangs is the tool's failure, reported as
+a result the model reads (``docs/specs/agents.md``, "Tools"), and not the
+turn running out of time.
+"""
+
+MAX_TOOL_TIMEOUT_SECONDS = MAX_MODEL_TIMEOUT_SECONDS
+"""Past this a timeout is not a timeout, for a tool as for a model."""
+
+MAX_BASIC_USER_CHARS = 200
+"""The longest the user part of a ``basic`` credential may be."""
+
+
+@dataclass(frozen=True, slots=True)
+class ToolServerConfig:
+    """One remote MCP server a deployment may reach, and how (``docs/specs/agents.md``).
+
+    ``url`` is checked as every configured endpoint is (``is_endpoint_url``):
+    the secret travels to it. ``secret_env`` is the **name** of an environment
+    variable, exactly as a model provider's ``api_key_env`` is: the secret is
+    the operator's, read once at start-up, never in this file, never logged.
+    ``prefix`` is what the server's tools are shown to the model under
+    (``<prefix>__<name>``), the server's id when the operator wrote none --
+    and an id that would not do as a prefix (too long, or one a name could not
+    be told apart from) is refused until one is written.
+    """
+
+    id: str
+    url: str
+    secret_env: str
+    """The name of the environment variable the secret is read from."""
+    auth: ToolServerAuth = ToolServerAuth.BEARER
+    user: str = ""
+    """The user part of a ``basic`` credential; empty for ``bearer``, which has none."""
+    prefix: str = ""
+    """What this server's tools are named under for the model; empty is the id."""
+    timeout_seconds: float = DEFAULT_TOOL_TIMEOUT_SECONDS
+    """How long one call to one of this server's tools may take."""
+
+    def __post_init__(self) -> None:
+        checked_config_id(self.id, "a tool server's id")
+        checked_line(self.url, "a tool server's url", MAX_BASE_URL_CHARS)
+        if not is_endpoint_url(self.url):
+            # The value is not echoed: it may hold the very credential this
+            # refuses, and a refusal is not a place to print one.
+            raise InvalidValueError(
+                "a tool server's url is an https:// endpoint (http:// only on the loopback"
+                " interface), with no query, no fragment and no user:password in it"
+            )
+        checked_line(self.secret_env, "a tool server's secret_env", MAX_ENV_NAME_CHARS)
+        if not is_env_name(self.secret_env):
+            raise InvalidValueError(
+                f"secret_env is the NAME of an environment variable holding the secret,"
+                f" not {describe(self.secret_env)}"
+            )
+        if not isinstance(self.auth, ToolServerAuth):
+            raise InvalidValueError(
+                f"a tool server's auth is a ToolServerAuth, not {describe(self.auth)}"
+            )
+        checked_line(self.user, "a tool server's user", MAX_BASIC_USER_CHARS)
+        if self.auth is ToolServerAuth.BASIC:
+            if not self.user.strip():
+                raise InvalidValueError("a tool server with basic auth names the user part: user")
+            if ":" in self.user:
+                raise InvalidValueError("the user part of a basic credential holds no ':'")
+        elif self.user:
+            raise InvalidValueError(
+                f"only basic auth has a user part; {self.auth.value} sends the secret alone"
+            )
+        if not self.prefix:
+            if not is_tool_prefix(self.id):
+                raise InvalidValueError(
+                    f"tool server {self.id!r} needs a prefix written down: its id is not one"
+                    f" its tools can be named under (at most {MAX_TOOL_PREFIX_CHARS} characters,"
+                    f" no '__', not ending in '_')"
+                )
+            object.__setattr__(self, "prefix", self.id)
+        checked_tool_prefix(self.prefix, "a tool server's prefix")
+        if (
+            isinstance(self.timeout_seconds, bool)
+            or not isinstance(self.timeout_seconds, int | float)
+            or not 0 < self.timeout_seconds <= MAX_TOOL_TIMEOUT_SECONDS
+        ):
+            raise InvalidValueError(
+                f"a tool server's timeout_seconds is a number of seconds over 0 and at most"
+                f" {MAX_TOOL_TIMEOUT_SECONDS:g}, not {describe(self.timeout_seconds)}"
+            )
+        object.__setattr__(self, "timeout_seconds", float(self.timeout_seconds))
+
+
 @dataclass(frozen=True, slots=True)
 class ModelsConfig:
-    """The model half of a deployment's configuration: providers, models, agents.
+    """The model half of a deployment's configuration: providers, models, agents, servers.
 
-    Three tables that refer to one another, held together so that the thing
+    Four tables that refer to one another, held together so that the thing
     handed to the composition root is whole: every agent names a model that is
-    here, and every model names a provider that is here. ``core`` is what
-    proves that of an operator's file; this record is what the proof produces,
-    and a caller may look things up in it without wondering.
+    here and tool servers that are here, every model names a provider that is
+    here, and no two servers name their tools under one prefix. ``core`` is
+    what proves that of an operator's file; this record is what the proof
+    produces, and a caller may look things up in it without wondering.
 
     Empty is a deployment with no agents, which is allowed and starts: the
     picker has nothing in it and ``/api/agents`` is empty
@@ -455,12 +580,14 @@ class ModelsConfig:
     providers: Mapping[str, ModelProviderConfig] = field(default_factory=dict)
     models: Mapping[str, ModelConfig] = field(default_factory=dict)
     agents: Mapping[str, AgentDefinition] = field(default_factory=dict)
+    tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for where, table, wanted in (
             ("providers", self.providers, ModelProviderConfig),
             ("models", self.models, ModelConfig),
             ("agents", self.agents, AgentDefinition),
+            ("tool_servers", self.tool_servers, ToolServerConfig),
         ):
             for key, value in table.items():
                 if not isinstance(value, wanted) or value.id != key:
@@ -476,6 +603,20 @@ class ModelsConfig:
             if agent.model not in self.models:
                 raise InvalidValueError(
                     f"agent {agent.id!r} runs on model {agent.model!r}, which is not" f" configured"
+                )
+            for server_id in agent.tools:
+                if server_id not in self.tool_servers:
+                    raise InvalidValueError(
+                        f"agent {agent.id!r} uses tool server {server_id!r}, which is not"
+                        f" configured"
+                    )
+        prefixes: dict[str, str] = {}
+        for server in self.tool_servers.values():
+            other = prefixes.setdefault(server.prefix, server.id)
+            if other != server.id:
+                raise InvalidValueError(
+                    f"tool servers {other!r} and {server.id!r} would both name their tools"
+                    f" under {server.prefix!r}: give one a prefix of its own"
                 )
 
     def model_by_id(self, model_id: str) -> ModelConfig:

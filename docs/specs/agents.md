@@ -389,10 +389,35 @@ api_key_env = "ROBINAUTS_GATEWAY_KEY"
   server's tools are shown to the model under, the server's id when left
   out; and `timeout_seconds`, per tool call and optional. The token's
   scopes, and the organisation's own policy on tokens, bound what the server
-  will do; nothing here does. A worked example, spelt so that an operator
-  connecting GitHub or Atlassian copies it and changes the url and the
-  variable name, arrives with the parser that reads it
-  ([working-notes/mcp-plan.md](../working-notes/mcp-plan.md), step 5).
+  will do; nothing here does. Spelt so that an operator connecting GitHub or
+  Atlassian copies it and changes the url and the variable name — one server
+  with `bearer`, one with `basic`:
+
+```toml
+[mcp_servers.github]
+url = "https://api.githubcopilot.com/mcp/"
+secret_env = "ROBINAUTS_GITHUB_TOKEN"
+
+[mcp_servers.jira]
+url = "https://your-site.atlassian.net/mcp"
+auth = "basic"
+user = "robinauts@example.com"
+secret_env = "ROBINAUTS_JIRA_TOKEN"
+prefix = "atlassian"
+timeout_seconds = 30
+
+[agents.assistant-with-tools]
+title = "Assistant (tools)"
+model = "sonnet"
+engine = "langgraph"
+tools = ["github", "jira"]
+```
+
+  The agent's `tools` names the servers; the model then sees
+  `github__search_repositories` and `atlassian__search_issues`, and a
+  call is routed to its server by the name alone. Start-up reads both
+  variables and refuses to start naming every one that is unset; it does
+  not connect to either server ([runs.md](runs.md), "Tools").
 
 ## Known findings
 

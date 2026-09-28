@@ -23,6 +23,7 @@ import pytest
 from robinauts.core import parse_models_config
 from robinauts.domain import (
     DEFAULT_MODEL_TIMEOUT_SECONDS,
+    DEFAULT_TOOL_TIMEOUT_SECONDS,
     KINDS_WITH_BASE_URL,
     LOOPBACK_HOSTS,
     MAX_AGENT_TITLE_CHARS,
@@ -32,6 +33,8 @@ from robinauts.domain import (
     MAX_MODEL_TITLE_CHARS,
     MAX_OUTPUT_TOKENS,
     MAX_SYSTEM_PROMPT_CHARS,
+    MAX_TOOL_PREFIX_CHARS,
+    MAX_TOOL_TIMEOUT_SECONDS,
     AgentDefinition,
     ConfigError,
     Engine,
@@ -40,6 +43,8 @@ from robinauts.domain import (
     ModelProviderConfig,
     ModelsConfig,
     ProviderKind,
+    ToolServerAuth,
+    ToolServerConfig,
     UnknownModelError,
     is_endpoint_url,
 )
@@ -47,6 +52,7 @@ from robinauts.domain import (
 ANTHROPIC = {"kind": "anthropic", "api_key_env": "ROBINAUTS_ANTHROPIC_KEY"}
 SONNET = {"provider": "anthropic", "name": "claude-sonnet-5"}
 ASSISTANT = {"title": "Assistant", "model": "sonnet", "engine": "langgraph"}
+GITHUB = {"url": "https://api.githubcopilot.com/mcp/", "secret_env": "ROBINAUTS_GITHUB_TOKEN"}
 
 LANGGRAPH_ONLY = frozenset({Engine.LANGGRAPH})
 ANTHROPIC_ONLY = frozenset({ProviderKind.ANTHROPIC})
@@ -86,6 +92,10 @@ def model(**changes: Any) -> list[str]:
 
 def agent(**changes: Any) -> list[str]:
     return problems(agents={"assistant": {**ASSISTANT, **changes}})
+
+
+def server(**changes: Any) -> list[str]:
+    return problems(mcp_servers={"github": {**GITHUB, **changes}})
 
 
 def only(found: list[str]) -> str:
@@ -532,7 +542,7 @@ def test_an_agent_is_a_table() -> None:
 
 
 def test_an_agent_refuses_an_unknown_key() -> None:
-    assert only(agent(tools=[])) == "agents.assistant: unknown key 'tools'"
+    assert only(agent(skills=[])) == "agents.assistant: unknown key 'skills'"
 
 
 def test_an_agent_s_title_is_bounded() -> None:
@@ -600,7 +610,7 @@ def test_every_problem_in_the_file_is_reported_together() -> None:
             "anthropic": {**ANTHROPIC, "api_key_env": "sk-ant-secret", "region": "eu"}
         },
         models={"sonnet": {**SONNET, "timeout_seconds": 0}},
-        agents={"assistant": {**ASSISTANT, "engine": "langchain", "tools": []}},
+        agents={"assistant": {**ASSISTANT, "engine": "langchain", "skills": []}},
     )
 
     assert found == [
@@ -609,7 +619,7 @@ def test_every_problem_in_the_file_is_reported_together() -> None:
         "model_providers.anthropic.api_key_env: the NAME of an environment variable"
         " holding the key, not the key itself",
         "models.sonnet.timeout_seconds: a number of seconds over 0 and at most 3600," " not 0",
-        "agents.assistant: unknown key 'tools'",
+        "agents.assistant: unknown key 'skills'",
         "agents.assistant.engine: one of langgraph, pydantic-ai, not 'langchain'",
     ]
     # The key itself is in none of it: only the variable's name is ever named,
@@ -732,6 +742,286 @@ def test_a_record_holds_a_configured_endpoint_to_the_same_rule_as_the_parser() -
         )
 
     assert str(raised.value).startswith("base_url is an https:// endpoint")
+
+
+# --- tool servers, and the agents that use them --------------------------------
+
+
+def test_a_tool_server_becomes_its_record_and_an_agent_names_it() -> None:
+    config = parse_models_config(
+        data(
+            mcp_servers={"github": dict(GITHUB)},
+            agents={"assistant": {**ASSISTANT, "tools": ["github"]}},
+        )
+    )
+
+    assert config.tool_servers["github"] == ToolServerConfig(
+        id="github",
+        url="https://api.githubcopilot.com/mcp/",
+        secret_env="ROBINAUTS_GITHUB_TOKEN",
+        auth=ToolServerAuth.BEARER,
+        prefix="github",
+        timeout_seconds=DEFAULT_TOOL_TIMEOUT_SECONDS,
+    )
+    assert config.agents["assistant"].tools == ("github",)
+
+
+def test_what_a_tool_server_does_not_say_is_left_to_the_defaults() -> None:
+    config = parse_models_config(data(mcp_servers={"github": dict(GITHUB)}))
+
+    github = config.tool_servers["github"]
+    assert (github.auth, github.user, github.prefix) == (ToolServerAuth.BEARER, "", "github")
+    assert github.timeout_seconds == DEFAULT_TOOL_TIMEOUT_SECONDS
+    assert config.agents["assistant"].tools == ()
+
+
+def test_a_tool_server_may_use_basic_auth_a_prefix_and_a_timeout_of_its_own() -> None:
+    jira = {
+        "url": "https://your-site.atlassian.net/mcp",
+        "auth": "basic",
+        "user": "robinauts@example.com",
+        "secret_env": "JIRA",
+        "prefix": "atlassian",
+        "timeout_seconds": 30,
+    }
+
+    config = parse_models_config(data(mcp_servers={"jira": jira}))
+
+    server_ = config.tool_servers["jira"]
+    assert (server_.auth, server_.user, server_.prefix, server_.timeout_seconds) == (
+        ToolServerAuth.BASIC,
+        "robinauts@example.com",
+        "atlassian",
+        30.0,
+    )
+
+
+def test_a_file_with_no_servers_is_a_deployment_whose_agents_have_no_tools() -> None:
+    config = parse_models_config(data())
+
+    assert config.tool_servers == {}
+    assert config.agents["assistant"].tools == ()
+
+
+def test_a_tool_server_id_is_spelt_the_way_every_configured_id_is() -> None:
+    found = only(problems(mcp_servers={"GitHub": dict(GITHUB)}))
+
+    assert found.startswith("mcp_servers.GitHub: an id")
+
+
+def test_a_tool_server_is_a_table() -> None:
+    assert only(problems(mcp_servers={"github": "https://x"})) == "mcp_servers.github: a table"
+
+
+def test_a_tool_server_refuses_an_unknown_key() -> None:
+    assert only(server(token="sk-live")) == "mcp_servers.github: unknown key 'token'"
+
+
+def test_a_tool_server_names_its_url_and_the_variable_its_secret_is_read_from() -> None:
+    assert sorted(problems(mcp_servers={"github": {}})) == [
+        "mcp_servers.github.secret_env: missing, or not a non-empty string",
+        "mcp_servers.github.url: missing, or not a non-empty string",
+    ]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://github.example/mcp",
+        "https://user:sk-live@github.example/mcp",
+        "https://github.example/mcp?token=x",
+        "https://github.example/mcp#f",
+        "ftp://github.example/mcp",
+    ],
+)
+def test_a_tool_server_s_url_is_an_endpoint_a_secret_may_be_sent_to(url: str) -> None:
+    found = only(server(url=url))
+
+    assert found.startswith("mcp_servers.github.url: an https:// endpoint")
+    assert "sk-live" not in found
+
+
+def test_a_secret_pasted_where_its_variable_s_name_belongs_is_refused() -> None:
+    assert only(server(secret_env="ghp_notAVariableName!")) == (
+        "mcp_servers.github.secret_env: the NAME of an environment variable holding the"
+        " secret, not the secret itself"
+    )
+
+
+def test_a_tool_server_s_auth_is_bearer_or_basic() -> None:
+    assert only(server(auth="digest")) == (
+        "mcp_servers.github.auth: one of basic, bearer, not 'digest'"
+    )
+
+
+def test_basic_auth_names_the_user_part_and_bearer_has_none() -> None:
+    assert only(server(auth="basic")) == (
+        "mcp_servers.github.user: basic auth names the user part; there is nothing to guess"
+    )
+    assert only(server(user="me")) == (
+        "mcp_servers.github.user: only basic auth has a user part; bearer sends the secret" " alone"
+    )
+    assert only(server(auth="basic", user="")) == (
+        "mcp_servers.github.user: missing, or not a non-empty string"
+    )
+
+
+@pytest.mark.parametrize(
+    "prefix", ["git__hub", "github_", "GitHub Tools", "g" * (MAX_TOOL_PREFIX_CHARS + 1), ""]
+)
+def test_a_prefix_is_a_name_a_tool_can_be_told_apart_under(prefix: str) -> None:
+    (found,) = server(prefix=prefix)
+
+    assert found.startswith("mcp_servers.github.prefix:")
+
+
+def test_an_id_that_would_not_do_as_a_prefix_needs_one_written_down() -> None:
+    long = "g" * (MAX_TOOL_PREFIX_CHARS + 1)
+    assert only(problems(mcp_servers={long: dict(GITHUB)})) == (
+        f"mcp_servers.{long}: this id is not one its tools can be named under (at most"
+        f" {MAX_TOOL_PREFIX_CHARS} characters, no '__', not ending in '_'); write a prefix"
+    )
+    assert only(problems(mcp_servers={"git__hub": dict(GITHUB)})).startswith(
+        "mcp_servers.git__hub: this id is not one"
+    )
+    # With one written, the id is free to be what it is.
+    config = parse_models_config(data(mcp_servers={long: {**GITHUB, "prefix": "github"}}))
+    assert config.tool_servers[long].prefix == "github"
+
+
+def test_two_servers_under_one_prefix_are_refused_by_both_names() -> None:
+    jira = {**GITHUB, "secret_env": "JIRA", "prefix": "github"}
+
+    assert only(problems(mcp_servers={"github": dict(GITHUB), "jira": jira})) == (
+        "mcp_servers.jira: its tools would be named under 'github', as mcp_servers.github's"
+        " are; give one of them a prefix of its own"
+    )
+
+
+@pytest.mark.parametrize("seconds", [0, -1, "30", True, float("inf"), MAX_TOOL_TIMEOUT_SECONDS + 1])
+def test_a_tool_call_s_timeout_is_a_number_of_seconds_inside_its_bounds(seconds: Any) -> None:
+    assert only(server(timeout_seconds=seconds)).startswith(
+        "mcp_servers.github.timeout_seconds: a number of seconds over 0 and at most"
+    )
+
+
+def test_an_agent_names_tool_servers_that_are_configured() -> None:
+    assert only(agent(tools=["github"])) == (
+        "agents.assistant.tools: 'github' is not one of [mcp_servers]"
+    )
+
+
+def test_an_agent_s_tools_are_a_list_of_ids_each_once() -> None:
+    assert only(agent(tools="github")) == (
+        "agents.assistant.tools: a list of tool server ids, or no tools at all"
+    )
+    assert only(agent(tools=[1])) == (
+        "agents.assistant.tools: a list of tool server ids, or no tools at all"
+    )
+    assert (
+        only(
+            problems(
+                mcp_servers={"github": dict(GITHUB)},
+                agents={"assistant": {**ASSISTANT, "tools": ["github", "github"]}},
+            )
+        )
+        == "agents.assistant.tools: each tool server once"
+    )
+
+
+def test_a_server_with_a_mistake_does_not_bury_it_under_the_agents_that_name_it() -> None:
+    # The declared table is what an agent's `tools` is checked against, as a
+    # model's provider is: one mistake, one line.
+    found = problems(
+        mcp_servers={"github": {**GITHUB, "url": "not a url"}},
+        agents={"assistant": {**ASSISTANT, "tools": ["github"]}},
+    )
+
+    assert len(found) == 1 and found[0].startswith("mcp_servers.github.url:")
+
+
+# --- the tool server record's own rules ----------------------------------------
+
+
+def tool_server(**changes: Any) -> ToolServerConfig:
+    fields: dict[str, Any] = {"id": "github", "url": "https://x/mcp", "secret_env": "G"}
+    fields.update(changes)
+    return ToolServerConfig(**fields)
+
+
+def test_a_tool_server_record_fills_its_prefix_in_from_its_id() -> None:
+    assert tool_server().prefix == "github"
+
+
+def test_a_tool_server_record_refuses_an_id_it_cannot_name_tools_under_unless_told() -> None:
+    with pytest.raises(InvalidValueError, match="needs a prefix written down"):
+        tool_server(id="git__hub")
+
+    assert tool_server(id="git__hub", prefix="gh").prefix == "gh"
+
+
+def test_a_tool_server_record_holds_basic_auth_to_its_user_part() -> None:
+    with pytest.raises(InvalidValueError, match="names the user part"):
+        tool_server(auth=ToolServerAuth.BASIC)
+    with pytest.raises(InvalidValueError, match="holds no ':'"):
+        tool_server(auth=ToolServerAuth.BASIC, user="a:b")
+    with pytest.raises(InvalidValueError, match="only basic auth has a user part"):
+        tool_server(user="me")
+
+
+def test_a_tool_server_record_holds_its_endpoint_to_the_same_rule_as_the_parser() -> None:
+    with pytest.raises(InvalidValueError) as raised:
+        tool_server(url="http://github.example/mcp")
+
+    assert str(raised.value).startswith("a tool server's url is an https:// endpoint")
+
+
+def test_the_whole_configuration_holds_agents_to_configured_servers_and_prefixes_apart() -> None:
+    config = parse_models_config(data(mcp_servers={"github": dict(GITHUB)}))
+    github = config.tool_servers["github"]
+    uses_jira = AgentDefinition(
+        id="a",
+        title="A",
+        system_prompt="",
+        model="sonnet",
+        engine=Engine.LANGGRAPH,
+        tools=("jira",),
+    )
+
+    with pytest.raises(InvalidValueError, match="uses tool server 'jira', which is not configured"):
+        ModelsConfig(
+            providers=config.providers,
+            models=config.models,
+            agents={"a": uses_jira},
+            tool_servers={"github": github},
+        )
+    with pytest.raises(InvalidValueError, match="would both name their tools under 'github'"):
+        ModelsConfig(
+            providers=config.providers,
+            models=config.models,
+            tool_servers={"github": github, "jira": tool_server(id="jira", prefix="github")},
+        )
+
+
+def test_an_agent_record_names_each_tool_server_once_by_id() -> None:
+    with pytest.raises(InvalidValueError, match="each tool server once"):
+        AgentDefinition(
+            id="a",
+            title="A",
+            system_prompt="",
+            model="sonnet",
+            engine=Engine.LANGGRAPH,
+            tools=("g", "g"),
+        )
+    with pytest.raises(InvalidValueError, match="a tuple of ids"):
+        AgentDefinition(
+            id="a",
+            title="A",
+            system_prompt="",
+            model="sonnet",
+            engine=Engine.LANGGRAPH,
+            tools=["g"],  # type: ignore[arg-type]
+        )
 
 
 # --- the record's own rules about a model's title --------------------------

@@ -41,6 +41,26 @@ MAX_TOOL_NAME_CHARS = 64
 _TOOL_NAME = re.compile(rf"[A-Za-z0-9_-]{{1,{MAX_TOOL_NAME_CHARS}}}")
 """What the vendors accept a tool name to be spelt with."""
 
+TOOL_NAME_SEPARATOR = "__"
+"""What joins a server's prefix to a tool's own name in the name the model sees.
+
+Two underscores, which a prefix may not hold (``is_tool_prefix``), so that the
+first occurrence in a full name is the join and the server is read off the
+name alone (``docs/specs/agents.md``, "Tools").
+"""
+
+MAX_TOOL_PREFIX_CHARS = 32
+"""The longest a server's prefix may be.
+
+Half the vendors' bound on the full name, so that a real tool name -- thirty
+characters, past ``list_pull_request_reviews`` -- fits after any prefix an
+operator may write. A server's id (``MAX_CONFIG_ID_CHARS``) can be longer
+than this, which is why a long id needs a prefix written down.
+"""
+
+_TOOL_PREFIX = re.compile(rf"[A-Za-z0-9_-]{{1,{MAX_TOOL_PREFIX_CHARS}}}")
+"""What a prefix is spelt with: the vendors' own charset, so that it fits the name."""
+
 MAX_CALL_ID_CHARS = 128
 """The longest a call's id may be.
 
@@ -61,6 +81,31 @@ def checked_tool_name(value: object, what: str) -> str:
         raise InvalidValueError(
             f"{what} is letters, digits, '_' and '-', at most {MAX_TOOL_NAME_CHARS} of them,"
             f" not {describe(value)}"
+        )
+    return value
+
+
+def is_tool_prefix(value: object) -> bool:
+    """Whether ``value`` may be a server's prefix: a name that can be told apart.
+
+    The vendors' charset, bounded; never holding the separator, so that the
+    join is the first ``__`` of a full name; and never ending in ``_``, so
+    that ``a_`` + ``__b`` and ``a`` + ``___b`` are not one name spelt twice.
+    """
+    return (
+        isinstance(value, str)
+        and _TOOL_PREFIX.fullmatch(value) is not None
+        and TOOL_NAME_SEPARATOR not in value
+        and not value.endswith("_")
+    )
+
+
+def checked_tool_prefix(value: object, what: str) -> str:
+    """``value`` if it may be a server's prefix; ``InvalidValueError`` if not."""
+    if not is_tool_prefix(value):
+        raise InvalidValueError(
+            f"{what} is letters, digits, '_' and '-', at most {MAX_TOOL_PREFIX_CHARS} of them,"
+            f" holding no '{TOOL_NAME_SEPARATOR}' and not ending in '_', not {describe(value)}"
         )
     return value
 

@@ -464,6 +464,16 @@ is the first turn that calls one.
    under `tests/live/` against Microsoft Learn's server
    (`https://learn.microsoft.com/api/mcp`), which needs no credential, beside
    the vendor live tests.
+   **Cut into four on the way (2026-09-28)**, each around the size a step
+   aims for: **5a** the configuration (`[mcp_servers.*]`, `tools`, the
+   records, the secrets at start-up, the sketch in `agents.md`); **5b** the
+   `ToolServers` port, the listed tool as a record, naming, sorting and
+   bounding in core, the in-memory fake and the port's contract suite;
+   **5c** the MCP adapter over `httpx` with the scripted-server tests and
+   the live test; **5d** the loop in `Turns`, the turn events and the
+   composition. A step the reviews added sits before them: **4d**, a call
+   no tool message answers shown to the model as one that was not run
+   ("Open").
 
 6. **Wire and interface.** The four AG-UI tool events in `AguiMapper` with
    their ids and the re-attach rules; `events.ts`, the reducer, the runtime

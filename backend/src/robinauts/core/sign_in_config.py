@@ -63,7 +63,7 @@ from robinauts.domain import (
 SIGN_IN_KEYS = frozenset({"public_url", "session_hours", "providers", "allow"})
 """The top-level tables sign-in is written in."""
 
-MODEL_KEYS = frozenset({"model_providers", "models", "agents"})
+MODEL_KEYS = frozenset({"model_providers", "models", "agents", "mcp_servers"})
 """The top-level tables the model half is written in (``core.models_config``).
 
 Named here, beside sign-in's own, because **one file holds both** and each

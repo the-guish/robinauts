@@ -78,6 +78,7 @@ from robinauts.core.models_config import (
     ALL_KINDS,
     MODEL_ENTRY_KEYS,
     MODEL_PROVIDER_KEYS,
+    TOOL_SERVER_KEYS,
     parse_models_config,
 )
 from robinauts.core.oidc import (
@@ -165,6 +166,7 @@ __all__ = [
     "SIGN_IN_KEYS",
     "TEXT_DELTA",
     "TOKEN_PARAMETERS",
+    "TOOL_SERVER_KEYS",
     "TOP_LEVEL_KEYS",
     "TRUNCATED",
     "UNRESERVED",
