@@ -295,7 +295,7 @@ class AgentContract:
         assert _completed(seen) == ["Let me look."]
 
     @asyncio_test
-    async def test_a_turn_without_tools_never_says_it_is_waiting(self) -> None:
+    async def test_a_turn_whose_model_asks_for_no_tool_never_says_it_is_waiting(self) -> None:
         seen = await self.turn(Script(answers=(Say("Someone who plays fair."),)))
 
         assert not any(isinstance(event, WaitingOnTools) for event in seen)

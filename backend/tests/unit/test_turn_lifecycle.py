@@ -748,9 +748,29 @@ async def test_an_answer_completed_with_calls_but_never_announced_fails_the_turn
 
     ended = await wiring.store.run_by_id(run.id)
     assert ended is not None and ended.state is RunState.FAILED
+    assert ended.error is not None and NO_TOOLS_YET in ended.error
+    readable(await stored_events(wiring.store, run.id), run)
     assert [
         message.role for message in await stored_messages(wiring.store, run.conversation_id)
     ] == [Role.USER]
+
+
+@asyncio_test
+async def test_what_the_engine_hands_back_in_extras_is_stored_on_the_answer() -> None:
+    """The vendor's signed blocks ride on the answer as data the platform
+    never reads, so that the adapter that made them finds them in the history
+    it is handed next turn (``docs/specs/conversations.md``, "extras")."""
+    signed = {"anthropic": {"thinking": [{"type": "redacted_thinking", "data": "OPAQUE"}]}}
+    wiring = wired(*says("Found it.", extras=signed))
+    run = await begun(wiring)
+
+    await wiring.turns.execute(run)
+
+    stored = await stored_messages(wiring.store, run.conversation_id)
+    assert [message.extras for message in stored] == [{}, signed]
+    events = await stored_events(wiring.store, run.id)
+    (completed,) = [event.event for event in events if isinstance(event.event, MessageCompleted)]
+    assert completed.message.extras == signed
 
 
 # --- ending a run, whatever is happening to the task ---------------------------

@@ -54,6 +54,28 @@ lines; the plan's numbering is kept where a step is named.
   `ToolResultContent` with every field required, and the OpenAPI snapshot
   follows; the AG-UI mapper still refuses a `tool` announcement (the wire
   step maps it).
+- **The port is handed the whole path and the tools.** `ports.agents`:
+  `run_turn(agent, history, tools, *, model)`, the history the full visible
+  path and never trimmed above the port (ADR 0004; `core.trim_history`,
+  `DEFAULT_HISTORY_CHARS` and `Turns(history_chars=)` are gone, so the
+  lines of `poc-progress.md` that name them are history). `domain/tools.py`:
+  `ToolDefinition(name, description, input_schema, annotations)`, the full
+  name checked by the vendors' rule, the schema and the annotations bounded
+  plain data. `domain/turn.py`: `ToolCallStarted(call_id, name)`,
+  `ToolCallArgumentsDelta(call_id, text)`, `ToolCallCompleted(call)` and
+  `WaitingOnTools()`, held to their order by `core.check_engine_events`. The
+  application (`application/turns.py`) hands the path and `()` for tools and
+  fails a turn on the first tool event with `NO_TOOLS_YET`, until step 5c.
+- **The LangGraph engine calls tools.** `adapters/agents/langgraph/engine.py`
+  binds the run's tools in Anthropic's own shape (`bind_tools` passes it
+  through; the engine serves only `ChatAnthropic`), announces a call as the
+  client lifts it off the stream, streams its arguments, completes it with
+  what they parse to, and ends the turn `WaitingOnTools`; it replays an
+  answer's calls as the framework's `tool_calls` and a tool message as one
+  `ToolMessage` per result; the vendor's `thinking` and
+  `redacted_thinking` blocks come out in `extras["anthropic"]["thinking"]`
+  and go back only to the model that made them (`THINKING_BLOCKS`,
+  `VENDOR`). Its context policy is still "everything".
 
 ## Corrections to the plan
 
@@ -207,11 +229,81 @@ application hands the whole path and no tools, fails a turn on the first
 tool event so nothing half-answered is stored, and carries a completed
 answer's `extras` on to the stored message (from step 3's review).
 
-Review: pending.
+Review: 1 round (read after the commit; the fixes ride with step 4b).
+- High: 0.
+- Medium: 3 (2/1) — fixed in 4b: `check_engine_events` refused streamed
+  arguments nested past what the parser follows with a `RecursionError`
+  instead of the `InvalidValueError` it promised, and compared them as
+  Python (`1 == 1.0 == True`) rather than as JSON; a lifecycle test now
+  holds the stored answer to the `extras` the engine handed back. Left for
+  the final review: ADR 0004 and `agents.md` say the **contract suite**
+  keeps the one invariant above the port (the question is whole in what
+  the model sees) while the port docstring and the code keep it in each
+  adapter's own tests -- either the contract grows a hook for what the
+  scripted model was shown, or the two documents say what the code does.
+- Low: 9 (6/3) — fixed in 4b: the port's "how it ends" names
+  `WaitingOnTools`; the whole-path test's question is the longest message
+  (LangGraph; Pydantic AI's in 4c); a half-character split across two
+  argument deltas is tested; the never-announced lifecycle test asserts the
+  error and the readable stream; the engine checks what it is handed are
+  `ToolDefinition`s; `NO_TOOLS_YET` speaks of this version, not this
+  deployment, and of tool usage, not the loop; the prose of the format
+  module no longer says a tool call is refused; the contract test is named
+  for what it does (the model asks for no tool). Left: `fakes.calls`'s
+  `streamed` governs the arguments, not the text (rename or widen when a
+  test needs it); Pydantic AI's stale prose (4c); `poc-progress.md` (noted
+  under "What exists" instead of edited).
 
-Checks: lint; the whole suite against a throwaway PostgreSQL.
+Checks: lint; the whole suite against a throwaway PostgreSQL (3026 passed,
+15 skipped).
 Not done / to watch: the real engines still refuse a tool call from the
 model (`NO_TOOLS`) and a turn handed tools (`NO_TOOL_BINDING`) until steps
 4b and 4c, where each also gets its context policy and its own history
 tests; the application's refusal (`NO_TOOLS_YET`) is what step 5c replaces
 with the loop.
+
+### Step 4b — the LangGraph engine calls tools   (feature/mcp-4b-langgraph)
+
+Summary: the engine binds the run's tools in Anthropic's own shape (`name`,
+`description`, `input_schema`, which `bind_tools` passes through untouched
+to the one client this engine serves) and never runs one. Streaming: the
+client lifts a call off the stream as `tool_call_chunks` -- id and name on
+the first chunk, pieces of JSON with no id after -- and the engine announces
+it, streams the pieces, completes it with what they parse to (or with the
+framework's parsed arguments when nothing streamed), refuses arguments that
+are not JSON or not an object, refuses arguments for no announced call, and
+refuses a `tool_use` block in the final message that was never announced
+rather than dropping it. An answer that only calls holds the calls and no
+text; an answer that calls ends the turn `WaitingOnTools`. History: an
+answer's calls travel as the framework's `tool_calls`, a tool message as one
+`ToolMessage` per result with its `status`, which langchain-anthropic folds
+into the one `user` turn of `tool_result` blocks the vendor wants. The
+vendor's signed blocks (`thinking`, `redacted_thinking`) come out of the
+final message into `extras["anthropic"]["thinking"]` as they were, the
+thinking's text is streamed as reasoning deltas as it arrives and never
+stored as content, and the blocks are replayed in front of the answer's
+content only when the run's model is the one that made them
+(`provenance.model`); a block that does not fit `extras` is left out with a
+line in the log, and the answer is stored without it (the plan's open
+question (a), for this engine: dropped and logged, so a later turn on the
+same model sends that answer without its thinking). `NO_TOOLS`,
+`TOOL_BLOCKS` and `NO_TOOL_BINDING` are gone from this engine;
+`can_call_tools` is on, so the contract's tool test runs against it. The
+scripted chat model of the tests binds tools, records what was bound and
+makes the real client's chunks (`calling`). The fixes from step 4a's review
+ride here (above).
+
+Review: pending.
+
+Checks: lint; the whole suite against a throwaway PostgreSQL (3036 passed,
+14 skipped).
+Not done / to watch: the adapter does not turn thinking **on** -- the
+blocks are handled when a model sends them (a `thinking` parameter on the
+model, or a vendor default), and nothing tests the live client end to end
+(`tests/live/` still runs a plain turn); a live test with tools and
+thinking on is step 5b's or the final review's. No prompt caching, no
+token counting, no trimming: the context policy is "everything", as ADR
+0004 allows for now. A dropped oversize block is never asked back from the
+vendor; if Anthropic refuses an answer replayed without its thinking, the
+turn fails loudly and the fix is a policy in `_assistant`, not the store.
+The Pydantic AI engine still refuses tools (step 4c).

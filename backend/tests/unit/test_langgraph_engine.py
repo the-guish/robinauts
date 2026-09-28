@@ -28,10 +28,12 @@ Four subjects:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import subprocess
 import sys
+import uuid
 from collections.abc import AsyncIterator, Iterator, Sequence
 from typing import Any
 
@@ -43,6 +45,7 @@ import pytest
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessageChunk, BaseMessage
+from langchain_core.messages.tool import tool_call_chunk
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.tracers import langchain as tracer_module
 from langchain_core.tracers.context import _tracing_v2_is_enabled
@@ -61,12 +64,15 @@ from robinauts.adapters.agents.langgraph import (
     QUIET_CLIENT_LEVEL,
     QUIET_CLIENT_LOGGERS,
     TRACING_VARIABLES_REMOVED,
+    VENDOR,
     LangGraphAgent,
     chat_model,
     endpoint_of,
 )
+from robinauts.core import check_engine_events
 from robinauts.domain import (
     KINDS_WITH_BASE_URL,
+    MAX_EXTRAS_BYTES,
     AgentDefinition,
     AnswerCompleted,
     AnswerReasoningDelta,
@@ -83,9 +89,15 @@ from robinauts.domain import (
     ReasoningPart,
     Role,
     TextPart,
+    ToolCallArgumentsDelta,
+    ToolCallCompleted,
+    ToolCallPart,
+    ToolCallStarted,
     ToolDefinition,
+    ToolResultPart,
     UnknownModelError,
     UnsupportedContentError,
+    WaitingOnTools,
 )
 from robinauts.ports import Agent
 
@@ -161,6 +173,8 @@ class ScriptedChatModel(BaseChatModel):
     """What the chunks carry as ``response_metadata``; Anthropic names itself."""
     seen: list[list[BaseMessage]] = []
     """Every call's messages, exactly as the graph handed them over."""
+    bound: list[Any] = []
+    """Every call's tools, as ``bind_tools`` was handed them; ``None`` when none were."""
     open_streams: int = 0
 
     model_config = {"arbitrary_types_allowed": True}
@@ -169,30 +183,36 @@ class ScriptedChatModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "scripted"
 
+    def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> Any:
+        """What the real client does: the definitions ride along as ``tools``."""
+        return self.bind(tools=list(tools), **kwargs)
+
+    def _chunk(self, content: Any) -> AIMessageChunk:
+        """One scripted chunk: content, or a whole chunk written by the test."""
+        if isinstance(content, AIMessageChunk):
+            return content
+        return AIMessageChunk(content=content, response_metadata=dict(self.provider_metadata))
+
     def _generate(
         self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
     ) -> ChatResult:
         """The whole answer at once: what a model that does not stream does."""
         self.seen.append(list(messages))
+        self.bound.append(kwargs.get("tools"))
         whole = AIMessageChunk(content="", response_metadata=dict(self.provider_metadata))
         for content in self.chunks:
-            whole = whole + AIMessageChunk(
-                content=content, response_metadata=dict(self.provider_metadata)
-            )
+            whole = whole + self._chunk(content)
         return ChatResult(generations=[ChatGeneration(message=whole)])
 
     async def _astream(
         self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
     ) -> AsyncIterator[ChatGenerationChunk]:
         self.seen.append(list(messages))
+        self.bound.append(kwargs.get("tools"))
         self.open_streams += 1
         try:
             for content in self.chunks:
-                chunk = ChatGenerationChunk(
-                    message=AIMessageChunk(
-                        content=content, response_metadata=dict(self.provider_metadata)
-                    )
-                )
+                chunk = ChatGenerationChunk(message=self._chunk(content))
                 if run_manager is not None:
                     await run_manager.on_llm_new_token(chunk.text, chunk=chunk)
                 yield chunk
@@ -210,17 +230,57 @@ def in_pieces(text: str, pieces: int = PIECES) -> list[str]:
     return [text[start : start + size] for start in range(0, len(text), size)]
 
 
+ANTHROPIC = {"model_provider": "anthropic"}
+"""What the real client puts on every chunk: the provider, by which
+langchain-core normalises the vendor's blocks."""
+
+
+def calling(call_id: str, name: str, arguments: dict[str, Any], *, index: int = 1) -> list[Any]:
+    """The chunks the real client makes of one streamed tool call.
+
+    A ``content_block_start`` lifts the call on to the message as a tool-call
+    chunk with its id and name and no arguments; each ``input_json_delta``
+    is a chunk with a piece of the JSON and no id. The vendor's own block
+    rides along in the content, as it does in the client.
+    """
+    written = json.dumps(arguments)
+    half = len(written) // 2
+    return [
+        AIMessageChunk(
+            content=[
+                {"type": "tool_use", "id": call_id, "name": name, "input": {}, "index": index}
+            ],
+            tool_call_chunks=[tool_call_chunk(index=index, id=call_id, name=name, args="")],
+            response_metadata=dict(ANTHROPIC),
+        ),
+        *(
+            AIMessageChunk(
+                content=[{"type": "input_json_delta", "partial_json": piece, "index": index}],
+                tool_call_chunks=[tool_call_chunk(index=index, id=None, name=None, args=piece)],
+                response_metadata=dict(ANTHROPIC),
+            )
+            for piece in (written[:half], written[half:])
+            if piece
+        ),
+    ]
+
+
 def scripted(script: Script) -> ScriptedChatModel:
     """The chat model one turn of that script needs.
 
     A turn of this engine is one call to the model, so it is the script's
     first answer that is scripted; ``answers_per_turn`` below is what keeps
-    the suite from asking for a second.
+    the suite from asking for a second. An answer that calls tools streams
+    its text and then each call as the real client would.
     """
-    said = script.answers[0].text if script.answers else ""
-    streams = not script.answers or script.answers[0].streamed
+    first = script.answers[0] if script.answers else None
+    said = first.text if first else ""
+    streams = first is None or first.streamed
+    chunks: list[Any] = in_pieces(said) if said else []
+    for at, call in enumerate(first.calls if first else ()):
+        chunks.extend(calling(call.call_id, call.name, dict(call.arguments), index=at + 1))
     return ScriptedChatModel(
-        chunks=in_pieces(said) if said else [],
+        chunks=chunks,
         disable_streaming=not streams,
         error=RuntimeError("the provider said no") if script.ending is Ending.FAIL else None,
         gate=asyncio.Event() if script.ending is Ending.HANG else None,
@@ -235,9 +295,6 @@ class TestLangGraphAgent(AgentContract):
 
     can_answer_without_streaming = False
     """LangGraph hands the answer over in pieces even when the model sent one."""
-
-    can_call_tools = False
-    """Until this engine binds tools (the next step), its model cannot be scripted to call one."""
 
     def new_agent(self, script: Script) -> Agent:
         self.model = scripted(script)
@@ -418,76 +475,18 @@ async def test_a_model_that_does_not_stream_still_arrives_as_one_delta() -> None
 
 
 @asyncio_test
-async def test_a_message_of_the_tool_role_is_never_sent_to_a_model() -> None:
-    """The second of two refusals, and the one the engine owes.
-
-    ``domain.Message`` already refuses the ``tool`` role, so one cannot be
-    built or stored and the message below has to be forced into existence.
-    The engine checks anyway: it is the line that turns a history into what a
-    model is told, and the failure it would otherwise have is silent -- a
-    tool result sent as though the agent had said it. The day tool results
-    are carried, this is the line that has to learn what they look like, and
-    a line that would have guessed is worse than one that refuses.
-    """
-    model = ScriptedChatModel(chunks=["Never asked."])
-    from_a_tool = question("the weather is fine")
-    object.__setattr__(from_a_tool, "role", Role.TOOL)
-
-    with pytest.raises(UnsupportedContentError) as raised:
-        await turn_of(engine(model), (from_a_tool,))
-
-    assert "tool" in str(raised.value)
-    assert model.seen == []
-
-
-@asyncio_test
-async def test_a_model_that_asks_to_use_a_tool_fails_the_turn() -> None:
-    # This version has no tools: every block after the call would belong to an
-    # answer that cannot be produced, so finishing the turn with whatever text
-    # came with it would store half an answer that looks whole. An engine
-    # reports that by raising.
-    model = ScriptedChatModel(
-        chunks=[
-            [{"type": "text", "text": "Let me look it up. ", "index": 0}],
-            [{"type": "tool_call", "name": "search", "args": {}, "id": "t1", "index": 1}],
-        ],
-        provider_metadata={"model_provider": "anthropic"},
-    )
-    agent = engine(model)
-
-    with pytest.raises(UnsupportedContentError) as raised:
-        await turn_of(agent, (question(),))
-
-    assert "tool" in str(raised.value)
-    assert (agent.held, model.open_streams) == (0, 0)
-
-
-@asyncio_test
-async def test_a_turn_handed_tools_is_refused_until_the_engine_binds_them() -> None:
-    # Binding the definitions to the model is the next step's; a turn run
-    # without them would answer a question the model was meant to use a tool
-    # for, so it is refused before the model is reached.
-    model = ScriptedChatModel(chunks=["Never asked."])
-    search = ToolDefinition(name="github__search", description="Search.", input_schema={})
-
-    with pytest.raises(UnsupportedContentError) as raised:
-        await turn_of(engine(model), (question(),), tools=(search,))
-
-    assert "bind tools" in str(raised.value)
-    assert model.seen == []
-
-
-@asyncio_test
 async def test_the_whole_path_reaches_the_model_and_ends_in_the_question() -> None:
     """This engine's context policy, for now: everything (ADR 0004). What is
     kept above the port is that the question being answered is whole in what
     the model sees; it is checked here, where the model can be asked."""
     model = ScriptedChatModel(chunks=["Three."])
-    first = question("q" * 5_000, seconds=0)
+    first = question("Are you sure?", seconds=0)
     said = answer(first, "a" * 5_000, seconds=1)
     second = question("r" * 5_000, parent=said, seconds=2)
     replied = answer(second, "b" * 5_000, seconds=3)
-    third = question("Are you sure?", parent=replied, seconds=4)
+    # The question is the longest message, so a policy that cut the tail --
+    # the one thing ADR 0004 forbids -- would be caught here and not passed.
+    third = question("q" * 5_000, parent=replied, seconds=4)
 
     await turn_of(engine(model), (first, said, second, replied, third))
 
@@ -495,24 +494,375 @@ async def test_the_whole_path_reaches_the_model_and_ends_in_the_question() -> No
     told = [message for message in heard if message.type != "system"]
     assert [message.type for message in told] == ["human", "ai", "human", "ai", "human"]
     assert [str(message.content) for message in told] == [
-        first.text,
+        "Are you sure?",
         said.text,
         second.text,
         replied.text,
-        "Are you sure?",
+        third.text,
+    ]
+
+
+# --- tools ---------------------------------------------------------------------
+
+SEARCH = ToolDefinition(
+    name="github__search",
+    description="Search the repositories this deployment may see.",
+    input_schema={"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]},
+    annotations={"readOnlyHint": True},
+)
+
+
+def turn_with_tools() -> tuple[Message, Message, Message]:
+    """A question, the answer that called a tool with its signed blocks, the result."""
+    asked = question("look it up", seconds=0)
+    calling_ = answer(
+        asked,
+        seconds=1,
+        parts=(TextPart("Let me look."), ToolCallPart("toolu_01", SEARCH.name, {"q": "robinauts"})),
+        extras={
+            VENDOR: {
+                "thinking": [
+                    {"type": "thinking", "thinking": "hm", "signature": "SIG"},
+                    {"type": "redacted_thinking", "data": "OPAQUE"},
+                ]
+            }
+        },
+    )
+    results = Message(
+        id=uuid.uuid4(),
+        conversation_id=asked.conversation_id,
+        parent_id=calling_.id,
+        role=Role.TOOL,
+        parts=(ToolResultPart("toolu_01", "found 3", is_error=True),),
+        created_at=calling_.created_at,
+    )
+    return asked, calling_, results
+
+
+@asyncio_test
+async def test_the_tools_a_run_has_are_bound_as_the_vendor_takes_them() -> None:
+    model = ScriptedChatModel(chunks=["Found it."])
+
+    await turn_of(engine(model), (question(),), tools=(SEARCH,))
+    await turn_of(engine(model), (question(),))
+
+    # Anthropic's own shape, passed through untouched: the full name, the
+    # description and the server's schema as it stands. The annotations are
+    # the platform's and are not sent.
+    assert model.bound == [
+        [
+            {
+                "name": "github__search",
+                "description": "Search the repositories this deployment may see.",
+                "input_schema": SEARCH.input_schema,
+            }
+        ],
+        None,
     ]
 
 
 @asyncio_test
-async def test_anthropics_own_spelling_of_a_tool_call_fails_the_turn_too() -> None:
-    # Without the metadata langchain-core normalises by, the vendor's own
-    # block arrives as it was sent; it means the same thing and is refused.
+async def test_a_model_that_asks_for_a_tool_yields_the_call_and_ends_the_turn_waiting() -> None:
+    """The call is announced with its id and name, its arguments stream as the
+    model writes them, it completes as the platform's part, the answer holds
+    it and the turn ends waiting: the engine runs nothing
+    (``docs/specs/runs.md``)."""
+    model = ScriptedChatModel(
+        chunks=[
+            AIMessageChunk(content=[{"type": "text", "text": "Let me look. ", "index": 0}]),
+            *calling("toolu_01", "github__search", {"q": "robinauts"}, index=1),
+            *calling("toolu_02", "jira__find", {}, index=2),
+        ]
+    )
+    agent = engine(model)
+
+    seen = await turn_of(agent, (question(),), tools=(SEARCH,))
+
+    check_engine_events(seen)
+    assert [type(event) for event in seen] == [
+        AnswerStarted,
+        AnswerTextDelta,
+        ToolCallStarted,
+        ToolCallArgumentsDelta,
+        ToolCallArgumentsDelta,
+        ToolCallCompleted,
+        ToolCallStarted,
+        ToolCallArgumentsDelta,
+        ToolCallArgumentsDelta,
+        ToolCallCompleted,
+        AnswerCompleted,
+        WaitingOnTools,
+    ]
+    assert seen[2] == ToolCallStarted(call_id="toolu_01", name="github__search")
+    assert "".join(
+        event.text
+        for event in seen
+        if isinstance(event, ToolCallArgumentsDelta) and event.call_id == "toolu_01"
+    ) == json.dumps({"q": "robinauts"})
+    first = ToolCallPart("toolu_01", "github__search", {"q": "robinauts"})
+    second = ToolCallPart("toolu_02", "jira__find", {})
+    assert seen[5] == ToolCallCompleted(call=first)
+    assert seen[-2] == AnswerCompleted(parts=(TextPart("Let me look. "), first, second))
+    assert (agent.held, model.open_streams) == (0, 0)
+
+
+@asyncio_test
+async def test_an_answer_that_only_calls_holds_the_calls_and_no_text() -> None:
+    model = ScriptedChatModel(chunks=calling("toolu_01", "github__search", {"q": "x"}))
+
+    seen = await turn_of(engine(model), (question(),), tools=(SEARCH,))
+
+    check_engine_events(seen)
+    assert seen[-2] == AnswerCompleted(
+        parts=(ToolCallPart("toolu_01", "github__search", {"q": "x"}),)
+    )
+    assert isinstance(seen[-1], WaitingOnTools)
+
+
+@asyncio_test
+async def test_an_answer_that_was_not_streamed_still_yields_its_calls() -> None:
+    # A model that does not stream hands the whole message over in one piece:
+    # the framework passes it on as one chunk, so the call is announced, its
+    # arguments arrive whole, and the answer completes with the same parts a
+    # streamed one would.
+    model = ScriptedChatModel(
+        chunks=[
+            AIMessageChunk(
+                content=[{"type": "text", "text": "Whole. ", "index": 0}],
+                response_metadata=dict(ANTHROPIC),
+            ),
+            *calling("toolu_01", "github__search", {"q": "x"}),
+        ],
+        disable_streaming=True,
+    )
+
+    seen = await turn_of(engine(model), (question(),), tools=(SEARCH,))
+
+    check_engine_events(seen)
+    assert [type(event) for event in seen] == [
+        AnswerStarted,
+        AnswerTextDelta,
+        ToolCallStarted,
+        ToolCallArgumentsDelta,
+        ToolCallCompleted,
+        AnswerCompleted,
+        WaitingOnTools,
+    ]
+    assert seen[-2] == AnswerCompleted(
+        parts=(TextPart("Whole. "), ToolCallPart("toolu_01", "github__search", {"q": "x"}))
+    )
+
+
+@asyncio_test
+async def test_arguments_that_are_not_json_or_not_an_object_fail_the_turn() -> None:
+    for pieces in ("not json", '["a", "list"]'):
+        model = ScriptedChatModel(
+            chunks=[
+                AIMessageChunk(
+                    content=[
+                        {
+                            "type": "tool_use",
+                            "id": "t1",
+                            "name": "github__search",
+                            "input": {},
+                            "index": 0,
+                        }
+                    ],
+                    tool_call_chunks=[
+                        tool_call_chunk(index=0, id="t1", name="github__search", args="")
+                    ],
+                ),
+                AIMessageChunk(
+                    content=[{"type": "input_json_delta", "partial_json": pieces, "index": 0}],
+                    tool_call_chunks=[tool_call_chunk(index=0, id=None, name=None, args=pieces)],
+                ),
+            ]
+        )
+        with pytest.raises(UnsupportedContentError, match="arguments"):
+            await turn_of(engine(model), (question(),), tools=(SEARCH,))
+
+
+@asyncio_test
+async def test_a_call_the_client_did_not_lift_off_the_stream_is_refused_not_dropped() -> None:
+    # The vendor's own block with no tool-call chunk beside it: a client that
+    # did not recognise a call. Finishing the turn without it would store
+    # half an answer that looks whole, so it is refused.
     model = ScriptedChatModel(
         chunks=[[{"type": "tool_use", "name": "search", "input": {}, "id": "t1", "index": 0}]]
     )
 
-    with pytest.raises(UnsupportedContentError):
-        await turn_of(engine(model), (question(),))
+    with pytest.raises(UnsupportedContentError, match="did not translate"):
+        await turn_of(engine(model), (question(),), tools=(SEARCH,))
+
+
+@asyncio_test
+async def test_arguments_for_no_announced_call_are_refused() -> None:
+    model = ScriptedChatModel(
+        chunks=[
+            AIMessageChunk(
+                content=[{"type": "input_json_delta", "partial_json": "{}", "index": 0}],
+                tool_call_chunks=[tool_call_chunk(index=0, id=None, name=None, args="{}")],
+            )
+        ]
+    )
+
+    with pytest.raises(UnsupportedContentError, match="no tool call"):
+        await turn_of(engine(model), (question(),), tools=(SEARCH,))
+
+
+@asyncio_test
+async def test_a_turn_with_tools_in_its_history_is_translated_for_the_model() -> None:
+    """The answer's calls travel as the framework's tool calls with the
+    vendor's signed blocks in front, and the tool message becomes one tool
+    result per call, its error flag with it -- which the vendor's client
+    formats as Anthropic wants them back."""
+    from langchain_anthropic.chat_models import _format_messages
+
+    asked, calling_, results = turn_with_tools()
+    model = ScriptedChatModel(chunks=["Found three."])
+
+    await turn_of(engine(model), (asked, calling_, results))
+
+    (heard,) = model.seen
+    _system, human, assistant, tool = heard
+    assert human.type == "human" and str(human.content) == "look it up"
+    assert assistant.type == "ai"
+    assert assistant.tool_calls == [
+        {
+            "name": "github__search",
+            "args": {"q": "robinauts"},
+            "id": "toolu_01",
+            "type": "tool_call",
+        }
+    ]
+    assert assistant.content == [
+        {"type": "thinking", "thinking": "hm", "signature": "SIG"},
+        {"type": "redacted_thinking", "data": "OPAQUE"},
+        {"type": "text", "text": "Let me look."},
+    ]
+    assert tool.type == "tool"
+    assert (tool.content, tool.tool_call_id, tool.status) == ("found 3", "toolu_01", "error")
+    # And what the vendor is sent, block for block.
+    _, formatted = _format_messages(heard)
+    assert formatted[1]["content"] == [
+        {"type": "thinking", "thinking": "hm", "signature": "SIG"},
+        {"type": "redacted_thinking", "data": "OPAQUE"},
+        {"type": "text", "text": "Let me look."},
+        {
+            "type": "tool_use",
+            "name": "github__search",
+            "input": {"q": "robinauts"},
+            "id": "toolu_01",
+        },
+    ]
+    assert formatted[2] == {
+        "role": "user",
+        "content": [
+            {
+                "type": "tool_result",
+                "content": "found 3",
+                "tool_use_id": "toolu_01",
+                "is_error": True,
+            }
+        ],
+    }
+
+
+@asyncio_test
+async def test_the_signed_blocks_are_replayed_to_the_model_that_made_them_and_to_no_other() -> None:
+    asked, calling_, results = turn_with_tools()
+    model = ScriptedChatModel(chunks=["Found three."])
+    other = answer(asked, "plain", seconds=1, extras=calling_.extras)
+
+    agent = LangGraphAgent(two_models(), keys(), chat_model_for=lambda *_: model)  # noqa: ARG005
+
+    await turn_of(agent, (asked, calling_, results), model=OTHER_MODEL)
+    await turn_of(agent, (asked, other))
+
+    moved, same_model = model.seen
+    # Moved to another model: the calls and the text go, the blocks do not.
+    assert moved[2].content == [{"type": "text", "text": "Let me look."}]
+    assert moved[2].tool_calls[0]["id"] == "toolu_01"
+    # A plain answer on the model that made the blocks replays them too.
+    assert same_model[2].content[0] == {"type": "thinking", "thinking": "hm", "signature": "SIG"}
+
+
+@asyncio_test
+async def test_the_vendors_signed_blocks_come_out_in_extras_and_the_thinking_is_streamed() -> None:
+    model = ScriptedChatModel(
+        chunks=[
+            AIMessageChunk(
+                content=[{"type": "thinking", "thinking": "let me ", "signature": "", "index": 0}],
+                response_metadata=dict(ANTHROPIC),
+            ),
+            AIMessageChunk(
+                content=[{"type": "thinking", "thinking": "think", "index": 0}],
+                response_metadata=dict(ANTHROPIC),
+            ),
+            AIMessageChunk(
+                content=[{"type": "thinking", "signature": "SIG", "index": 0}],
+                response_metadata=dict(ANTHROPIC),
+            ),
+            AIMessageChunk(
+                content=[{"type": "redacted_thinking", "data": "OPAQUE", "index": 1}],
+                response_metadata=dict(ANTHROPIC),
+            ),
+            AIMessageChunk(
+                content=[{"type": "text", "text": "Hi.", "index": 2}],
+                response_metadata=dict(ANTHROPIC),
+            ),
+        ]
+    )
+
+    seen = await turn_of(engine(model), (question(),))
+
+    check_engine_events(seen)
+    assert [event.text for event in seen if isinstance(event, AnswerReasoningDelta)] == [
+        "let me ",
+        "think",
+    ]
+    assert seen[-1] == AnswerCompleted(
+        parts=(TextPart("Hi."),),
+        extras={
+            VENDOR: {
+                "thinking": [
+                    {"type": "thinking", "thinking": "let me think", "signature": "SIG"},
+                    {"type": "redacted_thinking", "data": "OPAQUE"},
+                ]
+            }
+        },
+    )
+
+
+@asyncio_test
+async def test_blocks_that_do_not_fit_extras_are_left_out_with_a_line_in_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    model = ScriptedChatModel(
+        chunks=[
+            AIMessageChunk(
+                content=[
+                    {
+                        "type": "thinking",
+                        "thinking": "x" * MAX_EXTRAS_BYTES,
+                        "signature": "S",
+                        "index": 0,
+                    }
+                ],
+                response_metadata=dict(ANTHROPIC),
+            ),
+            AIMessageChunk(
+                content=[{"type": "text", "text": "Hi.", "index": 1}],
+                response_metadata=dict(ANTHROPIC),
+            ),
+        ]
+    )
+
+    with caplog.at_level(logging.WARNING):
+        seen = await turn_of(engine(model), (question(),))
+
+    assert seen[-1] == AnswerCompleted(parts=(TextPart("Hi."),))
+    assert any("did not fit" in record.getMessage() for record in caplog.records)
 
 
 @asyncio_test

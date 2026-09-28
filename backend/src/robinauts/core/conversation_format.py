@@ -50,7 +50,7 @@ something only our own rows can cause. The rules
 - writing always writes the current version.
 
 **Loud about what it does not know.** A message holding content of a kind the
-format names and this build does not carry (an image, a tool call) is refused
+format names and this build does not carry (an image) is refused
 by name with ``UnsupportedContentError`` -- whatever else that piece of
 content carries, because the kind is read before anything else. The message is
 refused whole: one shown without its image is one misread. A key nobody wrote, a naive

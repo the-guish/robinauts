@@ -366,6 +366,32 @@ def test_a_tool_calls_arguments_belong_to_the_open_call_and_are_what_it_complete
     # Whitespace alone is nothing streamed, as an empty text delta is.
     blank = ToolCallArgumentsDelta(call_id=CALL.call_id, text=" ")
     assert check_engine_events((started, announced, blank, completed, answer, waiting)) is None
+    # A character cut in half across two deltas -- a surrogate pair the
+    # vendor split -- is joined before it is read, as an answer's text is.
+    high = ToolCallArgumentsDelta(call_id=CALL.call_id, text='{"q": "\ud83d')
+    low = ToolCallArgumentsDelta(call_id=CALL.call_id, text='\ude00"}')
+    smiled = ToolCallCompleted(call=ToolCallPart(CALL.call_id, CALL.name, {"q": "\U0001f600"}))
+    whole = AnswerCompleted(parts=(TextPart("Let me look."), smiled.call))
+    assert check_engine_events((started, announced, high, low, smiled, whole, waiting)) is None
+
+
+def test_streamed_arguments_are_compared_as_json_and_refused_past_what_the_parser_follows() -> None:
+    started, said, announced, first, second, completed, answer, waiting = asked_for_tools()
+    # ``1`` and ``1.0`` are one value to Python and two to JSON; the record
+    # holds what was streamed, so the wire and the store must agree as JSON.
+    completed_as_int = ToolCallCompleted(call=ToolCallPart(CALL.call_id, CALL.name, {"n": 1}))
+    streamed_as_float = ToolCallArgumentsDelta(call_id=CALL.call_id, text='{"n": 1.0}')
+    with pytest.raises(InvalidValueError, match="are the arguments it completed with"):
+        check_engine_events((started, announced, streamed_as_float, completed_as_int))
+    streamed_as_bool = ToolCallArgumentsDelta(call_id=CALL.call_id, text='{"n": true}')
+    with pytest.raises(InvalidValueError, match="are the arguments it completed with"):
+        check_engine_events((started, announced, streamed_as_bool, completed_as_int))
+    # Deltas are bounded one by one and not in number: text nested past what
+    # the parser can follow is refused as not the call's JSON, not raised as
+    # a RecursionError from a place that promised a refusal.
+    deep = [ToolCallArgumentsDelta(call_id=CALL.call_id, text="[" * 5_000) for _ in range(40)]
+    with pytest.raises(InvalidValueError, match="are JSON"):
+        check_engine_events((started, announced, *deep, completed))
 
 
 def test_a_tool_call_completes_as_it_was_announced_and_the_answer_holds_exactly_the_calls() -> None:

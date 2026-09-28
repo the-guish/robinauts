@@ -27,31 +27,49 @@ calls, which is what lets the next turn of the same conversation run on the
 other engine.
 
 **A real graph, not a shortcut.** One node, which streams the chat model, and
-two edges. It would be shorter to call the model directly; then the seam the
-project exists to prove would not be exercised, and the day a turn grows a
-second node -- tools -- the shape would have to be invented rather than
-extended.
+two edges -- and **no ``ToolNode``**: the platform owns the tool loop
+(``docs/specs/agents.md``, "Tools"). The tools a run has are bound to the
+model (``bind_tools``), a call the model makes is yielded as events and the
+turn ends there, waiting; the application runs the call, appends the result
+and starts the next turn from the stored history, which this engine then sees
+as a path ending in a tool message.
 
 **The mapping**, which is the whole of the translation:
 
 - LangGraph's ``messages`` stream carries what the model produced, chunk by
   chunk. The first chunk with anything in it opens the answer
-  (``AnswerStarted``); text becomes ``AnswerTextDelta`` and reasoning becomes
-  ``AnswerReasoningDelta``;
+  (``AnswerStarted``); text becomes ``AnswerTextDelta``, reasoning becomes
+  ``AnswerReasoningDelta``, and a tool call becomes ``ToolCallStarted`` with
+  its id and name, ``ToolCallArgumentsDelta`` for the JSON the model writes,
+  and ``ToolCallCompleted`` with the platform's part for it;
 - the node's own update carries the whole message, which is what an answer
-  **that never streamed** completes with;
+  **that never streamed** completes with, where a call that streamed no
+  arguments takes them from, and where the vendor's signed thinking blocks
+  are read off (``_Answer.complete``);
 - **what was streamed is what is kept** (``docs/specs/agents.md``): an answer
   that yielded text deltas completes with exactly those deltas joined, never
-  with whatever the framework made of the final message;
+  with whatever the framework made of the final message, and a call's
+  arguments are what its deltas parse to;
 - **reasoning is never in the completed parts.** ``domain.kept_parts`` would
   drop a ``ReasoningPart`` anyway; putting the model's thinking in the answer's
   *text* is the mistake that would survive that, so the text part is built
-  from the text deltas alone.
+  from the text deltas alone. What **is** kept of the thinking is the vendor's
+  signed blocks, in ``AnswerCompleted.extras`` under ``anthropic``, unread
+  (``docs/specs/conversations.md``, "Reasoning"): the vendor requires them back
+  with a tool call's results, and this adapter replays them -- to the model
+  that made them, since they are bound to it -- when it translates the
+  history (``_assistant``);
+- **an answer that asked for tools ends the turn waiting** (``WaitingOnTools``)
+  and the engine executes none of them.
 
 Chunks are read through ``AIMessageChunk.content_blocks``, langchain-core's
-own provider-neutral view of a message's content: Anthropic's ``thinking``
-blocks arrive here as standard ``reasoning`` blocks, so the engine needs no
-vendor branch to show thinking as it arrives.
+own provider-neutral view of a message's content, for text and reasoning, and
+through ``tool_call_chunks`` for calls, which is where every provider client
+puts a streamed call.
+
+**Its context policy is everything** (ADR 0004): the whole visible path goes
+to the model, in order, with the system prompt in front. Trimming to a token
+budget and cache breakpoints are this adapter's to add, and are not added yet.
 
 **Nothing phones home** (``docs/specs/core.md``). LangSmith is off, explicitly,
 at construction and whatever the environment says (``force_tracing_off``), and
@@ -82,6 +100,7 @@ composition root, which is a step of its own
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
@@ -91,8 +110,15 @@ from typing import Any
 import langsmith
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    BaseMessage,
+    HumanMessage,
+    ToolMessage,
+)
 from langchain_core.messages import SystemMessage as ChatSystemMessage
+from langchain_core.runnables import Runnable
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from robinauts.adapters.config_file import ProviderKeys
@@ -104,19 +130,29 @@ from robinauts.domain import (
     AnswerTextDelta,
     ConfigError,
     EngineEvent,
+    InvalidValueError,
     Message,
+    MessagePart,
     ModelConfig,
     ModelProviderConfig,
     ModelsConfig,
     ProviderKind,
     Role,
-    TextPart,
+    ToolCallArgumentsDelta,
+    ToolCallCompleted,
+    ToolCallPart,
+    ToolCallStarted,
     ToolDefinition,
     UnsupportedContentError,
+    WaitingOnTools,
+    chain,
+    checked_data,
     clean_text,
     text_parts,
 )
 from robinauts.ports import Agent
+
+_log = logging.getLogger(__name__)
 
 ANTHROPIC_ENDPOINT = "https://api.anthropic.com"
 """Where Anthropic is, said here rather than left to the client to decide.
@@ -230,6 +266,37 @@ it to the engine" and this is where "the engine" answers.
 
 ANSWER_NODE = "answer"
 """The one node of the graph: the model, streamed."""
+
+VENDOR = "anthropic"
+"""The key the vendor's opaque blocks are kept under in a message's ``extras``.
+
+One vendor's key for one vendor's blocks (``docs/specs/conversations.md``,
+"Reasoning"): the two kinds this engine reaches speak Anthropic's Messages
+API, so what it stores and what it replays are Anthropic's thinking blocks,
+and an adapter reaching another vendor reads past this key.
+"""
+
+THINKING_BLOCKS = frozenset({"thinking", "redacted_thinking"})
+"""The vendor's block types that carry signed reasoning.
+
+What the vendor requires back, unchanged, when a tool call's results go back:
+a ``thinking`` block with its ``signature``, or a ``redacted_thinking`` block
+that is opaque throughout. These are what ``_extras`` keeps and ``_assistant``
+replays; the reasoning a person watched arrive is shown from the stream and
+kept in the run's events, and never read out of these.
+"""
+
+BLOCKS_LEFT_OUT = (
+    "the vendor's signed thinking blocks did not fit a message's extras and were left"
+    " out; if the model asked for tools, the vendor may refuse the next round"
+)
+"""What the log says when an answer's blocks are bigger than ``extras`` may be.
+
+The plan's open question, answered here for this iteration
+(``docs/working-notes/mcp-plan.md``, "Open"): the answer is stored without
+them rather than the turn failing over the size of the thinking, and the
+line says what that may cost.
+"""
 
 
 ChatModelFactory = Callable[[ModelConfig, ModelProviderConfig, str], BaseChatModel]
@@ -515,25 +582,29 @@ class LangGraphAgent(Agent):
         tools: tuple[ToolDefinition, ...],
         model_id: str,
     ) -> AsyncGenerator[EngineEvent, None]:
-        if tools:
-            # Binding the definitions to the model is the next step's
-            # (``docs/working-notes/mcp-plan.md``, step 4); until then a turn
-            # handed tools is refused rather than run without them, which
-            # would answer a question the model was meant to use a tool for.
-            raise UnsupportedContentError(NO_TOOL_BINDING)
         # The run's model, never the agent's default: the conversation may
         # have been moved to another (``robinauts.ports.agents``).
         model = self._models.model_by_id(model_id)
         provider = self._models.provider_for(model)
         chat = self._chat_model_for(model, provider, self._keys.key_for(provider.id))
-        graph = _compiled(chat)
-        started = False
-        streamed: list[str] = []
-        whole: str | None = None
+        # The tools the run has, bound as the vendor's own definitions and
+        # never executed here: a call is yielded and the turn ends. The port
+        # is a seam a test double crosses too, so what comes over it is
+        # checked to be the platform's definition and nothing that looks
+        # like one.
+        for tool in tools:
+            if not isinstance(tool, ToolDefinition):
+                raise InvalidValueError(f"a run's tools are ToolDefinitions, not {tool!r}")
+        bound: Runnable[Any, Any] = (
+            chat.bind_tools([_anthropic_tool(tool) for tool in tools]) if tools else chat
+        )
+        graph = _compiled(bound)
+        answer = _Answer()
+        whole: AIMessage | None = None
         self._open += 1
         try:
             stream = graph.astream(
-                {"messages": _messages(agent, history)},
+                {"messages": _messages(agent, history, model_id)},
                 stream_mode=["messages", "updates"],
                 # A fresh configuration each turn, carrying no callbacks: a
                 # turn inherits nothing from whatever context it happens to
@@ -545,31 +616,19 @@ class LangGraphAgent(Agent):
                 async for mode, payload in stream:
                     if mode == "messages":
                         chunk, _metadata = payload
-                        for text, reasoning in _blocks(chunk):
-                            if not started:
-                                started = True
-                                yield AnswerStarted()
-                            if reasoning:
-                                yield AnswerReasoningDelta(text=reasoning)
-                            if text:
-                                streamed.append(text)
-                                yield AnswerTextDelta(text=text)
+                        for event in answer.events_of(chunk):
+                            yield event
                     else:
-                        whole = _said(payload)
-            if not started:
-                # Nothing was streamed that this version carries -- no text
-                # and no thinking. The answer is whatever the node left in the
-                # state, announced and completed in one breath; an engine is
-                # never required to stream (``docs/specs/agents.md``).
-                yield AnswerStarted()
-            yield AnswerCompleted(parts=_parts(streamed, whole))
+                        whole = _reply(payload)
+            for event in answer.complete(whole):
+                yield event
         finally:
             # Reached when the turn ends, when it raises, and when the
             # iteration is closed -- which is what a cancellation does.
             self._open -= 1
 
 
-def _compiled(chat: BaseChatModel) -> Any:
+def _compiled(chat: Runnable[Any, Any]) -> Any:
     """The turn's graph: one node that streams the model, and no checkpointer.
 
     Compiled per turn and thrown away with it. Cheap -- it is a handful of
@@ -579,7 +638,9 @@ def _compiled(chat: BaseChatModel) -> Any:
 
     The node streams rather than invokes: a model asked for the whole answer
     at once would arrive as one piece however well it streams, and what a
-    person watches arrive is what the platform stores.
+    person watches arrive is what the platform stores. ``chat`` is the model
+    with the run's tools bound, or the model alone; there is no tool node,
+    because the platform runs the tools (``docs/specs/agents.md``).
     """
 
     async def answer(state: MessagesState) -> dict[str, list[BaseMessage]]:
@@ -595,7 +656,23 @@ def _compiled(chat: BaseChatModel) -> Any:
     return graph.compile()
 
 
-def _messages(agent: AgentDefinition, history: Sequence[Message]) -> list[BaseMessage]:
+def _anthropic_tool(tool: ToolDefinition) -> dict[str, Any]:
+    """The definition as the vendor's client takes it, as it stands.
+
+    Anthropic's own shape -- ``name``, ``description``, ``input_schema`` --
+    which ``bind_tools`` passes through untouched. The name is the full name
+    the platform gave it, and the schema is the server's, as plain data.
+    """
+    return {
+        "name": tool.name,
+        "description": tool.description,
+        "input_schema": dict(tool.input_schema),
+    }
+
+
+def _messages(
+    agent: AgentDefinition, history: Sequence[Message], model_id: str
+) -> list[BaseMessage]:
     """The history as the framework's messages, with the system prompt in front.
 
     The system prompt is the **agent's** and is not one of the messages
@@ -603,150 +680,274 @@ def _messages(agent: AgentDefinition, history: Sequence[Message]) -> list[BaseMe
     the definition as it stands now. An empty one is left out rather than sent
     as an empty system message, which some providers refuse.
 
-    **Text only.** Reasoning a previous turn produced is not carried back to
-    the model: this version keeps none of it, and what is stored holds none
-    either (``docs/working-notes/poc-scope.md``). A message with no text at
-    all still becomes a message, empty, because dropping it *here* would be
-    this engine deciding what a turn that said nothing means. What becomes of
-    it is the vendor mapping's, and it is the same answer under both engines:
+    **Text, calls and results.** The reasoning a previous turn streamed is
+    not carried back to the model as content: what is stored of it is the
+    platform's record, not the vendor's, and the vendor's own signed blocks
+    travel in ``extras`` and are replayed by ``_assistant`` on their own
+    terms. A message with no text at all still
+    becomes a message, empty, because dropping it *here* would be this engine
+    deciding what a turn that said nothing means. What becomes of it is the
+    vendor mapping's, and it is the same answer under both engines:
     Anthropic's API refuses an empty content block, so langchain-anthropic
     drops an assistant message whose content came out empty and Pydantic AI
     leaves out the assistant message it emptied. The model is shown the same
     history either way, which is what the swap needs.
 
-    **A message of the ``tool`` role is refused.** The role is reserved and
-    not carried (``docs/specs/conversations.md``); sending one to a model as
-    though the agent had said it would be telling the model something nobody
-    said, and quietly. Nothing can put one in a conversation today, which is
-    why this is a refusal rather than a translation: the day tool results are
-    stored, this is the line that has to learn what they look like.
+    An answer's tool calls travel as the framework's ``tool_calls``, and a
+    **tool message** becomes one ``ToolMessage`` per result, each naming its
+    call and whether it went wrong -- which langchain-anthropic folds into the
+    one ``user`` turn of ``tool_result`` blocks the vendor wants back.
     """
     messages: list[BaseMessage] = []
     if agent.system_prompt:
         messages.append(ChatSystemMessage(agent.system_prompt))
     for message in history:
-        if message.role not in (Role.USER, Role.ASSISTANT):
-            raise UnsupportedContentError(
-                f"a message of the {message.role.value} role cannot be sent to a model:"
-                f" this version carries no tool results"
+        if message.role is Role.USER:
+            messages.append(HumanMessage(message.text))
+        elif message.role is Role.ASSISTANT:
+            messages.append(_assistant(message, model_id))
+        else:
+            messages.extend(
+                ToolMessage(
+                    content=part.text,
+                    tool_call_id=part.call_id,
+                    status="error" if part.is_error else "success",
+                )
+                for part in message.tool_results
             )
-        text = "".join(part.text for part in message.parts if isinstance(part, TextPart))
-        messages.append(HumanMessage(text) if message.role is Role.USER else AIMessage(text))
     return messages
 
 
-TOOL_BLOCKS = frozenset({"tool_call", "tool_call_chunk", "invalid_tool_call", "tool_use"})
-"""The block kinds that mean the model wants to use a tool.
+def _assistant(message: Message, model_id: str) -> AIMessage:
+    """An answer as the framework's message: its text, its calls, its signed blocks.
 
-Both spellings: the standard one langchain-core normalises to, and the
-vendor's own, which is what a block carries when it arrives as
-``non_standard`` -- the framework passes a block it does not recognise
-through rather than dropping it, and a tool call is exactly the kind of thing
-it will not recognise until this version has tools.
-"""
-
-NO_TOOLS = (
-    "the model asked to use a tool, and this version has none: give the agent a"
-    " model or a system prompt that does not, or wait for tool usage"
-)
-"""Why a turn that meets a tool call fails, and what an operator can do."""
-
-NO_TOOL_BINDING = (
-    "the LangGraph engine does not bind tools to the model yet; a turn with tools is"
-    " refused rather than run without them"
-)
-"""Why a turn handed tool definitions fails, until this engine binds them."""
-
-
-def _blocks(chunk: Any) -> list[tuple[str, str]]:
-    """The text and the reasoning of one streamed chunk, in the order they came.
-
-    ``content_blocks`` is langchain-core's provider-neutral view of what a
-    message holds, so Anthropic's ``thinking`` blocks arrive as standard
-    ``reasoning`` ones and nothing here is vendor-specific. Blocks of a kind
-    this version does not carry -- a citation, whatever a provider adds next
-    -- are passed over: an engine that guessed at them would be inventing
-    content.
-
-    **A tool call is not passed over.** This version has no tools
-    (``docs/specs/agents.md``), so a model that asks to use one is asking for
-    something that will never happen: every following block would be part of
-    an answer that cannot be produced, and passing the call over would finish
-    the turn with whatever text happened to come with it -- an answer that
-    looks complete and is half of one. An engine reports that by raising, and
-    ``UnsupportedContentError`` is what the format already calls content this
-    build does not carry.
+    **The vendor's signed thinking blocks are replayed to the model that made
+    them** (``docs/specs/conversations.md``, "Reasoning"): they are bound to
+    it, so an answer produced on another model is sent without them and
+    nothing else is lost. They go in front of the text, where the vendor put
+    them, exactly as they were stored; nothing here reads them. A plain answer
+    -- no calls, no blocks -- is the one string it always was.
     """
-    if not isinstance(chunk, AIMessageChunk):  # pragma: no cover -- LangGraph yields these
+    text = message.text
+    calls = [
+        {"name": part.name, "args": dict(part.arguments), "id": part.call_id, "type": "tool_call"}
+        for part in message.tool_calls
+    ]
+    blocks = _replayed(message, model_id)
+    if not calls and not blocks:
+        return AIMessage(text)
+    content: list[dict[str, Any]] = [*blocks]
+    if text:
+        content.append({"type": "text", "text": text})
+    return AIMessage(content=content, tool_calls=calls)
+
+
+def _replayed(message: Message, model_id: str) -> list[dict[str, Any]]:
+    """The vendor's blocks stored on that answer, if they are for this model."""
+    if message.provenance is None or message.provenance.model != model_id:
         return []
-    if chunk.tool_call_chunks or chunk.tool_calls or chunk.invalid_tool_calls:
-        # How a provider that really streams a tool call arrives: the client
-        # lifts it off the content and on to the message.
-        raise UnsupportedContentError(NO_TOOLS)
-    found: list[tuple[str, str]] = []
-    for block in chunk.content_blocks:
-        kind = block.get("type")
-        if kind == "text":
-            found.append((str(block.get("text", "")), ""))
-        elif kind == "reasoning":
-            found.append(("", str(block.get("reasoning", ""))))
-        elif _asks_for_a_tool(kind, block):
-            raise UnsupportedContentError(NO_TOOLS)
-    return [pair for pair in found if pair != ("", "")]
+    kept = message.extras.get(VENDOR)
+    if not isinstance(kept, Mapping):
+        return []
+    blocks = kept.get("thinking")
+    if not isinstance(blocks, list):
+        return []
+    return [
+        dict(block)
+        for block in blocks
+        if isinstance(block, Mapping) and block.get("type") in THINKING_BLOCKS
+    ]
 
 
-def _asks_for_a_tool(kind: object, block: Mapping[str, Any]) -> bool:
-    """Whether this block is the model asking to use a tool.
+class _Answer:
+    """One answer as it streams: what was said, what was called, and the events.
 
-    Two ways round: the standard block kind, and a block the framework did not
-    recognise and passed through under ``non_standard`` with the vendor's own
-    spelling inside it -- which is where a tool call lands while this version
-    has no tools to declare.
+    The order the port asks for (``robinauts.core.check_engine_events``) is
+    kept here: the answer is announced on its first piece, a call is announced
+    when the client lifts it off the stream and completed when the next one
+    begins or the answer ends, and what the call completes with is what its
+    deltas parse to.
     """
-    if kind in TOOL_BLOCKS:
-        return True
-    if kind != "non_standard":
-        return False
-    inner = block.get("value")
-    return isinstance(inner, Mapping) and inner.get("type") in TOOL_BLOCKS
+
+    def __init__(self) -> None:
+        self.started = False
+        self.streamed: list[str] = []
+        self.calls: list[ToolCallPart] = []
+        self._open: tuple[str, str] | None = None
+        """The call being made -- its id and name -- while its arguments stream."""
+        self._arguments: list[str] = []
+
+    def events_of(self, chunk: Any) -> list[EngineEvent]:
+        """The events one streamed chunk carries, in the order they came."""
+        if not isinstance(chunk, AIMessageChunk):  # pragma: no cover -- LangGraph yields these
+            return []
+        events: list[EngineEvent] = []
+        for block in chunk.content_blocks:
+            kind = block.get("type")
+            if kind == "text" and block.get("text"):
+                text = str(block["text"])
+                self.streamed.append(text)
+                events.append(AnswerTextDelta(text=text))
+            elif kind == "reasoning" and block.get("reasoning"):
+                events.append(AnswerReasoningDelta(text=str(block["reasoning"])))
+        for piece in chunk.tool_call_chunks:
+            call_id, name, arguments = piece.get("id"), piece.get("name"), piece.get("args")
+            if call_id and name:
+                # A new call: the one before it, if any, is whole.
+                events.extend(self._closed(None))
+                self._open, self._arguments = (str(call_id), str(name)), []
+                events.append(ToolCallStarted(call_id=str(call_id), name=str(name)))
+            if arguments:
+                if self._open is None:
+                    raise UnsupportedContentError(
+                        "the model streamed arguments for no tool call this engine announced"
+                    )
+                self._arguments.append(str(arguments))
+                events.append(ToolCallArgumentsDelta(call_id=self._open[0], text=str(arguments)))
+        if events and not self.started:
+            self.started = True
+            events.insert(0, AnswerStarted())
+        return events
+
+    def complete(self, whole: AIMessage | None) -> list[EngineEvent]:
+        """The events that end the answer, given the message the node left in the state.
+
+        ``whole`` is what an answer that never streamed completes with, where a
+        call that streamed no arguments takes its arguments from, and where the
+        signed blocks are read off. A call the framework's final message holds
+        that was never announced -- a block the client did not lift off the
+        stream -- is refused rather than dropped: an answer missing a call
+        would be half an answer that looks whole.
+        """
+        events: list[EngineEvent] = list(self._closed(whole))
+        if not self.started:
+            # Nothing was streamed that this version carries: the answer is
+            # whatever the node left in the state, announced and completed in
+            # one breath -- an engine is never required to stream.
+            events.append(AnswerStarted())
+            self.started = True
+            for call in _calls_of(whole):
+                events.append(ToolCallStarted(call_id=call.call_id, name=call.name))
+                events.append(ToolCallCompleted(call=call))
+                self.calls.append(call)
+        announced = {call.call_id for call in self.calls}
+        if any(call_id not in announced for call_id in _tool_use_ids(whole)):
+            raise UnsupportedContentError(
+                "the model asked for a tool in a form this engine did not translate"
+            )
+        parts: list[MessagePart] = []
+        text = clean_text("".join(self.streamed)) if self.streamed else _text_of(whole)
+        if text or not self.calls:
+            parts.extend(text_parts(text))
+        parts.extend(self.calls)
+        events.append(AnswerCompleted(parts=tuple(parts), extras=_extras(whole)))
+        if self.calls:
+            events.append(WaitingOnTools())
+        return events
+
+    def _closed(self, whole: AIMessage | None) -> list[EngineEvent]:
+        """Complete the call being made, if there is one, with what it streamed."""
+        if self._open is None:
+            return []
+        call_id, name = self._open
+        joined = clean_text("".join(self._arguments))
+        if joined.strip():
+            arguments = _parsed(joined)
+        else:
+            arguments = next(
+                (call.arguments for call in _calls_of(whole) if call.call_id == call_id), {}
+            )
+        call = ToolCallPart(call_id=call_id, name=name, arguments=arguments)
+        self.calls.append(call)
+        self._open, self._arguments = None, []
+        return [ToolCallCompleted(call=call)]
 
 
-def _said(payload: Any) -> str | None:
-    """The text of the message the node put in the state, if it put one there."""
+def _parsed(arguments: str) -> dict[str, Any]:
+    """The JSON the model wrote for a call, as the object it has to be."""
+    try:
+        parsed = json.loads(arguments)
+    except ValueError:
+        raise UnsupportedContentError(
+            "the model's arguments for a tool call were not JSON"
+        ) from None
+    if not isinstance(parsed, dict):
+        raise UnsupportedContentError("the model's arguments for a tool call were not an object")
+    return parsed
+
+
+def _reply(payload: Any) -> AIMessage | None:
+    """The message the node put in the state, if it put one there."""
     if not isinstance(payload, Mapping):  # pragma: no cover -- LangGraph yields these
         return None
     update = payload.get(ANSWER_NODE)
     if not isinstance(update, Mapping):  # pragma: no cover -- our own node's shape
         return None
     messages = update.get("messages") or []
-    return "".join(_text_of(message) for message in messages)
+    return next((message for message in messages if isinstance(message, AIMessage)), None)
 
 
-def _text_of(message: Any) -> str:
+def _calls_of(whole: AIMessage | None) -> list[ToolCallPart]:
+    """The calls the framework's final message holds, as the platform's parts."""
+    if whole is None:
+        return []
+    calls: list[ToolCallPart] = []
+    for call in whole.tool_calls:
+        arguments = call.get("args")
+        calls.append(
+            ToolCallPart(
+                call_id=str(call.get("id") or ""),
+                name=str(call.get("name") or ""),
+                arguments=arguments if isinstance(arguments, Mapping) else {},
+            )
+        )
+    return calls
+
+
+def _tool_use_ids(whole: AIMessage | None) -> list[str]:
+    """The ids of the vendor's own ``tool_use`` blocks in the final message."""
+    if whole is None or isinstance(whole.content, str):
+        return []
+    return [
+        str(block.get("id"))
+        for block in whole.content
+        if isinstance(block, Mapping) and block.get("type") == "tool_use"
+    ]
+
+
+def _text_of(whole: AIMessage | None) -> str:
     """A framework message's text, and none of its reasoning.
 
     ``BaseMessage.text`` is the text blocks alone, which is exactly the line
     this version draws: thinking is shown as it arrives and is never part of
     what is stored (``docs/specs/conversations.md``).
     """
-    text = getattr(message, "text", "")
-    return text if isinstance(text, str) else ""
+    if whole is None:
+        return ""
+    text = getattr(whole, "text", "")
+    return clean_text(text) if isinstance(text, str) else ""
 
 
-def _parts(streamed: list[str], whole: str | None) -> tuple[TextPart, ...]:
-    """What the answer completes with: what was streamed, or the whole message.
+def _extras(whole: AIMessage | None) -> dict[str, Any]:
+    """The vendor's signed blocks off the final message, keyed by vendor.
 
-    **What was streamed wins.** A framework that rewrites the final message --
-    reordering blocks, adding a summary, normalising whitespace -- would
-    otherwise store something other than what a person watched arrive, which
-    is the promise ``core.check_engine_events`` holds every engine to.
-
-    Made storable on the way (``domain.clean_text``): a provider splits where
-    it likes, so a character above the basic plane can arrive in halves, and
-    the halves are joined here rather than published as something a store
-    cannot hold. An answer with no text at all is one empty part -- which is
-    ``text_parts``'s own answer for empty text -- because a message has
-    content and "the model said nothing" is worth recording.
+    Kept as they came, less the stream's own ``index``, and bounded as every
+    ``extras`` is: blocks that do not fit are left out with a line in the log
+    (``BLOCKS_LEFT_OUT``) rather than failing the turn over the size of the
+    thinking.
     """
-    text = clean_text("".join(streamed)) if streamed else clean_text(whole or "")
-    return text_parts(text)
+    if whole is None or isinstance(whole.content, str):
+        return {}
+    blocks = [
+        {key: value for key, value in block.items() if key != "index"}
+        for block in whole.content
+        if isinstance(block, Mapping) and block.get("type") in THINKING_BLOCKS
+    ]
+    if not blocks:
+        return {}
+    extras = {VENDOR: {"thinking": blocks}}
+    try:
+        return checked_data(extras, "an answer's extras")
+    except InvalidValueError as too_big:
+        _log.warning("%s: %s", BLOCKS_LEFT_OUT, chain(too_big))
+        return {}

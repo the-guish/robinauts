@@ -163,13 +163,21 @@ class ScriptedAgent(Agent):
         return self.asked[-1].history
 
 
-def says(text: str, *, streamed: bool = True, reasoning: str = "", pieces: int = 1) -> list[Step]:
+def says(
+    text: str,
+    *,
+    streamed: bool = True,
+    reasoning: str = "",
+    pieces: int = 1,
+    extras: Mapping[str, Any] | None = None,
+) -> list[Step]:
     """The ordinary steps of one answer: announced, streamed, completed.
 
     ``streamed=False`` is an engine that yields no text delta and completes
     with the whole answer, which is allowed: not every provider streams.
     ``pieces`` splits the text over that many deltas, for a test about what is
-    published as it arrives.
+    published as it arrives. ``extras`` is what the engine hands back for the
+    stored message to carry (``Message.extras``).
     """
     steps: list[Step] = [AnswerStarted()]
     if reasoning:
@@ -179,7 +187,7 @@ def says(text: str, *, streamed: bool = True, reasoning: str = "", pieces: int =
         steps.extend(
             AnswerTextDelta(text=text[start : start + size]) for start in range(0, len(text), size)
         )
-    steps.append(AnswerCompleted(parts=text_parts(text)))
+    steps.append(AnswerCompleted(parts=text_parts(text), extras=extras or {}))
     return steps
 
 

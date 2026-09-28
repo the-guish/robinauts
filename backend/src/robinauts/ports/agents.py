@@ -36,7 +36,8 @@ before it.
 
 **How it ends.**
 
-- normally: the last event is an ``AnswerCompleted``. A turn produces at least
+- normally: the last event is an ``AnswerCompleted`` or, when that answer
+  asked for tools, the ``WaitingOnTools`` after it. A turn produces at least
   one answer; one that produces none is a failed run
   (``docs/specs/runs.md``), and the application is what records that.
 - by **raising**: any exception ends the turn. The application records the run

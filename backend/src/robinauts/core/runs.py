@@ -368,9 +368,13 @@ def _check_call(call: ToolCallPart, started: ToolCallStarted, arguments: Sequenc
     """The call that completes is the call that was announced, with what was streamed.
 
     The arguments streamed are JSON text and the part holds them as data, so
-    the check is that the text, joined, parses to exactly that mapping; a call
-    that streamed nothing -- not every provider does -- may complete with any
-    arguments, as an answer that streamed no text may.
+    the check is that the text, joined, parses to exactly that mapping -- as
+    JSON, where ``1``, ``1.0`` and ``true`` are three values, not as Python,
+    where they are one; a call that streamed nothing -- not every provider
+    does -- may complete with any arguments, as an answer that streamed no
+    text may. The deltas are bounded one by one and not in number, so text
+    nested past what the parser can follow is refused like any other text
+    that is not the call's JSON, rather than escaping as a ``RecursionError``.
     """
     if call.call_id != started.call_id or call.name != started.name:
         raise InvalidValueError("a tool call is completed as it was announced")
@@ -379,9 +383,9 @@ def _check_call(call: ToolCallPart, started: ToolCallStarted, arguments: Sequenc
         return
     try:
         parsed = json.loads(joined)
-    except ValueError:
+    except (ValueError, RecursionError):
         raise InvalidValueError("a tool call's streamed arguments are JSON") from None
-    if parsed != call.arguments:
+    if json.dumps(parsed, sort_keys=True) != json.dumps(call.arguments, sort_keys=True):
         raise InvalidValueError(
             "a tool call's streamed arguments are the arguments it completed with"
         )

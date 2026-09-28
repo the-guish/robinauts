@@ -244,8 +244,8 @@ UNFINISHED_ANSWER = "the agent began an answer and never completed it"
 """What a turn that stopped in the middle of an answer without saying so records."""
 
 NO_TOOLS_YET = (
-    "the model asked to use a tool, and this deployment runs none yet: give the agent"
-    " a model or a system prompt that does not, or wait for the tool loop"
+    "the model asked to use a tool, and this version runs none: give the agent"
+    " a model or a system prompt that does not, or wait for tool usage"
 )
 """Why a turn that meets a tool call fails, until the loop that runs one is built.
 
