@@ -1265,3 +1265,146 @@ def test_a_slice_may_begin_inside_a_tool_round_and_is_checked_from_there() -> No
     inside = numbered[12:]
     assert isinstance(inside[0].event, ResultLanded)
     assert ordered(inside, follows=calling.id, after=numbered[11].seq) is None
+
+
+def test_a_slice_may_begin_inside_a_calls_arguments_and_adopts_that_one_call() -> None:
+    asked, calling, results, events = tool_round()
+    numbered = stream(events)
+    # Between the two halves of the first call's arguments: what was streamed
+    # before the cut was not seen, so the tail is not asked to parse.
+    inside = numbered[5:]
+    assert isinstance(inside[0].event, ArgumentsDelta) and inside[0].event.text == 'nauts"}'
+    assert ordered(inside, follows=asked.id, after=numbered[4].seq) is None
+    # Every cut of the round is a slice that reads back.
+    for cut in range(1, len(numbered)):
+        follows = asked.id if cut <= 9 else calling.id if cut <= 13 else results.id
+        assert ordered(numbered[cut:], follows=follows, after=numbered[cut - 1].seq) is None
+    # One call is adopted, and one only: the second, seen without its
+    # announcement, is a call that was never announced.
+    second = events[7]
+    assert isinstance(second, CallStarted) and second.call_id == "toolu_02"
+    with pytest.raises(InvalidValueError, match="completed once, after it was announced"):
+        ordered(
+            stream(tuple(event for event in events if event is not second))[5:],
+            follows=asked.id,
+            after=numbered[4].seq,
+        )
+    # The calls announced after the cut are checked as ever: their arguments parse.
+    broken = ArgumentsDelta(run_id=RUN, message_id=calling.id, call_id="toolu_02", text="{")
+    with pytest.raises(InvalidValueError, match="streamed arguments are JSON"):
+        ordered(
+            stream((*events[:8], broken, *events[8:]))[5:], follows=asked.id, after=numbered[4].seq
+        )
+
+
+def test_a_tool_message_answers_every_call_of_the_answer_before_it_and_nothing_else() -> None:
+    asked, calling, results, events = tool_round()
+    # One call's result never landed and is not in the message either: what
+    # landed is what was stored, and it is still not the batch.
+    landed = events[11]
+    assert isinstance(landed, ResultLanded) and landed.call_id == "toolu_02"
+    completed = events[13]
+    assert isinstance(completed, MessageCompleted)
+    partial = replace(results, parts=(ToolResultPart("toolu_01", "found 3"),))
+    with pytest.raises(InvalidValueError, match="every call of the answer before it"):
+        ordered(
+            replacing(
+                tuple(event for event in events if event is not landed),
+                completed,
+                MessageCompleted(run_id=RUN, message=partial),
+            ),
+            follows=asked.id,
+        )
+    # A whole run beginning with a tool message: under the question, which made no calls.
+    with pytest.raises(InvalidValueError, match="answers an answer that made calls"):
+        ordered(
+            (
+                events[0],
+                MessageStarted(
+                    run_id=RUN, message_id=results.id, parent_id=asked.id, role=Role.TOOL
+                ),
+                *events[11:13],
+                MessageCompleted(run_id=RUN, message=replace(results, parent_id=asked.id)),
+                RunEnded(run_id=RUN, state=RunState.FINISHED),
+            ),
+            follows=asked.id,
+        )
+    # What follows an answer that made calls is the tool message: not another answer.
+    done = replace(answer(calling, "Found three.", seconds=2), parent_id=calling.id)
+    with pytest.raises(InvalidValueError, match="followed by the tool message answering them"):
+        ordered(
+            (
+                *events[:10],
+                MessageStarted(run_id=RUN, message_id=done.id, parent_id=calling.id),
+                MessageCompleted(run_id=RUN, message=done),
+                RunEnded(run_id=RUN, state=RunState.FINISHED),
+            ),
+            follows=asked.id,
+        )
+    # Nor the end of a finished run: a run that finished left no calls unanswered.
+    with pytest.raises(InvalidValueError, match="left no calls unanswered"):
+        ordered((*events[:10], RunEnded(run_id=RUN, state=RunState.FINISHED)), follows=asked.id)
+    # A run that failed, or was cancelled, may well have.
+    for over in (
+        RunEnded(run_id=RUN, state=RunState.FAILED, error="the server went away"),
+        RunEnded(run_id=RUN, state=RunState.CANCELLED),
+    ):
+        assert ordered((*events[:10], over), follows=asked.id) is None
+
+
+def test_each_tool_event_is_held_to_its_message_its_role_and_its_call() -> None:
+    asked, calling, results, events = tool_round()
+    # A result inside the answer, carrying the answer's id: the role refuses it.
+    inside_answer = ResultLanded(run_id=RUN, message_id=calling.id, call_id="toolu_01", text="?")
+    with pytest.raises(InvalidValueError, match="belongs to a tool message being produced"):
+        ordered((*events[:4], inside_answer, *events[4:]), follows=asked.id)
+    # A call event carrying another message's id while the answer is open.
+    elsewhere = CallStarted(run_id=RUN, message_id=results.id, call_id="toolu_09", name="x__y")
+    with pytest.raises(InvalidValueError, match="belongs to an answer being produced"):
+        ordered((*events[:7], elsewhere, *events[7:]), follows=asked.id)
+    # A result carrying the answer's id while the tool message is open.
+    astray = ResultLanded(run_id=RUN, message_id=calling.id, call_id="toolu_01", text="found 3")
+    with pytest.raises(InvalidValueError, match="belongs to a tool message being produced"):
+        ordered((*events[:11], astray, *events[11:]), follows=asked.id)
+    # A call completed that was never announced, and one completed twice.
+    unknown = CallCompleted(run_id=RUN, message_id=calling.id, call_id="toolu_09")
+    with pytest.raises(InvalidValueError, match="completed once, after it was announced"):
+        ordered((*events[:6], unknown, *events[6:]), follows=asked.id)
+    with pytest.raises(InvalidValueError, match="completed once, after it was announced"):
+        ordered((*events[:7], events[6], *events[7:]), follows=asked.id)
+    # The answer completes with its calls in the order they were announced, by name.
+    completed = events[9]
+    assert isinstance(completed, MessageCompleted)
+    swapped = replace(
+        calling, parts=(TextPart("Let me look."), calling.tool_calls[1], calling.tool_calls[0])
+    )
+    with pytest.raises(InvalidValueError, match="exactly the calls it announced"):
+        ordered(
+            replacing(events, completed, MessageCompleted(run_id=RUN, message=swapped)),
+            follows=asked.id,
+        )
+    renamed = replace(
+        calling,
+        parts=(
+            TextPart("Let me look."),
+            ToolCallPart("toolu_01", "github__other", {"q": "robinauts"}),
+            calling.tool_calls[1],
+        ),
+    )
+    with pytest.raises(InvalidValueError, match="exactly the calls it announced"):
+        ordered(
+            replacing(events, completed, MessageCompleted(run_id=RUN, message=renamed)),
+            follows=asked.id,
+        )
+    # The tool message completes with each result's flag as it landed.
+    results_completed = events[13]
+    assert isinstance(results_completed, MessageCompleted)
+    unflagged = replace(
+        results,
+        parts=(ToolResultPart("toolu_02", "nothing"), ToolResultPart("toolu_01", "found 3")),
+    )
+    with pytest.raises(InvalidValueError, match="exactly the results that landed"):
+        ordered(
+            replacing(events, results_completed, MessageCompleted(run_id=RUN, message=unflagged)),
+            follows=asked.id,
+        )
