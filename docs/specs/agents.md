@@ -53,8 +53,10 @@
   translate rather than two. **What of that path the model sees is the
   adapter's to decide** ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)):
   ordering, trimming and other context management, and prompt caching, are
-  per framework and per vendor. The one invariant the contract suite keeps
-  is that the question being answered is whole in what the model sees.
+  per framework and per vendor. The one invariant kept above the port -- by
+  each adapter's own tests, since the shared suite has no hook for what the
+  model was shown -- is that the question being answered is whole in what
+  the model sees.
 - **An agent named by a request that this deployment does not have is not
   there**: it is refused exactly as an id that reaches nothing is refused, and
   so is a conversation bound to an agent the operator has since removed.
