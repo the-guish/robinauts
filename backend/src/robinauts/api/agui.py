@@ -7,7 +7,8 @@
 The application publishes the platform's own events -- ``RunStarted``,
 ``MessageStarted``, ``TextDelta``, ``ReasoningDelta``, the three of a tool
 call and the one of a result, ``MessageCompleted``, ``RunEnded`` -- and this
-turns each of them into the events a chat client understands. Nothing below ``api`` knows that AG-UI exists, which is what makes
+turns each of them into the events a chat client understands. Nothing below
+``api`` knows that AG-UI exists, which is what makes
 a second wire, or a client that cannot stream at all, a second mapping rather
 than a redesign. The frameworks' AG-UI bridges are not used: every turn goes
 through the agent port and the platform's persistence, and the wire is the same
@@ -22,7 +23,8 @@ this stream with nothing added.
 
 **Nothing of the platform's own record crosses that is not on this list.**
 No ``extras`` -- the format reserves that key on every document it writes and
-this build writes none -- and no ``raw_event`` or ``metadata``, which is where a
+this build writes none -- no ``raw_event``, and nothing in ``metadata`` but the
+boolean error flag on a result (``ERROR_FLAG``, below): those two are where a
 provider's own payload would otherwise be handed to a browser. A run that ended
 badly crosses as a **fixed sentence per state** and never as the stored error,
 which is free text made of whatever a provider or a traceback said and is

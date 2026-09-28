@@ -122,8 +122,9 @@ checks as every other write.
   above, and `RUN_FINISHED` or `RUN_ERROR`. A completed message is a bare
   `TEXT_MESSAGE_END`: the client built it from the deltas, and one that did
   not receive every delta reloads the conversation, which is what the store
-  is for. A completed tool message sends nothing of its own: its results
-  went out one by one, and the client holds them against their calls.
+  is for. A tool message, announced or completed, sends nothing of its own:
+  its results went out one by one, and the client holds them against their
+  calls.
 - **Thinking is bracketed, and the brackets survive a re-attach.** Each
   stretch of thinking inside an answer is a reasoning message of its own,
   under an id derived from the answer's and from the position it opened at, so

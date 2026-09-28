@@ -468,11 +468,6 @@ async def test_a_tool_round_is_the_calls_events_the_results_and_nothing_for_the_
         "role": "tool",
         "metadata": {"isError": True},
     }
-    assert (calling.id, results.id, done.id) == (
-        calling.id,
-        results.parent_id and results.id,
-        done.id,
-    )
     assert results.parent_id == calling.id and done.parent_id == results.id
     assert blocks[9].body["messageId"] == str(done.id)
     # The result's text is on the wire once, as content, and nowhere else.
@@ -506,8 +501,9 @@ async def test_dropping_anywhere_and_re_attaching_gives_the_whole_stream_once(
     run that **finished** and of one that was **cancelled**, since how a run
     ends is part of what a client is owed, and through both ways of saying
     where to carry on from. And of a turn with a **tool round** before that
-    answer (``shape``), so that the cuts fall inside a call's arguments, on
-    the two positions a tool message sends nothing for, and on a result.
+    answer (``shape``), so that the cuts fall inside a call's arguments,
+    across the two positions a tool message sends nothing for, and on a
+    result.
     """
     gate = Gate()
     steps = two_stretches(ANSWER)

@@ -505,7 +505,13 @@ def test_thinking_is_closed_by_a_tool_call_starting_and_by_a_tool_message() -> N
     ]
     # A mapper with thinking open is closed by what a tool message sends, which
     # is nothing else: a client is never left with a block nothing closed.
-    for closer in (results_announced(), landed(), results_completed()):
+    for closer in (
+        arguments("{}"),
+        call_completed(),
+        results_announced(),
+        landed(),
+        results_completed(),
+    ):
         one = mapper()
         one.of(RunEvent(run_id=RUN, seq=1, event=thought("Hmm.")))
         closed = one.of(RunEvent(run_id=RUN, seq=2, event=closer))
