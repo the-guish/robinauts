@@ -35,7 +35,9 @@ What an internal platform team deploys and controls.
   server to know the person waits for per-user credentials. What an agent
   may do through a server is bounded by the credential's scopes and by the
   server's own admin gates, and by nothing here: every tool the agent's
-  servers offer runs without asking.
+  servers offer runs without asking. A server configured with `auth =
+  "none"` — a public one, such as Microsoft Learn's — is sent no credential
+  at all, and sees the deployment's address and nothing of anyone.
 
 ## Configuration
 

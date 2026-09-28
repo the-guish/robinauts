@@ -107,6 +107,7 @@ from robinauts.domain import (
     is_endpoint_url,
     is_env_name,
     is_tool_prefix,
+    sends_alone,
 )
 
 MODEL_PROVIDER_KEYS = frozenset({"kind", "api_key_env", "base_url"})
@@ -451,19 +452,28 @@ def _tool_server(server_id: object, table: object, problems: list[str]) -> ToolS
             f" with no query, no fragment and no user:password in it -- the server's"
             f" credential is the variable secret_env names and is never in this file"
         )
-    secret_env = _string(table, "secret_env", where, problems, limit=MAX_ENV_NAME_CHARS)
-    if secret_env and not is_env_name(secret_env):
-        problems.append(
-            f"{where}.secret_env: the NAME of an environment variable holding the secret,"
-            f" not the secret itself"
-        )
-
     auth: ToolServerAuth | None = ToolServerAuth.BEARER
     if "auth" in table:
         raw_auth = _string(table, "auth", where, problems)
         auth = _AUTHS.get(raw_auth) if raw_auth else None
         if raw_auth and auth is None:
             problems.append(f"{where}.auth: one of {_named(_AUTHS)}, not {raw_auth!r}")
+
+    # A server sent no credential names no variable; every other names one.
+    secret_env = ""
+    if auth is ToolServerAuth.NONE:
+        if "secret_env" in table:
+            problems.append(
+                f'{where}.secret_env: auth = "none" sends no credential, so there is no'
+                f" variable to name; leave secret_env out"
+            )
+    else:
+        secret_env = _string(table, "secret_env", where, problems, limit=MAX_ENV_NAME_CHARS)
+        if secret_env and not is_env_name(secret_env):
+            problems.append(
+                f"{where}.secret_env: the NAME of an environment variable holding the secret,"
+                f" not the secret itself"
+            )
 
     given: dict[str, Any] = {}
     if "user" in table:
@@ -474,10 +484,7 @@ def _tool_server(server_id: object, table: object, problems: list[str]) -> ToolS
         # Said only when the auth is known: under a misspelt auth it would be
         # the same mistake reported twice.
         if user and auth is not None and auth is not ToolServerAuth.BASIC:
-            problems.append(
-                f"{where}.user: only basic auth has a user part; {auth.value} sends the"
-                f" secret alone"
-            )
+            problems.append(f"{where}.user: only basic auth has a user part; {sends_alone(auth)}")
     elif auth is ToolServerAuth.BASIC:
         problems.append(f"{where}.user: basic auth names the user part; there is nothing to guess")
     if "prefix" in table:

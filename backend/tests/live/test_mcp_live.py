@@ -14,10 +14,10 @@ not collected by a plain ``pytest`` run (``tests/live`` is in
 
     ROBINAUTS_LIVE_MCP=1 uv run pytest tests/live/test_mcp_live.py
 
-**A server that takes no credential is still sent one.** The configuration
-requires ``secret_env`` and the adapter sends what it names as a bearer token;
-this server ignores it. Whether the configuration should say ``auth = "none"``
-is an open question of the plan (``docs/working-notes/mcp-progress.md``).
+**A server that takes no credential is sent none**: ``auth = "none"``, which
+names no variable, and the adapter sends no ``Authorization`` header for it
+(``docs/specs/agents.md``, "Tools"). The question step 5c left open is
+answered in step 8 of the plan.
 """
 
 from __future__ import annotations
@@ -30,20 +30,20 @@ from aio import asyncio_test
 from robinauts.adapters import ToolServerSecrets
 from robinauts.adapters.tools.mcp import McpToolServers
 from robinauts.core import named_tools
-from robinauts.domain import ToolServerConfig
+from robinauts.domain import ToolServerAuth, ToolServerConfig
 
 SWITCH = "ROBINAUTS_LIVE_MCP"
 ENDPOINT = "https://learn.microsoft.com/api/mcp"
 SEARCH = "microsoft_docs_search"
 """The tool the server documents first; its one argument is ``query``."""
 
-LEARN = ToolServerConfig(id="learn", url=ENDPOINT, secret_env="ROBINAUTS_LIVE_MCP_TOKEN")
+LEARN = ToolServerConfig(id="learn", url=ENDPOINT, auth=ToolServerAuth.NONE)
 
 
 @pytest.mark.skipif(not os.environ.get(SWITCH), reason=f"set {SWITCH}=1 to run this")
 @asyncio_test
 async def test_one_real_listing_and_one_real_call_against_microsoft_learn() -> None:
-    servers = McpToolServers(ToolServerSecrets({"learn": "not-needed-by-this-server"}))
+    servers = McpToolServers(ToolServerSecrets({}))
     try:
         listed = await servers.list_tools(LEARN)
         result = await servers.call_tool(LEARN, SEARCH, {"query": "Azure Functions triggers"})

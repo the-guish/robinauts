@@ -38,7 +38,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from robinauts.domain import ConfigError, ModelsConfig, SignInConfig
+from robinauts.domain import ConfigError, ModelsConfig, SignInConfig, ToolServerAuth
 
 SecretLookup = Callable[[str], str | None]
 """How a secret is asked for: given a variable's name, its value or ``None``.
@@ -230,13 +230,17 @@ def check_tool_secrets(
     ``check_api_keys`` for the tool servers: **every** missing variable at
     once, in one ``ConfigError``, only the variable's **name** in the message,
     and every **declared** server looked at whether or not an agent names it
-    (``docs/specs/agents.md``, "Tools"). Start-up reads the secret and does
-    not connect: whether the server takes it is found out at the first turn
-    of an agent naming it, by name.
+    (``docs/specs/agents.md``, "Tools") -- except one with no ``auth``, which
+    names no variable. Start-up reads the secret and does not connect:
+    whether the server takes it is found out at the first turn of an agent
+    naming it, by name.
     """
     problems: list[str] = []
     secrets: dict[str, str] = {}
     for server in config.tool_servers.values():
+        if server.auth is ToolServerAuth.NONE:
+            # A public server: nothing to read, and nothing to hold for it.
+            continue
         secret = secret_for(server.secret_env)
         if secret:
             secrets[server.id] = secret

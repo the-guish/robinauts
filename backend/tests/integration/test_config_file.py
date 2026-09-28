@@ -473,7 +473,10 @@ def test_the_tool_servers_example_in_the_specification_reads_and_parses(tmp_path
         "robinauts@example.com",
     )
     assert jira.timeout_seconds == 30.0
-    assert config.agents["assistant-with-tools"].tools == ("github", "jira")
+    # The public server: no credential, so no variable named.
+    learn = config.tool_servers["learn"]
+    assert (learn.auth, learn.secret_env, learn.prefix) == (ToolServerAuth.NONE, "", "learn")
+    assert config.agents["assistant-with-tools"].tools == ("github", "jira", "learn")
 
 
 def test_the_tool_servers_example_names_the_variables_rather_than_the_secrets(

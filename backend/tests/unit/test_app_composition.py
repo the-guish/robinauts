@@ -756,6 +756,17 @@ def test_a_deployment_that_started_holds_the_tool_secrets_it_read_and_prints_non
     assert deployment.tool_secrets.secret_for("github") == "ghp-x"
     assert repr(deployment.tool_secrets) == "ToolServerSecrets(github)"
 
+    # A public server names no variable, so start-up reads none for it.
+    public = (
+        WITH_AGENTS.replace('engine = "langgraph"', 'engine = "langgraph"\ntools = ["learn"]') + """
+[mcp_servers.learn]
+url = "https://learn.microsoft.com/api/mcp"
+auth = "none"
+"""
+    )
+    deployment = with_agents(tmp_path, public, secret_for=reading(BOTH_KEYS))
+    assert repr(deployment.tool_secrets) == "ToolServerSecrets()"
+
 
 @asyncio_test
 async def test_opening_builds_the_mcp_adapter_over_the_secrets_read_and_closing_lets_it_go(

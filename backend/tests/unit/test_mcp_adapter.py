@@ -305,20 +305,25 @@ async def test_a_question_is_one_session_initialized_asked_and_deleted() -> None
 
 
 @asyncio_test
-async def test_the_credential_is_a_bearer_header_or_a_basic_one_and_nothing_else() -> None:
+async def test_the_credential_is_a_bearer_header_or_a_basic_one_or_none_at_all() -> None:
     servers, tools, script = scripted()
     servers.scripts["basic"] = Script(tools=[])
+    servers.scripts["public"] = Script(tools=[])
     tools = adapter(servers, scripted=SECRET, basic=SECRET)
 
     await tools.list_tools(server("scripted"))
     await tools.list_tools(
         server("basic", auth=ToolServerAuth.BASIC, user="me@example.com", secret_env="B")
     )
+    await tools.list_tools(server("public", auth=ToolServerAuth.NONE, secret_env=""))
 
     assert script.headers[0]["authorization"] == f"Bearer {SECRET}"
     pair = base64.b64encode(f"me@example.com:{SECRET}".encode()).decode()
     assert servers.scripts["basic"].headers[0]["authorization"] == f"Basic {pair}"
     assert servers.scripts["basic"].headers[0]["user-agent"].startswith("robinauts")
+    # A public server is sent no header at all, and no secret is looked for.
+    assert all("authorization" not in h for h in servers.scripts["public"].headers)
+    assert servers.scripts["public"].headers[0]["user-agent"].startswith("robinauts")
 
 
 @asyncio_test

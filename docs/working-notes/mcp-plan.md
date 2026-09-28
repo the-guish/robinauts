@@ -252,6 +252,14 @@ it here rather than deciding it in passing.
   own for a dangling call that is not in the last response; with the
   adapter's inserted, nothing dangles and the engine's sentence is what the
   model sees in every shape. The spec sentence is in `runs.md`, "Tools".
+- **A server that needs no credential** (met by step 5c's live test against
+  Microsoft Learn, answered in step 8, 2026-09-28). The shape had `bearer` and
+  `basic`, both naming a variable, and a public server had to be given a
+  variable holding anything, sent as a bearer token it ignored. Decided:
+  `auth = "none"`, which names no `secret_env` (naming one is refused) and
+  is sent no `Authorization` header at all rather than an empty one; the
+  start-up secrets check passes such a server over. The spec's sketch shows
+  Learn's server as the third, and the demo carries it commented out.
 - **Whether `MIT-0` joins the allowed list, and what a runtime, Windows-only
   package with family-only metadata gets** (added in step 2, 2026-09-28).
   The SDK's tree fails the gate on `cffi` (`MIT-0`) and `pywin32` (a licence

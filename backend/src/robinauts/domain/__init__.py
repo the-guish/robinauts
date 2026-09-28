@@ -38,6 +38,7 @@ from robinauts.domain.agents import (
     is_config_id,
     is_endpoint_url,
     is_env_name,
+    sends_alone,
 )
 from robinauts.domain.conversation import (
     FORMAT_VERSION,
@@ -407,6 +408,7 @@ __all__ = [
     "publishable",
     "reading_stored",
     "shown",
+    "sends_alone",
     "text_parts",
     "unanswered_calls",
     "where",

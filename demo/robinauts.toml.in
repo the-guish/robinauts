@@ -57,9 +57,29 @@ title = "Assistant (LangGraph)"
 model = "@MODEL_ID@"
 engine = "langgraph"
 system_prompt = "You are the Robinauts demo assistant. Answer briefly, and play fair."
+# tools = ["learn"]
 
 [agents.assistant-pydantic-ai]
 title = "Assistant (Pydantic AI)"
 model = "@MODEL_ID@"
 engine = "pydantic-ai"
 system_prompt = "You are the Robinauts demo assistant. Answer briefly, and play fair."
+# tools = ["learn"]
+
+# Tools, off until you turn them on. A server an agent may call is a table
+# like the two below, and an agent names the servers it may use in `tools`
+# (docs/specs/agents.md, "Tools"). Microsoft Learn's public server needs no
+# credential: take the `#` off its table and off an agent's `tools` line, and
+# that agent searches Microsoft's documentation when a question calls for it --
+# the demo then reaches learn.microsoft.com from this machine, and the chat
+# shows each call and what came back. GitHub's server needs a token, which the
+# platform reads from the variable named here and never from this file; the
+# demo does not carry one for you (demo/README.md, "Tools").
+#
+# [mcp_servers.learn]
+# url = "https://learn.microsoft.com/api/mcp"
+# auth = "none"
+#
+# [mcp_servers.github]
+# url = "https://api.githubcopilot.com/mcp/"
+# secret_env = "ROBINAUTS_GITHUB_TOKEN"

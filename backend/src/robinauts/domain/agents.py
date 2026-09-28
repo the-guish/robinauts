@@ -462,12 +462,23 @@ class ToolServerAuth(StrEnum):
 
     ``BEARER`` is ``Authorization: Bearer <secret>``, and the default; ``BASIC``
     is ``Authorization: Basic base64(<user>:<secret>)``, where the table names
-    the user part too and the secret is the token. The values are the ones the
-    configuration is written with.
+    the user part too and the secret is the token; ``NONE`` sends no credential
+    at all -- a public server, which names no variable and is sent no header.
+    The values are the ones the configuration is written with.
     """
 
     BEARER = "bearer"
     BASIC = "basic"
+    NONE = "none"
+
+
+def sends_alone(auth: ToolServerAuth) -> str:
+    """What an auth that has no user part sends instead, for a refusal to say."""
+    return (
+        "none sends no credential"
+        if auth is ToolServerAuth.NONE
+        else f"{auth.value} sends the secret alone"
+    )
 
 
 DEFAULT_TOOL_TIMEOUT_SECONDS = 60.0
@@ -493,7 +504,8 @@ class ToolServerConfig:
     ``url`` is checked as every configured endpoint is (``is_endpoint_url``):
     the secret travels to it. ``secret_env`` is the **name** of an environment
     variable, exactly as a model provider's ``api_key_env`` is: the secret is
-    the operator's, read once at start-up, never in this file, never logged.
+    the operator's, read once at start-up, never in this file, never logged --
+    and empty for a server with no ``auth``, which has no secret to read.
     ``prefix`` is what the server's tools are shown to the model under
     (``<prefix>__<name>``), the server's id when the operator wrote none --
     and an id that would not do as a prefix (too long, or one a name could not
@@ -502,8 +514,8 @@ class ToolServerConfig:
 
     id: str
     url: str
-    secret_env: str
-    """The name of the environment variable the secret is read from."""
+    secret_env: str = ""
+    """The name of the environment variable the secret is read from; empty for ``none``."""
     auth: ToolServerAuth = ToolServerAuth.BEARER
     user: str = ""
     """The user part of a ``basic`` credential; empty for ``bearer``, which has none."""
@@ -522,16 +534,22 @@ class ToolServerConfig:
                 "a tool server's url is an https:// endpoint (http:// only on the loopback"
                 " interface), with no query, no fragment and no user:password in it"
             )
-        checked_line(self.secret_env, "a tool server's secret_env", MAX_ENV_NAME_CHARS)
-        if not is_env_name(self.secret_env):
-            raise InvalidValueError(
-                f"secret_env is the NAME of an environment variable holding the secret,"
-                f" not {describe(self.secret_env)}"
-            )
         if not isinstance(self.auth, ToolServerAuth):
             raise InvalidValueError(
                 f"a tool server's auth is a ToolServerAuth, not {describe(self.auth)}"
             )
+        if self.auth is ToolServerAuth.NONE:
+            if not isinstance(self.secret_env, str) or self.secret_env:
+                raise InvalidValueError(
+                    "a tool server with no auth names no secret_env: there is no secret to read"
+                )
+        else:
+            checked_line(self.secret_env, "a tool server's secret_env", MAX_ENV_NAME_CHARS)
+            if not is_env_name(self.secret_env):
+                raise InvalidValueError(
+                    f"secret_env is the NAME of an environment variable holding the secret,"
+                    f" not {describe(self.secret_env)}"
+                )
         checked_line(self.user, "a tool server's user", MAX_BASIC_USER_CHARS)
         if self.auth is ToolServerAuth.BASIC:
             if not self.user.strip():
@@ -539,9 +557,7 @@ class ToolServerConfig:
             if ":" in self.user:
                 raise InvalidValueError("the user part of a basic credential holds no ':'")
         elif self.user:
-            raise InvalidValueError(
-                f"only basic auth has a user part; {self.auth.value} sends the secret alone"
-            )
+            raise InvalidValueError(f"only basic auth has a user part; {sends_alone(self.auth)}")
         if not self.prefix:
             if not is_tool_prefix(self.id):
                 raise InvalidValueError(

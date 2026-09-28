@@ -275,8 +275,14 @@ class McpToolServers(ToolServers):
         finally:
             await session.close()
 
-    def _authorization(self, server: ToolServerConfig) -> str:
-        """The ``Authorization`` header's value for that server, built when a request is."""
+    def _authorization(self, server: ToolServerConfig) -> str | None:
+        """The ``Authorization`` header's value for that server, built when a request is.
+
+        ``None`` for a server with no ``auth``: a public server is sent no
+        header at all, rather than an empty one it might read as a credential.
+        """
+        if server.auth is ToolServerAuth.NONE:
+            return None
         secret = self._secrets.secret_for(server.id)
         if server.auth is ToolServerAuth.BASIC:
             pair = base64.b64encode(f"{server.user}:{secret}".encode()).decode("ascii")
@@ -320,7 +326,7 @@ class _Session:
 
     client: httpx.AsyncClient
     server: ToolServerConfig
-    authorize: Callable[[], str]
+    authorize: Callable[[], str | None]
     session_id: str | None = None
     version: str = PROTOCOL_VERSION
     next_id: int = 1
@@ -433,8 +439,10 @@ class _Session:
             "Accept-Encoding": "identity",
             "Content-Type": "application/json",
             "User-Agent": USER_AGENT,
-            "Authorization": self.authorize(),
         }
+        authorization = self.authorize()
+        if authorization is not None:
+            headers["Authorization"] = authorization
         if self.session_id is not None:
             headers[SESSION_HEADER] = self.session_id
         if not opening:

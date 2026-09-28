@@ -210,12 +210,14 @@ The decisions behind this, and their order of work, are in
   its `url` — checked as every configured endpoint is: https, or http on the
   loopback interface, no query, no fragment, no credential in it — the
   **name** of the environment variable its secret is read from, and how the
-  secret is sent: `bearer` (the default, `Authorization: Bearer <secret>`)
-  or `basic` (`Authorization: Basic base64(<user>:<secret>)`, where the
-  table also names the user part and the secret is the token). Nothing about
-  a particular vendor's server is written into the platform: GitHub's and
-  Atlassian's remote servers are the two the shape was designed against, and
-  both are connected with configuration alone (the sketch below).
+  secret is sent: `bearer` (the default, `Authorization: Bearer <secret>`),
+  `basic` (`Authorization: Basic base64(<user>:<secret>)`, where the table
+  also names the user part and the secret is the token), or `none` for a
+  public server that takes no credential, which names no variable and is
+  sent no header. Nothing about a particular vendor's server is written into
+  the platform: GitHub's and Atlassian's remote servers are the two the shape
+  was designed against, Microsoft Learn's public one is the third, and all
+  three are connected with configuration alone (the sketch below).
 - An agent names the servers it may use (`tools`). An agent naming a server
   the deployment has not got is refused at start-up, as one naming an engine
   that is not wired is. The secrets are read at start-up by variable name,
@@ -385,15 +387,17 @@ api_key_env = "ROBINAUTS_GATEWAY_KEY"
 
   A tool server is a table beside the providers, `[mcp_servers.<id>]`, and
   an agent names the servers it may use in `tools`: the server's `url`;
-  `auth`, which is `bearer` unless said otherwise, or `basic`, which also
-  names the `user` part and takes the token from the variable; `secret_env`,
-  the **name** of the variable the secret is read from; `prefix`, what the
-  server's tools are shown to the model under, the server's id when left
-  out; and `timeout_seconds`, per tool call and optional. The token's
-  scopes, and the organisation's own policy on tokens, bound what the server
-  will do; nothing here does. Spelt so that an operator connecting GitHub or
-  Atlassian copies it and changes the url and the variable name — one server
-  with `bearer`, one with `basic`:
+  `auth`, which is `bearer` unless said otherwise, `basic`, which also
+  names the `user` part and takes the token from the variable, or `none`
+  for a public server, which names no variable; `secret_env`, the **name**
+  of the variable the secret is read from, left out under `none`; `prefix`,
+  what the server's tools are shown to the model under, the server's id
+  when left out; and `timeout_seconds`, per tool call and optional. The
+  token's scopes, and the organisation's own policy on tokens, bound what
+  the server will do; nothing here does. Spelt so that an operator
+  connecting GitHub or Atlassian copies it and changes the url and the
+  variable name — one server with `bearer`, one with `basic`, and one
+  public server with `none`:
 
 ```toml
 [mcp_servers.github]
@@ -408,18 +412,23 @@ secret_env = "ROBINAUTS_JIRA_TOKEN"
 prefix = "atlassian"
 timeout_seconds = 30
 
+[mcp_servers.learn]
+url = "https://learn.microsoft.com/api/mcp"
+auth = "none"
+
 [agents.assistant-with-tools]
 title = "Assistant (tools)"
 model = "sonnet"
 engine = "langgraph"
-tools = ["github", "jira"]
+tools = ["github", "jira", "learn"]
 ```
 
   The agent's `tools` names the servers; the model then sees
-  `github__search_repositories` and `atlassian__search_issues`, and a
-  call is routed to its server by the name alone. Start-up reads both
-  variables and refuses to start naming every one that is unset; it does
-  not connect to either server ([runs.md](runs.md), "Tools").
+  `github__search_repositories`, `atlassian__search_issues` and
+  `learn__microsoft_docs_search`, and a call is routed to its server by the
+  name alone. Start-up reads the two variables and refuses to start naming
+  every one that is unset — the public server names none — and it does not
+  connect to any server ([runs.md](runs.md), "Tools").
 
 ## Known findings
 

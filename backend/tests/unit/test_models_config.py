@@ -855,9 +855,29 @@ def test_a_secret_pasted_where_its_variable_s_name_belongs_is_refused_when_it_ca
     assert accepted.tool_servers["github"].secret_env == token
 
 
-def test_a_tool_server_s_auth_is_bearer_or_basic() -> None:
+def test_a_tool_server_s_auth_is_bearer_basic_or_none() -> None:
     assert only(server(auth="digest")) == (
-        "mcp_servers.github.auth: one of basic, bearer, not 'digest'"
+        "mcp_servers.github.auth: one of basic, bearer, none, not 'digest'"
+    )
+
+
+def test_a_server_with_no_auth_names_no_variable_and_no_user() -> None:
+    """A public server -- Microsoft Learn's is one -- is sent no credential,
+    so there is no variable to name; naming one is a mistake to say."""
+    learn = {"url": "https://learn.microsoft.com/api/mcp", "auth": "none"}
+
+    config = parse_models_config(data(mcp_servers={"learn": learn}))
+
+    assert config.tool_servers["learn"] == ToolServerConfig(
+        id="learn", url="https://learn.microsoft.com/api/mcp", auth=ToolServerAuth.NONE
+    )
+    assert config.tool_servers["learn"].secret_env == ""
+    assert only(server(auth="none")) == (
+        'mcp_servers.github.secret_env: auth = "none" sends no credential, so there is no'
+        " variable to name; leave secret_env out"
+    )
+    assert only(problems(mcp_servers={"learn": {**learn, "user": "me"}})) == (
+        "mcp_servers.learn.user: only basic auth has a user part; none sends no credential"
     )
 
 
@@ -995,6 +1015,18 @@ def test_a_tool_server_record_holds_basic_auth_to_its_user_part() -> None:
         tool_server(auth=ToolServerAuth.BASIC, user="a:b")
     with pytest.raises(InvalidValueError, match="only basic auth has a user part"):
         tool_server(user="me")
+
+
+def test_a_tool_server_record_with_no_auth_names_no_secret_env_and_every_other_names_one() -> None:
+    public = tool_server(auth=ToolServerAuth.NONE, secret_env="")
+    assert (public.auth, public.secret_env) == (ToolServerAuth.NONE, "")
+    with pytest.raises(InvalidValueError, match="names no secret_env"):
+        tool_server(auth=ToolServerAuth.NONE)
+    with pytest.raises(InvalidValueError, match="sends no credential"):
+        tool_server(auth=ToolServerAuth.NONE, secret_env="", user="me")
+    for auth in (ToolServerAuth.BEARER, ToolServerAuth.BASIC):
+        with pytest.raises(InvalidValueError, match="secret_env"):
+            tool_server(auth=auth, secret_env="", user="me" if auth is ToolServerAuth.BASIC else "")
 
 
 def test_a_tool_server_record_holds_its_endpoint_to_the_same_rule_as_the_parser() -> None:

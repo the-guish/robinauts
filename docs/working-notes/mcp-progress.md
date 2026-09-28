@@ -226,6 +226,16 @@ lines; the plan's numbering is kept where a step is named.
   hook), `Chat.test.tsx` (a call drawn as text: markup in the name, the
   arguments and the result stays text and makes no element). The frontend
   typecheck, red since step 3 on the `tool` role, is green again.
+- **A public server, and the demo.** `ToolServerAuth.NONE` (`auth = "none"`):
+  a server sent no credential names no `secret_env` (the record and the
+  parser refuse one), the start-up secrets check passes it over, and the MCP
+  adapter sends no `Authorization` header for it. `agents.md`'s sketch shows
+  Microsoft Learn's public server as the third beside GitHub's and
+  Atlassian's, `operations.md` says what such a server sees, and
+  `demo/robinauts.toml.in` carries Learn's and GitHub's tables and a `tools`
+  line per agent commented out, with `demo/README.md` ("Tools") saying how
+  to turn Learn on, what the demo then reaches, and why the demo hands no
+  token to GitHub's.
 
 ## Corrections to the plan
 
@@ -1022,6 +1032,37 @@ cancelled, complete); a cancelled batch shows its calls as "Cancelled
 tool"; two answers of one turn are two bubbles, the round's answer with
 its calls and the answer after; nothing renders `args` beyond the
 fallback's text; the demo and the operator's page (step 8).
+
+### Step 8 — the demo's tool servers, a public server, the operator's page   (feature/mcp-8-demo)
+
+Summary: what an operator copies. The open question step 5c's live test
+raised is answered: `auth = "none"` for a server that takes no credential
+(`ToolServerAuth.NONE`), which names no `secret_env` -- the record and the
+parser refuse one, saying there is no variable to name -- is passed over
+by the start-up secrets check, and is sent no `Authorization` header at
+all by the MCP adapter, rather than an empty one a server might read as a
+credential. `agents.md` says the third way the secret is sent and shows
+Microsoft Learn's public server as the third table of the sketch, which
+the integration test reads; `operations.md` says such a server sees the
+deployment's address and nothing of anyone. `demo/robinauts.toml.in`
+carries Learn's table, GitHub's table and a `tools` line under each agent,
+commented out, with a paragraph saying what turning them on does, and
+`demo/README.md` gains a "Tools" section: Learn's server needs no
+credential and is a `#` away, the demo then reaches `learn.microsoft.com`,
+and GitHub's needs a token the demo does not carry, since `start.sh`
+strips only the provider's key from what it starts. Tests: the parser
+(a server with `none`, one that names a variable all the same, one with a
+user part), the record, the adapter (no header for a public server), the
+deployment (no variable read for one).
+
+Review: pending.
+
+Checks: lint; the import contracts; the whole suite against a throwaway
+PostgreSQL (3240 passed, 6 skipped); the live test against Microsoft Learn with no credential.
+Not done / to watch: the demo does not exercise a tool server itself (the
+lines are commented); `start.sh` passes no token through on purpose; a
+server that needs a credential of another scheme (a custom header) is
+still a scheme to add.
 
 Checks: lint; the whole suite against a throwaway PostgreSQL (3220 passed, 13 skipped).
 Not done / to watch: the frontend decodes none of it yet (6b); the mapper
