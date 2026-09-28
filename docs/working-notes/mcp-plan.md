@@ -480,9 +480,11 @@ is the first turn that calls one.
    `ToolServers` port, the listed tool as a record, naming, sorting and
    bounding in core, the in-memory fake and the port's contract suite;
    **5c** the MCP adapter over `httpx` with the scripted-server tests and
-   the live test; **5d** the loop in `Turns`, the turn events and the
-   composition. A step the reviews added sits before them: **4d**, a call
-   no tool message answers answered to the model with what the record says
+   the live test; **5d** the run's tool events, their written form, the
+   order and the stores; **5e** the loop in `Turns` and the composition
+   (five, in the end: the events were a step of their own once written
+   down). A step the reviews added sits before them: **4d**, a call no tool
+   message answers answered to the model with what the record says
    ("Open").
 
 6. **Wire and interface.** The four AG-UI tool events in `AguiMapper` with

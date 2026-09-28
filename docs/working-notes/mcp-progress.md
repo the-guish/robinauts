@@ -64,8 +64,9 @@ lines; the plan's numbering is kept where a step is named.
   plain data. `domain/turn.py`: `ToolCallStarted(call_id, name)`,
   `ToolCallArgumentsDelta(call_id, text)`, `ToolCallCompleted(call)` and
   `WaitingOnTools()`, held to their order by `core.check_engine_events`. The
-  application (`application/turns.py`) hands the path and `()` for tools and
-  fails a turn on the first tool event with `NO_TOOLS_YET`, until step 5c.
+  application (`application/turns.py`) handed the path and `()` for tools
+  and failed a turn on the first tool event with `NO_TOOLS_YET`, until the
+  loop of step 5e.
 - **The LangGraph engine calls tools.** `adapters/agents/langgraph/engine.py`
   binds the run's tools in Anthropic's own shape (`bind_tools` passes it
   through; the engine serves only `ChatAnthropic`), announces a call as the
@@ -158,6 +159,34 @@ lines; the plan's numbering is kept where a step is named.
   complete a tool message as they complete an answer (no provenance: it is
   the platform's own). The wire refuses the four kinds loudly until the
   step that maps them (`NOT_MAPPED_YET` in `test_agui.py`).
+- **The tool loop.** `application/turns.py`: `Turns(tool_servers=,
+  servers=, max_tool_rounds=)`; the tools of the agent's servers listed
+  once per run, in parallel, before the engine is asked (`_tools_for`, over
+  `core.tools_for_run`; a server that will not list fails the run naming
+  it, a tool left out is logged by name); `_produce` runs the engine from
+  the stored history, and when an answer asked for tools stores it with its
+  calls, announces the one tool message of the batch under it, runs the
+  calls in parallel through the port, publishes each `ResultLanded` as it
+  lands, completes the tool message with the last (after
+  `core.check_answers_calls`), lets the engine of that round go and runs
+  the engine again from the history read back -- the same path a run taken
+  up again takes -- until an answer asks for nothing or
+  `DEFAULT_MAX_TOOL_ROUNDS` (25) is reached, which fails the run with
+  `TOO_MANY_ROUNDS`. A name the run was not handed is answered
+  `NO_SUCH_TOOL` (an error result, the model's mistake); a result with no
+  text is stored as `NO_CONTENT`; a tool's error is an error result; only
+  a `ToolServerError` fails the run, and a cancellation or a failure in the
+  middle of a batch leaves the answer and its calls stored with no tool
+  message, the remaining calls cancelled. The round holds the engine to the
+  order the stream is read back by: a call completes as it was announced,
+  its streamed arguments parse to the stored ones
+  (`core.check_call_arguments`, the one rule in its three places), an
+  answer completes with exactly the calls it announced. `app.py` builds
+  `McpToolServers` over `Deployment.tool_secrets` at `open` and closes it
+  with the rest, unless a `tool_servers` port was handed in
+  (`Deployment.configured(tool_servers=, servers=, max_tool_rounds=)`).
+  `tests/fakes/agents.py`: `ScriptedAgent.then(*steps)` scripts the next
+  turn of a run separately from the first.
 
 ## Corrections to the plan
 
@@ -757,7 +786,35 @@ run. The AG-UI mapper does not map the four kinds yet and refuses them as a
 mistake of ours; the closed-set test names them as not-yet, for step 6a to
 take off the list. The fixes from step 5b's review ride here.
 
-Review: pending.
+Review: 1 round (read after the commit; the fixes are a commit of their
+own on step 5e's branch, "mcp 5d: fixes from the review").
+- High: 1 (1/0) — a slice cut **between two `ArgumentsDelta`s** of a call
+  was refused: the call adopted at the cut had the tail of its arguments
+  compared as if it were the whole. The adopted call is remembered and its
+  arguments are not compared (what was streamed before the cut was not
+  seen); a test walks every cut of the round.
+- Medium: 5 (4/1) — one call is adopted at a cut, not one after another
+  (M2); a whole run cannot begin with a tool message under the question
+  (M3); a tool message completes holding a result **for every call** of the
+  answer before it, and the loop asks `check_answers_calls` of the stored
+  pair before the write, so the tree never refuses what a run stored (M4);
+  the ten rules the order tests did not pin (a mutation run found them)
+  each have a case (M5). **Left**: a message adopted in a slice is not
+  checked at its completion beyond its streamed arguments (M1) — for the
+  final review, with the note that a re-attaching watcher is exactly who a
+  slice is for.
+- Low: 7 (2 fixed, 2 in part, 3 left) — what follows an answer that made
+  calls is decided and held: the tool message, and never the end of a
+  finished run (L5); the dead reset at a message's announcement is gone and
+  the order check's docstring no longer says a run produces only answers
+  (L2, L3 in part: `_check_results`' unreachable branch, the format's
+  unreachable default, and the stale lines in `api/agui.py` and
+  `ports/conversations.py` wait for 6a and the final review). Left: one
+  adoption helper for the four sites (L1), a delta inside a tool message
+  (L4), the export asymmetry (L6), the spec's additivity rule not naming a
+  new event kind (L7).
+  The fixes were checked with lint and the unit suite; the whole suite runs
+  again with step 5e.
 
 Checks: lint; the whole suite against a throwaway PostgreSQL (3189 passed,
 13 skipped).
@@ -765,3 +822,52 @@ Not done / to watch: nothing publishes these events yet (5e); the wire does
 not map them (6a); `MessageStarted` for a tool message passes
 `check_supported_role`, and the mapper's `sent_role` still refuses the
 `tool` role until 6a maps a tool message to nothing of its own.
+
+### Step 5e — the tool loop and the composition   (feature/mcp-5e-loop)
+
+Summary: the first turn that calls a server. `Turns` is given the
+`ToolServers` port, the configured servers and `max_tool_rounds`, and
+refuses an agent whose servers are not configured or a deployment with
+nothing that reaches them. `_produce` is the loop of the plan (decisions 5,
+6, 7 and 9): the agent's servers listed once per run, in parallel, before
+the engine is asked, named and sorted by `core.tools_for_run` and the
+left-outs logged by name; the engine run from the stored history; an answer
+that asked for tools stored with its calls, the batch's one tool message
+announced under it, the calls run in parallel through the port, each
+`ResultLanded` published as it lands, the tool message completed with the
+last after `core.check_answers_calls`; the engine of that round let go and
+run again from the history read back -- the one path a run taken up again
+takes -- until an answer asks for nothing, or the bound is reached and the
+run fails with `TOO_MANY_ROUNDS`. A call for a name the run was not handed
+is answered with `NO_SUCH_TOOL` as an error result; a result with no text
+is stored as `NO_CONTENT`; a tool's error is an error result; a
+`ToolServerError` fails the run naming the server; a cancellation or a
+failure mid-batch leaves the answer and its calls stored, no tool message,
+and the calls still running cancelled. The round holds the engine to what
+the stream is read back by (a call completes as announced, its streamed
+arguments parse to the stored ones through `core.check_call_arguments`,
+the answer completes with exactly the calls it announced), so nothing an
+engine could yield leaves a stream `check_event_order` refuses. `app.py`
+builds `McpToolServers` over the secrets at `open` and closes it with the
+rest, or takes a port handed in (`Deployment.configured(tool_servers=,
+servers=, max_tool_rounds=)`). `ScriptedAgent.then` scripts the second
+turn of a run. Tests: `test_turn_lifecycle.py` ("the tool loop": one
+round end to end, the listing once per run and the history read back, the
+next turn's path, results published as they land, a failing tool, a name
+not handed, an empty result, a server that will not list, a server gone
+mid-batch, a cancellation mid-call with `unanswered_calls` on the record,
+the bound, an answer completing with calls it never announced);
+`test_app_composition.py` (the adapter built and closed; a port handed in
+reached through the deployment's own `turns`). The fixes from the 5c and
+5d reviews are commits of their own on this branch.
+
+Review: pending.
+
+Checks: lint; the import contracts; the whole suite against a throwaway
+PostgreSQL (3210 passed, 13 skipped).
+Not done / to watch: the wire does not map the four events (6a); the
+frontend shows nothing of a call (6b); no `waiting` state -- a call whose
+result does not come inside the run is a cancelled or failed run with the
+calls stored (plan, step 7); a name the run was handed whose server has
+no such tool goes to the server, whose refusal is the error result; the
+`auth = "none"` question for a server that needs no credential (step 8).

@@ -31,6 +31,7 @@ import httpx
 import pytest
 
 from aio import asyncio_test
+from contracts.tool_servers import SEARCH
 from conversations import (
     AGENT,
     CONVERSATION,
@@ -47,12 +48,15 @@ from fakes import (
     Gate,
     MemoryConversationStore,
     MemoryCredentialStore,
+    MemoryToolServers,
     ScriptedAgent,
     ScriptedIdentityProvider,
+    calls,
     says,
 )
 from robinauts import app as app_module
-from robinauts.adapters import HttpIdentityProvider, SecretLookup
+from robinauts.adapters import HttpIdentityProvider, SecretLookup, ToolServerSecrets
+from robinauts.adapters.tools.mcp import McpToolServers
 from robinauts.app import (
     AUTH_CONFIG_VARIABLE,
     CONFIG_VARIABLE,
@@ -74,6 +78,8 @@ from robinauts.domain import (
     Run,
     RunQuietError,
     RunState,
+    ToolResult,
+    ToolServerConfig,
 )
 from turns import AUTHOR, readable, stored_events
 from webapp import PUBLIC_URL, running
@@ -749,6 +755,85 @@ def test_a_deployment_that_started_holds_the_tool_secrets_it_read_and_prints_non
 
     assert deployment.tool_secrets.secret_for("github") == "ghp-x"
     assert repr(deployment.tool_secrets) == "ToolServerSecrets(github)"
+
+
+@asyncio_test
+async def test_opening_builds_the_mcp_adapter_over_the_secrets_read_and_closing_lets_it_go(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one thing that reaches a tool server is built at ``open``, over the
+    secrets start-up read, and given back with the rest at ``aclose``: its
+    connection pool is the process's for its life, like the identity
+    provider's client."""
+    built: list[Recording] = []
+
+    class Recording(McpToolServers):
+        def __init__(self, secrets: ToolServerSecrets) -> None:
+            super().__init__(secrets)
+            self.secrets = secrets
+            self.closed = 0
+            built.append(self)
+
+        async def aclose(self) -> None:
+            self.closed += 1
+            await super().aclose()
+
+    monkeypatch.setattr(app_module, "McpToolServers", Recording)
+    deployment = with_agents(
+        tmp_path,
+        WITH_TOOLS,
+        secret_for=reading({**BOTH_KEYS, "ROBINAUTS_GITHUB_TOKEN": "ghp-x"}),
+        provider=ScriptedIdentityProvider(),
+    )
+
+    await deployment.open()
+    assert [adapter.secrets is deployment.tool_secrets for adapter in built] == [True]
+    assert built[0].closed == 0
+    await deployment.aclose()
+
+    assert built[0].closed == 1
+
+
+@asyncio_test
+async def test_a_tool_servers_port_handed_in_is_the_one_a_turn_reaches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A test's fake stands where the MCP adapter would, and nothing builds
+    the adapter: a whole tool round runs through the deployment's own
+    ``turns`` and reaches the fake with the tool's own name."""
+    monkeypatch.setattr(app_module, "McpToolServers", None)  # nothing here may build it
+    store = MemoryConversationStore()
+    tools = MemoryToolServers()
+    tools.serving("github", SEARCH)
+    tools.answering("github", SEARCH.name, ToolResult("found 3"))
+    github = ToolServerConfig(
+        id="github", url="https://github.example.test/mcp/", secret_env="ROBINAUTS_GITHUB_TOKEN"
+    )
+    engine = ScriptedAgent(*calls(("toolu_01", "github__search_repositories", {"q": "x"})))
+    engine.then(*says("Found three."))
+    definition = agent_definition(tools=("github",))
+    deployment = deployed(
+        tmp_path,
+        conversation_store=store,
+        agents={definition.id: definition},
+        models=offered(),
+        engines={definition.engine: engine},
+        provider=ScriptedIdentityProvider(),
+        tool_servers=tools,
+        servers={"github": github},
+    )
+    await deployment.open()
+    assert deployment.turns is not None
+
+    started = await deployment.turns.begin(AUTHOR, agent_id=AGENT, text="What is a robinaut?")
+    while (await store.run_by_id(started.run.id)).state in ACTIVE_RUN_STATES:
+        await asyncio.sleep(0.005)
+    await deployment.aclose()
+
+    assert (await store.run_by_id(started.run.id)).state is RunState.FINISHED
+    assert tools.listings == ["github"]
+    assert tools.calls == [("github", "search_repositories", {"q": "x"})]
+    readable(await stored_events(store, started.run.id), started.run)
 
 
 def test_the_key_itself_is_in_none_of_what_a_start_up_refusal_says(tmp_path: Path) -> None:

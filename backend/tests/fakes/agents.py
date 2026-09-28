@@ -107,6 +107,14 @@ class ScriptedAgent(Agent):
     def __init__(self, *steps: Step) -> None:
         self.steps: list[Step] = list(steps)
         """The script. A test may replace it between turns."""
+        self.next: list[list[Step]] = []
+        """Scripts for the turns to come, one each, used up in order (``then``).
+
+        A tool round is two turns of the engine inside one run: the answer
+        that calls, and the answer after the results. The first runs
+        ``steps``; the second runs the first of these, if a test wrote one,
+        and ``steps`` again if not.
+        """
         self.asked: list[Asked] = []
         """Every turn it was asked for, with the history it was given."""
         self.released = 0
@@ -126,7 +134,12 @@ class ScriptedAgent(Agent):
         self.asked.append(
             Asked(agent=agent, history=tuple(history), model=model, tools=tuple(tools))
         )
-        return self._events(tuple(self.steps))
+        script = self.next.pop(0) if self.asked[1:] and self.next else self.steps
+        return self._events(tuple(script))
+
+    def then(self, *steps: Step) -> None:
+        """What the engine yields at the next turn it is asked for after this one."""
+        self.next.append(list(steps))
 
     async def _events(self, steps: tuple[Step, ...]) -> AsyncIterator[EngineEvent]:
         # What a real engine opens on its first step: an HTTP response, a
