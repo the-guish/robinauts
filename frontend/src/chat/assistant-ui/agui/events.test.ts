@@ -86,8 +86,116 @@ test("a run that ended in an error carries the code to branch on", () => {
   });
 });
 
-test("what it does not know, it ignores", () => {
+test("a tool call: its start, its arguments, its end and its result", () => {
+  expect(
+    decode(
+      json({
+        type: "TOOL_CALL_START",
+        toolCallId: "toolu_01",
+        toolCallName: "github__search",
+        parentMessageId: "m",
+      }),
+    ),
+  ).toEqual({
+    type: "TOOL_CALL_START",
+    toolCallId: "toolu_01",
+    toolCallName: "github__search",
+    parentMessageId: "m",
+  });
+  // AG-UI leaves the parent optional; the backend always names it.
+  expect(
+    decode(
+      json({ type: "TOOL_CALL_START", toolCallId: "t", toolCallName: "x__y" }),
+    ),
+  ).toEqual({
+    type: "TOOL_CALL_START",
+    toolCallId: "t",
+    toolCallName: "x__y",
+    parentMessageId: null,
+  });
+  expect(
+    decode(json({ type: "TOOL_CALL_ARGS", toolCallId: "t", delta: '{"q":' })),
+  ).toEqual({ type: "TOOL_CALL_ARGS", toolCallId: "t", delta: '{"q":' });
+  expect(decode(json({ type: "TOOL_CALL_END", toolCallId: "t" }))).toEqual({
+    type: "TOOL_CALL_END",
+    toolCallId: "t",
+  });
+  expect(
+    decode(
+      json({
+        type: "TOOL_CALL_RESULT",
+        messageId: "r",
+        toolCallId: "t",
+        content: "found 3",
+        role: "tool",
+      }),
+    ),
+  ).toEqual({
+    type: "TOOL_CALL_RESULT",
+    messageId: "r",
+    toolCallId: "t",
+    content: "found 3",
+    isError: false,
+  });
+  // **The error flag is the one thing read out of `metadata`**
+  // (`docs/specs/wire.md`), and only `true` is an error.
+  expect(
+    decode(
+      json({
+        type: "TOOL_CALL_RESULT",
+        messageId: "r",
+        toolCallId: "t",
+        content: "no such repository",
+        metadata: { isError: true },
+      }),
+    ),
+  ).toEqual({
+    type: "TOOL_CALL_RESULT",
+    messageId: "r",
+    toolCallId: "t",
+    content: "no such repository",
+    isError: true,
+  });
+  expect(
+    decode(
+      json({
+        type: "TOOL_CALL_RESULT",
+        messageId: "r",
+        toolCallId: "t",
+        content: "x",
+        metadata: { isError: "yes" },
+      }),
+    ),
+  ).toMatchObject({ isError: false });
+});
+
+test("a tool event whose fields are wrong is ignored rather than guessed at", () => {
+  // A call with no name would be a call nothing could draw.
   expect(decode(json({ type: "TOOL_CALL_START", toolCallId: "t" }))).toBeNull();
+  expect(
+    decode(json({ type: "TOOL_CALL_START", toolCallName: "x__y" })),
+  ).toBeNull();
+  expect(decode(json({ type: "TOOL_CALL_ARGS", toolCallId: "t" }))).toBeNull();
+  expect(decode(json({ type: "TOOL_CALL_END" }))).toBeNull();
+  // AG-UI allows a list of parts as the content; this backend sends one
+  // string, and a list is a result this build does not read.
+  expect(
+    decode(
+      json({
+        type: "TOOL_CALL_RESULT",
+        messageId: "r",
+        toolCallId: "t",
+        content: [{ type: "text", text: "x" }],
+      }),
+    ),
+  ).toBeNull();
+  expect(
+    decode(json({ type: "TOOL_CALL_RESULT", toolCallId: "t", content: "x" })),
+  ).toBeNull();
+});
+
+test("what it does not know, it ignores", () => {
+  expect(decode(json({ type: "TOOL_CALL_CHUNK", toolCallId: "t" }))).toBeNull();
   expect(decode(json({ type: "STEP_STARTED" }))).toBeNull();
   expect(decode("not json at all")).toBeNull();
   expect(decode("[1, 2]")).toBeNull();
@@ -114,6 +222,15 @@ test("the two that say a run is over, and nothing else", () => {
     true,
   );
   expect(isTerminal({ type: "TEXT_MESSAGE_END", messageId: "m" })).toBe(false);
+  expect(
+    isTerminal({
+      type: "TOOL_CALL_RESULT",
+      messageId: "r",
+      toolCallId: "t",
+      content: "x",
+      isError: false,
+    }),
+  ).toBe(false);
   expect(isTerminal({ type: "RUN_STARTED", threadId: "c", runId: "r" })).toBe(
     false,
   );

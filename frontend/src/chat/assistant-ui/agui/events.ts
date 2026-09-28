@@ -6,8 +6,8 @@
  *
  * The vocabulary is `docs/specs/wire.md` and what `api/agui.py` really
  * writes: a run started, a message opened, appended to and ended, the same
- * three for a stretch of thinking, and one event saying the run is over. Tool
- * calls have AG-UI events of their own and this version produces none.
+ * three for a stretch of thinking, a tool call started, its arguments,
+ * its end and its result, and one event saying the run is over.
  *
  * **What it does not know, it ignores.** AG-UI is a protocol with more in it
  * than this build uses, and a deployment newer than the page in front of it
@@ -17,7 +17,9 @@
  * those are the three cases below that can never be dropped.
  *
  * The wire is camel case -- it is the AG-UI package's own JSON on the other
- * side -- and this is the one file that knows it.
+ * side -- and this is the one file that knows it. The one thing it reads out
+ * of `metadata` is the error flag on a result, which is the one thing the
+ * backend puts there (`docs/specs/wire.md`).
  */
 
 /** One event of a run, as this build understands one. */
@@ -29,6 +31,27 @@ export type AguiEvent =
   | { type: "REASONING_MESSAGE_START"; messageId: string }
   | { type: "REASONING_MESSAGE_CONTENT"; messageId: string; delta: string }
   | { type: "REASONING_MESSAGE_END"; messageId: string }
+  | {
+      type: "TOOL_CALL_START";
+      /** The call's id: the vendor's, carried as data, and what a result names. */
+      toolCallId: string;
+      /** The tool's full name, `<server>__<tool>`. */
+      toolCallName: string;
+      /** The answer the call is part of; AG-UI leaves it optional. */
+      parentMessageId: string | null;
+    }
+  | { type: "TOOL_CALL_ARGS"; toolCallId: string; delta: string }
+  | { type: "TOOL_CALL_END"; toolCallId: string }
+  | {
+      type: "TOOL_CALL_RESULT";
+      /** The tool message the result is part of, which the next message hangs under. */
+      messageId: string;
+      toolCallId: string;
+      /** The tool's text, to be rendered as data and never as markup. */
+      content: string;
+      /** Whether the tool said it failed (`metadata.isError` on the wire). */
+      isError: boolean;
+    }
   | { type: "RUN_FINISHED"; runId: string; cancelled: boolean }
   | { type: "RUN_ERROR"; code: string; message: string };
 
@@ -87,6 +110,46 @@ export function decode(data: string): AguiEvent | null {
       const messageId = text(read.messageId);
       if (messageId === null) return null;
       return { type, messageId };
+    }
+    case "TOOL_CALL_START": {
+      const toolCallId = text(read.toolCallId);
+      const toolCallName = text(read.toolCallName);
+      if (toolCallId === null || toolCallName === null) return null;
+      return {
+        type,
+        toolCallId,
+        toolCallName,
+        parentMessageId: text(read.parentMessageId),
+      };
+    }
+    case "TOOL_CALL_ARGS": {
+      const toolCallId = text(read.toolCallId);
+      const delta = text(read.delta);
+      if (toolCallId === null || delta === null) return null;
+      return { type, toolCallId, delta };
+    }
+    case "TOOL_CALL_END": {
+      const toolCallId = text(read.toolCallId);
+      if (toolCallId === null) return null;
+      return { type, toolCallId };
+    }
+    case "TOOL_CALL_RESULT": {
+      const messageId = text(read.messageId);
+      const toolCallId = text(read.toolCallId);
+      // AG-UI allows a list of parts here; this backend sends the text as
+      // one string (`api/agui.py`), and anything else is a result this
+      // build does not read. The conversation, read again when the run
+      // ends, still shows it.
+      const content = text(read.content);
+      if (messageId === null || toolCallId === null || content === null) {
+        return null;
+      }
+      const metadata = read.metadata;
+      const isError =
+        typeof metadata === "object" &&
+        metadata !== null &&
+        (metadata as Record<string, unknown>).isError === true;
+      return { type, messageId, toolCallId, content, isError };
     }
     case "RUN_FINISHED": {
       const runId = text(read.runId);

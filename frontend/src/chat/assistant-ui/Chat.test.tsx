@@ -12,7 +12,14 @@ import { expect, expectTypeOf, test, vi } from "vitest";
 
 import { json, refusal, type Call } from "../../test/api";
 import type { Conversation } from "../../conversation/conversation";
-import { conversation, id, message, opened } from "../../test/conversations";
+import {
+  calling,
+  conversation,
+  id,
+  message,
+  opened,
+  results,
+} from "../../test/conversations";
 import { event, streamed, streamHeaders, writable } from "../../test/stream";
 import {
   Chat,
@@ -74,6 +81,53 @@ async function send(text: string) {
     await settle();
   });
 }
+
+test("a tool call is drawn as data: the name, the arguments and the result as text", async () => {
+  // The name is the model's, the arguments are the model's and the result
+  // is the tool's: attacker-influenced text, every one of them
+  // (`docs/specs/wire.md`). None is markup and none becomes a link.
+  const markup = "<b>no</b> such [repository](https://example.test/)";
+  stub(() =>
+    json(
+      opened(conversation(1), [
+        message("m1", "user", "Any robins on GitHub?"),
+        calling("m2", "Let me look.", [
+          {
+            call_id: "toolu_01",
+            name: "github__search_<i>x</i>",
+            arguments: { q: "<script>alert(1)</script>" },
+          },
+        ]),
+        results("t1", [{ call_id: "toolu_01", text: markup, is_error: true }]),
+        message("m3", "assistant", "None."),
+      ]),
+    ),
+  );
+  draw({ conversationId: CONVERSATION });
+  await waitFor(() => {
+    expect(screen.getByText("None.")).toBeInTheDocument();
+  });
+  // The vendored Thread folds the calls of an answer behind one trigger, and
+  // each call behind its own, which names the tool as text.
+  fireEvent.click(screen.getByRole("button", { name: "1 tool call" }));
+  const trigger = await screen.findByRole("button", {
+    name: /github__search_<i>x<\/i>/,
+  });
+  expect(trigger.querySelector("i")).toBeNull();
+  fireEvent.click(trigger);
+  await waitFor(() => {
+    expect(screen.getByText(markup)).toBeInTheDocument();
+  });
+  expect(
+    screen.getByText('{"q":"<script>alert(1)</script>"}'),
+  ).toBeInTheDocument();
+  // The one <b> is the trigger's own, around the name; the result's is text.
+  expect(
+    [...document.querySelectorAll("b")].map((bold) => bold.textContent),
+  ).toEqual(["github__search_<i>x</i>"]);
+  expect(document.querySelector("script")).toBeNull();
+  expect(document.querySelector('a[href="https://example.test/"]')).toBeNull();
+});
 
 test("a conversation that is loaded is drawn as a thread", async () => {
   stub(() => json(opened(conversation(1), TREE)));

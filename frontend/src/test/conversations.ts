@@ -60,6 +60,53 @@ export function message(
   };
 }
 
+/** One call an answer makes, as the API shows it. */
+export interface Call {
+  call_id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+/** An answer that made those calls, beside what it said. */
+export function calling(
+  messageId: string,
+  text: string,
+  calls: readonly Call[],
+  provenance: Message["provenance"] = null,
+): Message {
+  return {
+    id: messageId,
+    role: "assistant",
+    channel: "web",
+    created_at: "2026-09-02T09:30:00Z",
+    parts: [
+      ...(text === "" ? [] : [{ kind: "text" as const, text }]),
+      ...calls.map((call) => ({ kind: "tool_call" as const, ...call })),
+    ],
+    provenance,
+  };
+}
+
+/** The tool message under an answer: one result per call it made. */
+export function results(
+  messageId: string,
+  answers: readonly { call_id: string; text: string; is_error?: boolean }[],
+): Message {
+  return {
+    id: messageId,
+    role: "tool",
+    channel: "web",
+    created_at: "2026-09-02T09:30:01Z",
+    parts: answers.map((answer) => ({
+      kind: "tool_result" as const,
+      call_id: answer.call_id,
+      text: answer.text,
+      is_error: answer.is_error ?? false,
+    })),
+    provenance: null,
+  };
+}
+
 /** What an answer records, on an assistant message. */
 export function madeBy(
   agent = "helper",

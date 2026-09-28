@@ -202,6 +202,30 @@ lines; the plan's numbering is kept where a step is named.
   the route (the ids, the bodies, the two silent positions) and the
   re-attach property test has a `tools` shape, cutting inside a call's
   arguments, on the silent positions and on a result.
+- **The frontend shows tool calls.** `agui/events.ts` decodes the four
+  events (`TOOL_CALL_START` with the call's id, the tool's full name and the
+  answer; `TOOL_CALL_ARGS`; `TOOL_CALL_END`; `TOOL_CALL_RESULT` with the
+  tool message's id, the text as `content` and `metadata.isError` read as
+  the one thing it takes out of `metadata`); a known type with wrong fields
+  is ignored, as ever. `state.ts`: a `ChatToolCall` part (id, name,
+  `argsText` as it streams, `args` once whole or from the store, `result`,
+  `isError`) inside the answer that made it; the reducer opens the answer
+  a call names if its start went missing, treats a start already held, an
+  end or a result twice, and arguments for a call never announced as the
+  no-ops the wire promises (and returns the same object for them); a
+  stored tool message is **folded** into the answer before it (`folded`,
+  `answered`) -- no bubble of its own -- and the answer keeps its id as
+  `resultsId`, which `under`, `storedParent` and `upTo` use so that a
+  question, an edit or a cut after that answer hangs under the tool
+  message in the store. `runtime.tsx` hands a call to assistant-ui as its
+  `tool-call` part (`asThreadMessage`), which the vendored Thread draws
+  with `ToolFallback` -- name, arguments and result each in a text node --
+  and an edit's parent goes through `storedParent`. Tests: `events.test.ts`,
+  `runtime.test.tsx` (a round through the reducer, the no-ops, folding, the
+  parent rules, the part handed over, an edit after a round through the
+  hook), `Chat.test.tsx` (a call drawn as text: markup in the name, the
+  arguments and the result stays text and makes no element). The frontend
+  typecheck, red since step 3 on the `tool` role, is green again.
 
 ## Corrections to the plan
 
@@ -861,8 +885,10 @@ failure mid-batch leaves the answer and its calls stored, no tool message,
 and the calls still running cancelled. The round holds the engine to what
 the stream is read back by (a call completes as announced, its streamed
 arguments parse to the stored ones through `core.check_call_arguments`,
-the answer completes with exactly the calls it announced), so nothing an
-engine could yield leaves a stream `check_event_order` refuses. `app.py`
+the answer completes with exactly the calls it announced, each call id
+once, nothing after the turn ends waiting and no answer after one that
+asked for tools), so that what an engine yields out of order fails the
+run before anything the stream could not read back is stored. `app.py`
 builds `McpToolServers` over the secrets at `open` and closes it with the
 rest, or takes a port handed in (`Deployment.configured(tool_servers=,
 servers=, max_tool_rounds=)`). `ScriptedAgent.then` scripts the second
@@ -876,10 +902,37 @@ the bound, an answer completing with calls it never announced);
 reached through the deployment's own `turns`). The fixes from the 5c and
 5d reviews are commits of their own on this branch.
 
-Review: pending.
+Review: 1 round (read after the commit; the fixes are a commit of their
+own, "mcp 5e: fixes from the review", on step 6b's branch).
+- High: 1 (1/0) — an engine that yielded **a second answer after one that
+  asked for tools**, or anything after `WaitingOnTools`, was accepted: the
+  run finished, the calls were never run, and the stream was one
+  `check_event_order` refuses. The round holds the engine to the order
+  `check_engine_events` states -- nothing after the turn ends waiting, no
+  answer after one that asked for tools -- and fails the run before
+  anything is stored; a table test drives each rule.
+- Medium: 4 (4/0) — a call id named twice in one answer is refused (M1); a
+  round after the results that yields no answer fails the run with
+  `NO_ANSWER_AFTER_TOOLS`, since a run finished on a tool message is one
+  nothing can continue from (M2); the calls still running when a batch is
+  abandoned are cancelled and waited for **bounded** by `CLOSING_SECONDS`,
+  as the engine is, and abandoned with a line in the log past that (M3);
+  `Deployment.configured` refuses servers handed in without the port that
+  reaches them and a handed-in agent naming a server that will not be
+  wired, as it refuses models without engines (M4).
+- Low: 5 (5/0) — a listing that fails cancels its siblings (L1);
+  `NO_SUCH_TOOL` covers what its docstring says: a name not among the tools
+  the run was handed is answered without a server being asked (L2); tests
+  for the rules the round enforces (a call completed under another name,
+  streamed arguments that do not parse to the stored ones, waiting after an
+  answer with no calls, an answer completed with a call open, a bound of
+  zero) (L3); the module docstring says what a run with tools writes, the
+  stray literal is gone, the note's claim is honest and the plan's "before
+  anything is written" reads "before the engine is called" (L4); a result
+  of nothing but whitespace is stored as `NO_CONTENT` (L5).
 
 Checks: lint; the import contracts; the whole suite against a throwaway
-PostgreSQL (3210 passed, 13 skipped).
+PostgreSQL (3220 passed, 13 skipped).
 Not done / to watch: the wire does not map the four events (6a); the
 frontend shows nothing of a call (6b); no `waiting` state -- a call whose
 result does not come inside the run is a cancelled or failed run with the
@@ -916,7 +969,59 @@ turn with a tool round before its answer). The OpenAPI document is
 unchanged: the streaming routes are outside it, and the content parts
 were step 3's.
 
+Review: 1 round (read after the commit; the fixes are a commit of their
+own, "mcp 6a: fixes from the review", on step 6b's branch).
+- High: 0.
+- Medium: 2 (2/0) — the commit's lint was red (a 128-character docstring
+  line) while the note said "lint": re-wrapped, and this note stands
+  corrected; the thinking closed before `TOOL_CALL_ARGS` and
+  `TOOL_CALL_END` was untested (a mutation run showed it): the closers
+  test now drives all four tool events and the three of a tool message.
+- Low: 4 (4/0) — `ERROR_FLAG` in its place in `__all__`; the module
+  docstring's "no `metadata`" reads "nothing in `metadata` but the error
+  flag"; a vacuous assertion in the route test removed; `wire.md` says a
+  tool message sends nothing **announced or completed**, and the property
+  test's docstring says the cuts fall *across* the silent positions.
+
+### Step 6b — the frontend decodes tool events and draws calls as data   (feature/mcp-6b-frontend)
+
+Summary: the chat shows what a turn did with its tools. `events.ts` decodes
+`TOOL_CALL_START`, `TOOL_CALL_ARGS`, `TOOL_CALL_END` and `TOOL_CALL_RESULT`
+as the backend writes them, the error flag read out of `metadata` and
+nothing else from there, a result whose content is not one string ignored
+(this backend sends one). The state holds a call as a part of the answer
+that made it (`ChatToolCall`: the vendor's id, the full name, the
+arguments as text while they stream and as data once whole, the result
+and its flag), and the reducer keeps the wire's no-ops -- a start already
+held, an end or a result twice, arguments for a call it never saw -- as
+no-ops that hand back the same object, opening the answer a call names
+when its start went missing as it does for text. A stored tool message is
+folded into the answer before it rather than drawn as a bubble, and the
+answer remembers its id (`resultsId`): a new question, an edit and a cut
+after that answer go to the tool message in the store (`under`,
+`storedParent`, `upTo`), since a message sent under the answer itself
+would leave the results off the path the model sees. The runtime hands a
+call to assistant-ui as its `tool-call` part, which the vendored Thread
+draws with `ToolFallback` behind a "1 tool call" trigger -- the name, the
+arguments and the result each in a text node, as `wire.md` requires of
+attacker-influenced text -- and an edit's parent goes through
+`storedParent`. Tests: `events.test.ts` (the four events, the flag, wrong
+fields ignored), `runtime.test.tsx` (a round through the reducer, an error
+result, the no-ops, a cancellation mid-batch, folding and the parent
+rules, the part handed over, an edit after a round through the hook),
+`Chat.test.tsx` (markup in a name, in arguments and in a result stays
+text and makes no element). The frontend's typecheck, red since step 3
+added the `tool` role to the API's enum, is green again.
+
 Review: pending.
+
+Checks: frontend typecheck, lint, prettier, tests (424); the backend suite
+runs again with the 5e and 6a fixes on this branch (3238 passed, 6 skipped).
+Not done / to watch: a call's status is the message's (running,
+cancelled, complete); a cancelled batch shows its calls as "Cancelled
+tool"; two answers of one turn are two bubbles, the round's answer with
+its calls and the answer after; nothing renders `args` beyond the
+fallback's text; the demo and the operator's page (step 8).
 
 Checks: lint; the whole suite against a throwaway PostgreSQL (3220 passed, 13 skipped).
 Not done / to watch: the frontend decodes none of it yet (6b); the mapper
