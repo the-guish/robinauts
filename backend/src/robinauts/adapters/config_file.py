@@ -32,6 +32,7 @@ a key could be written down.
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -108,12 +109,32 @@ def check_client_secrets(config: SignInConfig, *, secret_for: SecretLookup = env
     """
     problems = [
         f"providers.{provider.id}: the client secret is read from the environment"
-        f" variable {provider.client_secret_env}, which is unset or empty"
+        f" variable {named(provider.client_secret_env)}, which is unset or empty"
         for provider in config.providers.values()
         if not secret_for(provider.client_secret_env)
     ]
     if problems:
         raise ConfigError(problems)
+
+
+_CONVENTIONAL_VARIABLE = re.compile(r"[A-Z_][A-Z0-9_]*")
+"""How a variable an operator means to name is spelt: upper case, digits, underscores."""
+
+
+def named(variable: str) -> str:
+    """The variable's name as a start-up message may carry it.
+
+    A message about an unset variable names the variable so that the operator
+    knows what to set -- and a **secret pasted where the name belongs** is a
+    valid name too, as far as the spelling rule goes: a GitHub token is
+    letters, digits and underscores. Echoing that "name" would put the secret
+    in the start-up log. So a name spelt as variables conventionally are is
+    printed, and anything else is described rather than repeated; the
+    operator finds it in the file, under the key the message names.
+    """
+    if _CONVENTIONAL_VARIABLE.fullmatch(variable):
+        return variable
+    return "named in the configuration (not repeated here: it is not spelt like one)"
 
 
 class ProviderKeys:
@@ -222,7 +243,7 @@ def check_tool_secrets(
         else:
             problems.append(
                 f"mcp_servers.{server.id}: the secret is read from the environment variable"
-                f" {server.secret_env}, which is unset or empty"
+                f" {named(server.secret_env)}, which is unset or empty"
             )
     if problems:
         raise ConfigError(problems)
@@ -256,7 +277,7 @@ def check_api_keys(config: ModelsConfig, *, secret_for: SecretLookup = environme
         else:
             problems.append(
                 f"model_providers.{provider.id}: the API key is read from the environment"
-                f" variable {provider.api_key_env}, which is unset or empty"
+                f" variable {named(provider.api_key_env)}, which is unset or empty"
             )
     if problems:
         raise ConfigError(problems)

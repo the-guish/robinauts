@@ -720,6 +720,7 @@ secret_env = "ROBINAUTS_GITHUB_TOKEN"
 """
 )
 """The agent of ``WITH_AGENTS`` given a tool server, whose secret is a third variable."""
+assert 'tools = ["github"]' in WITH_TOOLS  # the edit above found its line
 
 
 def test_a_tool_server_whose_secret_is_unset_stops_the_start_up_with_the_rest(

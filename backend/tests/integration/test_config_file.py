@@ -526,6 +526,32 @@ def test_every_unset_secret_variable_is_named_at_once_and_never_a_value() -> Non
     ]
 
 
+def test_a_token_pasted_as_a_variable_name_is_not_repeated_by_the_refusal() -> None:
+    # A GitHub token is letters, digits and underscores -- a valid variable
+    # name, as far as the spelling rule can tell -- so the refusal describes
+    # it rather than repeating it into the start-up log.
+    token = "ghp_" + "A1b2C3d4" * 5
+    config = ModelsConfig(tool_servers={"github": tool_server("github", token)})
+
+    with pytest.raises(ConfigError) as raised:
+        check_tool_secrets(config, secret_for=lambda _: None)
+
+    (line,) = raised.value.problems
+    assert token not in line
+    assert line.startswith("mcp_servers.github: the secret is read from the environment variable")
+    # And a name spelt as variables are is printed, as the operator needs.
+    assert "ROBINAUTS_X" in check_missing("ROBINAUTS_X")
+    assert "lower_case" not in check_missing("lower_case")
+
+
+def check_missing(variable: str) -> str:
+    with pytest.raises(ConfigError) as raised:
+        check_tool_secrets(
+            ModelsConfig(tool_servers={"s": tool_server("s", variable)}), secret_for=lambda _: None
+        )
+    return raised.value.problems[0]
+
+
 def test_the_tool_secrets_print_the_servers_and_never_a_secret() -> None:
     read = check_tool_secrets(with_servers(github="GH"), secret_for=lambda _: "sk-nobody")
 

@@ -179,13 +179,18 @@ def parse_models_config(
         if server is not None:
             servers[server.id] = server
     # Two servers under one prefix would be two servers a call could name:
-    # said here, by both ids, with the rest of the file's problems.
+    # said here, by both ids, with the rest of the file's problems -- over
+    # the **declared** tables, so that a server with another mistake in it
+    # is still one the clash is reported against, in the same pass.
     under: dict[str, str] = {}
-    for server in servers.values():
-        first = under.setdefault(server.prefix, server.id)
-        if first != server.id:
+    for server_id, table in declared_servers.items():
+        prefix = _declared_prefix(server_id, table)
+        if prefix is None:
+            continue
+        first = under.setdefault(prefix, str(server_id))
+        if first != server_id:
             problems.append(
-                f"mcp_servers.{server.id}: its tools would be named under {server.prefix!r},"
+                f"mcp_servers.{server_id}: its tools would be named under {prefix!r},"
                 f" as mcp_servers.{first}'s are; give one of them a prefix of its own"
             )
 
@@ -392,7 +397,7 @@ def _agent(
         ):
             problems.append(f"{where}.tools: a list of tool server ids, or no tools at all")
         else:
-            for server_id in raw_tools:
+            for server_id in dict.fromkeys(raw_tools):
                 if server_id not in declared_servers:
                     problems.append(f"{where}.tools: {server_id!r} is not one of [mcp_servers]")
             if len(set(raw_tools)) != len(raw_tools):
@@ -412,6 +417,18 @@ def _agent(
         engine=engine,
         tools=tools,
     )
+
+
+def _declared_prefix(server_id: object, table: object) -> str | None:
+    """The prefix a declared server would name its tools under, if it is known yet."""
+    if not isinstance(table, Mapping):
+        return None
+    written = table.get("prefix")
+    if isinstance(written, str) and is_tool_prefix(written):
+        return written
+    if written is None and is_tool_prefix(server_id):
+        return str(server_id)
+    return None
 
 
 def _tool_server(server_id: object, table: object, problems: list[str]) -> ToolServerConfig | None:
@@ -441,19 +458,22 @@ def _tool_server(server_id: object, table: object, problems: list[str]) -> ToolS
             f" not the secret itself"
         )
 
-    auth = ToolServerAuth.BEARER
+    auth: ToolServerAuth | None = ToolServerAuth.BEARER
     if "auth" in table:
         raw_auth = _string(table, "auth", where, problems)
-        found = _AUTHS.get(raw_auth) if raw_auth else None
-        if raw_auth and found is None:
+        auth = _AUTHS.get(raw_auth) if raw_auth else None
+        if raw_auth and auth is None:
             problems.append(f"{where}.auth: one of {_named(_AUTHS)}, not {raw_auth!r}")
-        elif found is not None:
-            auth = found
 
     given: dict[str, Any] = {}
     if "user" in table:
-        given["user"] = _string(table, "user", where, problems, limit=MAX_BASIC_USER_CHARS)
-        if auth is not ToolServerAuth.BASIC:
+        user = _string(table, "user", where, problems, limit=MAX_BASIC_USER_CHARS)
+        given["user"] = user
+        if user and ":" in user:
+            problems.append(f"{where}.user: the user part of a basic credential holds no ':'")
+        # Said only when the auth is known: under a misspelt auth it would be
+        # the same mistake reported twice.
+        if user and auth is not None and auth is not ToolServerAuth.BASIC:
             problems.append(
                 f"{where}.user: only basic auth has a user part; {auth.value} sends the"
                 f" secret alone"
@@ -477,7 +497,7 @@ def _tool_server(server_id: object, table: object, problems: list[str]) -> ToolS
     if seconds is not None:
         given["timeout_seconds"] = seconds
 
-    if len(problems) > before:
+    if len(problems) > before or auth is None:
         return None
     return _built(
         where,

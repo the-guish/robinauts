@@ -399,7 +399,7 @@ url = "https://api.githubcopilot.com/mcp/"
 secret_env = "ROBINAUTS_GITHUB_TOKEN"
 
 [mcp_servers.jira]
-url = "https://your-site.atlassian.net/mcp"
+url = "https://mcp.atlassian.com/v2/mcp"
 auth = "basic"
 user = "robinauts@example.com"
 secret_env = "ROBINAUTS_JIRA_TOKEN"

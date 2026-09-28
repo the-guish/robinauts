@@ -3,13 +3,14 @@
 
 """Agents are configuration: the engine that runs one, and how ids are spelt.
 
-An agent is a name, a system prompt, a default model and an engine
-(``docs/specs/agents.md``); the operator writes them in the configuration and
-users do not create them. What the conversation format needs of it is here:
-the engine a message was produced by, and the shape of the ids an agent and a
-model are referred to by. So are the records an operator's configuration is
-read into -- ``AgentDefinition``, ``ModelProviderConfig``, ``ModelConfig`` and
-the ``ModelsConfig`` that holds the three tables together.
+An agent is a name, a system prompt, a default model, an engine and the tool
+servers it may use (``docs/specs/agents.md``); the operator writes them in the
+configuration and users do not create them. What the conversation format needs
+of it is here: the engine a message was produced by, and the shape of the ids
+an agent and a model are referred to by. So are the records an operator's
+configuration is read into -- ``AgentDefinition``, ``ModelProviderConfig``,
+``ModelConfig``, ``ToolServerConfig`` and the ``ModelsConfig`` that holds the
+four tables together.
 
 **The records alone, with no reading of any file.** An adapter reads the TOML
 and ``robinauts.core.parse_models_config`` decides whether it describes a
@@ -17,9 +18,10 @@ deployment, exactly as sign-in is read (``docs/layout.md``). What is here is
 what every layer above needs and the rules each record keeps to.
 
 **No key is ever in one of these.** A provider names the *environment
-variable* its key is read from, which is the whole of what the configuration
-carries; reading it is the adapter's, and what it read travels in a
-``ProviderKeys`` (``robinauts.adapters.config_file``) that prints nothing.
+variable* its key is read from, and a tool server the one its secret is read
+from, which is the whole of what the configuration carries; reading them is
+the adapter's, and what it read travels in a ``ProviderKeys`` or a
+``ToolServerSecrets`` (``robinauts.adapters.config_file``) that prints nothing.
 """
 
 from __future__ import annotations
@@ -97,7 +99,7 @@ somebody should be told about at start-up rather than at the first turn.
 
 @dataclass(frozen=True, slots=True)
 class AgentDefinition:
-    """An agent as the operator defined it: a name, a prompt, a model, an engine.
+    """An agent as the operator defined it: a name, a prompt, a model, an engine, its tools.
 
     The record alone (``docs/specs/agents.md``). **Reading the configuration
     is not here**: an adapter reads the raw tables and ``core`` turns them into

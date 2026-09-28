@@ -841,11 +841,18 @@ def test_a_tool_server_s_url_is_an_endpoint_a_secret_may_be_sent_to(url: str) ->
     assert "sk-live" not in found
 
 
-def test_a_secret_pasted_where_its_variable_s_name_belongs_is_refused() -> None:
-    assert only(server(secret_env="ghp_notAVariableName!")) == (
+def test_a_secret_pasted_where_its_variable_s_name_belongs_is_refused_when_it_can_be() -> None:
+    # A token with a '-' in it is not a variable name and is refused here; a
+    # GitHub token is letters, digits and underscores, which *is* one, so the
+    # refusal cannot see it -- the start-up check then declines to repeat it
+    # (``adapters.config_file.named``, tested with the secrets).
+    assert only(server(secret_env="sk-ant-pasted-by-mistake")) == (
         "mcp_servers.github.secret_env: the NAME of an environment variable holding the"
         " secret, not the secret itself"
     )
+    token = "ghp_" + "A1b2" * 9
+    accepted = parse_models_config(data(mcp_servers={"github": {**GITHUB, "secret_env": token}}))
+    assert accepted.tool_servers["github"].secret_env == token
 
 
 def test_a_tool_server_s_auth_is_bearer_or_basic() -> None:
@@ -864,15 +871,28 @@ def test_basic_auth_names_the_user_part_and_bearer_has_none() -> None:
     assert only(server(auth="basic", user="")) == (
         "mcp_servers.github.user: missing, or not a non-empty string"
     )
+    assert only(server(auth="basic", user="a:b")) == (
+        "mcp_servers.github.user: the user part of a basic credential holds no ':'"
+    )
+    # Under a misspelt auth, the user part is not a second mistake.
+    assert only(server(auth="digest", user="me")).startswith("mcp_servers.github.auth:")
 
 
-@pytest.mark.parametrize(
-    "prefix", ["git__hub", "github_", "GitHub Tools", "g" * (MAX_TOOL_PREFIX_CHARS + 1), ""]
-)
+@pytest.mark.parametrize("prefix", ["git__hub", "github_", "GitHub Tools"])
 def test_a_prefix_is_a_name_a_tool_can_be_told_apart_under(prefix: str) -> None:
-    (found,) = server(prefix=prefix)
+    assert only(server(prefix=prefix)) == (
+        f"mcp_servers.github.prefix: letters, digits, _ and -, at most {MAX_TOOL_PREFIX_CHARS} of"
+        f" them, holding no '__' and not ending in '_'"
+    )
 
-    assert found.startswith("mcp_servers.github.prefix:")
+
+def test_a_prefix_is_bounded_and_written_or_left_out() -> None:
+    assert only(server(prefix="g" * (MAX_TOOL_PREFIX_CHARS + 1))) == (
+        f"mcp_servers.github.prefix: at most {MAX_TOOL_PREFIX_CHARS} characters"
+    )
+    assert only(server(prefix="")) == (
+        "mcp_servers.github.prefix: missing, or not a non-empty string"
+    )
 
 
 def test_an_id_that_would_not_do_as_a_prefix_needs_one_written_down() -> None:
@@ -896,6 +916,9 @@ def test_two_servers_under_one_prefix_are_refused_by_both_names() -> None:
         "mcp_servers.jira: its tools would be named under 'github', as mcp_servers.github's"
         " are; give one of them a prefix of its own"
     )
+    # In the same pass as the other mistakes in the clashing table.
+    found = problems(mcp_servers={"github": dict(GITHUB), "jira": {**jira, "url": "not a url"}})
+    assert [line.split(":")[0] for line in found] == ["mcp_servers.jira.url", "mcp_servers.jira"]
 
 
 @pytest.mark.parametrize("seconds", [0, -1, "30", True, float("inf"), MAX_TOOL_TIMEOUT_SECONDS + 1])
@@ -927,6 +950,11 @@ def test_an_agent_s_tools_are_a_list_of_ids_each_once() -> None:
         )
         == "agents.assistant.tools: each tool server once"
     )
+    # An unknown id named twice is one unknown id, and one repeat.
+    assert agent(tools=["x", "x"]) == [
+        "agents.assistant.tools: 'x' is not one of [mcp_servers]",
+        "agents.assistant.tools: each tool server once",
+    ]
 
 
 def test_a_server_with_a_mistake_does_not_bury_it_under_the_agents_that_name_it() -> None:
