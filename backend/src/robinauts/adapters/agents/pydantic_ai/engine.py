@@ -144,6 +144,7 @@ from pydantic_ai.toolsets import ExternalToolset
 
 from robinauts.adapters.config_file import ProviderKeys
 from robinauts.domain import (
+    NOT_RUN,
     AgentDefinition,
     AnswerCompleted,
     AnswerReasoningDelta,
@@ -171,6 +172,7 @@ from robinauts.domain import (
     checked_data,
     clean_text,
     text_parts,
+    unanswered_calls,
 )
 from robinauts.ports import Agent
 
@@ -756,7 +758,9 @@ def _messages(history: Sequence[Message], model_id: str, vendor: str) -> list[Mo
     framework. A tool message is one ``ToolReturnPart`` per result, naming
     the call it answers by the id and by the name the answer before it gave
     that id, and whether it went wrong -- which the framework folds into the
-    one ``user`` turn of ``tool_result`` blocks the vendor wants back. The
+    one ``user`` turn of ``tool_result`` blocks the vendor wants back. An
+    answer whose calls no tool message answers is followed by one error
+    result per call saying it was not run (``domain.NOT_RUN``). The
     reasoning a previous turn streamed is not carried back: what is stored of
     it is the platform's record, not the vendor's.
 
@@ -785,12 +789,26 @@ def _messages(history: Sequence[Message], model_id: str, vendor: str) -> list[Mo
     messages: list[ModelMessage] = []
     named: dict[str, str] = {}
     """The calls of the answer before, by id: what a result is named after."""
+    unanswered = unanswered_calls(history)
     for message in history:
         if message.role is Role.USER:
             messages.append(ModelRequest(parts=[UserPromptPart(content=message.text)]))
         elif message.role is Role.ASSISTANT:
             messages.append(_response(message, model_id, vendor))
             named = {call.call_id: call.name for call in message.tool_calls}
+            if message.id in unanswered:
+                # A call no tool message answers is shown as one that was
+                # not run (``domain.NOT_RUN``): the vendor refuses a call
+                # with nothing answering it, and the record, which keeps the
+                # call without a result, is not what is edited.
+                messages.append(
+                    ModelRequest(
+                        parts=[
+                            _returned(ToolResultPart(call.call_id, NOT_RUN, is_error=True), named)
+                            for call in unanswered[message.id]
+                        ]
+                    )
+                )
         else:
             # A tool message holds results and nothing else (``domain.Message``);
             # one that holds anything else is a fault of ours, refused here

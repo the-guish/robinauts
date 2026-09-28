@@ -49,7 +49,7 @@ nearly all of them, stored unread and written back as it was.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -521,3 +521,22 @@ class Conversation:
         checked_line(self.title, "a conversation's title", MAX_TITLE_CHARS)
         checked_instant(self.created_at, "created_at")
         checked_instant(self.updated_at, "updated_at")
+
+
+def unanswered_calls(history: Sequence[Message]) -> dict[uuid.UUID, tuple[ToolCallPart, ...]]:
+    """The calls on that path no tool message answers, by the answer that made them.
+
+    A path is the platform's (``core.check_tree``): a tool message hangs under
+    the answer whose calls it answers and answers all of them, so an answer's
+    calls are answered when the next message on the path is a tool message
+    and unanswered otherwise. An answer that made no calls is not here. What
+    a model is told of such a call is ``NOT_RUN`` (``robinauts.domain.tools``).
+    """
+    found: dict[uuid.UUID, tuple[ToolCallPart, ...]] = {}
+    for position, message in enumerate(history):
+        if message.role is not Role.ASSISTANT or not message.tool_calls:
+            continue
+        following = history[position + 1] if position + 1 < len(history) else None
+        if following is None or following.role is not Role.TOOL:
+            found[message.id] = message.tool_calls
+    return found

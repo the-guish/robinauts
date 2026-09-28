@@ -62,6 +62,8 @@ from robinauts.adapters import ProviderKeys
 from robinauts.adapters.agents.pydantic_ai import (
     ANTHROPIC_ENDPOINT,
     ANTHROPIC_KEY_HEADER,
+    BLOCK_NOT_REPLAYED,
+    BLOCKS_LEFT_OUT,
     CLIENT_VARIABLES_REMOVED,
     DEFAULT_ANTHROPIC_OUTPUT_TOKENS,
     MAX_RETRIES,
@@ -77,6 +79,7 @@ from robinauts.adapters.agents.pydantic_ai import (
 from robinauts.core import check_engine_events
 from robinauts.domain import (
     KINDS_WITH_BASE_URL,
+    NOT_RUN,
     AgentDefinition,
     AnswerCompleted,
     AnswerReasoningDelta,
@@ -813,6 +816,46 @@ async def test_what_the_vendors_client_sends_for_a_turn_with_tools_is_the_vendor
 
 
 @asyncio_test
+async def test_a_call_no_tool_message_answers_is_shown_as_one_that_was_not_run() -> None:
+    """A stopped or failed tool round leaves the calls stored with no result
+    under them; a question asked after it hangs under that answer. The vendor
+    refuses a call with nothing answering it, so the model is told the call
+    was not run -- and the record is not touched (``domain.NOT_RUN``)."""
+    model = Vendor(("text", {"content": "Sorry, once more."}))
+    asked, calling_, _ = turn_with_tools(VENDOR)
+    again = question("and now?", parent=calling_, seconds=2)
+
+    await turn_of(engine(model), (asked, calling_, again), tools=(SEARCH,))
+
+    (heard,) = model.seen
+    # The framework folds the result and the question that followed into one
+    # request, as the vendor wants them in one user turn.
+    assert [[part.part_kind for part in message.parts] for message in heard] == [
+        ["user-prompt"],
+        ["thinking", "thinking", "text", "tool-call"],
+        ["tool-return", "user-prompt"],
+    ]
+    returned, _asked = heard[2].parts
+    assert (returned.tool_call_id, returned.content, returned.outcome) == (
+        "toolu_01",
+        NOT_RUN,
+        "failed",
+    )
+    # And the vendor's own mapping takes it: a tool_use answered by an error.
+    client = AnthropicModel("claude-sonnet-5", provider=AnthropicProvider(api_key=KEY))
+    _system, sent = await client._map_message(heard, ModelRequestParameters(), {})
+    assert sent[2]["content"] == [
+        {
+            "type": "tool_result",
+            "tool_use_id": "toolu_01",
+            "content": [{"type": "text", "text": NOT_RUN}],
+            "is_error": True,
+        },
+        {"type": "text", "text": "and now?"},
+    ]
+
+
+@asyncio_test
 async def test_a_result_answering_no_call_of_the_answer_before_it_is_a_fault_of_ours() -> None:
     model = ScriptedModel("Never asked.")
     asked, calling_, results = turn_with_tools()
@@ -871,10 +914,7 @@ async def test_a_stored_block_of_a_shape_the_vendor_did_not_make_is_left_out_wit
 
     (heard,) = model.seen
     assert [part.part_kind for part in heard[1].parts] == ["text"]
-    assert [record.getMessage() for record in caplog.records].count(
-        "a stored thinking block of the vendor's is not of a shape this engine replays, and"
-        " was left out"
-    ) == 2
+    assert [record.getMessage() for record in caplog.records].count(BLOCK_NOT_REPLAYED) == 2
 
 
 @asyncio_test
@@ -928,7 +968,7 @@ async def test_blocks_that_do_not_fit_extras_are_left_out_with_a_line_in_the_log
         seen = await turn_of(engine(model), (question(),))
 
     assert seen[-1] == AnswerCompleted(parts=(TextPart("Hi."),))
-    assert any("did not fit" in record.getMessage() for record in caplog.records)
+    assert any(record.getMessage().startswith(BLOCKS_LEFT_OUT) for record in caplog.records)
 
 
 def test_the_client_the_engine_builds_is_the_vendor_the_blocks_are_kept_under() -> None:
@@ -953,7 +993,7 @@ async def test_the_whole_path_reaches_the_model_and_ends_in_the_question() -> No
     replied = answer(second, "b" * 5_000, seconds=3)
     # The question is the longest message, so a policy that cut the tail --
     # the one thing ADR 0004 forbids -- would be caught here and not passed.
-    third = question("q" * 5_000, parent=replied, seconds=4)
+    third = question("q" * 5_001, parent=replied, seconds=4)
 
     await turn_of(engine(model), (first, said, second, replied, third))
 

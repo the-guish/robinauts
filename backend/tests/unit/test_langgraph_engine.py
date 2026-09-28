@@ -44,7 +44,7 @@ import langsmith.run_trees
 import pytest
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessageChunk, BaseMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.messages.tool import tool_call_chunk
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.tracers import langchain as tracer_module
@@ -58,6 +58,7 @@ from robinauts.adapters import ProviderKeys
 from robinauts.adapters.agents.langgraph import (
     ANTHROPIC_ENDPOINT,
     ANTHROPIC_KEY_HEADER,
+    BLOCKS_LEFT_OUT,
     CLIENT_VARIABLES_REMOVED,
     DEFAULT_ANTHROPIC_OUTPUT_TOKENS,
     MAX_RETRIES,
@@ -73,6 +74,7 @@ from robinauts.core import check_engine_events
 from robinauts.domain import (
     KINDS_WITH_BASE_URL,
     MAX_EXTRAS_BYTES,
+    NOT_RUN,
     AgentDefinition,
     AnswerCompleted,
     AnswerReasoningDelta,
@@ -196,12 +198,22 @@ class ScriptedChatModel(BaseChatModel):
     def _generate(
         self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
     ) -> ChatResult:
-        """The whole answer at once: what a model that does not stream does."""
+        """The whole answer at once: what a model that does not stream does.
+
+        A plain ``AIMessage`` and not a chunk, which is what the real client's
+        ``_generate`` returns and what LangGraph then passes through its
+        message stream unchanged.
+        """
         self.seen.append(list(messages))
         self.bound.append(kwargs.get("tools"))
-        whole = AIMessageChunk(content="", response_metadata=dict(self.provider_metadata))
+        merged = AIMessageChunk(content="", response_metadata=dict(self.provider_metadata))
         for content in self.chunks:
-            whole = whole + self._chunk(content)
+            merged = merged + self._chunk(content)
+        whole = AIMessage(
+            content=merged.content,
+            tool_calls=merged.tool_calls,
+            response_metadata=dict(merged.response_metadata),
+        )
         return ChatResult(generations=[ChatGeneration(message=whole)])
 
     async def _astream(
@@ -293,8 +305,8 @@ class TestLangGraphAgent(AgentContract):
     answers_per_turn = 1
     """A graph with one node calls the model once, so a turn holds one answer."""
 
-    can_answer_without_streaming = False
-    """LangGraph hands the answer over in pieces even when the model sent one."""
+    can_answer_without_streaming = True
+    """A model that does not stream hands the whole answer over, and so does the turn."""
 
     def new_agent(self, script: Script) -> Agent:
         self.model = scripted(script)
@@ -409,7 +421,7 @@ async def test_thinking_is_streamed_as_reasoning_and_kept_out_of_the_answer() ->
             [{"type": "text", "text": "Someone who ", "index": 1}],
             [{"type": "text", "text": "plays fair.", "index": 1}],
         ],
-        provider_metadata={"model_provider": "anthropic"},
+        provider_metadata=dict(ANTHROPIC),
     )
 
     seen = await turn_of(engine(model), (question(),))
@@ -454,23 +466,21 @@ async def test_a_character_split_across_two_chunks_is_put_back_together() -> Non
 
 
 @asyncio_test
-async def test_a_model_that_does_not_stream_still_arrives_as_one_delta() -> None:
+async def test_a_model_that_does_not_stream_arrives_whole_with_no_delta() -> None:
     """The "not streamed" shape, as this engine really produces it.
 
-    The contract suite says an engine need not stream, and declares that this
-    one always does (``can_answer_without_streaming = False``); what that
-    means in practice is this. The model hands the whole answer over at once,
-    LangGraph passes it on as a single message chunk, and the turn is
-    announced, one delta, completed -- with exactly what was streamed, which
-    is the promise that still holds.
+    The model hands the whole answer over at once as a plain message,
+    LangGraph passes it through its message stream unchanged -- not as a
+    chunk -- and the engine builds the answer from the node's update: the
+    turn is announced and completed with no delta, which the port allows
+    (``can_answer_without_streaming``).
     """
     whole = "All of it at once."
     model = ScriptedChatModel(chunks=[whole], disable_streaming=True)
 
     seen = await turn_of(engine(model), (question(),))
 
-    assert [type(event) for event in seen] == [AnswerStarted, AnswerTextDelta, AnswerCompleted]
-    assert [event.text for event in seen if isinstance(event, AnswerTextDelta)] == [whole]
+    assert [type(event) for event in seen] == [AnswerStarted, AnswerCompleted]
     assert seen[-1] == AnswerCompleted(parts=(TextPart(whole),))
 
 
@@ -486,7 +496,7 @@ async def test_the_whole_path_reaches_the_model_and_ends_in_the_question() -> No
     replied = answer(second, "b" * 5_000, seconds=3)
     # The question is the longest message, so a policy that cut the tail --
     # the one thing ADR 0004 forbids -- would be caught here and not passed.
-    third = question("q" * 5_000, parent=replied, seconds=4)
+    third = question("q" * 5_001, parent=replied, seconds=4)
 
     await turn_of(engine(model), (first, said, second, replied, third))
 
@@ -621,10 +631,10 @@ async def test_an_answer_that_only_calls_holds_the_calls_and_no_text() -> None:
 
 @asyncio_test
 async def test_an_answer_that_was_not_streamed_still_yields_its_calls() -> None:
-    # A model that does not stream hands the whole message over in one piece:
-    # the framework passes it on as one chunk, so the call is announced, its
-    # arguments arrive whole, and the answer completes with the same parts a
-    # streamed one would.
+    # A model that does not stream hands the whole message over: nothing
+    # comes through the stream, so the calls are announced and completed from
+    # the node's update in one breath, with the arguments the framework
+    # parsed, and the answer holds the same parts a streamed one would.
     model = ScriptedChatModel(
         chunks=[
             AIMessageChunk(
@@ -641,9 +651,7 @@ async def test_an_answer_that_was_not_streamed_still_yields_its_calls() -> None:
     check_engine_events(seen)
     assert [type(event) for event in seen] == [
         AnswerStarted,
-        AnswerTextDelta,
         ToolCallStarted,
-        ToolCallArgumentsDelta,
         ToolCallCompleted,
         AnswerCompleted,
         WaitingOnTools,
@@ -769,6 +777,36 @@ async def test_a_turn_with_tools_in_its_history_is_translated_for_the_model() ->
 
 
 @asyncio_test
+async def test_a_call_no_tool_message_answers_is_shown_as_one_that_was_not_run() -> None:
+    """A stopped or failed tool round leaves the calls stored with no result
+    under them; a question asked after it hangs under that answer. The vendor
+    refuses a call with nothing answering it, so the model is told the call
+    was not run -- and the record is not touched (``domain.NOT_RUN``)."""
+    model = ScriptedChatModel(chunks=["Sorry, once more."])
+    asked, calling_, _ = turn_with_tools()
+    again = question("and now?", parent=calling_, seconds=2)
+
+    await turn_of(engine(model), (asked, calling_, again), tools=(SEARCH,))
+
+    (heard,) = model.seen
+    assert [message.type for message in heard] == ["system", "human", "ai", "tool", "human"]
+    assert (heard[3].tool_call_id, heard[3].content, heard[3].status) == (
+        "toolu_01",
+        NOT_RUN,
+        "error",
+    )
+    # And the vendor's own mapping takes it: a tool_use answered by an error,
+    # in the one user turn the question that followed is folded into.
+    from langchain_anthropic.chat_models import _format_messages
+
+    _system, sent = _format_messages(heard)
+    assert sent[2]["content"] == [
+        {"type": "tool_result", "tool_use_id": "toolu_01", "content": NOT_RUN, "is_error": True},
+        {"type": "text", "text": "and now?"},
+    ]
+
+
+@asyncio_test
 async def test_the_signed_blocks_are_replayed_to_the_model_that_made_them_and_to_no_other() -> None:
     asked, calling_, results = turn_with_tools()
     model = ScriptedChatModel(chunks=["Found three."])
@@ -862,7 +900,7 @@ async def test_blocks_that_do_not_fit_extras_are_left_out_with_a_line_in_the_log
         seen = await turn_of(engine(model), (question(),))
 
     assert seen[-1] == AnswerCompleted(parts=(TextPart("Hi."),))
-    assert any("did not fit" in record.getMessage() for record in caplog.records)
+    assert any(BLOCKS_LEFT_OUT in record.getMessage() for record in caplog.records)
 
 
 @asyncio_test

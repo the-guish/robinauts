@@ -131,3 +131,22 @@ class ToolDefinition:
         object.__setattr__(
             self, "annotations", checked_data(self.annotations, "a tool's annotations")
         )
+
+
+NOT_RUN = "this call was not run: the turn that made it ended before its result came"
+"""What a model is told of a call that no tool message answers.
+
+A stored answer that asked for tools and has no tool message under it on the
+path -- the turn was stopped, or failed, before its results were in
+(``docs/specs/runs.md``, "Tools") -- would go to the vendor as calls with
+nothing answering them, which the vendors refuse: a call is followed by its
+result or the request is refused whole. So each agent adapter puts, after such
+an answer, the tool turn the vendor requires -- one **error** result per
+unanswered call, saying this -- which is what a tool message would have said
+had the platform written one, is true of the record at that moment, and is
+**never stored**: the record keeps the calls without results, which is what
+happened, and the client shows exactly that. One sentence, the same under
+both engines, so that a conversation moved across the swap is told the same
+thing about the same call (ADR 0004). Which calls those are is
+``unanswered_calls`` (``robinauts.domain.conversation``).
+"""

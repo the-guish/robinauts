@@ -231,6 +231,17 @@ it here rather than deciding it in passing.
   Nothing asks the vendor to drop what it can no longer match; the bound is
   not raised for this key. The case is left to a live test of a long-thinking
   tool turn, and to the final review if one shows the vendor refusing.
+- **A call no tool message answers** (added by step 4b's review, answered in
+  step 4d, 2026-09-28). A stopped or failed tool round leaves an answer with
+  calls and no tool message under it; the next question hangs under that
+  answer, and the vendor refuses `tool_use` blocks with nothing answering
+  them. Decided: each adapter shows such a call as **one that was not run**
+  -- after that answer, the tool turn the vendor requires, one error result
+  per unanswered call saying `domain.NOT_RUN` -- rather than dropping the
+  calls from what the model sees (the model would then read its own "let me
+  look" as done) or writing a tool message the platform never produced.
+  Nothing is stored: the record keeps the calls without results, and the
+  client shows exactly that. Both adapters, one sentence (ADR 0004).
 - **Whether `MIT-0` joins the allowed list, and what a runtime, Windows-only
   package with family-only metadata gets** (added in step 2, 2026-09-28).
   The SDK's tree fails the gate on `cffi` (`MIT-0`) and `pywin32` (a licence

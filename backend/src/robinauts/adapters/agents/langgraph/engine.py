@@ -43,9 +43,11 @@ as a path ending in a tool message.
   its id and name, ``ToolCallArgumentsDelta`` for the JSON the model writes,
   and ``ToolCallCompleted`` with the platform's part for it;
 - the node's own update carries the whole message, which is what an answer
-  **that never streamed** completes with, where a call that streamed no
-  arguments takes them from, and where the vendor's signed thinking blocks
-  are read off (``_Answer.complete``);
+  **that never streamed** completes with, where a call still open when the
+  answer ends and that streamed no arguments takes them from, and where the
+  vendor's signed thinking blocks are read off (``_Answer.complete``). A
+  call closed by the next call's start with nothing streamed completes with
+  no arguments, which is what this client's stream gives such a call anyway;
 - **what was streamed is what is kept** (``docs/specs/agents.md``): an answer
   that yielded text deltas completes with exactly those deltas joined, never
   with whatever the framework made of the final message, and a call's
@@ -123,6 +125,7 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 
 from robinauts.adapters.config_file import ProviderKeys
 from robinauts.domain import (
+    NOT_RUN,
     AgentDefinition,
     AnswerCompleted,
     AnswerReasoningDelta,
@@ -149,6 +152,7 @@ from robinauts.domain import (
     checked_data,
     clean_text,
     text_parts,
+    unanswered_calls,
 )
 from robinauts.ports import Agent
 
@@ -696,26 +700,40 @@ def _messages(
     An answer's tool calls travel as the framework's ``tool_calls``, and a
     **tool message** becomes one ``ToolMessage`` per result, each naming its
     call and whether it went wrong -- which langchain-anthropic folds into the
-    one ``user`` turn of ``tool_result`` blocks the vendor wants back.
+    one ``user`` turn of ``tool_result`` blocks the vendor wants back. An
+    answer whose calls no tool message answers is followed by one error
+    result per call saying it was not run (``domain.NOT_RUN``).
     """
     messages: list[BaseMessage] = []
     if agent.system_prompt:
         messages.append(ChatSystemMessage(agent.system_prompt))
+    unanswered = unanswered_calls(history)
     for message in history:
         if message.role is Role.USER:
             messages.append(HumanMessage(message.text))
         elif message.role is Role.ASSISTANT:
             messages.append(_assistant(message, model_id))
+            # A call no tool message answers is shown as one that was not
+            # run (``domain.NOT_RUN``): the vendor refuses a call with nothing
+            # answering it, and the record, which keeps the call without a
+            # result, is not what is edited.
+            messages.extend(
+                _tool_message(call.call_id, NOT_RUN, is_error=True)
+                for call in unanswered.get(message.id, ())
+            )
         else:
             messages.extend(
-                ToolMessage(
-                    content=part.text,
-                    tool_call_id=part.call_id,
-                    status="error" if part.is_error else "success",
-                )
+                _tool_message(part.call_id, part.text, is_error=part.is_error)
                 for part in message.tool_results
             )
     return messages
+
+
+def _tool_message(call_id: str, text: str, *, is_error: bool) -> ToolMessage:
+    """One result as the framework's message, naming its call and how it went."""
+    return ToolMessage(
+        content=text, tool_call_id=call_id, status="error" if is_error else "success"
+    )
 
 
 def _assistant(message: Message, model_id: str) -> AIMessage:
@@ -779,7 +797,10 @@ class _Answer:
 
     def events_of(self, chunk: Any) -> list[EngineEvent]:
         """The events one streamed chunk carries, in the order they came."""
-        if not isinstance(chunk, AIMessageChunk):  # pragma: no cover -- LangGraph yields these
+        if not isinstance(chunk, AIMessageChunk):
+            # A model that does not stream: LangGraph passes the whole
+            # ``AIMessage`` through here unchanged, and the answer is built
+            # from the node's update in ``complete`` instead.
             return []
         events: list[EngineEvent] = []
         for block in chunk.content_blocks:
@@ -813,8 +834,8 @@ class _Answer:
         """The events that end the answer, given the message the node left in the state.
 
         ``whole`` is what an answer that never streamed completes with, where a
-        call that streamed no arguments takes its arguments from, and where the
-        signed blocks are read off. A call the framework's final message holds
+        call still open here that streamed no arguments takes its arguments
+        from, and where the signed blocks are read off. A call the framework's final message holds
         that was never announced -- a block the client did not lift off the
         stream -- is refused rather than dropped: an answer missing a call
         would be half an answer that looks whole.
@@ -867,7 +888,7 @@ def _parsed(arguments: str) -> dict[str, Any]:
     """The JSON the model wrote for a call, as the object it has to be."""
     try:
         parsed = json.loads(arguments)
-    except ValueError:
+    except (ValueError, RecursionError):
         raise UnsupportedContentError(
             "the model's arguments for a tool call were not JSON"
         ) from None

@@ -305,7 +305,34 @@ scripted chat model of the tests binds tools, records what was bound and
 makes the real client's chunks (`calling`). The fixes from step 4a's review
 ride here (above).
 
-Review: pending.
+Review: 1 round (read after the commit; the fixes ride with step 4d).
+- High: 0.
+- Medium: 5 (1/4) — fixed in 4d: **a user question under an answer whose
+  calls have no result** (a stopped or failed tool round, then the ordinary
+  next question) went to the vendor as calls with nothing answering them,
+  which Anthropic refuses whole; both adapters now show such a call as one
+  that was not run (`domain.NOT_RUN`, `unanswered_calls`), and the record
+  is untouched. Left: the non-streamed tests tested the fixture (the
+  scripted model handed a chunk where the real client hands a plain
+  message, so the real non-streamed path had no coverage) — fixed in 4d
+  too, as it was cheap; `bind_tools` drops a tool whose schema has a
+  top-level `anyOf`/`oneOf` with a Python warning and raises when every
+  tool is dropped — step 5a's naming and bounding leaves such a tool out
+  with a line in the log before an engine sees it; a history with tool
+  parts on a run handed **no** tools (an agent whose server was removed)
+  may be refused by Anthropic, which wants `tools` whenever the messages
+  hold `tool_use` — unverified offline, for the live test; the 64 KiB
+  `extras` bound makes "dropped and logged" the common case on a
+  long-thinking tool turn (a block is about four bytes a token) — for the
+  final review, as the plan's open question says.
+- Low: 7 (6/1) — fixed in 4d: the `no cover` pragma on the plain-message
+  path (it is the real non-streamed path); `_parsed` catching
+  `RecursionError` in both engines; `BLOCKS_LEFT_OUT` exported and used by
+  the tests; the whole-path test's question strictly the longest; the
+  prose on a call that streamed no arguments; one spelling of the vendor
+  metadata in the tests. Left: an empty result text and an empty tool
+  description reach the vendor as `""`, accepted by the client and not
+  checked live.
 
 Checks: lint; the whole suite against a throwaway PostgreSQL (3036 passed,
 14 skipped).
@@ -371,3 +398,33 @@ framework's private API, as the other engine's `_format_messages` test
 does, and breaks when the framework renames it. The plan's open question
 on oversize blocks is recorded as answered (dropped and logged, both
 engines).
+
+### Step 4d — a call no tool message answers   (feature/mcp-4d-unanswered-calls)
+
+Summary: a step the 4b review added. A stored answer that asked for tools
+and has no tool message under it on the path -- the turn was stopped, or
+failed, before its results were in -- followed by the next question, went
+to the vendor as `tool_use` blocks with nothing answering them, which
+Anthropic refuses whole; once step 5c stores calls, every later turn of
+such a branch would fail. Both adapters now show such a call as one that
+was not run: after that answer they put the tool turn the vendor requires,
+one error result per unanswered call whose text is `domain.NOT_RUN`, which
+is what a tool message would have said, is true of the record at that
+moment, and is never stored (the record keeps the calls without results;
+the client shows exactly that). Which calls those are is
+`domain.unanswered_calls` (a path rule: an answer's calls are answered when
+the next message on the path is a tool message). Each engine's test maps
+the result through the framework's real vendor mapping. The fixes from
+step 4b's review ride here (above): the LangGraph scripted model's
+non-streamed path hands over a plain `AIMessage` as the real client does,
+the tests expect the no-delta shape and `can_answer_without_streaming` is
+on for LangGraph too.
+
+Review: pending.
+
+Checks: lint; the whole suite against a throwaway PostgreSQL (3052 passed,
+13 skipped).
+Not done / to watch: the choice (an error result saying "not run" rather
+than dropping the calls from what the model sees) is recorded in the plan;
+whether Anthropic takes a history with tool parts on a run handed no
+`tools` at all is still unverified (4b's review, M4).

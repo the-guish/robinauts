@@ -16,6 +16,8 @@ of deleting it.
 from robinauts.adapters.agents.pydantic_ai.engine import (
     ANTHROPIC_ENDPOINT,
     ANTHROPIC_KEY_HEADER,
+    BLOCK_NOT_REPLAYED,
+    BLOCKS_LEFT_OUT,
     CLIENT_VARIABLES_REMOVED,
     DEFAULT_ANTHROPIC_OUTPUT_TOKENS,
     MAX_RETRIES,
@@ -36,6 +38,8 @@ from robinauts.adapters.agents.pydantic_ai.engine import (
 __all__ = [
     "ANTHROPIC_ENDPOINT",
     "ANTHROPIC_KEY_HEADER",
+    "BLOCKS_LEFT_OUT",
+    "BLOCK_NOT_REPLAYED",
     "CLIENT_VARIABLES_REMOVED",
     "DEFAULT_ANTHROPIC_OUTPUT_TOKENS",
     "MAX_RETRIES",

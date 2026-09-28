@@ -57,6 +57,7 @@ from robinauts.domain.conversation import (
     checked_parts,
     kept_parts,
     text_parts,
+    unanswered_calls,
 )
 from robinauts.domain.errors import (
     DB_INIT_COMMAND,
@@ -152,6 +153,7 @@ from robinauts.domain.tools import (
     MAX_TOOL_DESCRIPTION_CHARS,
     MAX_TOOL_NAME_CHARS,
     MAX_TOOL_SCHEMA_BYTES,
+    NOT_RUN,
     ToolDefinition,
     checked_call_id,
     checked_tool_name,
@@ -226,8 +228,8 @@ __all__ = [
     "LOOPBACK_HOSTS",
     "MAX_AGENT_TITLE_CHARS",
     "MAX_BASE_URL_CHARS",
-    "MAX_CAUSES",
     "MAX_CALL_ID_CHARS",
+    "MAX_CAUSES",
     "MAX_CONFIG_ID_CHARS",
     "MAX_ENV_NAME_CHARS",
     "MAX_EXTRAS_BYTES",
@@ -253,6 +255,7 @@ __all__ = [
     "MAX_TOOL_DESCRIPTION_CHARS",
     "MAX_TOOL_NAME_CHARS",
     "MAX_TOOL_SCHEMA_BYTES",
+    "NOT_RUN",
     "NUL",
     "PENDING_LOGIN_MINUTES",
     "REDACTED",
@@ -371,6 +374,7 @@ __all__ = [
     "reading_stored",
     "shown",
     "text_parts",
+    "unanswered_calls",
     "where",
     "without_secrets",
 ]
