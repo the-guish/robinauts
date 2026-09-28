@@ -685,7 +685,39 @@ request. The tests script a Streamable HTTP server over `httpx.MockTransport`
 refusals, bare bodies) and subclass the port's contract suite; the live test
 lists and calls Microsoft Learn's public server, which needs no credential.
 
-Review: pending.
+Review: 1 round (read after the commit; the fixes are a commit of their
+own on step 5e's branch, "mcp 5c: fixes from the review").
+- High: 3 (3/0) — the body was **read whole and then measured**, so the
+  bound was a post-hoc check and an endless body was never refused: the
+  client now sends every request with `stream=True`, refuses a declared
+  length over the bound and a content encoding it did not ask for
+  (`Accept-Encoding: identity`), counts the bytes as they arrive off the
+  wire, and reads an event stream only as far as our answer; the
+  **credential was reachable** from the session's `repr`, from a
+  traceback's locals and from the raised error's `__context__`: the session
+  holds a callable that builds the header when a request is built and has
+  no `repr`, the request is deleted before a failure is raised, and the
+  failure is raised outside every `except`, chained to nothing (tested
+  with `capture_locals`); the session's **`DELETE` was awaited during a
+  cancellation and after the call's time**: it is bounded by the connect
+  timeout, skipped when the task is being cancelled, and the call's
+  `timeout_seconds` now holds over the session it takes and the goodbye.
+- Medium: 3 (3/0) — a stream the server keeps open (pings) held the read
+  until the read timeout; incremental parsing returns at our answer, and
+  a whole-listing ceiling (`LISTING_SECONDS`) bounds the question; a status
+  that is not the protocol's on a **call** (404, 429, 5xx) is an error
+  result the model is told, the listing and the session staying strict; the
+  untested branches (a JSON-RPC error on the listing, an answer for another
+  request, a bare carriage return, a byte-order mark, protocol-level error
+  codes, the goodbye's bound) have tests.
+- Low: 6 (6/0) — dead field and stale `noqa`s; the logging pin's reason
+  says what those loggers write (URLs, response headers); the `DELETE`
+  carries the protocol version; the truncation note counts the cut made;
+  the protocol-level JSON-RPC codes (-32700, -32600, -32601) fail the call
+  as the server's, and the revision before this one (batches) is refused;
+  the leading byte-order mark is read past.
+  The fixes were checked with lint, the import contracts, the adapter's
+  tests (44) and the live test; the whole suite runs again with step 5e.
 
 Checks: lint; the whole suite against a throwaway PostgreSQL (3165 passed,
 13 skipped); the live test against `https://learn.microsoft.com/api/mcp`
