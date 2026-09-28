@@ -165,9 +165,10 @@ class AgentContract:
     can_call_tools: bool = True
     """Whether a turn of this engine can be scripted to ask for a tool.
 
-    ``False`` for an engine that does not bind tools yet, whose model can
-    therefore not be scripted to call one; it says which of the port's
-    situations this engine produces and weakens nothing it does produce.
+    ``False`` for an engine that does not bind tools -- both of today's do --
+    whose model can therefore not be scripted to call one; it says which of
+    the port's situations this engine produces and weakens nothing it does
+    produce.
     """
 
     def new_agent(self, script: Script) -> Agent:
@@ -211,7 +212,7 @@ class AgentContract:
     def tools(self) -> tuple[ToolDefinition, ...]:
         """The tools it is handed for the turn: one, so that a call has a name to use.
 
-        None for an engine that does not bind tools yet, which refuses a turn
+        None for an engine that does not bind tools, which refuses a turn
         handed any rather than run it without them.
         """
         return (SEARCH,) if self.can_call_tools else ()
@@ -280,7 +281,7 @@ class AgentContract:
         completes holding it, and the turn ends waiting: the engine runs no
         tool (``docs/specs/runs.md``)."""
         if not self.can_call_tools:
-            pytest.skip("this engine does not bind tools yet")
+            pytest.skip("this engine does not bind tools")
         made = Call("toolu_01", SEARCH.name, {"q": "robinauts"})
         seen = await self.turn(Script(answers=(Say("Let me look.", calls=(made,)),)))
 

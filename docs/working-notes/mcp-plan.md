@@ -224,7 +224,13 @@ it here rather than deciding it in passing.
   key alone, dropping what does not fit and asking the vendor to drop what it
   can no longer match, or asking the vendor for the shorter display of its
   thinking -- is made there, on what the vendor's API allows, and recorded
-  here.
+  here. **Answered in steps 4b and 4c (2026-09-28)**, the same way in both
+  adapters: the blocks that do not fit are left out and the answer is stored
+  without them, with a line in the log naming the consequence (the vendor
+  may refuse the next round of a tool turn replayed without its thinking).
+  Nothing asks the vendor to drop what it can no longer match; the bound is
+  not raised for this key. The case is left to a live test of a long-thinking
+  tool turn, and to the final review if one shows the vendor refusing.
 - **Whether `MIT-0` joins the allowed list, and what a runtime, Windows-only
   package with family-only metadata gets** (added in step 2, 2026-09-28).
   The SDK's tree fails the gate on `cffi` (`MIT-0`) and `pywin32` (a licence

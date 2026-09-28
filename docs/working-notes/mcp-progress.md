@@ -76,6 +76,18 @@ lines; the plan's numbering is kept where a step is named.
   `redacted_thinking` blocks come out in `extras["anthropic"]["thinking"]`
   and go back only to the model that made them (`THINKING_BLOCKS`,
   `VENDOR`). Its context policy is still "everything".
+- **The Pydantic AI engine calls tools.** `adapters/agents/pydantic_ai/engine.py`
+  declares the run's tools as an `ExternalToolset` (the framework's kind for
+  tools something else runs; the turn still ends at the model's first
+  answer, so the framework never looks for one), translates the stream's
+  `ToolCallPart` starts, deltas and ends into the platform's call events,
+  replays an answer's calls as the framework's `ToolCallPart`s and a tool
+  message as one `ToolReturnPart` per result (`outcome="failed"` for an
+  error), and keeps the vendor's signed blocks in `extras` under the
+  framework's name for the vendor (`Model.system`, `VENDOR` for the one
+  client it builds) in the same two shapes as the other engine, replaying
+  them as `ThinkingPart`s only to the model that made them. Both engines'
+  contract tool test runs; nothing above the port changed.
 
 ## Corrections to the plan
 
@@ -307,3 +319,55 @@ token counting, no trimming: the context policy is "everything", as ADR
 vendor; if Anthropic refuses an answer replayed without its thinking, the
 turn fails loudly and the fix is a policy in `_assistant`, not the store.
 The Pydantic AI engine still refuses tools (step 4c).
+
+### Step 4c — the Pydantic AI engine calls tools   (feature/mcp-4c-pydantic-ai)
+
+Summary: the engine declares the run's tools to the framework as an
+`ExternalToolset` -- the framework's own kind for tools it does not execute,
+so the model is shown them as any tool and nothing in the framework could
+run one -- and the turn still ends at the model's first answer, which is
+also what keeps the framework's own loop and its retry prompt out. The
+stream's `PartStartEvent`/`PartDeltaEvent`/`PartEndEvent` for a
+`ToolCallPart` become `ToolCallStarted`, `ToolCallArgumentsDelta` and
+`ToolCallCompleted` (a call is completed when its part ends, when the next
+part begins or when the answer ends; arguments the framework hands over
+whole are published as one JSON piece, so what was published still parses
+to the stored call); arguments that are not JSON or not an object fail the
+turn; a call of a kind the engine did not declare (the vendor's server-side
+tools, another class in the framework) is refused rather than passed over;
+a call the framework holds that was never announced is refused rather than
+dropped. History: a question is a `UserPromptPart`, an answer is its signed
+blocks (replayed as `ThinkingPart`s only when the run's model made them),
+its text and its calls as `ToolCallPart`s, a tool message is one
+`ToolReturnPart` per result named after the call in the answer before it
+(`outcome="failed"` for an error, which the framework sends as
+`tool_result` with `is_error`); a result naming no such call, or a tool
+message holding anything but results, is a fault of ours. The vendor's
+signed blocks come out of the framework's response into `extras` under the
+framework's name for the vendor (`Model.system`: `anthropic` for the one
+client this engine builds, the key the other engine uses, so a conversation
+crosses the swap with its thinking) in the same two shapes
+(`{"type": "thinking", "thinking", "signature"}` and
+`{"type": "redacted_thinking", "data"}`); an unsigned thinking part is
+streamed and not kept; blocks that do not fit are left out with a line in
+the log; a stored block of another shape is left out with a line in the log
+rather than handed to a framework that would send it as text. `NO_TOOLS`
+and `NO_TOOL_BINDING` are gone; `can_call_tools` is on for both engines and
+the contract's tool test runs against both. The tests grow a `Vendor` model
+that speaks as the vendor's client does where `FunctionModel` cannot (a
+redacted block, whole arguments, the vendor's name), and one test maps the
+translated history through the framework's real Anthropic mapping to check
+the blocks the vendor is sent.
+
+Review: pending.
+
+Checks: lint; the whole suite against a throwaway PostgreSQL (3050 passed,
+13 skipped).
+Not done / to watch: as for 4b, thinking is not turned on by the adapter
+and no live test runs a tool turn; the framework may transform a tool's
+JSON Schema for the vendor (its profile's transformer), which is its
+mapping and not checked here; the `_map_message` test reaches into the
+framework's private API, as the other engine's `_format_messages` test
+does, and breaks when the framework renames it. The plan's open question
+on oversize blocks is recorded as answered (dropped and logged, both
+engines).

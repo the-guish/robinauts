@@ -30,12 +30,17 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import logging
 import os
 import socket
 import subprocess
 import sys
+import uuid
 from collections.abc import AsyncIterator, Iterator, Sequence
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 import anthropic
@@ -43,13 +48,15 @@ import pydantic_ai
 import pydantic_ai.agent
 import pytest
 from pydantic_ai import Agent as FrameworkAgent
-from pydantic_ai.models import Model
+from pydantic_ai.messages import ModelResponseStreamEvent, NativeToolCallPart
+from pydantic_ai.models import Model, ModelRequestParameters, StreamedResponse
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.function import AgentInfo, DeltaThinkingPart, DeltaToolCall, FunctionModel
+from pydantic_ai.providers.anthropic import AnthropicProvider
 
 from aio import asyncio_test
 from conftest import VENDOR_LOGGERS
-from contracts.agents import AgentContract, Ending, Script
+from contracts.agents import SEARCH, AgentContract, Ending, Script
 from conversations import agent_definition, answer, question
 from robinauts.adapters import ProviderKeys
 from robinauts.adapters.agents.pydantic_ai import (
@@ -60,11 +67,14 @@ from robinauts.adapters.agents.pydantic_ai import (
     MAX_RETRIES,
     QUIET_CLIENT_LEVEL,
     QUIET_CLIENT_LOGGERS,
+    REDACTED,
     TRACING_VARIABLES_REMOVED,
+    VENDOR,
     PydanticAIAgent,
     chat_model,
     endpoint_of,
 )
+from robinauts.core import check_engine_events
 from robinauts.domain import (
     KINDS_WITH_BASE_URL,
     AgentDefinition,
@@ -75,6 +85,7 @@ from robinauts.domain import (
     ConfigError,
     Engine,
     EngineEvent,
+    InvalidValueError,
     Message,
     ModelConfig,
     ModelProviderConfig,
@@ -83,9 +94,15 @@ from robinauts.domain import (
     ReasoningPart,
     Role,
     TextPart,
+    ToolCallArgumentsDelta,
+    ToolCallCompleted,
+    ToolCallPart,
+    ToolCallStarted,
     ToolDefinition,
+    ToolResultPart,
     UnknownModelError,
     UnsupportedContentError,
+    WaitingOnTools,
 )
 from robinauts.ports import Agent
 
@@ -153,7 +170,9 @@ class ScriptedModel:
 
     Items are yielded as Pydantic AI's stream functions yield them: a ``str``
     is text, and a mapping of ``DeltaThinkingPart`` or ``DeltaToolCall`` is
-    thinking or a tool call.
+    thinking or a tool call. What the function model cannot spell -- a
+    redacted block, a call whose arguments arrive whole -- ``Vendor`` below
+    does.
     """
 
     def __init__(
@@ -174,6 +193,8 @@ class ScriptedModel:
         """The instructions of every call: where the system prompt arrives."""
         self.settings: list[Any] = []
         """The model settings of every call: the timeout and the ceiling."""
+        self.bound: list[list[Any]] = []
+        """The tools every call was declared, as the framework's definitions."""
         self.open_streams = 0
         self.model: Model = FunctionModel(stream_function=self._stream, model_name="scripted")
 
@@ -181,6 +202,7 @@ class ScriptedModel:
         self.seen.append(list(messages))
         self.instructions.append(info.instructions)
         self.settings.append(info.model_settings)
+        self.bound.append(list(info.function_tools))
         self.open_streams += 1
         try:
             for item in self.items:
@@ -204,14 +226,18 @@ def scripted(script: Script) -> ScriptedModel:
 
     A turn of this engine is one call to the model, so it is the script's first
     answer that is scripted; ``answers_per_turn`` below is what keeps the suite
-    from asking for a second.
+    from asking for a second. An answer that calls tools streams its text and
+    then each call, as the real client would.
     """
-    said = script.answers[0].text if script.answers else ""
-    streams = not script.answers or script.answers[0].streamed
+    first = script.answers[0] if script.answers else None
+    said = first.text if first else ""
+    streams = first is None or first.streamed
     # A stream function must yield at least one item, so an answer with nothing
     # in it is one empty piece of text -- which is also how a provider that
     # said nothing arrives.
-    items = (in_pieces(said) if streams else [said]) if said else [""]
+    items: list[Any] = (in_pieces(said) if streams else [said]) if said else [""]
+    for index, call in enumerate(first.calls if first else (), start=1):
+        items.extend(calling(call.call_id, call.name, dict(call.arguments), index=index))
     return ScriptedModel(
         *items,
         error=RuntimeError("the provider said no") if script.ending is Ending.FAIL else None,
@@ -227,9 +253,6 @@ class TestPydanticAIAgent(AgentContract):
 
     can_answer_without_streaming = False
     """Pydantic AI hands the answer over in pieces even when the model sent one."""
-
-    can_call_tools = False
-    """Until this engine binds tools (two steps on), its model cannot be scripted to call one."""
 
     def new_agent(self, script: Script) -> Agent:
         self.model = scripted(script)
@@ -267,10 +290,9 @@ async def turn_of(
     return seen
 
 
-def engine(model: ScriptedModel, **changes: Any) -> PydanticAIAgent:
-    return PydanticAIAgent(
-        models(**changes), keys(), model_for=lambda *_: model.model  # noqa: ARG005
-    )
+def engine(model: ScriptedModel | Model, **changes: Any) -> PydanticAIAgent:
+    client = model.model if isinstance(model, ScriptedModel) else model
+    return PydanticAIAgent(models(**changes), keys(), model_for=lambda *_: client)  # noqa: ARG005
 
 
 def said(messages: list[Any]) -> list[tuple[str, str | None]]:
@@ -447,57 +469,476 @@ async def test_one_turn_is_one_call_to_the_model() -> None:
 
 
 @asyncio_test
-async def test_a_message_of_the_tool_role_is_never_sent_to_a_model() -> None:
-    """The second of two refusals, and the one the engine owes.
-
-    ``domain.Message`` already refuses the ``tool`` role, so one cannot be
-    built or stored and the message below has to be forced into existence. The
-    engine checks anyway: it is the line that turns a history into what a model
-    is told, and the failure it would otherwise have is silent -- a tool result
-    sent as though the agent had said it.
-    """
+async def test_a_tool_message_holding_anything_but_results_is_a_fault_of_ours() -> None:
+    """``domain.Message`` already holds a tool message to results only, so the
+    message below has to be forced into existence. The engine checks anyway:
+    it is the line that turns a history into what a model is told, and the
+    failure it would otherwise have is silent -- a turn sent empty."""
     model = ScriptedModel("Never asked.")
     from_a_tool = question("the weather is fine")
     object.__setattr__(from_a_tool, "role", Role.TOOL)
 
-    with pytest.raises(UnsupportedContentError) as raised:
+    with pytest.raises(InvalidValueError, match="results only"):
         await turn_of(engine(model), (from_a_tool,))
 
-    assert "tool" in str(raised.value)
     assert model.seen == []
 
 
+# --- tools ---------------------------------------------------------------------
+
+SCRIPTED = "function"
+"""The framework's name for the function model's vendor (``Model.system``).
+
+The engine keeps a vendor's signed blocks under the vendor's own name and
+replays them to a model of that name, so the function model's blocks live
+under ``function`` where a real turn's live under ``VENDOR``
+(``test_the_client_the_engine_builds_is_the_vendor_the_blocks_are_kept_under``).
+"""
+
+
+def calling(call_id: str, name: str, arguments: dict[str, Any], *, index: int = 1) -> list[Any]:
+    """The items the function model takes for one streamed tool call.
+
+    The first carries the name, the id and the first half of the JSON, which
+    the framework's parts manager turns into the part starting; the second is
+    the rest as a delta with no name -- the same two events the real client's
+    stream makes of a ``tool_use`` block and its ``input_json_delta``s.
+    """
+    written = json.dumps(arguments)
+    half = len(written) // 2
+    items: list[Any] = [
+        {index: DeltaToolCall(name=name, json_args=written[:half], tool_call_id=call_id)}
+    ]
+    if written[half:]:
+        items.append({index: DeltaToolCall(json_args=written[half:])})
+    return items
+
+
+def turn_with_tools(vendor: str = SCRIPTED) -> tuple[Message, Message, Message]:
+    """A question, the answer that called a tool with its signed blocks, the result."""
+    asked = question("look it up", seconds=0)
+    calling_ = answer(
+        asked,
+        seconds=1,
+        parts=(TextPart("Let me look."), ToolCallPart("toolu_01", SEARCH.name, {"q": "robinauts"})),
+        extras={
+            vendor: {
+                "thinking": [
+                    {"type": "thinking", "thinking": "hm", "signature": "SIG"},
+                    {"type": REDACTED, "data": "OPAQUE"},
+                ]
+            }
+        },
+    )
+    results = Message(
+        id=uuid.uuid4(),
+        conversation_id=asked.conversation_id,
+        parent_id=calling_.id,
+        role=Role.TOOL,
+        parts=(ToolResultPart("toolu_01", "found 3", is_error=True),),
+        created_at=calling_.created_at,
+    )
+    return asked, calling_, results
+
+
+@dataclass
+class VendorStream(StreamedResponse):
+    """The stream of ``Vendor``: what the parts manager is told, in order."""
+
+    _steps: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    _timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+    async def _get_event_iterator(self) -> AsyncIterator[ModelResponseStreamEvent]:
+        manager = self._parts_manager
+        for index, (kind, given) in enumerate(self._steps):
+            # One block's pieces share a ``part``, as the client's share an index.
+            part = given.get("part", index)
+            given = {key: value for key, value in given.items() if key != "part"}
+            if kind == "text":
+                for event in manager.handle_text_delta(vendor_part_id=part, **given):
+                    yield event
+            elif kind == "thinking":
+                for event in manager.handle_thinking_delta(
+                    vendor_part_id=part, provider_name=VENDOR, **given
+                ):
+                    yield event
+            else:
+                yield manager.handle_tool_call_part(vendor_part_id=part, **given)
+
+    @property
+    def model_name(self) -> str:
+        return "vendor"
+
+    @property
+    def provider_name(self) -> str:
+        return VENDOR
+
+    @property
+    def provider_url(self) -> str | None:
+        return None
+
+    @property
+    def timestamp(self) -> datetime:
+        return self._timestamp
+
+
+class Vendor(Model):
+    """A model that speaks as the vendor's client does, where the function model cannot.
+
+    ``FunctionModel`` streams text, thinking and tool calls in pieces and
+    nothing else; the vendor's client also hands the parts manager a
+    ``redacted_thinking`` block, a call whose arguments arrive whole, and the
+    vendor's name (``Model.system``, which is what the engine keys the blocks
+    by). This one does those, from a script of what the parts manager is
+    told: ``("text", {...})``, ``("thinking", {...})`` or ``("call", {...})``,
+    with ``"part"`` naming the block when two steps are pieces of one.
+    """
+
+    def __init__(self, *steps: tuple[str, dict[str, Any]]) -> None:
+        super().__init__()
+        self.steps = list(steps)
+        self.seen: list[list[Any]] = []
+
+    @property
+    def model_name(self) -> str:
+        return "vendor"
+
+    @property
+    def system(self) -> str:
+        return VENDOR
+
+    async def request(self, *args: Any, **kwargs: Any) -> Any:
+        raise NotImplementedError("the engine streams")
+
+    @asynccontextmanager
+    async def request_stream(
+        self,
+        messages: list[Any],
+        model_settings: Any,
+        model_request_parameters: ModelRequestParameters,
+        run_context: Any = None,
+    ) -> AsyncIterator[StreamedResponse]:
+        self.seen.append(list(messages))
+        yield VendorStream(model_request_parameters=model_request_parameters, _steps=self.steps)
+
+
 @asyncio_test
-async def test_a_model_that_asks_to_use_a_tool_fails_the_turn() -> None:
-    # This version has no tools: every part after the call would belong to an
-    # answer that cannot be produced, so finishing the turn with whatever text
-    # came with it would store half an answer that looks whole. An engine
-    # reports that by raising.
-    model = ScriptedModel({0: DeltaToolCall(name="search", json_args="{}", tool_call_id="t1")})
+async def test_the_tools_a_run_has_are_declared_to_the_model_and_a_run_without_declares_none() -> (
+    None
+):
+    model = ScriptedModel("Found it.")
+
+    await turn_of(engine(model), (question(),), tools=(SEARCH,))
+    await turn_of(engine(model), (question(),))
+
+    with_tools, without = model.bound
+    assert [(tool.name, tool.description, tool.parameters_json_schema) for tool in with_tools] == [
+        (SEARCH.name, SEARCH.description, dict(SEARCH.input_schema))
+    ]
+    # Declared as the framework's kind for tools something else runs.
+    assert [tool.kind for tool in with_tools] == ["external"]
+    assert without == []
+
+
+@asyncio_test
+async def test_a_model_that_asks_for_a_tool_yields_the_call_and_ends_the_turn_waiting() -> None:
+    """The call is announced with its id and name, its arguments stream as the
+    model writes them, it completes as the platform's part, the answer holds
+    it and the turn ends waiting: the engine runs nothing and asks the model
+    nothing more (``docs/specs/runs.md``)."""
+    model = ScriptedModel(
+        "Let me look. ",
+        *calling("toolu_01", "github__search", {"q": "robinauts"}, index=1),
+        *calling("toolu_02", "jira__find", {}, index=2),
+    )
     agent = engine(model)
 
-    with pytest.raises(UnsupportedContentError) as raised:
-        await turn_of(agent, (question(),))
+    seen = await turn_of(agent, (question(),), tools=(SEARCH,))
 
-    assert "tool" in str(raised.value)
-    assert (agent.held, model.open_streams) == (0, 0)
-    # And it raised rather than letting the framework send its retry prompt.
+    check_engine_events(seen)
+    assert [type(event) for event in seen] == [
+        AnswerStarted,
+        AnswerTextDelta,
+        ToolCallStarted,
+        ToolCallArgumentsDelta,
+        ToolCallArgumentsDelta,
+        ToolCallCompleted,
+        ToolCallStarted,
+        ToolCallArgumentsDelta,
+        ToolCallArgumentsDelta,
+        ToolCallCompleted,
+        AnswerCompleted,
+        WaitingOnTools,
+    ]
+    assert seen[2] == ToolCallStarted(call_id="toolu_01", name="github__search")
+    assert "".join(
+        event.text
+        for event in seen
+        if isinstance(event, ToolCallArgumentsDelta) and event.call_id == "toolu_01"
+    ) == json.dumps({"q": "robinauts"})
+    first = ToolCallPart("toolu_01", "github__search", {"q": "robinauts"})
+    second = ToolCallPart("toolu_02", "jira__find", {})
+    assert seen[-2] == AnswerCompleted(parts=(TextPart("Let me look. "), first, second))
     assert len(model.seen) == 1
+    assert (agent.held, model.open_streams) == (0, 0)
 
 
 @asyncio_test
-async def test_a_turn_handed_tools_is_refused_until_the_engine_binds_them() -> None:
-    # Binding the definitions to the model is the next step's; a turn run
-    # without them would answer a question the model was meant to use a tool
-    # for, so it is refused before the model is reached.
+async def test_an_answer_that_only_calls_holds_the_calls_and_no_text() -> None:
+    model = ScriptedModel(*calling("toolu_01", "github__search", {"q": "x"}))
+
+    seen = await turn_of(engine(model), (question(),), tools=(SEARCH,))
+
+    check_engine_events(seen)
+    assert not any(isinstance(event, AnswerTextDelta) for event in seen)
+    assert seen[-2] == AnswerCompleted(
+        parts=(ToolCallPart("toolu_01", "github__search", {"q": "x"}),)
+    )
+    assert seen[-1] == WaitingOnTools()
+
+
+@asyncio_test
+async def test_arguments_that_arrive_whole_are_published_as_one_piece() -> None:
+    # A client that hands the framework the arguments as an object rather
+    # than as JSON pieces: what is published still parses to what the call
+    # completes with, which is what the port asks.
+    model = Vendor(
+        ("text", {"content": "Looking. "}),
+        ("call", {"tool_name": "github__search", "args": {"q": "x"}, "tool_call_id": "toolu_01"}),
+    )
+
+    seen = await turn_of(engine(model), (question(),), tools=(SEARCH,))
+
+    check_engine_events(seen)
+    assert [event for event in seen if isinstance(event, ToolCallArgumentsDelta)] == [
+        ToolCallArgumentsDelta(call_id="toolu_01", text=json.dumps({"q": "x"}))
+    ]
+    assert seen[-2] == AnswerCompleted(
+        parts=(TextPart("Looking. "), ToolCallPart("toolu_01", "github__search", {"q": "x"}))
+    )
+
+
+@asyncio_test
+async def test_arguments_that_are_not_json_or_not_an_object_fail_the_turn() -> None:
+    for written in ("not json", '["a", "list"]'):
+        model = ScriptedModel(
+            {0: DeltaToolCall(name="github__search", json_args=written, tool_call_id="t1")}
+        )
+        agent = engine(model)
+
+        with pytest.raises(UnsupportedContentError, match="arguments for a tool call"):
+            await turn_of(agent, (question(),), tools=(SEARCH,))
+
+        assert (agent.held, model.open_streams) == (0, 0)
+
+
+@asyncio_test
+async def test_a_tool_of_a_kind_this_engine_did_not_declare_is_refused_not_passed_over() -> None:
+    # The vendor's own server-side tools, which the framework spells as
+    # another class: an answer that went on past one would be half an answer
+    # that looks whole, so the turn fails where the call arrives.
+    served = NativeToolCallPart(
+        tool_name="web_search", args={"query": "x"}, tool_call_id="srv_1", provider_name=SCRIPTED
+    )
+    model = ScriptedModel("Searching. ", {0: served})
+    agent = engine(model)
+
+    with pytest.raises(UnsupportedContentError, match="did not declare"):
+        await turn_of(agent, (question(),), tools=(SEARCH,))
+
+    assert len(model.seen) == 1
+    assert (agent.held, model.open_streams) == (0, 0)
+
+
+@asyncio_test
+async def test_a_turn_with_tools_in_its_history_is_translated_for_the_model() -> None:
+    model = ScriptedModel("Found three.")
+    asked, calling_, results = turn_with_tools()
+
+    await turn_of(engine(model), (asked, calling_, results), tools=(SEARCH,))
+
+    (heard,) = model.seen
+    assert [[part.part_kind for part in message.parts] for message in heard] == [
+        ["user-prompt"],
+        ["thinking", "thinking", "text", "tool-call"],
+        ["tool-return"],
+    ]
+    thought, redacted, text, call = heard[1].parts
+    assert (thought.content, thought.signature, thought.provider_name) == ("hm", "SIG", SCRIPTED)
+    assert (redacted.id, redacted.content, redacted.signature) == (REDACTED, "", "OPAQUE")
+    assert text.content == "Let me look."
+    assert (call.tool_name, call.args, call.tool_call_id) == (
+        SEARCH.name,
+        {"q": "robinauts"},
+        "toolu_01",
+    )
+    (returned,) = heard[2].parts
+    assert (returned.tool_name, returned.content, returned.tool_call_id, returned.outcome) == (
+        SEARCH.name,
+        "found 3",
+        "toolu_01",
+        "failed",
+    )
+
+
+@asyncio_test
+async def test_what_the_vendors_client_sends_for_a_turn_with_tools_is_the_vendors_blocks() -> None:
+    """The framework's mapping, on the messages this engine builds: the signed
+    blocks first, then the text, then the ``tool_use``, and the results as one
+    ``user`` turn of ``tool_result`` blocks with ``is_error`` -- which is what
+    Anthropic wants back (``docs/specs/conversations.md``, "Reasoning")."""
+    model = Vendor(("text", {"content": "Found three."}))
+    asked, calling_, results = turn_with_tools(VENDOR)
+
+    await turn_of(engine(model), (asked, calling_, results), tools=(SEARCH,))
+
+    (heard,) = model.seen
+    client = AnthropicModel("claude-sonnet-5", provider=AnthropicProvider(api_key=KEY))
+    _system, sent = await client._map_message(heard, ModelRequestParameters(), {})
+    assert [message["role"] for message in sent] == ["user", "assistant", "user"]
+    assert sent[1]["content"] == [
+        {"type": "thinking", "thinking": "hm", "signature": "SIG"},
+        {"type": REDACTED, "data": "OPAQUE"},
+        {"type": "text", "text": "Let me look."},
+        {"type": "tool_use", "id": "toolu_01", "name": SEARCH.name, "input": {"q": "robinauts"}},
+    ]
+    assert sent[2]["content"] == [
+        {
+            "type": "tool_result",
+            "tool_use_id": "toolu_01",
+            "content": [{"type": "text", "text": "found 3"}],
+            "is_error": True,
+        }
+    ]
+
+
+@asyncio_test
+async def test_a_result_answering_no_call_of_the_answer_before_it_is_a_fault_of_ours() -> None:
     model = ScriptedModel("Never asked.")
-    search = ToolDefinition(name="github__search", description="Search.", input_schema={})
+    asked, calling_, results = turn_with_tools()
+    stray = Message(
+        id=uuid.uuid4(),
+        conversation_id=asked.conversation_id,
+        parent_id=calling_.id,
+        role=Role.TOOL,
+        parts=(ToolResultPart("toolu_99", "found 3"),),
+        created_at=results.created_at,
+    )
 
-    with pytest.raises(UnsupportedContentError) as raised:
-        await turn_of(engine(model), (question(),), tools=(search,))
+    with pytest.raises(InvalidValueError, match="answers a call of the answer before it"):
+        await turn_of(engine(model), (asked, calling_, stray), tools=(SEARCH,))
 
-    assert "bind tools" in str(raised.value)
     assert model.seen == []
+
+
+@asyncio_test
+async def test_the_signed_blocks_are_replayed_to_the_model_that_made_them_and_to_no_other() -> None:
+    asked, calling_, results = turn_with_tools()
+    model = ScriptedModel("Found three.")
+    other = answer(asked, "plain", seconds=1, extras=calling_.extras)
+    agent = PydanticAIAgent(two_models(), keys(), model_for=lambda *_: model.model)  # noqa: ARG005
+
+    await turn_of(agent, (asked, calling_, results), model=OTHER_MODEL)
+    await turn_of(agent, (asked, other))
+
+    moved, same_model = model.seen
+    # Moved to another model: the calls and the text go, the blocks do not.
+    assert [part.part_kind for part in moved[1].parts] == ["text", "tool-call"]
+    # A plain answer on the model that made the blocks replays them too.
+    assert [part.part_kind for part in same_model[1].parts] == ["thinking", "thinking", "text"]
+
+
+@asyncio_test
+async def test_a_stored_block_of_a_shape_the_vendor_did_not_make_is_left_out_with_a_line_in_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # An unsigned block is one the framework would send as text between
+    # thinking tags -- the model's thinking, spoken -- so it is not handed over.
+    model = ScriptedModel("Again.")
+    asked = question("look it up", seconds=0)
+    replied = answer(
+        asked,
+        "Looked.",
+        seconds=1,
+        extras={
+            SCRIPTED: {"thinking": [{"type": "thinking", "thinking": "unsigned"}, "not a block"]}
+        },
+    )
+    again = question("and?", parent=replied, seconds=2)
+
+    with caplog.at_level(logging.WARNING, logger="robinauts.adapters.agents.pydantic_ai.engine"):
+        await turn_of(engine(model), (asked, replied, again))
+
+    (heard,) = model.seen
+    assert [part.part_kind for part in heard[1].parts] == ["text"]
+    assert [record.getMessage() for record in caplog.records].count(
+        "a stored thinking block of the vendor's is not of a shape this engine replays, and"
+        " was left out"
+    ) == 2
+
+
+@asyncio_test
+async def test_the_vendors_signed_blocks_come_out_in_extras_and_the_thinking_is_streamed() -> None:
+    model = Vendor(
+        ("thinking", {"content": "let me ", "part": 0}),
+        ("thinking", {"content": "think", "signature": "SIG", "part": 0}),
+        ("thinking", {"id": REDACTED, "signature": "OPAQUE"}),
+        ("text", {"content": "Hi."}),
+    )
+
+    seen = await turn_of(engine(model), (question(),))
+
+    check_engine_events(seen)
+    assert [event.text for event in seen if isinstance(event, AnswerReasoningDelta)] == [
+        "let me ",
+        "think",
+    ]
+    assert seen[-1] == AnswerCompleted(
+        parts=(TextPart("Hi."),),
+        extras={
+            VENDOR: {
+                "thinking": [
+                    {"type": "thinking", "thinking": "let me think", "signature": "SIG"},
+                    {"type": REDACTED, "data": "OPAQUE"},
+                ]
+            }
+        },
+    )
+
+
+@asyncio_test
+async def test_thinking_the_vendor_did_not_sign_is_streamed_and_not_kept() -> None:
+    # An interrupted stream, or a model that signs nothing: the text was shown
+    # as it arrived, and there is no block the vendor would take back.
+    model = ScriptedModel({0: DeltaThinkingPart(content="unsigned")}, "Hi.")
+
+    seen = await turn_of(engine(model), (question(),))
+
+    assert [event.text for event in seen if isinstance(event, AnswerReasoningDelta)] == ["unsigned"]
+    assert seen[-1] == AnswerCompleted(parts=(TextPart("Hi."),))
+
+
+@asyncio_test
+async def test_blocks_that_do_not_fit_extras_are_left_out_with_a_line_in_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    model = ScriptedModel({0: DeltaThinkingPart(content="hm", signature="S" * 70_000)}, "Hi.")
+
+    with caplog.at_level(logging.WARNING, logger="robinauts.adapters.agents.pydantic_ai.engine"):
+        seen = await turn_of(engine(model), (question(),))
+
+    assert seen[-1] == AnswerCompleted(parts=(TextPart("Hi."),))
+    assert any("did not fit" in record.getMessage() for record in caplog.records)
+
+
+def test_the_client_the_engine_builds_is_the_vendor_the_blocks_are_kept_under() -> None:
+    # What the engine keys a run's blocks by is the framework's name for the
+    # client's vendor; for the one client this engine builds that is
+    # ``VENDOR`` -- the key the other engine uses too, which is what lets a
+    # conversation cross the swap with its thinking.
+    built = chat_model(models().models[MODEL], ANTHROPIC_PROVIDER, KEY)
+
+    assert built.system == VENDOR == "anthropic"
 
 
 @asyncio_test
@@ -506,11 +947,13 @@ async def test_the_whole_path_reaches_the_model_and_ends_in_the_question() -> No
     kept above the port is that the question being answered is whole in what
     the model sees; it is checked here, where the model can be asked."""
     model = ScriptedModel("Three.")
-    first = question("q" * 5_000, seconds=0)
+    first = question("Are you sure?", seconds=0)
     said = answer(first, "a" * 5_000, seconds=1)
     second = question("r" * 5_000, parent=said, seconds=2)
     replied = answer(second, "b" * 5_000, seconds=3)
-    third = question("Are you sure?", parent=replied, seconds=4)
+    # The question is the longest message, so a policy that cut the tail --
+    # the one thing ADR 0004 forbids -- would be caught here and not passed.
+    third = question("q" * 5_000, parent=replied, seconds=4)
 
     await turn_of(engine(model), (first, said, second, replied, third))
 
@@ -524,7 +967,7 @@ async def test_the_whole_path_reaches_the_model_and_ends_in_the_question() -> No
     ]
     assert [
         "".join(getattr(part, "content", "") for part in message.parts) for message in heard
-    ] == [first.text, said.text, second.text, replied.text, "Are you sure?"]
+    ] == ["Are you sure?", said.text, second.text, replied.text, third.text]
 
 
 @asyncio_test
