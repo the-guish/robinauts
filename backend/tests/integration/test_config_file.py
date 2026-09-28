@@ -517,6 +517,27 @@ def test_every_tool_server_s_secret_is_read_at_start_up() -> None:
     assert (read.secret_for("github"), read.secret_for("jira")) == ("g", "j")
 
 
+def test_a_public_server_is_passed_over_by_the_secrets_check() -> None:
+    # Nothing to read and nothing to hold: the check neither asks the
+    # environment for it nor refuses the start for it.
+    public = ToolServerConfig(id="learn", url="https://learn.example/mcp", auth=ToolServerAuth.NONE)
+    asked: list[str] = []
+
+    def secret_for(name: str) -> str | None:
+        asked.append(name)
+        return {"GH": "g"}.get(name)
+
+    read = check_tool_secrets(
+        ModelsConfig(tool_servers={"learn": public, "github": tool_server("github", "GH")}),
+        secret_for=secret_for,
+    )
+
+    assert asked == ["GH"]
+    assert repr(read) == "ToolServerSecrets(github)"
+    with pytest.raises(ConfigError, match="no secret was read"):
+        read.secret_for("learn")
+
+
 def test_every_unset_secret_variable_is_named_at_once_and_never_a_value() -> None:
     with pytest.raises(ConfigError) as raised:
         check_tool_secrets(with_servers(github="GH", jira="JI"), secret_for={"GH": ""}.get)

@@ -186,9 +186,10 @@ What they decide about the design:
   subdomain is why a fixed catalogue of vendors would not do.
 - **How the secret is sent is configuration, not an assumption.** Two
   schemes cover both targets: `bearer` (the default) and `basic`, where the
-  configuration also names the user part and the secret is the token. A
-  vendor-specific header value (Sentry's `Sentry-Bearer`) is a third scheme
-  to add later, not now.
+  configuration also names the user part and the secret is the token; step 8
+  added `none` for a public server, which names no variable and is sent no
+  header ("Open"). A vendor-specific header value (Sentry's `Sentry-Bearer`)
+  is a further scheme to add later, not now.
 - **A server that refuses the credential is reported by name.** Start-up
   does not connect to a server (decision 5), so the refusal an admin-gated
   feature answers with is met at the first turn of an agent naming it: the
@@ -519,10 +520,10 @@ is the first turn that calls one.
 
 8. **Demo and the operator's page.** `demo/robinauts.toml.in` with a
    commented `[mcp_servers.*]` table; `agents.md`'s configuration sketch
-   showing a server with `bearer` and one with `basic`, spelt so that an
-   operator connecting GitHub or Atlassian copies it and changes the url and
-   the variable name; `operations.md` on what a tool server sees (one
-   identity per deployment).
+   showing a server with `bearer`, one with `basic` and -- decided here, see
+   "Open" -- a public one with `none`, spelt so that an operator connecting
+   GitHub or Atlassian copies it and changes the url and the variable name;
+   `operations.md` on what a tool server sees (one identity per deployment).
 
 ## Backlog
 

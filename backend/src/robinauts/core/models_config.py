@@ -460,6 +460,9 @@ def _tool_server(server_id: object, table: object, problems: list[str]) -> ToolS
             problems.append(f"{where}.auth: one of {_named(_AUTHS)}, not {raw_auth!r}")
 
     # A server sent no credential names no variable; every other names one.
+    # Under a misspelt auth a missing secret_env is not a second mistake --
+    # it may be right for the auth that was meant -- so it is read only when
+    # it is there, as the user part is.
     secret_env = ""
     if auth is ToolServerAuth.NONE:
         if "secret_env" in table:
@@ -467,7 +470,7 @@ def _tool_server(server_id: object, table: object, problems: list[str]) -> ToolS
                 f'{where}.secret_env: auth = "none" sends no credential, so there is no'
                 f" variable to name; leave secret_env out"
             )
-    else:
+    elif auth is not None or "secret_env" in table:
         secret_env = _string(table, "secret_env", where, problems, limit=MAX_ENV_NAME_CHARS)
         if secret_env and not is_env_name(secret_env):
             problems.append(

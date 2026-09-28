@@ -37,7 +37,8 @@ What an internal platform team deploys and controls.
   server's own admin gates, and by nothing here: every tool the agent's
   servers offer runs without asking. A server configured with `auth =
   "none"` — a public one, such as Microsoft Learn's — is sent no credential
-  at all, and sees the deployment's address and nothing of anyone.
+  at all: what it sees is the deployment's address and the arguments the
+  model wrote for the call, and nothing that names anyone.
 
 ## Configuration
 

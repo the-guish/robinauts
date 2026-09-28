@@ -859,6 +859,15 @@ def test_a_tool_server_s_auth_is_bearer_basic_or_none() -> None:
     assert only(server(auth="digest")) == (
         "mcp_servers.github.auth: one of basic, bearer, none, not 'digest'"
     )
+    # Under a misspelt auth a missing secret_env is not a second mistake: the
+    # operator may have meant none, and a line asking for a variable would
+    # invite one the next start refuses.
+    assert only(
+        problems(mcp_servers={"s": {"url": "https://s.example/mcp", "auth": "nnone"}})
+    ).startswith("mcp_servers.s.auth:")
+    assert only(server(auth="digest")) == (
+        "mcp_servers.github.auth: one of basic, bearer, none, not 'digest'"
+    )
 
 
 def test_a_server_with_no_auth_names_no_variable_and_no_user() -> None:

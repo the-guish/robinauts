@@ -505,7 +505,7 @@ class ToolServerConfig:
     the secret travels to it. ``secret_env`` is the **name** of an environment
     variable, exactly as a model provider's ``api_key_env`` is: the secret is
     the operator's, read once at start-up, never in this file, never logged --
-    and empty for a server with no ``auth``, which has no secret to read.
+    and empty under ``auth = "none"``, which has no secret to read.
     ``prefix`` is what the server's tools are shown to the model under
     (``<prefix>__<name>``), the server's id when the operator wrote none --
     and an id that would not do as a prefix (too long, or one a name could not
@@ -541,7 +541,8 @@ class ToolServerConfig:
         if self.auth is ToolServerAuth.NONE:
             if not isinstance(self.secret_env, str) or self.secret_env:
                 raise InvalidValueError(
-                    "a tool server with no auth names no secret_env: there is no secret to read"
+                    'a tool server with auth = "none" names no secret_env: there is no secret'
+                    " to read"
                 )
         else:
             checked_line(self.secret_env, "a tool server's secret_env", MAX_ENV_NAME_CHARS)

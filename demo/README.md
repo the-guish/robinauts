@@ -155,28 +155,31 @@ one, and the id no longer says which model wrote them.
 Off until you turn them on. The configuration the demo writes holds, commented
 out, two MCP tool servers and a `tools` line under each agent
 ([robinauts.toml.in](robinauts.toml.in)); an agent whose `tools` names a server
-can call what that server offers, and the chat shows each call, its arguments
-and what came back ([../docs/specs/agents.md](../docs/specs/agents.md),
+can call what that server offers, and the chat shows each call behind a
+tool-call toggle above the answer -- the tool's name, its arguments and what
+came back, as text ([../docs/specs/agents.md](../docs/specs/agents.md),
 "Tools").
 
 **Microsoft Learn's server needs no credential.** Take the `#` off the
 `[mcp_servers.learn]` table and off one agent's `tools = ["learn"]` line in
 `robinauts.toml.in`, restart (`demo/stop.sh`, then `demo/start.sh`), and ask
 that agent something about, say, Azure: the model calls
-`learn__microsoft_docs_search`, the answer arrives with the call shown above
-it, and the conversation records both. **The demo then reaches
-`learn.microsoft.com` from this machine** for as long as the line is on, with
-no credential and nothing about you in the request beyond what any request
-carries.
+`learn__microsoft_docs_search`, the answer arrives with the call's toggle
+above it, and the conversation records both. **The demo then reaches
+`learn.microsoft.com` from this machine** for as long as the line is on. What
+the request carries is no credential and nothing that names you, but it does
+carry what the model wrote for the tool -- the search query it composed from
+your question -- and the deployment's address, as any request does.
 
 **GitHub's server needs a token**, read from the variable
-`[mcp_servers.github]` names and never from the file. The demo does not carry
-that variable for you: `start.sh` reads the model provider's key alone and
-strips it from everything but the server, so a token exported in the shell
-that runs `start.sh` would reach every process it starts — PostgreSQL, npm and
-what npm runs, uv. Put the server behind a shell of its own, or wait for the
-deployment shape ([../docs/deployment.md](../docs/deployment.md)), before
-handing the demo a token that can write.
+`[mcp_servers.github]` names and never from the file. The demo cannot hand it
+one safely: `start.sh` reads the model provider's key alone and strips it from
+everything but the server, and it has no such path for a tool server's token,
+so a token exported in the shell that runs `start.sh` would reach every
+process it starts — PostgreSQL, npm and what npm runs, uv. Do not: the table
+is here as the shape to copy into a deployment
+([../docs/deployment.md](../docs/deployment.md)), not as something the demo
+can run.
 
 ## Where the state lives
 

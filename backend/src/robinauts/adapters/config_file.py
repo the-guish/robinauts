@@ -230,8 +230,8 @@ def check_tool_secrets(
     ``check_api_keys`` for the tool servers: **every** missing variable at
     once, in one ``ConfigError``, only the variable's **name** in the message,
     and every **declared** server looked at whether or not an agent names it
-    (``docs/specs/agents.md``, "Tools") -- except one with no ``auth``, which
-    names no variable. Start-up reads the secret and does not connect:
+    (``docs/specs/agents.md``, "Tools") -- except one with ``auth = "none"``,
+    which names no variable. Start-up reads the secret and does not connect:
     whether the server takes it is found out at the first turn of an agent
     naming it, by name.
     """

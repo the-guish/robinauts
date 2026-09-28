@@ -5,9 +5,9 @@ recipe (`recipes/three-agent-steps.md`, beside this repository), one stacked
 branch per step, reviewed and committed one at a time. The codebase map is
 "What exists" in [poc-progress.md](poc-progress.md) and
 [model-selection-progress.md](model-selection-progress.md); this file
-records only what the tools add to it. The plan's steps 4 and 5 are split
-here into 4a-c and 5a-c, so that each branch stays around five hundred
-lines; the plan's numbering is kept where a step is named.
+records only what the tools add to it. The plan's steps 4, 5 and 6 are
+split here into 4a-d, 5a-e and 6a-b, so that each branch stays around five
+hundred lines; the plan's numbering is kept where a step is named.
 
 ## What exists
 
@@ -94,7 +94,8 @@ lines; the plan's numbering is kept where a step is named.
   tool turn the vendor requires after such an answer, never stored.
 - **The configuration knows tool servers.** `domain/agents.py`:
   `ToolServerConfig(id, url, secret_env, auth, user, prefix, timeout_seconds)`
-  and `ToolServerAuth` (`bearer` | `basic`), `DEFAULT_TOOL_TIMEOUT_SECONDS`
+  and `ToolServerAuth` (`bearer` | `basic`, and `none` from step 8),
+  `DEFAULT_TOOL_TIMEOUT_SECONDS`
   (60), `MAX_TOOL_TIMEOUT_SECONDS`, `MAX_BASIC_USER_CHARS`;
   `AgentDefinition.tools` (server ids, each once); `ModelsConfig.tool_servers`
   with the whole-configuration proof (an agent's servers exist; no two
@@ -133,7 +134,8 @@ lines; the plan's numbering is kept where a step is named.
   session per question (`initialize`, the `initialized` notification, the
   one request, `DELETE`), answers read as JSON or as an event stream, the
   session id and the negotiated protocol revision carried on every request,
-  the credential a `Bearer` or `Basic` header built from `ToolServerSecrets`,
+  the credential a `Bearer` or `Basic` header built from `ToolServerSecrets`
+  (or no header at all under `none`, from step 8),
   no redirects, bodies bounded (`MAX_RESPONSE_BYTES`), listings paged and
   bounded (`MAX_PAGES`), a call bounded by the server's `timeout_seconds`
   into an error result, a JSON-RPC error on a call an error result, every
@@ -993,6 +995,12 @@ own, "mcp 6a: fixes from the review", on step 6b's branch).
   tool message sends nothing **announced or completed**, and the property
   test's docstring says the cuts fall *across* the silent positions.
 
+Checks: lint; the whole suite against a throwaway PostgreSQL (3220 passed,
+13 skipped).
+Not done / to watch: the frontend decodes none of it yet (6b); the mapper
+sends a result's text as it is, and it is the client that renders it as
+data (`wire.md`); `api/agui.py`'s `UNMAPPED` docstring is true again.
+
 ### Step 6b — the frontend decodes tool events and draws calls as data   (feature/mcp-6b-frontend)
 
 Summary: the chat shows what a turn did with its tools. `events.ts` decodes
@@ -1044,7 +1052,8 @@ all by the MCP adapter, rather than an empty one a server might read as a
 credential. `agents.md` says the third way the secret is sent and shows
 Microsoft Learn's public server as the third table of the sketch, which
 the integration test reads; `operations.md` says such a server sees the
-deployment's address and nothing of anyone. `demo/robinauts.toml.in`
+deployment's address and the arguments the model wrote, and nothing that
+names anyone. `demo/robinauts.toml.in`
 carries Learn's table, GitHub's table and a `tools` line under each agent,
 commented out, with a paragraph saying what turning them on does, and
 `demo/README.md` gains a "Tools" section: Learn's server needs no
@@ -1055,7 +1064,23 @@ strips only the provider's key from what it starts. Tests: the parser
 user part), the record, the adapter (no header for a public server), the
 deployment (no variable read for one).
 
-Review: pending.
+Review: 1 round (read after the commit; the fixes are a commit of their
+own, "mcp 8: fixes from the review").
+- High: 0.
+- Medium: 2 (2/0) — under a misspelt `auth` a missing `secret_env` was
+  reported as a second problem, which would invite a variable the next
+  start refuses: it is read only when present, as the user part is (M1);
+  the demo's README said a request to Learn carries "nothing about you",
+  when it carries the query the model wrote from the question: the README
+  and `operations.md` say what is sent (M2).
+- Low: 7 (7/0) — the 6a entry's Checks block, orphaned under step 8, is
+  back in its place; the older notes and plan lines that said two schemes
+  say three; the README and the template say the call is behind a toggle
+  rather than "shown"; the token advice says plainly that the demo cannot
+  hand GitHub's server a token safely; the record's messages say
+  `auth = "none"` rather than "no auth"; `check_tool_secrets` passing a
+  public server over is tested where the check is tested; `sends_alone`
+  is in its place in `__all__`.
 
 Checks: lint; the import contracts; the whole suite against a throwaway
 PostgreSQL (3240 passed, 6 skipped); the live test against Microsoft Learn with no credential.
@@ -1063,8 +1088,3 @@ Not done / to watch: the demo does not exercise a tool server itself (the
 lines are commented); `start.sh` passes no token through on purpose; a
 server that needs a credential of another scheme (a custom header) is
 still a scheme to add.
-
-Checks: lint; the whole suite against a throwaway PostgreSQL (3220 passed, 13 skipped).
-Not done / to watch: the frontend decodes none of it yet (6b); the mapper
-sends a result's text as it is, and it is the client that renders it as
-data (`wire.md`); `api/agui.py`'s `UNMAPPED` docstring is true again.

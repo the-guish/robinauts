@@ -72,9 +72,9 @@ system_prompt = "You are the Robinauts demo assistant. Answer briefly, and play 
 # credential: take the `#` off its table and off an agent's `tools` line, and
 # that agent searches Microsoft's documentation when a question calls for it --
 # the demo then reaches learn.microsoft.com from this machine, and the chat
-# shows each call and what came back. GitHub's server needs a token, which the
-# platform reads from the variable named here and never from this file; the
-# demo does not carry one for you (demo/README.md, "Tools").
+# shows each call behind a toggle above the answer. GitHub's server needs a
+# token, which the platform reads from the variable named here and never from
+# this file; the demo cannot hand it one safely (demo/README.md, "Tools").
 #
 # [mcp_servers.learn]
 # url = "https://learn.microsoft.com/api/mcp"
