@@ -41,7 +41,9 @@ The order of a run's events is fixed, and
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any
 
 from robinauts.domain.conversation import (
     MAX_PART_CHARS,
@@ -58,7 +60,13 @@ from robinauts.domain.run import (
     MAX_RUN_ERROR_CHARS,
     RunState,
 )
-from robinauts.domain.values import checked_fragment, checked_text, checked_uuid, describe
+from robinauts.domain.values import (
+    checked_data,
+    checked_fragment,
+    checked_text,
+    checked_uuid,
+    describe,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,13 +253,24 @@ class AnswerCompleted:
 
     A ``ReasoningPart`` here is allowed and **dropped** by the application,
     which stores no reasoning in this version: an engine translates what the
-    model said and is not asked to know what the platform keeps.
+    model said and is not asked to know what the platform keeps. A
+    ``ToolCallPart`` is kept: an answer that asks for tools is an answer
+    (``docs/specs/agents.md``, "Tools").
+
+    ``extras`` is what the vendor needs back with the history and the
+    platform never reads: the signed thinking blocks an answer that makes a
+    tool call carries, under the vendor's key
+    (``docs/specs/conversations.md``, "Reasoning"). Bounded like every
+    ``extras`` of the format, carried on to the message as it is, and empty
+    for an engine with nothing of the kind to say.
     """
 
     parts: tuple[MessagePart, ...]
+    extras: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "parts", checked_parts(self.parts))
+        object.__setattr__(self, "extras", checked_data(self.extras, "an answer's extras"))
 
 
 EngineEvent = AnswerStarted | AnswerTextDelta | AnswerReasoningDelta | AnswerCompleted

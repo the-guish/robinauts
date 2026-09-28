@@ -21,27 +21,46 @@ holds and checks; it does not decide and it does not serialise.
 
 **Room without building it.** The format names every kind of content the
 specs give a message -- text, image, file, reasoning, tool call, tool result
--- and this version carries two of them, text and reasoning. The other kinds
-are refused, by name, as not supported yet. Naming them now is what lets them
-arrive without a stored conversation having to be rewritten: the discriminator
-they will be stored under is already reserved, and a build that meets one it
-cannot carry says so instead of guessing. The ``tool`` role is reserved the
-same way.
+-- and this version carries four of them: text, reasoning, and the two tool
+parts. The other kinds are refused, by name, as not supported yet. Naming
+them now is what lets them arrive without a stored conversation having to be
+rewritten: the discriminator they will be stored under is already reserved,
+and a build that meets one it cannot carry says so instead of guessing.
+
+**Tools, in the format** (``docs/specs/conversations.md``, "A turn is a
+chain"). A call the model makes is a ``ToolCallPart`` of the **assistant**
+message that made it: the call's id, the tool's full name, its arguments as
+data. The results of one call batch are one message of the ``tool`` role
+under that assistant message, holding one ``ToolResultPart`` per call, each
+naming the call it answers; that a tool message answers exactly its parent's
+calls is a rule of the tree (``robinauts.core.conversation_tree``), since it
+needs the parent. What a message of each role may hold is a rule of the
+record, here: a tool message holds results and nothing else, a user message
+holds no tool part, and an assistant message holds no result.
+
+**``extras``** is the one key of a document a build is allowed not to read
+(``docs/specs/conversations.md``, "The version"): an object, bounded, keyed
+by vendor, holding what a vendor needs back with the history and the platform
+never reads -- the signed thinking blocks an answer that makes a tool call
+carries (``extras.anthropic``). It is carried on every message, empty for
+nearly all of them, stored unread and written back as it was.
 """
 
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from robinauts.domain.agents import Engine, checked_config_id
 from robinauts.domain.errors import InvalidValueError, UnsupportedContentError
+from robinauts.domain.tools import checked_call_id, checked_tool_name
 from robinauts.domain.values import (
     MAX_PART_CHARS,
+    checked_data,
     checked_instant,
     checked_line,
     checked_text,
@@ -81,11 +100,11 @@ MAX_TITLE_CHARS = 120
 class Role(StrEnum):
     """Who a message is from.
 
-    ``TOOL`` is reserved and not carried: tool usage is planned
-    (``docs/specs/agents.md``), and a message of that role is refused until it
-    is built. It is named so that the stored spelling is settled now, and so
-    that the rule about what may follow what can be written for it already
-    (``robinauts.core.conversation_tree.may_follow``).
+    ``TOOL`` is the platform's own: a message of that role holds the results
+    of one batch of the calls its parent made, and is written by the
+    application and never by a person or a model
+    (``docs/specs/conversations.md``). What may follow what is
+    ``robinauts.core.conversation_tree.may_follow``.
     """
 
     USER = "user"
@@ -93,8 +112,13 @@ class Role(StrEnum):
     TOOL = "tool"
 
 
-SUPPORTED_ROLES: frozenset[Role] = frozenset({Role.USER, Role.ASSISTANT})
-"""The roles this version carries."""
+SUPPORTED_ROLES: frozenset[Role] = frozenset(Role)
+"""The roles this version carries: every one the format names.
+
+Kept as a set, and checked where a role is read, so that a role added to the
+format later is refused by name by a build that does not carry it, exactly
+as a kind of content is.
+"""
 
 
 class Channel(StrEnum):
@@ -125,7 +149,9 @@ class PartKind(StrEnum):
     TOOL_RESULT = "tool_result"
 
 
-SUPPORTED_PART_KINDS: frozenset[PartKind] = frozenset({PartKind.TEXT, PartKind.REASONING})
+SUPPORTED_PART_KINDS: frozenset[PartKind] = frozenset(
+    {PartKind.TEXT, PartKind.REASONING, PartKind.TOOL_CALL, PartKind.TOOL_RESULT}
+)
 """The kinds this version has a record for. The others are refused by name."""
 
 
@@ -174,13 +200,72 @@ class ReasoningPart:
         checked_text(self.text, "the text of a part", MAX_PART_CHARS)
 
 
-MessagePart = TextPart | ReasoningPart
+@dataclass(frozen=True, slots=True)
+class ToolCallPart:
+    """A tool the model asked for: the call's id, the tool's name, the arguments.
+
+    A part of the **assistant** message that made the call
+    (``docs/specs/conversations.md``). The id is the vendor's, carried as
+    data (``robinauts.domain.tools``); the name is the full name the model was
+    shown, ``<prefix>__<name>``, which is how the call is routed to its server;
+    and the arguments are what the model wrote, as plain data, bounded and
+    checked the way ``extras`` is because they are attacker-influenced text on
+    their way to a server and to a browser (``docs/specs/agents.md``).
+
+    A copy of the arguments is kept, as ``dict`` and ``list``; it is not to
+    be edited, and nothing in the platform edits it.
+    """
+
+    call_id: str
+    name: str
+    arguments: Mapping[str, Any] = field(default_factory=dict)
+    kind: ClassVar[PartKind] = PartKind.TOOL_CALL
+
+    def __post_init__(self) -> None:
+        checked_call_id(self.call_id, "a tool call's id")
+        checked_tool_name(self.name, "a tool call's name")
+        object.__setattr__(
+            self, "arguments", checked_data(self.arguments, "a tool call's arguments")
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ToolResultPart:
+    """What a tool answered, for one call: text, and whether it went wrong.
+
+    One per call, in the **tool** message that answers the batch
+    (``docs/specs/conversations.md``). Text in this iteration: a result of
+    another kind becomes a text note saying what was left out
+    (``docs/specs/agents.md``). ``is_error`` is the server saying the call
+    failed, or a call that ran out of its time; the model is told either way
+    and the run goes on -- only a server that cannot be reached at all fails
+    a run.
+    """
+
+    call_id: str
+    text: str
+    is_error: bool = False
+    kind: ClassVar[PartKind] = PartKind.TOOL_RESULT
+
+    def __post_init__(self) -> None:
+        checked_call_id(self.call_id, "a tool result's call id")
+        checked_text(self.text, "the text of a part", MAX_PART_CHARS)
+        if not isinstance(self.is_error, bool):
+            raise InvalidValueError(
+                f"whether a tool result is an error is yes or no, not {describe(self.is_error)}"
+            )
+
+
+MessagePart = TextPart | ReasoningPart | ToolCallPart | ToolResultPart
 """The closed set of content a message may hold in this version.
 
 A union rather than a base class: adding a kind is adding a record and a name
 here, and every place that takes a part apart is a match a type checker can
 tell is no longer exhaustive.
 """
+
+TOOL_PARTS = (ToolCallPart, ToolResultPart)
+"""The two kinds that belong to a turn with tools, and to no user message."""
 
 
 def text_parts(text: str) -> tuple[TextPart, ...]:
@@ -221,16 +306,22 @@ def kept_parts(parts: Iterable[MessagePart]) -> tuple[MessagePart, ...]:
 
     Reasoning is dropped rather than refused: an engine translates what the
     model said and is not asked to know what the platform keeps
-    (``docs/specs/conversations.md``). If nothing is left -- a model that only
-    thought, or that said nothing at all -- what is stored is one empty piece
-    of text, because a message must have content and because a conversation
-    where the agent answered with nothing should say so rather than skip a
-    turn.
+    (``docs/specs/conversations.md``). Text and tool calls are kept. A tool
+    **result** is refused: an engine never executes a tool
+    (``docs/specs/agents.md``), so one that completed an answer with a result
+    in it is an engine that did, and that is a bug rather than content. If
+    nothing is left -- a model that only thought, or that said nothing at all
+    -- what is stored is one empty piece of text, because a message must have
+    content and because a conversation where the agent answered with nothing
+    should say so rather than skip a turn.
 
     The application calls this between the engine and the store. The day
     reasoning is kept, this is where that changes.
     """
-    kept = tuple(part for part in checked_parts(parts) if not isinstance(part, ReasoningPart))
+    checked = checked_parts(parts)
+    if any(isinstance(part, ToolResultPart) for part in checked):
+        raise InvalidValueError("an engine answers with text and tool calls, never with a result")
+    kept = tuple(part for part in checked if not isinstance(part, ReasoningPart))
     return kept or (TextPart(""),)
 
 
@@ -308,7 +399,17 @@ class Message:
     created_at: datetime
     channel: Channel = Channel.WEB
     provenance: Provenance | None = None
-    """What produced it: on an assistant message, and on no other."""
+    """What produced it: on an assistant message, and on no other.
+
+    A tool message has none: the platform wrote it, and the run that made the
+    calls it answers is recorded on its parent.
+    """
+    extras: Mapping[str, Any] = field(default_factory=dict)
+    """The vendor's opaque data, keyed by vendor; empty for nearly every message.
+
+    Stored unread and written back as it was (``docs/specs/conversations.md``,
+    "Reasoning"). A copy is kept, as plain ``dict`` and ``list``.
+    """
 
     def __post_init__(self) -> None:
         checked_uuid(self.id, "a message's id")
@@ -328,6 +429,7 @@ class Message:
                 f"a message's channel is a Channel, not {describe(self.channel)}"
             )
         object.__setattr__(self, "parts", checked_parts(self.parts))
+        object.__setattr__(self, "extras", checked_data(self.extras, "a message's extras"))
         checked_instant(self.created_at, "created_at")
         if self.role is Role.ASSISTANT:
             if not isinstance(self.provenance, Provenance):
@@ -339,11 +441,41 @@ class Message:
             raise InvalidValueError(
                 f"only an assistant message has provenance, not one of role {self.role.value!r}"
             )
+        _check_content_of(self.role, self.parts)
 
     @property
     def text(self) -> str:
         """The message's text parts, joined. Reasoning is not the answer."""
         return "".join(part.text for part in self.parts if isinstance(part, TextPart))
+
+    @property
+    def tool_calls(self) -> tuple[ToolCallPart, ...]:
+        """The calls this message made, in order: on an assistant message, else none."""
+        return tuple(part for part in self.parts if isinstance(part, ToolCallPart))
+
+    @property
+    def tool_results(self) -> tuple[ToolResultPart, ...]:
+        """The results this message holds, in order: on a tool message, else none."""
+        return tuple(part for part in self.parts if isinstance(part, ToolResultPart))
+
+
+def _check_content_of(role: Role, parts: tuple[MessagePart, ...]) -> None:
+    """What a message of ``role`` may hold (``docs/specs/conversations.md``).
+
+    A user message holds no tool part; an assistant message holds no result;
+    a tool message holds results and nothing else. And within one message no
+    two calls, and no two results, name one call id: a result is matched to
+    its call by that id, so two of one would answer nothing.
+    """
+    if role is Role.USER and any(isinstance(part, TOOL_PARTS) for part in parts):
+        raise InvalidValueError("a user message holds no tool call and no tool result")
+    if role is Role.ASSISTANT and any(isinstance(part, ToolResultPart) for part in parts):
+        raise InvalidValueError("an assistant message holds no tool result; a tool message does")
+    if role is Role.TOOL and not all(isinstance(part, ToolResultPart) for part in parts):
+        raise InvalidValueError("a tool message holds tool results and nothing else")
+    named = [part.call_id for part in parts if isinstance(part, TOOL_PARTS)]
+    if len(named) != len(set(named)):
+        raise InvalidValueError("a message names each tool call once")
 
 
 @dataclass(frozen=True, slots=True)

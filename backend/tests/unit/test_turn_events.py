@@ -69,8 +69,9 @@ def test_a_message_a_run_produces_is_never_a_root() -> None:
 
 def test_a_message_is_announced_under_a_role_this_build_carries() -> None:
     assert started().role is Role.ASSISTANT
-    with pytest.raises(InvalidValueError, match="not supported yet"):
-        started(role=Role.TOOL)
+    # A tool message is announced too: it is the platform's, produced by a
+    # run once the calls of its parent have been answered.
+    assert started(role=Role.TOOL).role is Role.TOOL
     with pytest.raises(InvalidValueError, match="is a Role"):
         started(role="assistant")
 

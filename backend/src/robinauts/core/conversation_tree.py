@@ -127,6 +127,9 @@ def check_parent(role: Role, parent: Message | None) -> None:
 
     The one place the rule is applied: the tree's own check and the check a
     new message goes through are the same check, so they cannot part company.
+    A tool message's parent must also have made calls for it to answer;
+    which calls, and that it answers each once, is ``check_answers_calls``,
+    asked of the whole message once there is one.
     """
     if parent is not None and not isinstance(parent, Message):
         raise InvalidMessageTreeError(f"a parent is a message, not {describe(parent)}")
@@ -134,6 +137,41 @@ def check_parent(role: Role, parent: Message | None) -> None:
     if not may_follow(role, parent_role):
         follows = "nothing" if parent_role is None else f"a message of role {parent_role.value!r}"
         raise InvalidMessageTreeError(f"a message of role {role.value!r} does not follow {follows}")
+    if role is Role.TOOL and parent is not None and not parent.tool_calls:
+        raise InvalidMessageTreeError("a tool message follows an answer that made tool calls")
+
+
+def check_answers_calls(message: Message, parent: Message) -> None:
+    """``InvalidMessageTreeError`` unless a tool message answers its parent's calls.
+
+    **The results of one call batch are one tool message**
+    (``docs/specs/conversations.md``): one result per call the parent made,
+    each naming its call, none missing, none extra and none twice, so that
+    the visible path holds every result and no two tool messages ever stand
+    side by side as one replacing the other. A message of another role has
+    no calls to answer and passes.
+
+    Applied where the tree is built, as every rule of the shape is, and by the
+    application before it writes a tool message -- the same check, so the two
+    cannot part company.
+    """
+    if not isinstance(message, Message) or not isinstance(parent, Message):
+        raise InvalidMessageTreeError(
+            f"a tool message and its parent are messages, not {describe(message)}"
+            f" under {describe(parent)}"
+        )
+    if message.role is not Role.TOOL:
+        return
+    if message.parent_id != parent.id:
+        raise InvalidMessageTreeError(f"message {message.id} does not hang under {parent.id}")
+    answered = [part.call_id for part in message.tool_results]
+    made = [part.call_id for part in parent.tool_calls]
+    if sorted(answered) != sorted(made):
+        raise InvalidMessageTreeError(
+            f"tool message {message.id} answers {len(answered)} call(s) and its parent"
+            f" made {len(made)}; a tool message answers exactly the calls of its parent,"
+            " once each"
+        )
 
 
 # --- the conversation, read once --------------------------------------------
@@ -194,16 +232,17 @@ class ConversationTree:
         self._check_shape()
 
     def _check_shape(self) -> None:
-        """Parents present, roles as ``may_follow`` says, no cycles."""
+        """Parents present, roles as ``may_follow`` says, tool messages answering
+        their parent's calls, no cycles."""
         for message in self.messages:
             if message.parent_id is not None and message.parent_id not in self.at:
                 raise InvalidMessageTreeError(
                     f"message {message.id} has no parent here: {message.parent_id}"
                 )
-            check_parent(
-                message.role,
-                None if message.parent_id is None else self.at[message.parent_id],
-            )
+            parent = None if message.parent_id is None else self.at[message.parent_id]
+            check_parent(message.role, parent)
+            if parent is not None:
+                check_answers_calls(message, parent)
         # Walked once per message with the settled ones remembered, so a deep
         # conversation is not re-walked from every leaf.
         settled: set[uuid.UUID] = set()

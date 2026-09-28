@@ -25,6 +25,35 @@ lines; the plan's numbering is kept where a step is named.
   the responsibilities table), `core.md` (goal 3, the one-page, "Planned")
   and `operations.md` (one identity per deployment, what the operator
   configures).
+- The MCP Python SDK is **not** a dependency: its tree fails the licence gate
+  (`cffi` states `MIT-0`, `pywin32` a family only), so the adapter to come is
+  a client of our own over `httpx`. `adapters/tools/mcp/` exists, empty, and
+  the import contract confining the SDK to it is in `pyproject.toml` with the
+  probe tests of `test_architecture.py`.
+- **The format carries tools.** `domain/tools.py`: `MAX_TOOL_NAME_CHARS`
+  (64, the vendors' rule `[A-Za-z0-9_-]`), `checked_tool_name`,
+  `MAX_CALL_ID_CHARS` (128) and `checked_call_id` (one printable word).
+  `domain/conversation.py`: `ToolCallPart(call_id, name, arguments)` and
+  `ToolResultPart(call_id, text, is_error)`; `SUPPORTED_PART_KINDS` is text,
+  reasoning and the two; `SUPPORTED_ROLES` is every role, `tool` included;
+  `Message.extras` (a bounded object, keyed by vendor, kept as a copy) and
+  `Message.tool_calls` / `tool_results`; the role rules (`_check_content_of`:
+  a tool message holds results only, a user message no tool part, an answer
+  no result, each call id once per message); `kept_parts` keeps calls and
+  refuses a result. `domain/values.py`: `checked_data` and the
+  `MAX_EXTRAS_*` bounds moved here from core, shared by `extras` and a call's
+  arguments. `AnswerCompleted.extras`. Core: the two parts' encodings
+  (`tool_call`: `call_id`, `name`, `arguments`; `tool_result`: `call_id`,
+  `text`, `is_error`), a message's `extras` written when non-empty and read
+  back into the record (a part's and an event's are still read past),
+  `check_answers_calls` (a tool message answers exactly its parent's calls,
+  once each, in any order) applied where the tree is built, and
+  `check_parent` refusing a tool message under an answer that made no
+  calls. API: `SentKind` and `SentRole` grew, `ContentPart` is a
+  discriminated union of `TextContent`, `ToolCallContent` and
+  `ToolResultContent` with every field required, and the OpenAPI snapshot
+  follows; the AG-UI mapper still refuses a `tool` announcement (the wire
+  step maps it).
 
 ## Corrections to the plan
 
@@ -113,3 +142,25 @@ Review: 1 round.
   comment cited the wrong section; the probe's docstring said "framework";
   these notes say why the steps are lettered, and the plan's logging note
   names `httpx`'s loggers rather than the SDK's.
+
+### Step 3 — the format   (feature/mcp-3-format)
+
+Summary: the two tool parts, the `tool` role carried, `extras` kept on a
+message and on a completed answer, the tree rule that a tool message answers
+exactly its parent's calls, and the wire's content schemas grown to serve
+the new parts (the spec-example test couples `SentKind` to the supported
+kinds, so the schema and the OpenAPI snapshot moved here from step 6). The
+plain-data check that `extras` had in core moved to the domain so a tool
+call's arguments share it. Nothing produces these messages yet; a stored one
+round-trips through both stores (`contracts/conversation_store.py`). Larger
+than the five hundred lines a step aims for, by the snapshot and the tests.
+
+Review: pending.
+
+Checks: lint; the whole suite against a throwaway PostgreSQL.
+Not done / to watch: `core.runs._check_completed` accepts a completed tool
+message but does not yet hold it to its parent's calls or to what was
+published for it (step 5c); the AG-UI mapper refuses a tool announcement
+until step 6a; `datastore/schema.sql`'s comment on the `tool` role still
+says "reserved and refused" and is left alone, since every edit of that file
+re-pins `SCHEMA_SHA256` and makes operators recreate their database.

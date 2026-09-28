@@ -40,7 +40,6 @@ it like the rest.
 ANSWERS = (
     "AgentListResponse",
     "AgentSummary",
-    "ContentPart",
     "ConversationListResponse",
     "ConversationSummary",
     "EndedBadlyView",
@@ -49,6 +48,9 @@ ANSWERS = (
     "ProvenanceView",
     "ResumeView",
     "RunView",
+    "TextContent",
+    "ToolCallContent",
+    "ToolResultContent",
 )
 """Every shape the conversation and agent routes answer with.
 

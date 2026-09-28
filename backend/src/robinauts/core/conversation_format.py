@@ -74,7 +74,6 @@ records it owns those columns for, inside
 
 from __future__ import annotations
 
-import json
 import uuid
 from collections.abc import Callable, Mapping
 from copy import deepcopy
@@ -84,6 +83,9 @@ from typing import Any
 
 from robinauts.domain import (
     FORMAT_VERSION,
+    MAX_EXTRAS_BYTES,
+    MAX_EXTRAS_DEPTH,
+    MAX_EXTRAS_NODES,
     MAX_PARTS,
     Channel,
     Engine,
@@ -103,14 +105,16 @@ from robinauts.domain import (
     RunState,
     TextDelta,
     TextPart,
+    ToolCallPart,
+    ToolResultPart,
     TurnEvent,
     UnsupportedFormatError,
     check_supported,
     check_supported_role,
+    checked_data,
     checked_instant,
     checked_parts,
     describe,
-    is_storable,
     reading_stored,
 )
 
@@ -121,41 +125,30 @@ Everything else unknown is refused, because a build that dropped a field it
 did not recognise would write the message back without it. This key is the
 exception, and it is an exception with a shape: an object, bounded, whose
 contents are nobody else's business. A build that does not use what is in
-there ignores it -- **this** build does not carry it on its records and never
-writes it -- and one that does knows what it put there. Vendor-specific
-extras (signed reasoning, provider message ids, cache hints), when they are
-kept, live here (``docs/specs/conversations.md``).
+there reads past it, and one that does knows what it put there. **This build
+carries it on a message** -- ``Message.extras``, where the vendor's signed
+thinking blocks live, keyed by vendor, stored unread and written back as they
+were (``docs/specs/conversations.md``, "Reasoning") -- and reads past it on a
+part and on an event, which it never writes. The bounds are
+``domain.MAX_EXTRAS_BYTES``, ``MAX_EXTRAS_DEPTH`` and ``MAX_EXTRAS_NODES``,
+which a tool call's arguments share.
 """
 
-MAX_EXTRAS_BYTES = 64 * 1024
-"""How big the extras of one message or one part may be.
-
-The UTF-8 of the canonical JSON, written as it would be written, so that the
-bound is the same 64 KiB in every script rather than four times smaller in
-one that escapes. Bounded like everything else the platform keeps: without
-it, the one key nobody reads is the one place anything at all can be stored.
-"""
-
-MAX_EXTRAS_DEPTH = 32
-"""How deeply extras may nest.
-
-Measured **before** anything is written out, by a walk that does not recurse:
-a twenty-thousand-deep object would otherwise be a ``RecursionError`` out of
-the encoder, which is neither a refusal nor a message anyone can act on.
-"""
-
-MAX_EXTRAS_NODES = 4096
-"""How many values extras may hold, counted in the same walk."""
+__all__ = ["MAX_EXTRAS_BYTES", "MAX_EXTRAS_DEPTH", "MAX_EXTRAS_NODES"]
 
 _PART_TYPES: Mapping[PartKind, type[MessagePart]] = {
     PartKind.TEXT: TextPart,
     PartKind.REASONING: ReasoningPart,
+    PartKind.TOOL_CALL: ToolCallPart,
+    PartKind.TOOL_RESULT: ToolResultPart,
 }
 """The record each kind this build carries is read into."""
 
 _PART_KEYS: Mapping[PartKind, frozenset[str]] = {
     PartKind.TEXT: frozenset({"kind", "text", EXTRAS}),
     PartKind.REASONING: frozenset({"kind", "text", EXTRAS}),
+    PartKind.TOOL_CALL: frozenset({"kind", "call_id", "name", "arguments", EXTRAS}),
+    PartKind.TOOL_RESULT: frozenset({"kind", "call_id", "text", "is_error", EXTRAS}),
 }
 """What each kind is written with. A kind has its own keys; they are checked
 against the kind, once the kind is known."""
@@ -212,14 +205,33 @@ def part_to_data(part: MessagePart) -> dict[str, Any]:
     """
     if isinstance(part, TextPart | ReasoningPart):
         return {"kind": part.kind.value, "text": part.text}
+    if isinstance(part, ToolCallPart):
+        return {
+            "kind": part.kind.value,
+            "call_id": part.call_id,
+            "name": part.name,
+            "arguments": deepcopy(dict(part.arguments)),
+        }
+    if isinstance(part, ToolResultPart):
+        return {
+            "kind": part.kind.value,
+            "call_id": part.call_id,
+            "text": part.text,
+            "is_error": part.is_error,
+        }
     raise InvalidValueError(f"there is no encoding for {describe(part)}")
 
 
 def message_to_data(message: Message) -> dict[str, Any]:
-    """A whole message as plain data: what an export writes and a store keeps."""
+    """A whole message as plain data: what an export writes and a store keeps.
+
+    ``extras`` is written when there is something in it and left out when
+    there is not: it is the one key a document may be written without, and a
+    message with nothing of a vendor's is written as it always was.
+    """
     if not isinstance(message, Message):
         raise InvalidValueError(f"a message is a Message, not {describe(message)}")
-    return {
+    data = {
         "format_version": FORMAT_VERSION,
         "id": str(message.id),
         "conversation_id": str(message.conversation_id),
@@ -232,6 +244,9 @@ def message_to_data(message: Message) -> dict[str, Any]:
             None if message.provenance is None else provenance_to_data(message.provenance)
         ),
     }
+    if message.extras:
+        data[EXTRAS] = deepcopy(dict(message.extras))
+    return data
 
 
 def provenance_to_data(provenance: Provenance) -> dict[str, Any]:
@@ -276,6 +291,23 @@ def part_from_data(data: object) -> MessagePart:
     kind = check_supported(_enum(fields.get("kind"), PartKind, "a part's kind"))
     _keys(fields, _PART_KEYS[kind], f"a {kind.value} part")
     _check_extras(fields.get(EXTRAS), "a part's extras")
+    if kind is PartKind.TOOL_CALL:
+        return ToolCallPart(
+            call_id=_required(fields, "call_id", "a tool call's id"),
+            name=_required(fields, "name", "a tool call's name"),
+            arguments=checked_data(fields.get("arguments"), "a tool call's arguments"),
+        )
+    if kind is PartKind.TOOL_RESULT:
+        is_error = fields.get("is_error")
+        if not isinstance(is_error, bool):
+            raise InvalidValueError(
+                f"whether a tool result is an error is yes or no, not {describe(is_error)}"
+            )
+        return ToolResultPart(
+            call_id=_required(fields, "call_id", "a tool result's call id"),
+            text=_required(fields, "text", "a part's text"),
+            is_error=is_error,
+        )
     return _PART_TYPES[kind](text=_required(fields, "text", "a part's text"))
 
 
@@ -283,7 +315,7 @@ def message_from_data(data: object) -> Message:
     """A whole message, read back from plain data. Every field is checked."""
     fields = _at_current_version(_mapping(data, "a message"), "a message", _MESSAGE_UPGRADES)
     _keys(fields, _MESSAGE_KEYS, "a message")
-    _check_extras(fields.get(EXTRAS), "a message's extras")
+    extras = _check_extras(fields.get(EXTRAS), "a message's extras")
     role = check_supported_role(_enum(fields.get("role"), Role, "a message's role"))
     return Message(
         id=_uuid(fields.get("id"), "a message's id"),
@@ -294,6 +326,7 @@ def message_from_data(data: object) -> Message:
         created_at=_when(fields.get("created_at"), "created_at"),
         channel=_enum(fields.get("channel"), Channel, "a message's channel"),
         provenance=_provenance(fields.get("provenance")),
+        extras=extras,
     )
 
 
@@ -370,67 +403,19 @@ def _at_current_version(
     return fields
 
 
-def _check_extras(data: object, what: str) -> None:
-    """Read past ``extras``, once it is the shape the format reserves for it.
+def _check_extras(data: object, what: str) -> dict[str, Any]:
+    """``extras``, once it is the shape the format reserves for it; empty if absent.
 
-    Checked and then dropped: this build writes nothing there and keeps
-    nothing from there. What it must not do is accept something of another
-    shape, or of no bounded size, and hand a store a row it will choke on.
-
-    The **shape** is measured first, by a walk of its own, because measuring
-    the size means writing it out and writing out a deep enough object is a
-    ``RecursionError`` -- an error nobody can act on, from a place that
-    promised a refusal.
+    The shape and the bounds are ``domain.checked_data``'s, which a tool
+    call's arguments share. What is read is returned so that a message keeps
+    its own; a part's and an event's are checked and dropped, since this
+    build writes neither. What this must not do is accept something of
+    another shape, or of no bounded size, and hand a store a row it will
+    choke on.
     """
     if data is None:
-        return
-    fields = _mapping(data, what)
-    _check_extras_shape(fields, what)
-    try:
-        # ``allow_nan=False``: ``NaN`` and the infinities are no part of JSON
-        # (RFC 8259) and Python writes them as an extension nothing else
-        # reads back. ``ensure_ascii=False``: the bound is on the UTF-8 this
-        # would really be written as -- and the encoding is inside the guard,
-        # because that is the step that can fail.
-        written = json.dumps(fields, separators=(",", ":"), allow_nan=False, ensure_ascii=False)
-        size = len(written.encode("utf-8"))
-    except (TypeError, ValueError, UnicodeError):
-        raise InvalidValueError(f"{what} is plain data an export can write") from None
-    if size > MAX_EXTRAS_BYTES:
-        raise InvalidValueError(
-            f"{what} is at most {MAX_EXTRAS_BYTES} bytes written out, not {size}"
-        )
-
-
-def _check_extras_shape(fields: Mapping[str, Any], what: str) -> None:
-    """How deep, how many, and storable throughout.
-
-    Walked with a stack rather than with the stack. The text is checked here
-    too, key and value at every depth: a NUL cannot be stored in a jsonb
-    column and a lone surrogate cannot be encoded at all, and this is the
-    walk that is already looking at every one of them.
-    """
-    nodes = 0
-    stack: list[tuple[object, int]] = [(fields, 1)]
-    while stack:
-        value, depth = stack.pop()
-        nodes += 1
-        if depth > MAX_EXTRAS_DEPTH:
-            raise InvalidValueError(f"{what} nests at most {MAX_EXTRAS_DEPTH} deep")
-        if nodes > MAX_EXTRAS_NODES:
-            raise InvalidValueError(f"{what} holds at most {MAX_EXTRAS_NODES} values")
-        if isinstance(value, str):
-            if not is_storable(value):
-                raise InvalidValueError(f"the text in {what} is storable, at every depth")
-        elif isinstance(value, Mapping):
-            for key in value:
-                if not isinstance(key, str):
-                    raise InvalidValueError(f"the keys of {what} are names, at every depth")
-                if not is_storable(key):
-                    raise InvalidValueError(f"the text in {what} is storable, at every depth")
-            stack.extend((inside, depth + 1) for inside in value.values())
-        elif isinstance(value, list | tuple):
-            stack.extend((inside, depth + 1) for inside in value)
+        return {}
+    return checked_data(data, what)
 
 
 def _version(fields: Mapping[str, Any], what: str) -> int:

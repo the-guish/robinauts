@@ -148,15 +148,17 @@ SENT_ROLE: Mapping[Role, str] = {
     Role.ASSISTANT: "assistant",
     Role.USER: "user",
 }
-"""Which of the platform's roles AG-UI has a word for, and what that word is.
+"""Which of the platform's roles AG-UI has a word for in a **text** message.
 
 Written out rather than taken from the value, because the two sets are not the
-same one: ``domain.Role`` reserves ``tool`` for the tool messages the format
-will hold, and AG-UI's ``TEXT_MESSAGE_START`` takes ``developer``, ``system``,
-``assistant`` or ``user`` and none of it. A role that is in ours and not in
-theirs is not something to send under a word that means something else; it is
-a mapping nobody has written, and it stops the stream rather than the wire
-carrying a lie.
+same one: the format holds ``tool`` messages -- the results of one batch of
+calls (``docs/specs/conversations.md``) -- and AG-UI's ``TEXT_MESSAGE_START``
+takes ``developer``, ``system``, ``assistant`` or ``user`` and not ``tool``. A
+tool message is not a text message on the wire: its results go out as
+``TOOL_CALL_RESULT`` events, each naming its call (``docs/specs/wire.md``),
+which is the mapping the wire step writes. Until then a tool message announced
+to this mapper is a role with no word, and it stops the stream rather than the
+wire carrying a lie.
 """
 
 UNSENDABLE_ROLE = "no AG-UI role stands for this role of ours"

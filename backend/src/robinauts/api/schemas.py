@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -52,6 +52,7 @@ from robinauts.domain import (
     Channel,
     Conversation,
     Engine,
+    InvalidValueError,
     Message,
     MessagePart,
     ModelConfig,
@@ -59,11 +60,14 @@ from robinauts.domain import (
     ReasoningPart,
     Run,
     RunState,
+    TextPart,
+    ToolCallPart,
+    ToolResultPart,
     User,
 )
 
-SentKind = Literal["text"]
-"""The kinds of content this build **sends**, which is one.
+SentKind = Literal["text", "tool_call", "tool_result"]
+"""The kinds of content this build **sends**, which are three.
 
 Not ``PartKind``, which names every kind the stored format has a
 discriminator for: a document that offered ``reasoning`` here would describe
@@ -72,15 +76,16 @@ generated from it would have a branch for content it can never be sent. The
 day a kind is sent, this grows a value and the committed snapshot shows it --
 which is what the snapshot is for.
 
-``test_the_wire_sends_only_the_values_it_declares`` holds it to
+``test_the_wire_declares_exactly_the_values_it_sends`` holds it to
 ``domain.SUPPORTED_PART_KINDS``.
 """
 
-SentRole = Literal["assistant", "user"]
+SentRole = Literal["assistant", "user", "tool"]
 """The roles a message can be sent with: ``domain.SUPPORTED_ROLES``.
 
-``tool`` is in ``domain.Role`` and is refused by every message this build
-reads or writes, so it is not on the wire either.
+A ``tool`` message is the results of one batch of the calls its parent made
+(``docs/specs/conversations.md``): it is served in the thread like any other
+message, holding ``tool_result`` parts and nothing else.
 """
 
 SentBadEnd = Literal["cancelled", "failed", "interrupted"]
@@ -161,23 +166,67 @@ def utc(when: datetime) -> datetime:
     return when.astimezone(UTC)
 
 
-class ContentPart(BaseModel):
-    """One piece of a message's content, named by its kind.
+class TextContent(BaseModel):
+    """A piece of text: what a person wrote, or what a model answered."""
 
-    ``kind`` is the discriminator the stored format uses
-    (``docs/specs/conversations.md``), so a client reads the kinds it knows and
-    can be given another without the shape moving. Text is the only kind this
-    build sends (``SentKind``); ``text`` is the whole of it.
-    """
-
-    kind: SentKind
+    kind: Literal["text"]
     text: str
 
-    @classmethod
-    def of(cls, part: MessagePart) -> ContentPart:
-        # ``.value``: what goes out is the plain string the format is written
-        # in, not an enum member that happens to compare equal to one.
-        return cls(kind=part.kind.value, text=part.text)
+
+class ToolCallContent(BaseModel):
+    """A tool the model asked for, in the answer that asked (``ToolCallPart``).
+
+    **Rendered as data** by a client (``docs/specs/wire.md``): the name and the
+    arguments are the model's, and the arguments are whatever it wrote.
+    """
+
+    kind: Literal["tool_call"]
+    call_id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+class ToolResultContent(BaseModel):
+    """What a tool answered for one call, in the tool message that holds the
+    batch (``ToolResultPart``). Text, and whether the call went wrong."""
+
+    kind: Literal["tool_result"]
+    call_id: str
+    text: str
+    is_error: bool
+
+
+ContentPart = Annotated[
+    TextContent | ToolCallContent | ToolResultContent, Field(discriminator="kind")
+]
+"""One piece of a message's content, named by its kind.
+
+``kind`` is the discriminator the stored format uses
+(``docs/specs/conversations.md``), so a client reads the kinds it knows and
+can be given another without the shape moving. The kinds this build sends are
+``SentKind``'s; reasoning is never among them (``MessageView.of``).
+"""
+
+
+def content_of(part: MessagePart) -> TextContent | ToolCallContent | ToolResultContent:
+    """That part as it is sent.
+
+    ``kind`` is written out rather than defaulted, so that every field of a
+    part is required in the document a client is generated from
+    (``test_openapi_snapshot``): a client then reads a part without asking
+    whether each field is there.
+    """
+    if isinstance(part, ToolCallPart):
+        return ToolCallContent(
+            kind="tool_call", call_id=part.call_id, name=part.name, arguments=dict(part.arguments)
+        )
+    if isinstance(part, ToolResultPart):
+        return ToolResultContent(
+            kind="tool_result", call_id=part.call_id, text=part.text, is_error=part.is_error
+        )
+    if isinstance(part, TextPart):
+        return TextContent(kind="text", text=part.text)
+    raise InvalidValueError(f"reasoning is not sent, and {type(part).__name__} is not a part")
 
 
 class ProvenanceView(BaseModel):
@@ -238,9 +287,7 @@ class MessageView(BaseModel):
             channel=message.channel,
             created_at=utc(message.created_at),
             parts=[
-                ContentPart.of(part)
-                for part in message.parts
-                if not isinstance(part, ReasoningPart)
+                content_of(part) for part in message.parts if not isinstance(part, ReasoningPart)
             ],
             provenance=(
                 None if message.provenance is None else ProvenanceView.of(message.provenance)

@@ -52,6 +52,7 @@ from robinauts.core.conversation_format import (
 )
 from robinauts.core.conversation_tree import (
     ConversationTree,
+    check_answers_calls,
     check_parent,
     check_tree,
     may_follow,
@@ -176,6 +177,7 @@ __all__ = [
     "active_run_stored",
     "ascii_lower",
     "authorization_url",
+    "check_answers_calls",
     "check_engine_events",
     "check_event_order",
     "check_id_token_claims",

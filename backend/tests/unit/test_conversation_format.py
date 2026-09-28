@@ -35,12 +35,32 @@ from robinauts.domain import (
     Message,
     PartKind,
     ReasoningPart,
+    Role,
     StoredDataError,
     TextPart,
+    ToolCallPart,
+    ToolResultPart,
     UnsupportedContentError,
     UnsupportedFormatError,
     text_parts,
 )
+
+CALL = ToolCallPart("toolu_01", "github__search", {"q": "robinauts", "limit": 3})
+RESULT = ToolResultPart("toolu_01", "found 3", is_error=False)
+BLOCKS = {"anthropic": {"thinking": [{"type": "thinking", "signature": "sig", "thinking": "hm"}]}}
+
+
+def results(parent: Message, *parts: ToolResultPart) -> Message:
+    """The tool message answering ``parent``'s calls."""
+    return Message(
+        id=uuid.uuid4(),
+        conversation_id=CONVERSATION,
+        parent_id=parent.id,
+        role=Role.TOOL,
+        parts=parts or (RESULT,),
+        created_at=parent.created_at,
+    )
+
 
 LETTERED = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
 """An id with letters in it, so that a spelling by case can be told apart."""
@@ -73,10 +93,72 @@ PROVENANCE = {
         question(created_at=datetime(2026, 9, 21, 9, 0, tzinfo=timezone(timedelta(hours=-3)))),
         answer(question(), seconds=2.5),
         answer(question(), parts=(ReasoningPart("thinking"), TextPart("said"))),
+        answer(question(), parts=(TextPart("Let me look."), CALL), extras=BLOCKS),
+        answer(question(), parts=(CALL, ToolCallPart("toolu_02", "jira__find", {}))),
+        results(answer(question(), parts=(CALL,))),
+        results(
+            answer(question(), parts=(CALL,)),
+            ToolResultPart("toolu_01", "it broke: é\n", is_error=True),
+        ),
+        question(extras={"vendor": {"cache": "hit", "n": [1, 2.5, None, False]}}),
     ],
 )
 def test_a_message_survives_the_round_trip_unchanged(message: Message) -> None:
     assert message_from_data(message_to_data(message)) == message
+
+
+def test_the_tool_parts_are_written_with_their_own_keys() -> None:
+    asked = answer(question(), parts=(TextPart("Let me look."), CALL))
+    assert message_to_data(asked)["parts"] == [
+        {"kind": "text", "text": "Let me look."},
+        {
+            "kind": "tool_call",
+            "call_id": "toolu_01",
+            "name": "github__search",
+            "arguments": {"q": "robinauts", "limit": 3},
+        },
+    ]
+    assert message_to_data(results(asked))["parts"] == [
+        {"kind": "tool_result", "call_id": "toolu_01", "text": "found 3", "is_error": False}
+    ]
+    assert message_to_data(results(asked))["role"] == "tool"
+    # The arguments written out are a copy: editing the document edits no record.
+    document = message_to_data(asked)
+    document["parts"][1]["arguments"]["q"] = "changed"
+    assert asked.tool_calls[0].arguments == {"q": "robinauts", "limit": 3}
+
+
+def test_a_tool_part_read_back_is_checked_as_hard_as_one_built() -> None:
+    assert part_from_data(
+        {"kind": "tool_call", "call_id": "c", "name": "t", "arguments": {"a": {"b": None}}}
+    ) == ToolCallPart("c", "t", {"a": {"b": None}})
+    for broken in (
+        {"kind": "tool_call", "call_id": "", "name": "t", "arguments": {}},
+        {"kind": "tool_call", "call_id": "c", "name": "not a name", "arguments": {}},
+        {"kind": "tool_call", "call_id": "c", "name": "t", "arguments": "q=x"},
+        {"kind": "tool_call", "call_id": "c", "name": "t", "arguments": ["q"]},
+        {"kind": "tool_call", "call_id": "c", "name": "t"},
+        {"kind": "tool_result", "call_id": "c", "text": "ok"},
+        {"kind": "tool_result", "call_id": "c", "text": "ok", "is_error": "no"},
+        {"kind": "tool_result", "call_id": "c", "text": "ok", "is_error": 0},
+        {"kind": "tool_result", "call_id": "c", "text": 7, "is_error": False},
+        {"kind": "tool_result", "call_id": "c", "text": "ok", "is_error": False, "name": "t"},
+    ):
+        with pytest.raises(InvalidValueError):
+            part_from_data(broken)
+
+
+def test_extras_are_written_when_there_are_some_and_left_out_when_not() -> None:
+    """A message with nothing of a vendor's is written as it always was."""
+    plain = question("one")
+    assert EXTRAS not in message_to_data(plain)
+    kept = answer(question(), extras=BLOCKS)
+    assert message_to_data(kept)[EXTRAS] == BLOCKS
+    assert message_from_data(message_to_data(kept)).extras == BLOCKS
+    # Written out as a copy, and read back as one.
+    document = message_to_data(kept)
+    document[EXTRAS]["anthropic"]["thinking"].clear()
+    assert kept.extras == BLOCKS
 
 
 def test_a_messages_content_is_written_inside_its_document() -> None:
@@ -94,13 +176,23 @@ def test_a_part_survives_the_round_trip() -> None:
         assert part_from_data(part_to_data(part)) == part
 
 
+SAMPLES = {
+    PartKind.TEXT: {"kind": "text", "text": "some"},
+    PartKind.REASONING: {"kind": "reasoning", "text": "some"},
+    PartKind.TOOL_CALL: {"kind": "tool_call", "call_id": "c", "name": "t", "arguments": {"a": 1}},
+    PartKind.TOOL_RESULT: {"kind": "tool_result", "call_id": "c", "text": "ok", "is_error": True},
+}
+"""One document per kind this build carries; the test below holds the two in step."""
+
+
 def test_every_kind_this_build_carries_has_an_encoder_and_a_decoder() -> None:
     """A record added to the union and forgotten here stops, rather than
     being written out as whatever fields it shares with the ones above it."""
-    for kind in SUPPORTED_PART_KINDS:
-        built = part_from_data({"kind": kind.value, "text": "some"})
+    assert set(SAMPLES) == SUPPORTED_PART_KINDS
+    for kind, sample in SAMPLES.items():
+        built = part_from_data(sample)
         assert built.kind is kind
-        assert part_to_data(built) == {"kind": kind.value, "text": "some"}
+        assert part_to_data(built) == sample
 
     class Later:
         """A kind somebody added without an encoding."""
@@ -254,8 +346,6 @@ def test_an_upgrade_that_does_not_move_the_version_is_refused(
     [
         {"kind": "image", "media_type": "image/png", "sha256": "ab" * 32},
         {"kind": "file", "filename": "notes.pdf", "media_type": "application/pdf"},
-        {"kind": "tool_call", "call_id": "c1", "name": "search", "arguments": {"q": "x"}},
-        {"kind": "tool_result", "call_id": "c1", "output": "found"},
     ],
 )
 def test_a_kind_this_build_lacks_is_unsupported_whatever_it_carries(
@@ -267,9 +357,14 @@ def test_a_kind_this_build_lacks_is_unsupported_whatever_it_carries(
         part_from_data(data)
 
 
-def test_a_message_of_the_tool_role_is_refused_by_name() -> None:
-    with pytest.raises(UnsupportedContentError, match="tool.*not supported yet"):
+def test_a_message_of_the_tool_role_is_read_and_held_to_its_rules() -> None:
+    asked = answer(question(), parts=(CALL,))
+    assert message_from_data(message_to_data(results(asked))).role is Role.TOOL
+    # The record's rules hold on the way in: a tool message holds results.
+    with pytest.raises(InvalidValueError, match="tool results and nothing else"):
         message_from_data(data_of(question(), role="tool"))
+    with pytest.raises(InvalidValueError, match="only an assistant message has provenance"):
+        message_from_data(data_of(results(asked), provenance=PROVENANCE))
 
 
 @pytest.mark.parametrize("kind", ["", "audio", "TEXT", 7, None])
@@ -331,12 +426,13 @@ def test_a_newer_builds_additive_data_is_read_past_and_ignored() -> None:
     later = data_of(message, extras={"vendor": {"cache": "hit"}, "usage": {"input": 12}})
     later["parts"] = [{"kind": "text", "text": "one", "extras": {"signature": "abc"}}]
     read = message_from_data(later)
-    assert read == message
-    assert not hasattr(read, "extras")
+    # A message's extras are this build's to keep: they come back as they were.
+    assert read == question("one", id=message.id, extras=later[EXTRAS])
+    assert read.parts == message.parts
+    # A part's are read past, and this build writes none back.
     assert not hasattr(read.parts[0], "extras")
-    # And this build writes none of it back.
-    assert EXTRAS not in message_to_data(read)
     assert EXTRAS not in message_to_data(read)["parts"][0]
+    assert message_to_data(read)[EXTRAS] == later[EXTRAS]
 
 
 def test_extras_are_an_object_and_a_bounded_one() -> None:
@@ -377,7 +473,9 @@ def test_extras_are_bounded_in_shape_before_they_are_measured() -> None:
         inside["in"] = {}
         inside = inside["in"]  # type: ignore[assignment]
     fits = question("one")
-    assert message_from_data(data_of(fits, extras=at_the_bound)) == fits
+    assert message_from_data(data_of(fits, extras=at_the_bound)) == question(
+        "one", id=fits.id, extras=at_the_bound
+    )
 
 
 def test_the_keys_of_extras_are_names_at_every_depth() -> None:

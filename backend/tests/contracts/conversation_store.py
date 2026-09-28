@@ -66,7 +66,7 @@ from conversations import (
     conversation,
     question,
 )
-from robinauts.core import message_to_data
+from robinauts.core import message_from_data, message_to_data
 from robinauts.domain import (
     MAX_TITLE_CHARS,
     Conversation,
@@ -74,6 +74,10 @@ from robinauts.domain import (
     InvalidValueError,
     Message,
     MessageNotFoundError,
+    Role,
+    TextPart,
+    ToolCallPart,
+    ToolResultPart,
 )
 from robinauts.ports import MAX_PAGE, ConversationStore
 
@@ -437,6 +441,44 @@ class ConversationStoreContract:
             await store.append_message(first, document, now=at(1))
 
             assert list(await store.messages_of(CONVERSATION)) == [document]
+
+    @asyncio_test
+    async def test_a_turn_with_tools_is_kept_whole_and_read_back(self) -> None:
+        """An answer with calls and a vendor's extras, and the tool message under
+        it, are documents like any other: the store keeps them as they are and
+        the format reads them back equal (``docs/specs/conversations.md``)."""
+        async with self.opened() as store:
+            await store.add_conversation(conversation())
+            asked = question("look it up", seconds=0)
+            calling = answer(
+                asked,
+                parts=(
+                    TextPart("Let me look."),
+                    ToolCallPart("toolu_01", "github__search", {"q": "x"}),
+                ),
+                extras={"anthropic": {"thinking": [{"signature": "sig", "thinking": "hm"}]}},
+                seconds=1,
+            )
+            answered = Message(
+                id=uuid.uuid4(),
+                conversation_id=CONVERSATION,
+                parent_id=calling.id,
+                role=Role.TOOL,
+                parts=(ToolResultPart("toolu_01", "found 3", is_error=False),),
+                created_at=at(2),
+            )
+            for message, when in ((asked, at(0)), (calling, at(1)), (answered, at(2))):
+                await store.append_message(message, message_to_data(message), now=when)
+
+            documents = await store.messages_of(CONVERSATION)
+
+            assert [message_from_data(document) for document in documents] == [
+                asked,
+                calling,
+                answered,
+            ]
+            assert documents[1]["extras"] == calling.extras
+            assert documents[2]["role"] == "tool"
 
     @asyncio_test
     async def test_appending_dates_the_conversation(self) -> None:

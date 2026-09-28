@@ -26,9 +26,13 @@ two pieces before it replaces what is still half a character.
 
 from __future__ import annotations
 
+import json
 import re
 import uuid
+from collections.abc import Mapping
+from copy import deepcopy
 from datetime import UTC, datetime
+from typing import Any
 
 from robinauts.domain.errors import InvalidValueError
 
@@ -60,6 +64,27 @@ NUL = "\x00"
 
 REPLACEMENT = "�"
 """What a lone surrogate is repaired to: the replacement character."""
+
+MAX_EXTRAS_BYTES = 64 * 1024
+"""How big the extras of one message, or the arguments of one tool call, may be.
+
+The UTF-8 of the canonical JSON, written as it would be written, so that the
+bound is the same 64 KiB in every script rather than four times smaller in
+one that escapes. Bounded like everything else the platform keeps: without
+it, the one key nobody reads is the one place anything at all can be stored
+(``docs/specs/conversations.md``, "The version").
+"""
+
+MAX_EXTRAS_DEPTH = 32
+"""How deeply such data may nest.
+
+Measured **before** anything is written out, by a walk that does not recurse:
+a twenty-thousand-deep object would otherwise be a ``RecursionError`` out of
+the encoder, which is neither a refusal nor a message anyone can act on.
+"""
+
+MAX_EXTRAS_NODES = 4096
+"""How many values such data may hold, counted in the same walk."""
 
 JOINERS = frozenset({"‍", "︎", "️"})
 """Zero-width joiner and the variation selectors.
@@ -255,6 +280,82 @@ def flush(carry: str) -> str:
     A half that never found its other half; ``""`` if nothing was held back.
     """
     return clean_text(carry)
+
+
+def checked_data(
+    data: object,
+    what: str,
+    *,
+    max_bytes: int = MAX_EXTRAS_BYTES,
+    max_depth: int = MAX_EXTRAS_DEPTH,
+    max_nodes: int = MAX_EXTRAS_NODES,
+) -> dict[str, Any]:
+    """``data`` if it is a bounded object of plain data; ``InvalidValueError`` if not.
+
+    **The shape the format reserves for ``extras``**, and the shape a tool
+    call's arguments have (``docs/specs/conversations.md``): an object whose
+    keys are names, holding strings, numbers, booleans, ``None``, lists and
+    objects of the same, storable throughout, nesting no deeper than
+    ``max_depth``, holding no more than ``max_nodes`` values, and no bigger
+    than ``max_bytes`` once written as canonical JSON. Nothing in it is read
+    for meaning here; what is checked is that a store can hold it and an
+    export can write it.
+
+    The **shape** is measured first, by a walk of its own, because measuring
+    the size means writing it out and writing out a deep enough object is a
+    ``RecursionError`` -- an error nobody can act on, from a place that
+    promised a refusal. The walk uses a stack rather than the stack, and it
+    checks the text as it goes, key and value at every depth: a NUL cannot be
+    stored in a ``jsonb`` column and a lone surrogate cannot be encoded at
+    all, and this is the walk that is already looking at every one of them.
+
+    What comes back is a **copy**, as plain ``dict`` and ``list``: a caller's
+    mapping of another kind is not kept, and a caller that goes on editing
+    what it passed edits nothing of the record's.
+    """
+    if not isinstance(data, Mapping):
+        raise InvalidValueError(f"{what} is an object, not {describe(data)}")
+    nodes = 0
+    stack: list[tuple[object, int]] = [(data, 1)]
+    while stack:
+        value, depth = stack.pop()
+        nodes += 1
+        if depth > max_depth:
+            raise InvalidValueError(f"{what} nests at most {max_depth} deep")
+        if nodes > max_nodes:
+            raise InvalidValueError(f"{what} holds at most {max_nodes} values")
+        if isinstance(value, str):
+            if not is_storable(value):
+                raise InvalidValueError(f"the text in {what} is storable, at every depth")
+        elif isinstance(value, Mapping):
+            for key in value:
+                if not isinstance(key, str):
+                    raise InvalidValueError(f"the keys of {what} are names, at every depth")
+                if not is_storable(key):
+                    raise InvalidValueError(f"the text in {what} is storable, at every depth")
+            stack.extend((inside, depth + 1) for inside in value.values())
+        elif isinstance(value, list | tuple):
+            stack.extend((inside, depth + 1) for inside in value)
+        elif value is not None and not isinstance(value, bool | int | float):
+            raise InvalidValueError(
+                f"{what} is plain data an export can write, not {describe(value)}"
+            )
+    try:
+        # ``allow_nan=False``: ``NaN`` and the infinities are no part of JSON
+        # (RFC 8259) and Python writes them as an extension nothing else
+        # reads back. ``ensure_ascii=False``: the bound is on the UTF-8 this
+        # would really be written as -- and the encoding is inside the guard,
+        # because that is the step that can fail.
+        written = json.dumps(data, separators=(",", ":"), allow_nan=False, ensure_ascii=False)
+        size = len(written.encode("utf-8"))
+    except (TypeError, ValueError, UnicodeError):
+        raise InvalidValueError(f"{what} is plain data an export can write") from None
+    if size > max_bytes:
+        raise InvalidValueError(f"{what} is at most {max_bytes} bytes written out, not {size}")
+    # Through JSON and back rather than ``deepcopy`` alone: what is kept is
+    # exactly what would be written, as ``dict`` and ``list``, whatever
+    # mapping or sequence types the caller built it from.
+    return deepcopy(json.loads(written))
 
 
 def checked_line(value: object, what: str, limit: int) -> str:

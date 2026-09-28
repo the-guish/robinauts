@@ -10,9 +10,10 @@ from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
-from conversations import CONVERSATION, OTHER_CONVERSATION, answer, question
+from conversations import CONVERSATION, OTHER_CONVERSATION, answer, at, question
 from robinauts.core import (
     ConversationTree,
+    check_answers_calls,
     check_parent,
     check_tree,
     may_follow,
@@ -20,12 +21,16 @@ from robinauts.core import (
     tree_of_stored,
 )
 from robinauts.domain import (
+    Channel,
     InvalidMessageTreeError,
     InvalidValueError,
     Message,
     MessageNotFoundError,
     Role,
     StoredDataError,
+    TextPart,
+    ToolCallPart,
+    ToolResultPart,
 )
 
 
@@ -36,6 +41,32 @@ def exchange() -> tuple[Message, Message, Message, Message]:
     second = question("two", parent=said, seconds=2)
     replied = answer(second, "2", seconds=3)
     return first, said, second, replied
+
+
+def call(call_id: str) -> ToolCallPart:
+    return ToolCallPart(call_id, "github__search", {"q": call_id})
+
+
+def results(parent: Message, *call_ids: str, seconds: float = 2.0) -> Message:
+    """The tool message under ``parent`` answering those calls, one result each."""
+    return Message(
+        id=uuid.uuid4(),
+        conversation_id=CONVERSATION,
+        parent_id=parent.id,
+        role=Role.TOOL,
+        parts=tuple(ToolResultPart(call_id, f"result of {call_id}") for call_id in call_ids),
+        created_at=at(seconds),
+        channel=Channel.WEB,
+    )
+
+
+def tool_turn() -> tuple[Message, Message, Message, Message]:
+    """A question, an answer that calls two tools, the results, the final answer."""
+    asked = question("look it up", seconds=0)
+    calling = answer(asked, parts=(TextPart("Let me look."), call("c1"), call("c2")), seconds=1)
+    answered = results(calling, "c1", "c2", seconds=2)
+    final = answer(answered, "Found it.", seconds=3)
+    return asked, calling, answered, final
 
 
 def once(messages: Iterable[Message]) -> Iterator[Message]:
@@ -100,6 +131,63 @@ def test_check_parent_applies_the_rule_to_a_message() -> None:
         check_parent(Role.ASSISTANT, None)
     with pytest.raises(InvalidMessageTreeError, match="does not follow"):
         check_parent(Role.USER, first)
+
+
+def test_a_tool_message_follows_an_answer_that_made_calls() -> None:
+    asked, calling, answered, final = tool_turn()
+    assert check_parent(Role.TOOL, calling) is None
+    assert check_parent(Role.ASSISTANT, answered) is None
+    with pytest.raises(InvalidMessageTreeError, match="made tool calls"):
+        check_parent(Role.TOOL, answer(asked, "no calls here"))
+    with pytest.raises(InvalidMessageTreeError, match="does not follow"):
+        check_parent(Role.TOOL, asked)
+
+
+def test_a_tool_message_answers_exactly_the_calls_of_its_parent_once_each() -> None:
+    """The results of one call batch are one tool message: none missing, none
+    extra, none twice (``docs/specs/conversations.md``)."""
+    asked, calling, answered, final = tool_turn()
+    assert check_answers_calls(answered, calling) is None
+    # In either order: a batch runs in parallel and its results land as they land.
+    assert check_answers_calls(results(calling, "c2", "c1"), calling) is None
+    for wrong in (
+        results(calling, "c1"),
+        results(calling, "c1", "c2", "c3"),
+        results(calling, "c1", "c3"),
+    ):
+        with pytest.raises(InvalidMessageTreeError, match="exactly the calls of its parent"):
+            check_answers_calls(wrong, calling)
+    # A message of another role has no calls to answer.
+    assert check_answers_calls(final, answered) is None
+    assert check_answers_calls(asked, calling) is None
+    # Under the wrong parent it is not that parent's answer at all.
+    with pytest.raises(InvalidMessageTreeError, match="does not hang under"):
+        check_answers_calls(answered, answer(asked, parts=(call("c1"), call("c2"))))
+    with pytest.raises(InvalidMessageTreeError):
+        check_answers_calls("not a message", calling)  # type: ignore[arg-type]
+
+
+def test_the_tree_holds_a_tool_message_to_its_parents_calls() -> None:
+    asked, calling, answered, final = tool_turn()
+    whole = tree([asked, calling, answered, final])
+    assert whole.path_to(final.id) == (asked, calling, answered, final)
+    assert whole.turn_start(final.id) == asked
+    assert whole.parent_for_regenerate(final.id) == asked.id
+    # The rule is the tree's: rows that break it are no conversation.
+    with pytest.raises(InvalidMessageTreeError, match="exactly the calls of its parent"):
+        tree([asked, calling, results(calling, "c1")])
+    plain = answer(asked, "plain", seconds=1)
+    with pytest.raises(InvalidMessageTreeError, match="made tool calls"):
+        tree([asked, plain, results(plain, "c1")])
+    # Two tool messages under one answer would read as one replacing the other.
+    first = results(calling, "c1", "c2", seconds=2)
+    second = results(calling, "c1", "c2", seconds=2.5)
+    both = tree([asked, calling, first, second])
+    assert both.visible_path() == (asked, calling, second)
+    # A call left without a result is a run that stopped, and the format allows it.
+    assert tree([asked, calling]).visible_path() == (asked, calling)
+    with pytest.raises(StoredDataError):
+        tree_of_stored([asked, calling, results(calling, "c1")], conversation_id=CONVERSATION)
 
 
 # --- what a collection of messages must be ----------------------------------

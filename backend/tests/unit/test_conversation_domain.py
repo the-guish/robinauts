@@ -24,29 +24,38 @@ from conversations import (
 from robinauts.domain import (
     EARLIEST_YEAR,
     LATEST_YEAR,
+    MAX_CALL_ID_CHARS,
+    MAX_EXTRAS_BYTES,
     MAX_PART_CHARS,
     MAX_PARTS,
     MAX_TITLE_CHARS,
+    MAX_TOOL_NAME_CHARS,
     SUPPORTED_PART_KINDS,
     SUPPORTED_ROLES,
     Channel,
     Conversation,
     Engine,
     InvalidValueError,
+    Message,
     MessagePart,
     PartKind,
     ReasoningPart,
     Role,
     TextPart,
+    ToolCallPart,
+    ToolResultPart,
     UnsupportedContentError,
     check_supported,
     check_supported_role,
+    checked_call_id,
     checked_config_id,
     checked_fragment,
     checked_parts,
+    checked_tool_name,
     clean_text,
     describe,
     is_config_id,
+    is_tool_name,
     kept_parts,
 )
 
@@ -189,7 +198,7 @@ def test_what_a_refusal_says_instead() -> None:
     assert describe(b"ab") == "2 bytes"
 
 
-def test_the_format_names_every_kind_and_carries_two_of_them() -> None:
+def test_the_format_names_every_kind_and_carries_four_of_them() -> None:
     assert {kind.value for kind in PartKind} == {
         "text",
         "image",
@@ -198,25 +207,139 @@ def test_the_format_names_every_kind_and_carries_two_of_them() -> None:
         "tool_call",
         "tool_result",
     }
-    assert SUPPORTED_PART_KINDS == {PartKind.TEXT, PartKind.REASONING}
+    assert SUPPORTED_PART_KINDS == {
+        PartKind.TEXT,
+        PartKind.REASONING,
+        PartKind.TOOL_CALL,
+        PartKind.TOOL_RESULT,
+    }
     assert isinstance(TextPart(""), MessagePart)
     assert isinstance(ReasoningPart(""), MessagePart)
+    assert isinstance(call(), MessagePart)
+    assert isinstance(result(), MessagePart)
+    for kind in SUPPORTED_PART_KINDS:
+        assert check_supported(kind) is kind
 
 
-@pytest.mark.parametrize(
-    "kind", [PartKind.IMAGE, PartKind.FILE, PartKind.TOOL_CALL, PartKind.TOOL_RESULT]
-)
+@pytest.mark.parametrize("kind", [PartKind.IMAGE, PartKind.FILE])
 def test_a_kind_this_build_does_not_carry_is_refused_by_name(kind: PartKind) -> None:
     with pytest.raises(UnsupportedContentError, match=f"{kind.value}.*not supported yet"):
         check_supported(kind)
 
 
-def test_the_roles_are_the_two_a_turn_has_and_the_one_tools_will_need() -> None:
+def test_the_roles_are_the_three_a_turn_with_tools_has() -> None:
     assert {role.value for role in Role} == {"user", "assistant", "tool"}
-    assert SUPPORTED_ROLES == {Role.USER, Role.ASSISTANT}
-    assert check_supported_role(Role.USER) is Role.USER
-    with pytest.raises(UnsupportedContentError, match="tool.*not supported yet"):
-        check_supported_role(Role.TOOL)
+    assert SUPPORTED_ROLES == {Role.USER, Role.ASSISTANT, Role.TOOL}
+    for role in Role:
+        assert check_supported_role(role) is role
+
+
+# --- tool parts ---------------------------------------------------------------
+
+
+def call(
+    call_id: str = "toolu_01", name: str = "github__search", **arguments: object
+) -> ToolCallPart:
+    return ToolCallPart(call_id=call_id, name=name, arguments=arguments or {"q": "robinauts"})
+
+
+def result(call_id: str = "toolu_01", text: str = "found 3", **changes: object) -> ToolResultPart:
+    fields: dict[str, object] = {"call_id": call_id, "text": text}
+    fields.update(changes)
+    return ToolResultPart(**fields)  # type: ignore[arg-type]
+
+
+def test_a_tool_call_names_the_call_the_tool_and_its_arguments() -> None:
+    made = call("toolu_01", "github__search", q="x", limit=3)
+    assert (made.call_id, made.name, made.arguments) == (
+        "toolu_01",
+        "github__search",
+        {"q": "x", "limit": 3},
+    )
+    assert made.kind is PartKind.TOOL_CALL
+    assert ToolCallPart("c", "t").arguments == {}
+
+
+def test_a_tool_calls_arguments_are_a_copy_of_plain_data() -> None:
+    written = {"nested": {"list": [1, "two", None, True]}}
+    made = ToolCallPart("c", "t", written)
+    written["nested"]["list"].append("later")  # type: ignore[index]
+    assert made.arguments == {"nested": {"list": [1, "two", None, True]}}
+    assert isinstance(made.arguments, dict)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    ["q=x", ["a", "list"], 7, None, {"a": object()}, {7: "keys"}, {"a": float("nan")}],
+)
+def test_a_tool_calls_arguments_are_an_object_of_plain_data(arguments: object) -> None:
+    with pytest.raises(InvalidValueError):
+        ToolCallPart("c", "t", arguments)  # type: ignore[arg-type]
+
+
+def test_a_tool_calls_arguments_are_bounded_as_extras_are() -> None:
+    with pytest.raises(InvalidValueError, match="at most"):
+        ToolCallPart("c", "t", {"big": "x" * MAX_EXTRAS_BYTES})
+    with pytest.raises(InvalidValueError, match="storable"):
+        ToolCallPart("c", "t", {"a": "\x00"})
+
+
+@pytest.mark.parametrize("name", ["search", "github__search", "a-b_c9", "x" * MAX_TOOL_NAME_CHARS])
+def test_a_tool_name_is_what_the_vendors_accept(name: str) -> None:
+    assert is_tool_name(name)
+    assert checked_tool_name(name, "a tool's name") == name
+    assert ToolCallPart("c", name).name == name
+
+
+@pytest.mark.parametrize(
+    "name", ["", "with space", "x" * (MAX_TOOL_NAME_CHARS + 1), "é", "a.b", 7, None]
+)
+def test_anything_else_is_no_tool_name(name: object) -> None:
+    assert not is_tool_name(name)
+    with pytest.raises(InvalidValueError):
+        checked_tool_name(name, "a tool's name")
+    with pytest.raises(InvalidValueError):
+        ToolCallPart("c", name)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("call_id", ["toolu_01A09q90", "call_abc", "1", "x" * MAX_CALL_ID_CHARS])
+def test_a_call_id_is_one_word_of_printable_text(call_id: str) -> None:
+    assert checked_call_id(call_id, "a call's id") == call_id
+    assert result(call_id).call_id == call_id
+
+
+@pytest.mark.parametrize(
+    "call_id", ["", " ", "two words", "a\nb", "x" * (MAX_CALL_ID_CHARS + 1), 7, None]
+)
+def test_anything_else_is_no_call_id(call_id: object) -> None:
+    with pytest.raises(InvalidValueError):
+        checked_call_id(call_id, "a call's id")
+    with pytest.raises(InvalidValueError):
+        ToolCallPart(call_id, "t")  # type: ignore[arg-type]
+    with pytest.raises(InvalidValueError):
+        ToolResultPart(call_id, "found")  # type: ignore[arg-type]
+
+
+def test_a_tool_result_answers_one_call_with_text_and_says_if_it_went_wrong() -> None:
+    assert result().is_error is False
+    assert result(is_error=True).is_error is True
+    assert result().kind is PartKind.TOOL_RESULT
+    assert ToolResultPart("c", "a" * MAX_PART_CHARS).text
+    with pytest.raises(InvalidValueError):
+        ToolResultPart("c", "a" * (MAX_PART_CHARS + 1))
+    with pytest.raises(InvalidValueError):
+        ToolResultPart("c", "a\x00b")
+    with pytest.raises(InvalidValueError, match="yes or no"):
+        result(is_error="yes")
+    with pytest.raises(InvalidValueError, match="yes or no"):
+        result(is_error=1)
+
+
+def test_the_tool_parts_are_frozen() -> None:
+    with pytest.raises(FrozenInstanceError):
+        call().name = "other"  # type: ignore[misc]
+    with pytest.raises(FrozenInstanceError):
+        result().text = "other"  # type: ignore[misc]
 
 
 # --- provenance -------------------------------------------------------------
@@ -270,11 +393,19 @@ def test_a_question_with_provenance_is_refused() -> None:
 def test_what_this_version_keeps_of_an_answer() -> None:
     """Reasoning is dropped rather than refused, and a message always has
     content: a model that said nothing answered with nothing, which is a
-    thing a conversation should record rather than skip."""
+    thing a conversation should record rather than skip. A tool call is
+    kept; a tool result is an engine that executed a tool, and refused."""
     assert kept_parts((TextPart("Hi"), ReasoningPart("thinking"))) == (TextPart("Hi"),)
     assert kept_parts((ReasoningPart("thinking"),)) == (TextPart(""),)
     assert kept_parts((TextPart(""),)) == (TextPart(""),)
     assert kept_parts([TextPart("a"), TextPart("b")]) == (TextPart("a"), TextPart("b"))
+    assert kept_parts((ReasoningPart("hmm"), TextPart("Let me look."), call())) == (
+        TextPart("Let me look."),
+        call(),
+    )
+    assert kept_parts((call(),)) == (call(),)
+    with pytest.raises(InvalidValueError, match="never with a result"):
+        kept_parts((TextPart("hi"), result()))
     with pytest.raises(InvalidValueError):
         kept_parts(())
     with pytest.raises(InvalidValueError):
@@ -368,9 +499,73 @@ def test_a_message_is_not_its_own_parent() -> None:
         question(id=message_id, parent=message_id)
 
 
-def test_a_message_of_the_tool_role_is_not_supported_yet() -> None:
-    with pytest.raises(UnsupportedContentError, match="tool.*not supported yet"):
-        question(role=Role.TOOL)
+def tool_message(parent: Message, *results: ToolResultPart, **changes: object) -> Message:
+    fields: dict[str, object] = {
+        "id": uuid.uuid4(),
+        "conversation_id": CONVERSATION,
+        "parent_id": parent.id,
+        "role": Role.TOOL,
+        "parts": results or (result(),),
+        "created_at": parent.created_at + timedelta(seconds=1),
+        "channel": Channel.WEB,
+    }
+    fields.update(changes)
+    return Message(**fields)  # type: ignore[arg-type]
+
+
+def test_a_tool_message_holds_results_and_nothing_else() -> None:
+    asked = answer(question(), parts=(call(),))
+    results = tool_message(asked, result("toolu_01"), result("toolu_02", is_error=True))
+    assert results.role is Role.TOOL
+    assert results.tool_results == (result("toolu_01"), result("toolu_02", is_error=True))
+    assert results.tool_calls == ()
+    assert results.text == ""
+    assert results.provenance is None
+    for parts in ((TextPart("hi"),), (result(), TextPart("")), (call(),), (ReasoningPart("x"),)):
+        with pytest.raises(InvalidValueError, match="tool results and nothing else"):
+            tool_message(asked, *parts)  # type: ignore[arg-type]
+    with pytest.raises(InvalidValueError, match="only an assistant message has provenance"):
+        tool_message(asked, provenance=provenance())
+
+
+def test_an_answer_holds_its_calls_and_never_a_result() -> None:
+    asked = answer(question(), parts=(TextPart("Let me look."), call("toolu_01"), call("toolu_02")))
+    assert asked.tool_calls == (call("toolu_01"), call("toolu_02"))
+    assert asked.tool_results == ()
+    assert asked.text == "Let me look."
+    assert answer(question(), parts=(call(),)).text == ""
+    with pytest.raises(InvalidValueError, match="holds no tool result"):
+        answer(question(), parts=(TextPart("hi"), result()))
+
+
+def test_a_question_holds_no_tool_part() -> None:
+    for part in (call(), result()):
+        with pytest.raises(InvalidValueError, match="no tool call and no tool result"):
+            question(parts=(TextPart("hi"), part))
+
+
+def test_a_message_names_each_call_once() -> None:
+    with pytest.raises(InvalidValueError, match="each tool call once"):
+        answer(question(), parts=(call("same"), call("same", "other__tool")))
+    asked = answer(question(), parts=(call("same"),))
+    with pytest.raises(InvalidValueError, match="each tool call once"):
+        tool_message(asked, result("same"), result("same", "again"))
+
+
+def test_a_message_carries_a_vendors_extras_unread_and_bounded() -> None:
+    assert question().extras == {}
+    kept = answer(question(), extras={"anthropic": {"thinking": [{"signature": "sig"}]}})
+    assert kept.extras == {"anthropic": {"thinking": [{"signature": "sig"}]}}
+    assert isinstance(kept.extras, dict)
+    given: dict[str, object] = {"vendor": {"a": 1}}
+    kept = question(extras=given)
+    given["vendor"] = "changed"  # the record keeps a copy
+    assert kept.extras == {"vendor": {"a": 1}}
+    with pytest.raises(InvalidValueError, match="at most"):
+        question(extras={"vendor": "x" * MAX_EXTRAS_BYTES})
+    for broken in ("text", ["a", "list"], {"a": object()}, {7: "keys"}):
+        with pytest.raises(InvalidValueError):
+            question(extras=broken)  # type: ignore[arg-type]
 
 
 def test_a_messages_text_is_its_text_parts_and_not_its_reasoning() -> None:

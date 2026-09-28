@@ -54,26 +54,6 @@
         "title": "Channel",
         "type": "string"
       },
-      "ContentPart": {
-        "description": "One piece of a message's content, named by its kind.\n\n``kind`` is the discriminator the stored format uses\n(``docs/specs/conversations.md``), so a client reads the kinds it knows and\ncan be given another without the shape moving. Text is the only kind this\nbuild sends (``SentKind``); ``text`` is the whole of it.",
-        "properties": {
-          "kind": {
-            "const": "text",
-            "title": "Kind",
-            "type": "string"
-          },
-          "text": {
-            "title": "Text",
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "text"
-        ],
-        "title": "ContentPart",
-        "type": "object"
-      },
       "ConversationListResponse": {
         "description": "One page of the caller's conversations, and how to ask for the next.\n\n``next_cursor`` is ``null`` on the last page. It is opaque: a position\ninside this person's own listing, written by the store and read by it, and\nnothing a client should take apart (``docs/specs/conversations.md``).",
         "properties": {
@@ -236,7 +216,25 @@
           },
           "parts": {
             "items": {
-              "$ref": "#/components/schemas/ContentPart"
+              "discriminator": {
+                "mapping": {
+                  "text": "#/components/schemas/TextContent",
+                  "tool_call": "#/components/schemas/ToolCallContent",
+                  "tool_result": "#/components/schemas/ToolResultContent"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/TextContent"
+                },
+                {
+                  "$ref": "#/components/schemas/ToolCallContent"
+                },
+                {
+                  "$ref": "#/components/schemas/ToolResultContent"
+                }
+              ]
             },
             "title": "Parts",
             "type": "array"
@@ -254,7 +252,8 @@
           "role": {
             "enum": [
               "assistant",
-              "user"
+              "user",
+              "tool"
             ],
             "title": "Role",
             "type": "string"
@@ -576,6 +575,87 @@
           "model_id"
         ],
         "title": "SetModelRequest",
+        "type": "object"
+      },
+      "TextContent": {
+        "description": "A piece of text: what a person wrote, or what a model answered.",
+        "properties": {
+          "kind": {
+            "const": "text",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "text"
+        ],
+        "title": "TextContent",
+        "type": "object"
+      },
+      "ToolCallContent": {
+        "description": "A tool the model asked for, in the answer that asked (``ToolCallPart``).\n\n**Rendered as data** by a client (``docs/specs/wire.md``): the name and the\narguments are the model's, and the arguments are whatever it wrote.",
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "call_id": {
+            "title": "Call Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "tool_call",
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "call_id",
+          "name",
+          "arguments"
+        ],
+        "title": "ToolCallContent",
+        "type": "object"
+      },
+      "ToolResultContent": {
+        "description": "What a tool answered for one call, in the tool message that holds the\nbatch (``ToolResultPart``). Text, and whether the call went wrong.",
+        "properties": {
+          "call_id": {
+            "title": "Call Id",
+            "type": "string"
+          },
+          "is_error": {
+            "title": "Is Error",
+            "type": "boolean"
+          },
+          "kind": {
+            "const": "tool_result",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "call_id",
+          "text",
+          "is_error"
+        ],
+        "title": "ToolResultContent",
         "type": "object"
       },
       "UserSummary": {
