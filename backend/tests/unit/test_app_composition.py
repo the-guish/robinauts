@@ -794,6 +794,44 @@ async def test_opening_builds_the_mcp_adapter_over_the_secrets_read_and_closing_
     assert built[0].closed == 1
 
 
+def test_tool_servers_handed_in_without_the_port_and_an_agent_naming_an_unknown_one_are_refused(
+    tmp_path: Path,
+) -> None:
+    """Refused at configuration, not found out in the middle of somebody's
+    turn: the adapter ``open`` builds holds the file's secrets and no
+    others, and an agent's servers must be among those to be wired."""
+    definition = agent_definition(tools=("github",))
+    github = ToolServerConfig(
+        id="github", url="https://github.example.test/mcp/", secret_env="ROBINAUTS_GITHUB_TOKEN"
+    )
+    with pytest.raises(ConfigError) as raised:
+        deployed(
+            tmp_path,
+            agents={definition.id: definition},
+            models=offered(),
+            engines={definition.engine: ScriptedAgent()},
+            servers={"github": github},
+        )
+    assert list(raised.value.problems) == [
+        "tool servers were handed in without the port that reaches them: the adapter"
+        " this build constructs holds the secrets of the configuration's servers, so"
+        " configure them, or hand in the tool servers as well"
+    ]
+
+    with pytest.raises(ConfigError) as raised:
+        deployed(
+            tmp_path,
+            agents={definition.id: definition},
+            models=offered(),
+            engines={definition.engine: ScriptedAgent()},
+            tool_servers=MemoryToolServers(),
+        )
+    assert list(raised.value.problems) == [
+        "the agent 'assistant' that was handed in uses tool server 'github', which is not"
+        " configured: configure the server, or hand it in beside the agent"
+    ]
+
+
 @asyncio_test
 async def test_a_tool_servers_port_handed_in_is_the_one_a_turn_reaches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

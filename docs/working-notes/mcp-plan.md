@@ -71,8 +71,8 @@ changes (listed at the end).
    wants, and both engines are handed the same list. A run taken up again
    after `waiting` lists again, which is the ordinary stateless turn. There
    is **no cache**: no state in the process, nothing to size or expire, and a
-   server that will not list fails the run before anything is written, with
-   the server named. The cost accepted is one round trip per server per
+   server that will not list fails the run before the engine is called and
+   before any answer is written, with the server named. The cost accepted is one round trip per server per
    turn, in parallel across servers, before the first model call. A cache in
    front of the port's listing is the named extension (see "Backlog"), and it
    is an adapter's change that nothing above the port would see.

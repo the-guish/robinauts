@@ -30,11 +30,14 @@ costs a bounded wait and never an event.
 
 **What ``execute`` writes, in order** (``docs/specs/runs.md``, "In the
 layout"): the run started, once, first; for each answer, its announcement,
-then its text and its thinking as they arrive, then the message itself,
-**stored with the event that announces it**; the run ended, once, last. Every
-event is numbered from 1 with no gaps by this layer -- an engine knows nothing
-of positions -- so one run is numbered one way whichever engine produced it,
-and everything stored satisfies ``core.check_event_order``.
+then its text, its thinking and its tool calls as they arrive, then the
+message itself, **stored with the event that announces it**; for an answer
+that asked for tools, the one tool message of the batch after it -- its
+announcement, each result as it lands, the message itself -- and then the
+next answer; the run ended, once, last. Every event is numbered from 1 with
+no gaps by this layer -- an engine knows nothing of positions -- so one run
+is numbered one way whichever engine produced it, and everything stored
+satisfies ``core.check_event_order``.
 
 **What was published is what was stored.** The engine's fragments go through
 ``domain.publishable`` / ``flush``, so nothing published ends on half a
@@ -52,10 +55,12 @@ failures (a ``finished`` run has at least one message and nothing
 half-written). The engine raises: ``failed``, with a description of what was
 raised -- its type and what it said, made storable and bounded by
 ``core.run_error``, never a traceback -- and the answer in flight is left
-uncompleted. The turn takes too long: ``failed``, saying so. The task is
-cancelled: ``cancelled``, written under a shield so the ending reaches the
-store, and the ``CancelledError`` is **re-raised**, because a coroutine that
-swallowed one would leave whoever cancelled it waiting.
+uncompleted. The turn takes too long: ``failed``, saying so. The turn goes
+back to the model with tool results more times than the bound allows, or a
+round after tool results produces no answer: ``failed``, saying which. The
+task is cancelled: ``cancelled``, written under a shield so the ending
+reaches the store, and the ``CancelledError`` is **re-raised**, because a
+coroutine that swallowed one would leave whoever cancelled it waiting.
 
 **A run that has ended is done with**, and the store says so. If a write is
 refused because the run ended under us -- somebody cancelled it, another
@@ -270,6 +275,15 @@ TOO_MANY_ROUNDS = (
     " allows, and the model asked for more"
 )
 """Why a turn that reaches ``max_tool_rounds`` fails."""
+
+NO_ANSWER_AFTER_TOOLS = "the agent produced no answer after the tool results"
+"""What a turn whose round after a batch of results yielded nothing records.
+
+A failure, as a turn that yields nothing at all is (``NO_ANSWER``): a run that
+finished on a tool message would be one nothing can continue from -- a
+question does not follow a tool message, and a tool message is not
+regenerated (``docs/specs/conversations.md``).
+"""
 
 NO_SUCH_TOOL = "no tool {name!r} is offered to this agent"
 """What a call for a tool the run was not handed is answered with: an error result.
@@ -1008,6 +1022,10 @@ class Turns:
             if _being_cancelled():
                 return _Ending(self._stopped_in())
             return _Ending(RunState.FAILED, TOO_MANY_ROUNDS)
+        except _NoAnswerAfterTools:
+            if _being_cancelled():
+                return _Ending(self._stopped_in())
+            return _Ending(RunState.FAILED, NO_ANSWER_AFTER_TOOLS)
         except TimeoutError as failure:
             if _being_cancelled():
                 return _Ending(self._stopped_in())
@@ -1063,11 +1081,13 @@ class Turns:
                 await self._released(pump)
             outcome = await self._round(stream, pump, definition, history, tools, parent_id)
             answers += outcome.answers
+            if rounds and not outcome.answers and not outcome.unfinished:
+                raise _NoAnswerAfterTools
             if outcome.unfinished or outcome.calling is None:
                 return answers, outcome.unfinished
             if rounds >= self._max_tool_rounds:
                 raise _TooManyRounds
-            parent_id = (await self._answered(stream, definition, outcome.calling)).id
+            parent_id = (await self._answered(stream, definition, outcome.calling, tools)).id
         raise AssertionError("unreachable")  # pragma: no cover
 
     async def _round(
@@ -1089,6 +1109,7 @@ class Turns:
         open_call: str | None = None
         announced_calls: list[tuple[str, str]] = []
         calling: Message | None = None
+        over = False
         # Consumed by a task of its own, through a bounded queue: what the
         # lifecycle awaits is the queue, so a cancellation reaches it at once
         # however long the engine then takes to let go, and a provider faster
@@ -1097,9 +1118,17 @@ class Turns:
         # up again runs on what it was begun on.
         pump.begin(self._engine(run.engine).run_turn(definition, history, tools, model=run.model))
         while (event := await pump.next()) is not None:
+            # The order ``core.check_engine_events`` holds an engine to, held
+            # here as well for the two turns of it that would otherwise store
+            # a stream nothing can read back: nothing follows the turn ending
+            # waiting, and no answer follows one that asked for tools.
+            if over:
+                raise InvalidValueError("a turn that is waiting on tools yields nothing more")
             if isinstance(event, AnswerStarted):
                 if open_id is not None:
                     raise InvalidValueError("an engine produces one answer at a time")
+                if calling is not None:
+                    raise InvalidValueError("a turn that asked for tools ends waiting on them")
                 open_id = self._ids.new_id()
                 said, thought, calling, announced_calls = _Text(), _Text(), None, []
                 await stream.publish(
@@ -1126,6 +1155,8 @@ class Turns:
                 open_id = _inside(open_id)
                 if open_call is not None:
                     raise InvalidValueError("an engine announces one tool call at a time")
+                if any(call_id == event.call_id for call_id, _ in announced_calls):
+                    raise InvalidValueError("an answer names each tool call once")
                 open_call, arguments = event.call_id, _Text()
                 announced_calls.append((event.call_id, event.name))
                 await stream.publish(
@@ -1190,6 +1221,7 @@ class Turns:
                     raise InvalidValueError("a turn waits on the tools an answer asked for")
                 # The port's word for how this round ended; what follows is
                 # the loop's, once the engine has let go.
+                over = True
             else:
                 raise InvalidValueError(f"an engine yields engine events, not {describe(event)}")
         return _Round(answers=answers, unfinished=open_id is not None, calling=calling)
@@ -1207,7 +1239,15 @@ class Turns:
         port = self._turn_servers
         assert port is not None  # the constructor refused an agent with tools otherwise
         servers = [self._servers[server_id] for server_id in definition.tools]
-        listed = await asyncio.gather(*(port.list_tools(server) for server in servers))
+        listings = [asyncio.create_task(port.list_tools(server)) for server in servers]
+        try:
+            listed = await asyncio.gather(*listings)
+        except BaseException:
+            # One that failed fails the run; the others are not left asking.
+            for listing in listings:
+                listing.cancel()
+                listing.add_done_callback(_forgotten)
+            raise
         kept, left_out = tools_for_run(servers, dict(zip(definition.tools, listed, strict=True)))
         for out in left_out:
             _log.warning(
@@ -1219,7 +1259,11 @@ class Turns:
         return kept
 
     async def _answered(
-        self, stream: _Stream, definition: AgentDefinition, calling: Message
+        self,
+        stream: _Stream,
+        definition: AgentDefinition,
+        calling: Message,
+        tools: Sequence[ToolDefinition],
     ) -> Message:
         """Run the calls of that answer and store the one tool message that answers them.
 
@@ -1228,6 +1272,12 @@ class Turns:
         "Tools"). A server that cannot be reached fails the run from here;
         a cancellation on the way leaves the calls stored with no result,
         which the format allows.
+
+        **The calls still running are let go of, bounded**, as the engine is
+        (``_released``): cancelled, then waited for ``CLOSING_SECONDS`` without
+        waiting on them, and abandoned with a line in the log past that. A
+        tool that will not let go must not hold a run that is over, in the
+        task the executor is waiting to reap.
         """
         run = stream.run
         tool_id = self._ids.new_id()
@@ -1238,11 +1288,12 @@ class Turns:
             self._servers[server_id].prefix: self._servers[server_id]
             for server_id in definition.tools
         }
+        offered = frozenset(tool.name for tool in tools)
         landed: asyncio.Queue[tuple[ToolCallPart, ToolResultPart | Exception]] = asyncio.Queue()
 
         async def one(call: ToolCallPart) -> None:
             try:
-                result = await self._called(by_prefix, call)
+                result = await self._called(by_prefix, offered, call)
             except Exception as failure:  # noqa: BLE001 - handed to the loop below
                 await landed.put((call, failure))
             else:
@@ -1268,7 +1319,16 @@ class Turns:
         finally:
             for task in tasks:
                 task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            if tasks:
+                try:
+                    _, pending = await asyncio.wait(tasks, timeout=CLOSING_SECONDS)
+                except asyncio.CancelledError:
+                    for task in tasks:
+                        if not task.done():
+                            _abandoned_call(task)
+                    raise
+                for task in pending:
+                    _abandoned_call(task)
         message = Message(
             id=tool_id,
             conversation_id=run.conversation_id,
@@ -1285,23 +1345,30 @@ class Turns:
         return message
 
     async def _called(
-        self, by_prefix: Mapping[str, ToolServerConfig], call: ToolCallPart
+        self,
+        by_prefix: Mapping[str, ToolServerConfig],
+        offered: frozenset[str],
+        call: ToolCallPart,
     ) -> ToolResultPart:
         """One call, through the port, as the part that answers it.
 
-        The full name is split back into the server's prefix and the tool's
-        own name (``core.split_tool_name``); a name the run was not handed is
+        A name that is not one of the tools the run was handed (``offered``:
+        a name the model invented, or one of a tool left out of the list) is
         the model's mistake and is answered with an error result, not a
-        failure. A result with no text is stored as ``NO_CONTENT``.
+        failure, and no server is asked. The full name is split back into
+        the server's prefix and the tool's own name
+        (``core.split_tool_name``). A result with no text in it is stored as
+        ``NO_CONTENT``.
         """
         split = split_tool_name(call.name)
         server = by_prefix.get(split[0]) if split is not None else None
-        if split is None or server is None:
+        if call.name not in offered or split is None or server is None:
             return ToolResultPart(call.call_id, NO_SUCH_TOOL.format(name=call.name), is_error=True)
         port = self._turn_servers
         assert port is not None  # an agent with tools has one
         result = await port.call_tool(server, split[1], call.arguments)
-        return ToolResultPart(call.call_id, result.text or NO_CONTENT, is_error=result.is_error)
+        text = result.text if result.text.strip() else NO_CONTENT
+        return ToolResultPart(call.call_id, text, is_error=result.is_error)
 
     async def _taken_up(self, stream: _Stream) -> Run:
         """Record that a process has taken this run up, before anything else.
@@ -1817,7 +1884,17 @@ class _TooManyRounds(Exception):
     """The turn went back to the model as many times as the bound allows."""
 
 
-"""The engine events about tools, which the loop of the next step answers."""
+class _NoAnswerAfterTools(Exception):
+    """A round after a batch of tool results produced no answer."""
+
+
+def _abandoned_call(task: asyncio.Task[None]) -> None:
+    """Give up on a tool call that has not let go, and say so once."""
+    _log.warning(
+        "a tool call did not release what it held within %ss; it was abandoned",
+        CLOSING_SECONDS,
+    )
+    task.add_done_callback(_forgotten)
 
 
 @dataclass(frozen=True, slots=True)
@@ -2152,8 +2229,9 @@ class _StillWriting(Exception):
 def _forgotten(task: asyncio.Task[None]) -> None:
     """Read the result of a task nobody waited for, so the loop says nothing.
 
-    Only ever the engine's pump, and only when it was abandoned for taking too
-    long to let go: what it raises then is of no interest, and an unretrieved
+    The engine's pump, a tool call, or a listing, and only when it was
+    abandoned -- for taking too long to let go, or because another one failed
+    the run: what it raises then is of no interest, and an unretrieved
     exception would be printed by the loop on its way out.
     """
     if not task.cancelled():

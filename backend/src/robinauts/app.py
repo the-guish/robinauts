@@ -660,6 +660,30 @@ class Deployment:
                 " build constructs reach the configuration's models, so configure them,"
                 " or hand in the engines as well"
             )
+        if servers is not None and tool_servers is None:
+            # The same rule for tools: the adapter `open` builds holds the
+            # secrets start-up read for the **file's** servers, so a server
+            # handed in beside it would be reached with no credential -- and
+            # found out in the middle of somebody's turn.
+            problems.append(
+                "tool servers were handed in without the port that reaches them: the"
+                " adapter this build constructs holds the secrets of the configuration's"
+                " servers, so configure them, or hand in the tool servers as well"
+            )
+        wired_servers = servers if servers is not None else configured_models.tool_servers
+        if agents is not None:
+            # An agent's servers are checked against what will be wired, as
+            # the parser checks the file's agents against the file's servers:
+            # `Turns` refuses the pair at `open` otherwise, which is the wrong
+            # moment and the wrong kind of error.
+            problems.extend(
+                f"the agent {agent_id!r} that was handed in uses tool server"
+                f" {server_id!r}, which is not configured: configure the server, or"
+                f" hand it in beside the agent"
+                for agent_id, definition in agents.items()
+                for server_id in definition.tools
+                if server_id not in wired_servers
+            )
         if engines is not None:
             # Whatever runs them, a conversation runs on a model this
             # deployment offers, and one begun on an agent's default would be
@@ -707,7 +731,7 @@ class Deployment:
             # the servers it names stand for the configuration's, as the
             # agents and the models handed in do.
             tool_servers=tool_servers,
-            servers=servers if servers is not None else configured_models.tool_servers,
+            servers=wired_servers,
             max_tool_rounds=max_tool_rounds,
         )
 

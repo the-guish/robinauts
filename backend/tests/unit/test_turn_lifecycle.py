@@ -41,6 +41,7 @@ from fakes import (
 )
 from robinauts.adapters import AsyncioRunExecutor, MemoryRunSignals
 from robinauts.application import (
+    NO_ANSWER_AFTER_TOOLS,
     NO_CONTENT,
     NO_SUCH_TOOL,
     TOO_MANY_ROUNDS,
@@ -80,7 +81,10 @@ from robinauts.domain import (
     RunState,
     TextDelta,
     TextPart,
+    ToolCallArgumentsDelta,
+    ToolCallCompleted,
     ToolCallPart,
+    ToolCallStarted,
     ToolDefinition,
     ToolResult,
     ToolResultPart,
@@ -1095,6 +1099,146 @@ async def test_a_turn_that_keeps_asking_for_tools_is_failed_at_the_bound() -> No
     roles = [message.role for message in await stored_messages(wiring.store, run.conversation_id)]
     assert roles == [Role.USER] + [Role.ASSISTANT, Role.TOOL] * 2 + [Role.ASSISTANT]
     assert wiring.tools.listings == [GITHUB.id]
+
+
+@asyncio_test
+async def test_a_round_after_the_results_that_produces_no_answer_fails_the_run() -> None:
+    """A run that finished on a tool message would be one nothing continues
+    from: a question does not follow a tool message, and a tool message is
+    not regenerated. So it is the failure a turn that says nothing is."""
+    wiring = tooled(*calls(SEARCH_CALL))
+    wiring.agent.then()
+    run = await begun(wiring)
+
+    await wiring.turns.execute(run)
+
+    ended = await wiring.store.run_by_id(run.id)
+    assert ended.state is RunState.FAILED and ended.error == NO_ANSWER_AFTER_TOOLS
+    readable(await stored_events(wiring.store, run.id), run)
+    assert [
+        message.role for message in await stored_messages(wiring.store, run.conversation_id)
+    ] == [Role.USER, Role.ASSISTANT, Role.TOOL]
+
+
+@asyncio_test
+async def test_a_bound_of_zero_rounds_fails_the_first_answer_that_asks_for_tools() -> None:
+    wiring = tooled(*calls(SEARCH_CALL), max_tool_rounds=0)
+    run = await begun(wiring)
+
+    await wiring.turns.execute(run)
+
+    ended = await wiring.store.run_by_id(run.id)
+    assert ended.state is RunState.FAILED and ended.error == TOO_MANY_ROUNDS
+    assert wiring.tools.calls == []
+    readable(await stored_events(wiring.store, run.id), run)
+
+
+@asyncio_test
+async def test_a_name_the_run_was_not_handed_is_never_sent_to_a_server() -> None:
+    """A tool the server did not list -- one the model made up under a known
+    prefix -- is the model's mistake: answered in words, and nothing asked."""
+    wiring = tooled(*calls(("toolu_01", "github__delete_everything", {})))
+    wiring.agent.then(*says("I cannot."))
+    run = await begun(wiring)
+
+    await wiring.turns.execute(run)
+
+    _, _, results, _ = await stored_messages(wiring.store, run.conversation_id)
+    assert results.tool_results == (
+        ToolResultPart(
+            "toolu_01", NO_SUCH_TOOL.format(name="github__delete_everything"), is_error=True
+        ),
+    )
+    assert wiring.tools.calls == []
+    # A result of nothing but whitespace is stored as saying so too.
+    wiring = tooled(*calls(SEARCH_CALL))
+    wiring.tools.answering(GITHUB.id, SEARCH.name, ToolResult(" \n "))
+    wiring.agent.then(*says("Nothing."))
+    run = await begun(wiring)
+    await wiring.turns.execute(run)
+    _, _, results, _ = await stored_messages(wiring.store, run.conversation_id)
+    assert results.tool_results == (ToolResultPart("toolu_01", NO_CONTENT),)
+
+
+@pytest.mark.parametrize(
+    ("steps", "refused"),
+    [
+        # A second answer after one that asked for tools, instead of waiting.
+        (
+            [*calls(SEARCH_CALL)[:-1], *says("more")],
+            "ends waiting on them",
+        ),
+        # Anything after the turn ended waiting.
+        (
+            [*calls(SEARCH_CALL), AnswerStarted()],
+            "yields nothing more",
+        ),
+        # One call id named twice in one answer.
+        (
+            [
+                AnswerStarted(),
+                ToolCallStarted(call_id="toolu_01", name="github__search_repositories"),
+                ToolCallCompleted(call=ToolCallPart("toolu_01", "github__search_repositories", {})),
+                ToolCallStarted(call_id="toolu_01", name="github__echo"),
+            ],
+            "each tool call once",
+        ),
+        # A call completed under another name than it was announced with.
+        (
+            [
+                AnswerStarted(),
+                ToolCallStarted(call_id="toolu_01", name="github__search_repositories"),
+                ToolCallCompleted(call=ToolCallPart("toolu_01", "github__echo", {})),
+            ],
+            "completed as it was announced",
+        ),
+        # Arguments streamed that do not parse to the ones completed with.
+        (
+            [
+                AnswerStarted(),
+                ToolCallStarted(call_id="toolu_01", name="github__search_repositories"),
+                ToolCallArgumentsDelta(call_id="toolu_01", text='{"q": "x"}'),
+                ToolCallCompleted(
+                    call=ToolCallPart("toolu_01", "github__search_repositories", {"q": "y"})
+                ),
+            ],
+            "are the arguments it completed with",
+        ),
+        # An answer completed with a call still open.
+        (
+            [
+                AnswerStarted(),
+                ToolCallStarted(call_id="toolu_01", name="github__search_repositories"),
+                AnswerCompleted(
+                    parts=(ToolCallPart("toolu_01", "github__search_repositories", {}),)
+                ),
+            ],
+            "completed before its answer is",
+        ),
+        # Waiting on tools after an answer that asked for none.
+        (
+            [*says("Nothing to do."), WaitingOnTools()],
+            "waits on the tools an answer asked for",
+        ),
+    ],
+)
+@asyncio_test
+async def test_an_engine_out_of_order_fails_the_run_before_the_stream_is_unreadable(
+    steps: list[Any], refused: str
+) -> None:
+    """The order ``core.check_engine_events`` holds an engine to, held here
+    too, so that nothing an engine yields out of order leaves a stream
+    ``check_event_order`` refuses -- and no server is asked on the way."""
+    wiring = tooled(*steps)
+    run = await begun(wiring)
+
+    await wiring.turns.execute(run)
+
+    ended = await wiring.store.run_by_id(run.id)
+    assert ended.state is RunState.FAILED
+    assert ended.error is not None and refused in ended.error
+    readable(await stored_events(wiring.store, run.id), run)
+    assert wiring.tools.calls == []
 
 
 @asyncio_test
