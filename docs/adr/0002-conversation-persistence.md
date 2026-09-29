@@ -2,7 +2,9 @@
 
 - Status: accepted; superseded in part by
   [ADR 0004](0004-context-management-in-the-adapter.md) (the paragraph on
-  what lives above the agent port, and its trimming example)
+  what lives above the agent port, and its trimming example) and by
+  [ADR 0005](0005-one-agent-runtime.md) (continuing a conversation on any
+  framework, and the two-way translation on every turn)
 - Date: 2026-09-20
 
 ## Context

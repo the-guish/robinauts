@@ -66,9 +66,11 @@ All optional, all set by the operator:
 - a maximum attachment size;
 - timeouts for a model call, a tool call and a whole run; the bound on the
   tool rounds one turn may take has a default and is not a setting yet;
-- a maximum context per agent. Fitting a history into it is each agent
-  adapter's own policy ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)),
-  so the setting is one an adapter reads;
+- the context policy per agent: what the framework does as a history
+  grows — summarize, compact server-side, or nothing — its threshold, the
+  summarising model, and whether prompt caching is on. Applied by the
+  runtime to the model-facing transcript and never to the record
+  ([ADR 0005](../adr/0005-one-agent-runtime.md));
 - a token budget per user per period, which refuses new turns once spent
   and is shown to the user. It depends on usage recording and arrives with
   it.

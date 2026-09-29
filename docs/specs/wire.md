@@ -33,19 +33,18 @@ delivery channel uses ([channels.md](channels.md)).
   documented with the API.
 - **The `api` layer emits the events.** The application yields the
   platform's own turn events; `api` maps them to AG-UI. One mapping,
-  shared by both engines. The events have a written form of their own —
+  shared by every runtime. The events have a written form of their own —
   versioned like a message, and the same one the events table keeps
   ([runs.md](runs.md)) — so what is stored and what is sent cannot drift
   apart.
-- **The frameworks' AG-UI bridges are not used** — neither
-  `ag-ui-langgraph` nor Pydantic AI's `ag-ui` extra. Every turn goes
-  through the agent port, the controller and the platform's persistence,
-  and the wire is the same whatever the engine.
+- **The framework's AG-UI bridge is not used** — Pydantic AI's `ag-ui`
+  extra stays out. Every turn goes through the runtime port, the controller
+  and the platform's persistence, and the wire is the platform's whatever
+  the runtime.
 - **Tool calls are AG-UI's tool events.** A call the model makes is part of
   the assistant message that made it ([conversations.md](conversations.md)),
   and is sent as `TOOL_CALL_START` (the call's id, the tool's full name, the
-  assistant message it belongs to), `TOOL_CALL_ARGS` (its arguments as they
-  stream, as JSON text) and `TOOL_CALL_END`; each result of the tool message
+  assistant message it belongs to), `TOOL_CALL_ARGS` (its arguments as JSON text, in pieces when the runtime streams them and whole when it does not) and `TOOL_CALL_END`; each result of the tool message
   that answers the batch is sent as `TOOL_CALL_RESULT` as it lands, naming
   the call it answers. The call's id is the one stored on the part — the
   vendor's, carried by the engine as data ([agents.md](agents.md)) — so

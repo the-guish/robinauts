@@ -1,6 +1,7 @@
 # ADR 0004 — Context management belongs to the agent adapter
 
-- Status: accepted; supersedes one paragraph of
+- Status: superseded by [ADR 0005](0005-one-agent-runtime.md); it
+  superseded one paragraph of
   [ADR 0002](0002-conversation-persistence.md)
 - Date: 2026-09-28
 

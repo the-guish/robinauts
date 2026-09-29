@@ -274,7 +274,10 @@ it here rather than deciding it in passing.
   Windows from the lock, which also drops `colorama` and says Windows is not
   supported); or leaving it. Both decisions together would let the SDK in
   and take step 5's hand-written client out, which is the cost the plan
-  named for the fallback. Step 2 took the fallback pending them.
+  named for the fallback. Step 2 took the fallback pending them. **Answered 2026-09-29**: `MIT-0` is
+  on the allowed list, and `pywin32` is step 0 of
+  [framework-runtime-plan.md](framework-runtime-plan.md), which retires the
+  hand-written client ([ADR 0005](../adr/0005-one-agent-runtime.md)).
 
 
 ## The seams, by layer

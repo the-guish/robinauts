@@ -127,60 +127,51 @@ the engine is handed, so a run keeps it however the conversation's changes
 
 ## Tools
 
-Tools are in [agents.md](agents.md) ("Tools"); runs were designed for
-them.
+Tools are in [agents.md](agents.md) ("Tools"); the framework runs them
+inside the turn ([ADR 0005](../adr/0005-one-agent-runtime.md)).
 
 - A tool call is part of the assistant message that made it, and its result
   is a message of the conversation, persisted like any other: **the results
   of one call batch are one tool message** under that assistant message,
-  one result per call ([conversations.md](conversations.md)).
-- **Short tools** run inside the run: the model calls the tools, the
-  platform runs them in parallel, publishes each result as it lands, writes
-  the tool message when the last one is in, and continues the turn from the
-  stored history — in one execution, as many rounds as the turn needs up
-  to `max_tool_rounds`. **The run stays `running` through the loop**; the
-  engine's "waiting on these calls" is how one round ends, and the `waiting`
-  state below is a run that holds no process. Every call has its own
-  timeout; the turn's timeout holds over the whole turn.
+  one result per call ([conversations.md](conversations.md)). The runtime
+  publishes each call and each result as it happens; the application writes
+  the messages from those events.
+- **Short tools run inside the run**, in the framework's loop: the model
+  calls the tools, the framework runs them, feeds the results back and calls
+  the model again, as many rounds as the turn needs up to the agent's
+  `max_tool_rounds`. **The run stays `running` through the loop.** Every
+  call has its own timeout; the turn's timeout holds over the whole turn.
 - **Long tools** need nothing more: the run outlives the request, the UI
   shows it as running and re-attaches at will.
 - **Tools that outlast a process** — an external job, a person's approval —
-  suspend the run. The conversation holds a tool call without a result, the
-  run is `waiting`, and no process holds anything. When the result arrives
-  it is appended as the tool message, and execution resumes from the
-  history. **Deferred in this iteration**: the loop is written so that "the
-  result arrives later" is the same code path as "the result arrives now",
-  and a batch with one result missing is what a suspended run looks like,
-  but nothing suspends a run yet and no route appends a result
-  ([working-notes/mcp-plan.md](../working-notes/mcp-plan.md), step 7).
-- Resuming is therefore the ordinary stateless turn
-  ([ADR 0002](../adr/0002-conversation-persistence.md)): **the conversation
-  record is the checkpoint.** It works the same with either engine and
-  needs no framework persistence.
-- The agent port's result is either "finished" or "waiting on these tool
-  calls". Without tools it is always "finished".
+  suspend the run: the framework ends the turn with the calls it did not
+  run, the run is `waiting` with its slice stored, and no process holds
+  anything. When the result or the approval arrives it is the input of the
+  run taken up again, and execution resumes from the stored slices.
+  **Deferred in this iteration**: the mechanism is the framework's
+  deferred-tool result, and no route delivers one yet.
+- **The run's slices along the path are the checkpoint.** Resuming is the
+  ordinary stateless turn: the native history is read from the store and
+  handed to the runtime with the input it waited for. No framework
+  persistence plugin is used.
+- The runtime's result is either "finished" or "waiting on these calls".
+  Without tools it is always "finished".
 - **A tool's error is a result, not a failure.** A server answering that
   the call failed, or a call that ran out of its time, becomes a result
   marked as an error, and the model is told. Only a server that cannot be
   reached at all — or that will not list its tools when the run begins —
   fails the run, naming the server.
 - **A run stopped in the middle of a batch leaves the calls without a
-  result message**, which the format allows: a cancellation, an
-  interruption or a failure between the assistant message and the tool
-  message ends the run with the calls stored and no result. Nothing is
-  re-executed on its own: a retry is a new run from the question, which
-  puts the unanswered calls off the visible path
-  ([conversations.md](conversations.md)). When such an answer is on the
-  visible path of a later turn — a question asked after the stop — the
-  model is told, for each call, that no result of it was recorded and
-  whether it ran is not known; that sentence is the adapter's, the same
-  under both engines, and is never stored
-  ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)). The MCP annotations a server
-  sends with a tool (`readOnlyHint`, `destructiveHint`, `idempotentHint`)
-  are carried on the definition and are what a policy would read — to
-  re-execute a safe call after an interruption, or to ask a person before
-  a destructive one — and no policy reads them yet
-  ([agents.md](agents.md), "Tools").
+  result message** in the record, which the format allows, and stores no
+  slice for that run. Nothing is re-executed on its own: a retry is a new
+  run from the question. A run without a slice contributes its messages
+  rebuilt from the record to the next turn's native history
+  ([conversations.md](conversations.md), "The native transcript"), and in
+  that rebuild an answer whose calls have no results is carried as its text
+  alone. The MCP annotations a server sends with a tool (`readOnlyHint`,
+  `destructiveHint`, `idempotentHint`) are what a policy would read to
+  re-execute a safe call or to ask a person before a destructive one; no
+  policy reads them yet ([agents.md](agents.md)).
 
 ## Where the work happens
 
@@ -344,7 +335,7 @@ them.
     in that message's conversation. The store reads its own columns and the
     records to see it; that a stored **document** says what its record says,
     and that a run's stream reads correctly as a whole, are the application's,
-    and are what `core.check_event_order` holds it to.
+    and are what the application's tests hold it to.
   - **a run begins active and answers a question**: it is created in one of
     the active states, the message it names is a user message of its
     conversation, and its agent is its conversation's agent — a conversation
@@ -430,6 +421,6 @@ them.
 - A later `robinauts worker` process role — the same wheel, claiming runs
   from the database — would be another adapter of `RunExecutor`. It is not
   planned.
-- With LangGraph, a graph that keeps state of its own beyond the messages
-  cannot be resumed from the conversation alone. That case belongs to the
-  open discussion in ADR 0002.
+- A run's slice is the framework's message list and nothing else. A
+  framework state beyond the messages is not stored and not expected
+  ([ADR 0005](../adr/0005-one-agent-runtime.md)).

@@ -92,7 +92,7 @@ topic documents listed under [Documents](#documents).
   - the chat UI library (assistant-ui) —
     [ADR 0001](../adr/0001-chat-ui-assistant-ui-with-tailwind.md),
     [frontend.md](frontend.md);
-  - the agent frameworks (LangGraph, Pydantic AI) —
+  - the agent runtime (Pydantic AI, with a reference implementation) —
     [agents.md](agents.md), [layout.md](../layout.md);
   - the wire between UI and backend, which is a published standard —
     [wire.md](wire.md).
@@ -100,21 +100,30 @@ topic documents listed under [Documents](#documents).
 ### The agent engine is a port
 
 - The controller — the main application flow — is independent of any agent
-  framework. It knows only the agent port.
-- There are two implementations: one on LangGraph (or LangChain; open
-  source parts only, none of their commercial or hosted offerings), one on
-  Pydantic AI.
-- The two are swappable at any time: by configuration, with no change to
-  the controller and no change to stored data.
+  framework. It knows only the agent runtime port.
+- One production implementation, on Pydantic AI, runs the whole turn: the
+  model calls, the tool loop, the tools, and the model-facing history with
+  its context management and prompt caching
+  ([ADR 0005](../adr/0005-one-agent-runtime.md)).
+- A second, deliberately small reference implementation over the vendors'
+  own SDKs keeps the port framework-agnostic. It serves no traffic and is
+  bounded by the contract suite.
+- A conversation stays on the engine it started on. Changing an agent's
+  engine reaches new conversations only.
 
-### Persistence is framework-neutral and vendor-neutral
+### Persistence: the record is the platform's, the transcript is the framework's
 
-- Conversations are persisted in the database, in a format the platform
-  owns — not the format of any agent framework or any model vendor.
-- Any conversation can be continued with any framework and any vendor.
-- A framework's own persistence is never the source of truth; both engines
-  are stateless per turn.
-  [ADR 0002](../adr/0002-conversation-persistence.md).
+- Conversations are persisted in the database in a format the platform
+  owns — not the format of any agent framework or any model vendor. That
+  record is for people: the interface, the archive, analytics, export.
+- Beside it, each run stores the framework's own transcript of that turn as
+  opaque data. It is what the model sees next turn, and the platform never
+  reads it.
+- No framework persistence plugin is used; the platform's database holds
+  both, and deletes them together. Moving a conversation to another runtime
+  is a lossy rebuild from the record, not a continuation
+  ([ADR 0002](../adr/0002-conversation-persistence.md),
+  [ADR 0005](../adr/0005-one-agent-runtime.md)).
 
 ### Dependency scanning from day zero
 
@@ -152,13 +161,14 @@ topic documents listed under [Documents](#documents).
   engine, and the tool servers it may use. Users pick one per conversation.
   [agents.md](agents.md).
 - **Tools.** Remote MCP servers the operator configures like model
-  providers; the platform owns the loop — it calls the tool, stores the
-  result and runs the engine again from the record — and no framework ever
-  executes one. [agents.md](agents.md), [runs.md](runs.md).
+  providers; the framework calls them inside its loop, and the platform
+  records every call and result as it happens. [agents.md](agents.md),
+  [runs.md](runs.md).
 - **A turn.** The UI posts a message, which starts a **run**: the
-  controller loads the history from the database, calls the agent port,
-  publishes the answer as AG-UI events, and appends each new message as it
-  is produced. The run executes in the background and is persisted: if the
+  controller loads the run's native history from the database, calls the
+  agent runtime, publishes what it streams as AG-UI events, appends each
+  new message to the record as it completes, and stores the framework's
+  transcript of the turn. The run executes in the background and is persisted: if the
   request drops, the agent keeps working, and the UI re-attaches. One
   active run per conversation. [runs.md](runs.md), [agents.md](agents.md),
   [wire.md](wire.md).

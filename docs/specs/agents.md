@@ -20,12 +20,13 @@
   no secret, and the person is looking at the conversation. There is no
   falling back to the agent's default: the point of choosing is knowing who
   answers.
-- The engine is a property of the agent. Both engines run side by side in
-  one deployment. Changing an agent's engine takes effect at the next turn
-  of its existing conversations — which is the swap the persistence design
-  guarantees. Changing an agent's **model** reaches new conversations only:
-  the default was copied into each existing one when it started, and what a
-  conversation runs on is read off the conversation alone.
+- The engine is a property of the agent, and **a conversation is bound to
+  the engine it started on** ([ADR 0005](../adr/0005-one-agent-runtime.md)):
+  the framework's transcript of the conversation is the framework's, and no
+  other runtime reads it. Changing an agent's engine reaches new
+  conversations only, as changing its **model** does: the default was copied
+  into each existing one when it started, and what a conversation runs on is
+  read off the conversation alone.
 - **In this version that means the next turn after a restart.** The
   configuration is read once, at start-up, and the definitions are handed to
   the controller then; a turn looks its agent up afresh, so nothing but a
@@ -34,116 +35,110 @@
 
 ## The agent port
 
-- The controller knows one port, `Agent`: given the agent's definition, the
-  model the run records (the conversation's when the run began, never read
-  off the agent), a history and the **tools** the run has, **stream the
-  engine's own events** — an answer has begun, more of its text, more of its
-  thinking, a tool call announced with its id and name, its arguments as
-  they stream, the call complete, the answer is complete and here are its
-  parts — and end either "finished" or "waiting on these tool calls"
+- The controller knows one port, the **agent runtime**: given the agent's
+  definition, the model the run records (the conversation's when the run
+  began, never read off the agent), the **native history** of the visible
+  path — the framework's own transcript, concatenated from the slices of the
+  runs on that path, or nothing for a conversation's first turn — the
+  **input** of the turn — the question being answered, or, for a run taken
+  up again, the tool results or approvals it was waiting on — and the tool
+  servers the agent names, **run the whole turn** and stream the runtime's
+  own events: an answer has begun, more of its text, more of its thinking, a
+  tool call announced with its id, its name and its arguments, the tool's
+  result as it lands, the answer is complete and here are its parts; then
+  the turn is over, **finished** or **waiting** on calls the framework did
+  not run, and here is the framework's transcript of the turn
   ([runs.md](runs.md), "Tools" below). **No usage**: what a turn cost is
-  reported in the platform's own terms when usage reporting is built, and
-  until then an engine's events carry none and no field is written for one.
-- **The history is the full visible path of the conversation, ending in the
-  user message being answered** — never trimmed above the port — and the
-  system prompt is the agent's and is not one of the messages. So there is no
-  second argument for "the new message": the message to answer is the last
-  of the history, which is also what a resumed turn, a regenerated one and
-  the next round of a tool loop look like, and an engine has one thing to
-  translate rather than two. **What of that path the model sees is the
-  adapter's to decide** ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)):
-  ordering, trimming and other context management, and prompt caching, are
-  per framework and per vendor. The one invariant kept above the port -- by
-  each adapter's own tests, since the shared suite has no hook for what the
-  model was shown -- is that the question being answered is whole in what
-  the model sees.
+  reported in the platform's own terms when usage reporting is built.
+- **The framework runs the loop.** The runtime calls the model, executes the
+  tools the model asks for through the framework's MCP support, feeds the
+  results back and calls the model again, as many times as the turn needs
+  within the bounds the agent's configuration sets. The application does not
+  run a tool and does not run the engine again from the record: it records
+  what the runtime streams, message by message, and stores the transcript
+  the runtime hands back at the end
+  ([ADR 0005](../adr/0005-one-agent-runtime.md)).
+- **What the model sees is the runtime's to decide**, through the
+  framework's own mechanisms — ordering, trimming, summarization, server-side
+  compaction and prompt caching — configured per agent and applied to the
+  native history alone. The record is never compacted. That the question
+  being answered is whole in what the model sees is the framework's contract
+  with its own history processors, and the runtime's own tests keep it.
+- **The runtime is stateless per turn.** It is handed the native history and
+  hands back the turn's slice; nothing is remembered between calls in the
+  process, and no framework persistence plugin is used
+  ([ADR 0002](../adr/0002-conversation-persistence.md),
+  [conversations.md](conversations.md), "The native transcript").
+- **Those events carry no ids of the platform's, no times and no
+  provenance**, because a runtime has none. The application turns them into
+  the platform's messages and its own turn events, which is where a message's
+  id, a parent, a run and a row come from. **A tool call's id is the
+  vendor's**, chosen by the model and carried by the runtime as data.
 - **An agent named by a request that this deployment does not have is not
-  there**: it is refused exactly as an id that reaches nothing is refused, and
-  so is a conversation bound to an agent the operator has since removed.
-- Those events carry no ids of the platform's, no times and no provenance,
-  because an engine has none: it was given a history and a model. The
-  application turns them into the platform's messages and its own turn
-  events, which is where a message's id, a parent, a run and a row come from.
-  An engine that had to invent one would be deciding something that is not
-  its to decide. **A tool call's id is the vendor's**, chosen by the model
-  and carried by the engine as data: it is stored on the call's part, the
-  result names it, the wire sends it as it is, and the adapter replays it to
-  the vendor unchanged ([conversations.md](conversations.md)).
-- Both engines are held to the order of their events by the shared contract
-  suite: an answer is announced, then streamed, then completed, one at a
-  time.
-- **Streaming is optional; what is streamed is what is kept.** An engine
-  that yields no text delta for an answer may complete it with any text —
-  not every provider streams. An engine that yields any must complete with
-  exactly what it streamed: what a person watched arrive is what is stored,
-  so an engine whose framework rewrites the final message builds its parts
-  from what it streamed, or does not stream at all.
-- An engine may stream reasoning, and may return it with a finished answer.
-  This version shows it, keeps it in the run's events so that a watcher can
-  re-attach, and puts none of it in a message
-  ([conversations.md](conversations.md)).
-- **A turn produces at least one answer.** A turn that ends without one is
-  a failed run ([runs.md](runs.md)), not a finished turn with nothing in
-  it.
-- **An engine reports a failure by raising.** Any exception ends the turn;
+  there**: refused exactly as an id that reaches nothing is refused, and so
+  is a conversation bound to an agent the operator has since removed.
+- The runtime is held to the order of its events by the contract suite: an
+  answer is announced, then streamed, then completed; a call is announced,
+  then completed, then answered; one at a time.
+- **Streaming is optional; what is streamed is what is kept.** A runtime that
+  yields no text delta for an answer may complete it with any text. One that
+  yields any completes with what it streamed, or the mismatch is logged and
+  the completed text is what is stored: the record holds what the framework
+  returned.
+- **A runtime reports a failure by raising.** Any exception ends the turn;
   the application records the run `failed` with a description of it and
-  leaves the answer that was in flight uncompleted. An engine never yields
+  leaves the answer that was in flight uncompleted. A runtime never yields
   anything after an error.
-- **A cancellation is the application cancelling the engine's task.** An
-  engine must not swallow `CancelledError`: it lets it through and releases
-  what it holds — an HTTP response, a client, a file. What was produced
-  before the cancellation stays ([runs.md](runs.md)).
-- Two implementations:
-  - **LangGraph** (or LangChain). Open source parts only: no LangSmith, no
-    LangGraph Platform.
-  - **Pydantic AI.**
-- Each is confined to its own adapter sub-package, and that is enforced:
-  no other code imports the framework, and the two do not import each
-  other ([layout.md](../layout.md)). **The discard test:** five places name an
-  adapter, and deleting it and its dependencies breaks those and nothing else
-  — the import in the composition root and its one entry in the table of
-  engines, the import contracts' exceptions for the sub-package, the
-  sub-package's own tests, and the shared **swap fixtures**, which exist to
-  name both engines at once and cannot be written without both. The
-  composition tests fail too, and name no adapter: they say that both engines
-  are wired, which is a claim about the table.
-- Both must pass one shared contract suite. It includes the swap: a
-  conversation started on one engine continues on the other.
+- **A cancellation is the application cancelling the runtime's task.** A
+  runtime must not swallow `CancelledError`: it lets it through and releases
+  what it holds — an HTTP response, a client, an MCP session.
+- **Two implementations.** The production runtime is on **Pydantic AI**,
+  used as it is meant to be used: its agent, its toolsets and MCP support,
+  its event stream, its history processors and its cache settings. The
+  **reference runtime** is a deliberately small implementation over the
+  vendors' own SDKs, bounded by the contract suite: it exists so that the
+  port stays framework-agnostic and the component replaceable, serves no
+  traffic, and is offered by no configuration. Each is confined to its own
+  adapter sub-package, and that is enforced ([layout.md](../layout.md)).
+  **The discard test:** deleting the production runtime and its
+  dependencies breaks the configuration, the composition table and its own
+  tests; deleting the reference breaks only the contract suite's second
+  parametrisation.
+- A conversation moved to another runtime is rebuilt from the record,
+  losing what only the native transcript held
+  ([conversations.md](conversations.md)); it is not a continuation and
+  nothing promises it.
 
 ## A turn
 
-Both engines are stateless per turn
+The runtime is stateless per turn
 ([ADR 0002](../adr/0002-conversation-persistence.md)). A turn executes as a
 **run** ([runs.md](runs.md)): a record in the database, executed in the
 background, independent of the request that started it. The controller
 runs every turn the same way:
 
-1. Load the conversation's messages from the database, and take the path
-   down to the message being answered.
-2. Fetch the tools of the servers the agent names, once for the run, and
-   call the agent port with the agent, the run's model, that history and
-   those tools; publish the events, which the UI watches
-   ([wire.md](wire.md)).
-3. Translate each new message into the platform's format and append it to
-   the conversation as it is produced.
-4. If the engine ended waiting on tool calls, call the tools, append their
-   results as one tool message, and go back to step 2's call with the
-   history read from the store again — which is also what a resumed run
-   does, so there is one path. Bounded by `max_tool_rounds` and by the
-   turn's timeout ("Tools" below).
-5. The next turn starts again from step 1, with whichever engine the agent
-   has at that moment and whichever model the conversation names.
+1. Load the conversation from the database: the visible path down to the
+   message being answered, and the native slices of the runs on it.
+2. Call the runtime with the agent, the run's model, that native history,
+   the turn's input and the tool servers the agent names; publish the
+   events, which the UI watches ([wire.md](wire.md)).
+3. Project each message the runtime completes — an answer with the calls it
+   made, the tool message holding the results — into the platform's format
+   and append it to the record as it is produced.
+4. When the turn ends, store the framework's transcript of it as the run's
+   slice. A turn that ends waiting — on an approval, on an external result —
+   leaves the run `waiting` with its slice stored, and is taken up again
+   from step 1 with what it waited for as the input.
+5. The next turn starts again from step 1, on the conversation's engine and
+   whichever model the conversation names.
 
-- The LangGraph engine compiles its graph without a checkpointer; the
-  Pydantic AI engine passes `message_history`. Neither remembers anything
-  between turns.
-- **Each adapter owns its context policy**: what of the full path it sends,
-  in what order, with which cache breakpoints
-  ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)). What must
-  behave the same under both engines is the record — what is stored, and
-  the order of a run's events — and that lives above the port.
-- No framework persistence is used, and none is needed for tools: the
-  conversation record is the checkpoint (ADR 0002).
+- Nothing above the port trims, summarizes, caches or runs a tool.
+- What must behave the same whatever the runtime is the record — what is
+  stored, and the order of a run's events — and that lives above the port.
+- No framework persistence plugin is used, and none is needed for tools or
+  for waiting: the run's slices along the path are the checkpoint, and the
+  record is the archive and the lossy fallback
+  ([ADR 0005](../adr/0005-one-agent-runtime.md)).
 
 ## Model providers
 
@@ -166,14 +161,11 @@ runs every turn the same way:
   are the ones that carry a `base_url`, and the only ones: a vendor has one
   endpoint, the engine pins it, and a second answer to "where is it" would
   be a way to send the operator's key somewhere else.
-- Both engines report tokens in the platform's terms — input, output,
-  model — taken from the provider's response.
-- **Nothing phones home.** The engines never enable a framework's hosted
-  tracing: LangSmith and Pydantic Logfire stay off whatever the
-  environment says. The adapter sets this explicitly, and where a framework
-  reads a variable that a switch cannot reach — LangChain's version 1
-  tracer, which raises when it is asked for and version 2 is off — the
-  adapter unsets the variable rather than leaving a turn to fail over it.
+- The runtime reports tokens in the platform's terms — input, output, model — taken from the provider's response.
+- **Nothing phones home.** The runtime never enables the framework's
+  hosted tracing: Pydantic Logfire stays off whatever the environment says,
+  set per agent where the framework's own switch is, and the framework's
+  banner for it is off too.
 - **And nothing is written down.** A log of this platform never carries the
   content of a conversation. A vendor SDK's own debug logging does, and is
   switched on by an environment variable it reads when it is *imported*, so an
@@ -205,124 +197,87 @@ runs every turn the same way:
   no way to configure an OpenAI organisation or project in this version: a
   key belongs to one project already, and a header nobody wrote in the
   configuration is not sent.
-- **The OpenAI kinds speak Chat Completions**, both of them and under both
-  engines: `ChatOpenAI` with the Responses API switched off, and Pydantic
-  AI's `OpenAIChatModel` rather than its Responses model. An
-  `openai-compatible` endpoint — a gateway, vLLM, OpenRouter — speaks Chat
-  Completions, and one protocol for both kinds keeps the two kinds and the
-  two engines symmetric: the same request goes out under either engine,
-  bar the few differences "Known findings" records. The Responses API is a
+- **The OpenAI kinds speak Chat Completions**, both of them: Pydantic AI's
+  `OpenAIChatModel` rather than its Responses model. An `openai-compatible`
+  endpoint — a gateway, vLLM, OpenRouter — speaks Chat Completions, and one
+  protocol for both kinds keeps them symmetric. The Responses API is a
   later decision (see "Known findings" for what it would buy).
 
 ## Tools
 
 An agent can use tools served by **remote MCP servers** the operator
-configured. A model asks for a tool, the platform calls it, the result goes
+configured. A model asks for a tool, the framework calls it, the result goes
 back to the model, and the model answers — as many times as the turn needs.
-The decisions behind this, and their order of work, are in
-[working-notes/mcp-plan.md](../working-notes/mcp-plan.md).
+The platform records every call and every result as it happens, and shows
+them. The decisions are in [ADR 0005](../adr/0005-one-agent-runtime.md) and
+[working-notes/framework-runtime-plan.md](../working-notes/framework-runtime-plan.md);
+the shape of the configuration came from the MCP work before it
+([working-notes/mcp-plan.md](../working-notes/mcp-plan.md)).
 
 - **Servers are remote, over Streamable HTTP, and nothing else.** No stdio,
   no sidecars, and the platform runs no MCP server of its own. A server is
   configured the way a model provider is: a `[mcp_servers.<id>]` table with
-  its `url` — checked as every configured endpoint is: https, or http on the
-  loopback interface, no query, no fragment, no credential in it — the
-  **name** of the environment variable its secret is read from, and how the
-  secret is sent: `bearer` (the default, `Authorization: Bearer <secret>`),
-  `basic` (`Authorization: Basic base64(<user>:<secret>)`, where the table
-  also names the user part and the secret is the token), or `none` for a
-  public server that takes no credential, which names no variable and is
-  sent no header. Nothing about a particular vendor's server is written into
-  the platform: GitHub's and Atlassian's remote servers are the two the shape
-  was designed against, Microsoft Learn's public one is the third, and all
-  three are connected with configuration alone (the sketch below).
+  its `url` — https, or http on the loopback interface, no query, no
+  fragment, no credential in it — the **name** of the environment variable
+  its secret is read from, and how the secret is sent: `bearer` (the
+  default), `basic` (with the `user` part in the table), or `none` for a
+  public server. Nothing about a particular vendor's server is written into
+  the platform.
 - An agent names the servers it may use (`tools`). An agent naming a server
-  the deployment has not got is refused at start-up, as one naming an engine
-  that is not wired is. The secrets are read at start-up by variable name,
-  every missing one reported together, and printed nowhere.
-- **The platform owns the tool loop.** The application calls the tool,
-  appends the result to the conversation and starts the next engine turn
-  from the stored history. Neither framework ever executes a tool, and no
-  framework checkpointer is used: an engine yields a tool call as an event
-  and its turn ends there, "waiting on these calls". LangGraph's `ToolNode`
-  and Pydantic AI's own tool execution and retry prompts stay out. This is
-  ADR 0002 kept — the conversation record is the checkpoint
-  ([runs.md](runs.md)) — and it answers the question ADR 0002 left open for
-  the day tools came ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)).
-- **The tool set is fetched once per run and holds for the run.** When a
-  turn begins the application asks each server the agent names for its
-  tools (`tools/list`), in parallel, and every model call inside that run's
-  loop is handed that one list: a stable list for the whole turn, which is
-  what a cached prefix wants, and the same list under both engines. There is
-  **no cache**: nothing in the process, nothing to size or expire. A server
-  that will not list fails the run before the engine is called and before
-  any answer is written, naming the server; one that refuses the credential is reported the same way, by name,
-  at the first turn of an agent naming it — start-up does not connect to a
-  server. A run taken up again after `waiting` lists again, which is the
-  ordinary stateless turn.
-- **A tool is shown to the model as `<prefix>__<name>`**, where the prefix
-  is the server's — written in its table, and defaulting to the server's id
-  — so that a call is routed to its server from the name alone and two
-  servers offering `search` never collide. Two servers with one prefix are
-  refused at start-up, with the rest of the configuration's problems, and so
-  is a prefix a name could not be told apart from (one holding `__`, or
-  ending in `_`). The vendors bound a tool name at
-  64 characters of `[a-zA-Z0-9_-]`, and that is the platform's bound on the
-  full name; the prefix is bounded at configuration time so that a real name
-  fits after it, and a server's tool whose full name still does not fit is
-  left out of that run's list with a line in the log naming the tool — as
-  is one whose input schema is not a JSON Schema object at the top, which
-  both vendors require of a tool's parameters, and one the server listed
-  twice (the second time). The list is sorted by full name, so two engines
-  and two runs send byte-identical lists. The run records nothing about its
-  tools: the messages already record every call and result by name.
-- **The results of one call batch are one tool message.** A model may ask
-  for several tools in one answer; the platform runs them in parallel,
-  publishes each result as it lands, and stores one `tool` message under the
-  assistant message that made the calls, holding one result per call, once
-  the last one is in ([conversations.md](conversations.md)).
-- **A tool's error is a result, not a failure.** A server answering
-  `isError`, or one call timing out, becomes a result marked as an error,
-  and the model is told. Only a server that cannot be reached at all fails
-  the run. Result content is text in this iteration: a text result is stored
-  as it is, and a part of another kind (an image, an embedded resource)
+  the deployment has not got is refused at start-up. The secrets are read at
+  start-up by variable name, every missing one reported together, and
+  printed nowhere.
+- **The framework talks to the servers**, through its MCP support: one
+  session per server for the run, the tool list fetched when the run
+  begins, the calls made inside the framework's loop. The platform holds no
+  MCP client. The MCP Python SDK is the framework's dependency and is
+  admitted by the licence policy ([DEPENDENCIES.md](../../DEPENDENCIES.md)).
+- **What the platform keeps of a call is a hook, not the loop.** The
+  runtime wraps every tool execution so that: the call runs under the
+  server's `timeout_seconds`, and one that runs out becomes an error result
+  the model is told; a tool is shown to the model as `<prefix>__<name>`
+  through the framework's prefixing, the prefix being the server's (its id
+  unless the table says otherwise), so that two servers offering `search`
+  never collide; every call and every result is published as an event the
+  moment it happens and recorded in the conversation; and, later, the
+  credential for the call is the person's rather than the deployment's.
+- **A tool's error is a result, not a failure.** A server answering that the
+  call failed, or a call that ran out of its time, is a result marked as an
+  error, and the model is told. A server that cannot be reached at all, or
+  that will not list its tools when the run begins, fails the run, naming
+  the server.
+- **The results of one call batch are one tool message** in the record, one
+  result per call, written when the last one is in
+  ([conversations.md](conversations.md)); each result is published as it
+  lands. Result content is text in this version: a part of another kind
   becomes a text note saying what was left out.
-- **Every call has its own timeout** (`timeout_seconds` on the server, with
-  a default), the turn's timeout holds over the whole turn, and
-  `max_tool_rounds` bounds how many times one turn may go back to the model
-  with results; a run that reaches it fails saying so.
+- **The bounds are the agent's configuration**, read by the runtime: how
+  many times one turn may go back to the model (`max_tool_rounds`, a
+  default when left out), and the turn's timeout, which holds over the
+  whole turn. A run that reaches the bound fails saying so.
 - **One identity per deployment.** The secret in the operator's
   configuration means every user's turns act as that principal, and the
-  server's audit log names the service account and not the person. Per-user
-  credentials (OAuth) are a later iteration
+  server's audit log names the service account and not the person.
+  Per-user credentials (OAuth) are a later iteration
   ([operations.md](operations.md)).
 - **Every tool the agent's servers offer runs without asking.** Approval
-  before a tool runs is deferred: in this iteration the operator's control
-  over what an agent may do is the credential's scopes and the server's own
-  admin gates. The MCP annotations a server sends with a tool
-  (`readOnlyHint`, `destructiveHint` and the rest) are carried on the
-  definition and read by nothing yet; they are what an approval policy would
-  read ([runs.md](runs.md)).
-- **The engine's share**: bind the definitions to the model; yield a call
-  where it used to refuse one — announced with its id and name, its
-  arguments as they stream, then complete — and end the turn "waiting on
-  these calls", which is the port's word for how one round ended and not the
-  run's `waiting` state: the run stays `running` through the loop
-  ([runs.md](runs.md)); translate `tool` messages and the two tool parts in
-  both directions; and
-  carry the vendor's signed reasoning out with the answer and back with the
-  history ([conversations.md](conversations.md), "Reasoning").
+  before a tool runs is the framework's deferred-tool mechanism, still to be
+  wired: a call marked as needing approval ends the turn **waiting**, with
+  the run's slice stored and nothing held in memory, and the run is taken up
+  again with the approval as its input ([runs.md](runs.md)). The MCP
+  annotations a server sends with a tool (`readOnlyHint`,
+  `destructiveHint` and the rest) are what that policy reads.
 - Tool arguments and results are attacker-influenced text going to a model
-  and to a browser: bounded on the way in like every part, stored as data,
-  rendered as data ([wire.md](wire.md)).
+  and to a browser: bounded on the way into the record like every part,
+  stored as data, rendered as data ([wire.md](wire.md)).
 
 ## Details likely to change
 
-- Each engine reaches the providers through its own framework's clients:
-  - LangGraph: `langchain-openai`, `langchain-anthropic`,
-    `langchain-google-genai`, `langchain-aws`;
-  - Pydantic AI: `pydantic-ai-slim` with the provider extras needed, not
-    the all-inclusive `pydantic-ai`.
+- The runtime reaches the providers through the framework's clients:
+  `pydantic-ai-slim` with the provider extras needed (`anthropic` and
+  `openai` today; `google` and `bedrock` when those kinds arrive), not the
+  all-inclusive `pydantic-ai`. The reference runtime uses the two vendor
+  SDKs directly.
   - An OpenAI-compatible endpoint goes through the OpenAI client with a
     base URL, and an Anthropic-compatible one through the Anthropic client.
     **OpenRouter serves both protocols**, so it may be configured as either
@@ -333,8 +288,8 @@ The decisions behind this, and their order of work, are in
   ([open-source.md](open-source.md)). A provider whose client is not in the
   build -- because it fails the gates, or because it has not been adopted --
   is not offered by that engine.
-- Not every model has to exist under both engines, but an agent's engine
-  can be swapped only if the models its conversations run on do.
+- A conversation stays on its runtime, so which models a runtime reaches
+  is a question for new conversations only.
 - A sketch of the configuration. It is written in the **same file** as
   sign-in ([sign-in.md](sign-in.md)), which is why the model providers are
   `[model_providers.*]` and not `[providers.*]`: that name is already the
@@ -359,14 +314,14 @@ max_output_tokens = 8192
 [agents.assistant]
 title = "Assistant"
 model = "sonnet"
-engine = "langgraph"
+engine = "pydantic-ai"
 system_prompt = "Play fair."
 ```
 
   An `anthropic-compatible` provider is the same thing with the endpoint
   written down. **This is one way OpenRouter is reached**: it serves
   Anthropic's Messages API and takes the key in the same `x-api-key`
-  header, so both engines reach it with the Anthropic client. `base_url` is
+  header, so the runtime reaches it with the Anthropic client. `base_url` is
   a **prefix** the client appends the protocol's own path to, and
   Anthropic's client appends `/v1/messages`, so it stops at `/api` and the
   request goes to `https://openrouter.ai/api/v1/messages`; the model names
@@ -426,7 +381,7 @@ name = "meta-llama/Llama-4-Scout-17B-16E-Instruct"
 [agents.assistant-gpt]
 title = "Assistant (GPT)"
 model = "gpt"
-engine = "langgraph"
+engine = "pydantic-ai"
 ```
 
   `max_output_tokens` means the same thing under every kind; what an
@@ -440,7 +395,7 @@ engine = "langgraph"
   take (its reasoning models refuse the older one), and to
   `openai-compatible` as `max_tokens`, the field OpenRouter and older
   compatible servers know and some know alone — Pydantic AI's own
-  OpenRouter profile makes the same choice. Both engines send the same.
+  OpenRouter profile makes the same choice. The reference runtime sends the same.
 
   A tool server is a table beside the providers, `[mcp_servers.<id>]`, and
   an agent names the servers it may use in `tools`: the server's `url`;
@@ -476,7 +431,7 @@ auth = "none"
 [agents.assistant-with-tools]
 title = "Assistant (tools)"
 model = "sonnet"
-engine = "langgraph"
+engine = "pydantic-ai"
 tools = ["github", "jira", "learn"]
 ```
 
@@ -489,175 +444,51 @@ tools = ["github", "jira", "learn"]
 
 ## Known findings
 
-- **The MCP Python SDK (`mcp`) is not adopted**: its tree fails the licence
-  gate. `pyjwt[crypto]` brings `cryptography`, which brings `cffi`, whose
-  metadata states `MIT-0` -- a licence on no list of
-  [DEPENDENCIES.md](../../DEPENDENCIES.md) -- and `pywin32`, Windows-only,
-  states a licence family and no licence (checked 2026-09-28, at 2.2.0). The
-  plan named the fallback for this case
-  ([working-notes/mcp-plan.md](../working-notes/mcp-plan.md), step 2): the
-  MCP adapter is a client of our own over `httpx` for the three calls a
-  client needs -- `initialize`, `tools/list`, `tools/call` -- over Streamable
-  HTTP, with session ids, protocol-version negotiation and an SSE response
-  read by hand. The import rule confining the SDK to `adapters/tools/mcp/` is
-  written all the same, before the fact ([layout.md](../layout.md)).
-
+- **The MCP Python SDK is adopted**
+  ([ADR 0005](../adr/0005-one-agent-runtime.md)). Its tree failed the
+  licence gate on `cffi`, which states `MIT-0`, and on `pywin32`,
+  Windows-only with family-only metadata. `MIT-0` is on the allowed list
+  since 2026-09-29 ([DEPENDENCIES.md](../../DEPENDENCIES.md)); `pywin32` is
+  settled by locking for Linux and macOS only
+  ([working-notes/framework-runtime-plan.md](../working-notes/framework-runtime-plan.md),
+  step 0). The hand-written client that stood in for it goes with the
+  refactor.
 - `langgraph-checkpoint-postgres` depends on `psycopg`, which is
-  LGPL-3.0-only. It cannot be adopted as it is (ADR 0002). The LangGraph
-  core is not affected.
-- `langchain-openai` requires `tiktoken`, which states its licence as the
-  licence *text* and no identifier, and which in turn requires `regex`,
-  `Apache-2.0 AND CNRI-Python`. Neither resolved under the policy. Both are
-  settled now -- CNRI-Python is on the allowed list, and `tiktoken` 0.14.0 is
-  excepted by name for its licence text (its package licence only: the BPE
-  tokenizer files it fetches at runtime are assets, a separate question).
-  **Nothing on a turn's path asks `tiktoken` for anything**: `ChatOpenAI`
-  reaches for it only to count tokens (`get_num_tokens` and its relatives),
-  which neither the engine nor the platform calls, and Pydantic AI only in
-  its embeddings, which are not used; so no tokenizer file is fetched and
-  the asset question does not arise. A turn is held to that under each
-  engine by one test run under both
-  (`test_an_openai_turn_streams_its_text_and_sends_the_configuration_s_request`,
-  in `tests/unit/test_engines_over_chat_completions.py`), which replaces
-  `tiktoken`'s `get_encoding` and `encoding_for_model` with functions that
-  fail the test, so a warm tokenizer cache, which closed sockets would not
-  notice, cannot hide a call.
-- So **both engines reach all four kinds**: `anthropic` and
-  `anthropic-compatible` through the Anthropic client, `openai` and
-  `openai-compatible` through the OpenAI one (`langchain-openai` under
-  LangGraph, `pydantic-ai-slim[openai]` under Pydantic AI), and the swap
-  holds for every model either of them has. The configuration names the same
-  four kinds, and a kind no engine of a build reaches is still refused at
-  start-up, saying so; in this build there is none.
-- **Chat Completions, and what it costs.** Both OpenAI kinds speak Chat
-  Completions under both engines ("Model providers" above). What that
-  leaves out, for the day the Responses API is decided on: OpenAI's signed
-  reasoning, which only the Responses API returns — an answer over Chat
-  Completions carries no `extras`, and nothing is replayed to the model — and
-  OpenAI's own server-side tools, which the platform does not use. And
-  **tools with reasoning**, on the newest models. OpenAI's model pages say,
-  for GPT-6 Sol and GPT-6 Luna (checked 2026-09-28), that Chat Completions
-  "supports function calling only with `reasoning_effort` set to `none`",
-  and send GPT-6 Astra's tools to the Responses API. For GPT-5.6 Sol, an
-  OpenAI Support reply on OpenAI's developer forum (community.openai.com,
-  post 1386454, 2026-09-07) quotes the refusal: "Function tools with
-  reasoning_effort are not supported for gpt-5.6-sol in
-  /v1/chat/completions. To use function tools, use /v1/responses or set
-  reasoning_effort to 'none'." GPT-5.6 Luna and Terra reason by default
-  (at `medium`) and are untried. The engines send no `reasoning_effort`, so
-  on any of these a turn with tools may be refused by the vendor, and a turn
-  without tools answers. The libraries pinned here know GPT-5.6 Sol, Luna
-  and Terra and GPT-6 Astra by name, and not GPT-6 Sol or Luna, which are
-  newer; nothing more than the sources above is claimed for any of them. The
-  demo's OpenAI models are GPT-5.5 and the GPT-5.4 family, which carry no
-  such note and whose smaller models do not reason unless asked
-  (`demo/README.md`).
-- **The request goes out as the same bytes under both engines.** The two
-  frameworks write Chat Completions messages differently, and the LangGraph
-  adapter moves to Pydantic AI's spelling, after `ChatOpenAI` has built the
-  request: an answer's text as a string beside its calls, a call's
-  arguments as compact JSON (no spaces, no ASCII escaping), `""` rather than
-  `null` for an answer with calls and no text, every message's keys in
-  Pydantic AI's order, and a result that went wrong written as
-  `{"error": <text>}` — the protocol has no field for "this went wrong", and
-  that is how Pydantic AI tells the model. A test runs both engines' real
-  clients over one history, for each OpenAI kind, and compares the request
-  byte for byte (`tests/unit/test_engine_swap.py`): the model, the
-  `messages`, the `tools` (one with a description and a schema carrying
-  titles, one with no description), `stream` and `stream_options`, and the
-  ceiling in the field the kind takes; the one field only one engine sends
-  is named below. Parity is proved **for the shapes that test writes**: a
-  call's arguments are serialised by a different library under each engine
-  (`json` under LangGraph, `pydantic_core` under Pydantic AI), and they agree
-  on the nested objects, integers and non-ASCII text the test holds — not
-  necessarily on every value a model could write, a float's spelling for
-  one.
-- **What is still not the same request**, left as each framework has it:
-  Pydantic AI sends `tool_choice: "auto"` with a turn's tools, which is the
-  protocol's default and what `langchain-openai` leaves unsaid; the system
-  prompt's role differs on the o-series — `langchain-openai` sends it as
-  `developer` for every model name beginning `o` and a digit, and Pydantic
-  AI keeps `system` except for names beginning `o1-mini`, which it sends as
-  `user` (that model takes no `system` role), so on `o1-mini` the two send
-  `developer` and `user` and on the other o-series models `developer` and
-  `system`; and for names beginning `o1` `langchain-openai` adds
-  `temperature: 1` when none is configured, which Pydantic AI does not.
-- **A `<think>` in the text is text, under both engines.** Pydantic AI would
-  otherwise lift a streamed `<think>` delta, and what follows it up to
-  `</think>`, out of the answer and into thinking; the Pydantic AI adapter
-  gives its OpenAI models no thinking tags, so, as under `langchain-openai`,
-  which has no such rule, what the vendor wrote is the answer, streamed and
-  stored with its tags.
-- **Reasoning a compatible endpoint streams in a field of its own is shown by
-  one engine only.** Some `openai-compatible` servers stream a model's
-  reasoning beside the text, in a field that is not OpenAI's: `reasoning`
-  (gpt-oss through Ollama or OpenRouter) or `reasoning_content` (DeepSeek,
-  Moonshot, vLLM). Pydantic AI reads either as thinking, and the Pydantic AI
-  engine streams it as reasoning; `langchain-openai` reads neither, and the
-  LangGraph engine shows nothing and does not fail. Neither engine keeps it:
-  it is unsigned, and what is stored is the answer. Both engines' tests pin
-  their side of it.
-- **How a streamed call may arrive, and what each engine makes of it.** Both
-  engines key a streamed call by its index — by its id, when a compatible
-  server sends a delta with no index, which OpenAI never does — and take a
-  server that sends the
-  id first and the name in a later delta, and one that repeats the id and
-  the name on every delta (Pydantic AI appends every name it is sent, so the
-  Pydantic AI adapter drops a name equal to the one the call has before the
-  framework sees it). Both refuse a call that is never named — the
-  framework would otherwise drop it silently, and the Pydantic AI adapter's
-  stream checks every call it saw begin at the end — a call whose name changes after
-  it is announced (a name streamed in pieces, which Pydantic AI would store
-  truncated), and a call the final message holds that the stream never
-  announced. They differ in one shape: a call whose **name arrives before its
-  id** is taken by the LangGraph engine, which announces a call once both
-  are known, and refused by the Pydantic AI engine, whose framework
-  announces it at once under an id of its own and then finds the vendor's.
-  And a delta with no `function` object at all fails a LangGraph turn inside
-  `langchain-openai` (an `AttributeError`, before the adapter sees the
-  chunk), a shape the tests do not pin. Every other shape above has a test
-  under each engine, and so do index-less calls: a single one, one after an
-  indexed call, one that repeats its id and name, each taken with the same
-  result under both, and one never named, refused by both.
-- **OpenAI's `refusal` field is not read.** Chat Completions carries a
-  separate `refusal` in place of the content only for Structured Outputs,
-  which the platform never asks for; a model declining a question otherwise
-  says so in its text, which is streamed and stored like any other.
-- **`ChatOpenAI` is handed clients the adapter built**, where
-  `ChatAnthropic` is handed arguments. Left to build its own,
-  `langchain-openai` takes its HTTP client from a cache shared by every turn
-  of the process and gives it TCP socket options read from
-  `LANGCHAIN_OPENAI_TCP_*`; the adapter's own clients are built per turn,
-  as the other client and the other engine's are, with exactly what the
-  configuration says. Every other default it would take from the
-  environment — `OPENAI_PROXY`, `LC_OUTPUT_VERSION`, its own stream timeout,
-  whether to ask for the stream's usage — is passed as an argument.
-- `langsmith` is a hard dependency of `langchain-core`, and the LangGraph
-  adapter imports it for **one call**: `langsmith.configure(enabled=False)`,
-  made when the engine is constructed, which is the switch langchain-core
-  itself consults before the environment. Nothing else in the platform uses
-  it, nothing is sent to it, no tracer is ever attached and no client is
-  ever built. Because it is imported rather than merely installed, it is a
-  direct dependency and is pinned as one.
-- **`ANTHROPIC_LOG`**: the Anthropic SDK — which both engines reach the vendor
-  through — reads it at import and, on `debug`, writes every request's options
-  to standard error, `json_data` included: the system prompt and every message
-  of the conversation. Both adapters answer it the same way, in the two halves
-  it needs (above): the SDK's loggers are pinned when the engine is built, and
-  the variable is removed.
-- `logfire-api` arrives with `pydantic-graph`, and `opentelemetry-api` with
-  `pydantic-ai-slim`. Neither is imported anywhere in the platform, and both
-  are named in the import rule all the same
-  ([layout.md](../layout.md)). Pydantic AI has **no environment switch** for
-  tracing — it instruments a run only when an agent's `instrument` says so,
-  which `logfire.instrument_pydantic_ai()` sets process-wide — so the adapter
-  turns it off per agent, where the answer beats the process-wide one, and
-  unsets no variable because there is none to unset. It does set the
-  framework's `BANNER_ENABLED` to `False`: on its first turn Pydantic AI
-  otherwise writes an advertisement for its hosted observability to standard
-  error, which is not a thing a server's log is for. One part of this is the
-  lock's rather than the code's: `pydantic-graph` opens spans through
-  `logfire_api`, which is a no-op shim that **replaces itself with the real
-  `logfire`** the moment that package is importable — outside anything the
-  per-agent switch reaches. So `logfire` not being in the locked set is part
-  of the guarantee, and a test asserts it.
+  LGPL-3.0-only ([ADR 0002](../adr/0002-conversation-persistence.md)).
+  Moot once the LangGraph engine is removed; recorded because the licence
+  fact stands for any future checkpointer.
+- `tiktoken` states its licence as the licence *text* and no identifier,
+  and requires `regex`, `Apache-2.0 AND CNRI-Python`. Both are settled —
+  CNRI-Python is on the allowed list and `tiktoken` 0.14.0 is excepted by
+  name — and both leave with `langchain-openai`, which is what brought them.
+  **Nothing on a turn's path asks `tiktoken` for anything**: Pydantic AI
+  reaches for it only in its embeddings, which are not used. Token counting
+  for the context policy uses the vendors' counting endpoints through the
+  framework, never a local tokenizer.
+- **The OpenAI kinds speak Chat Completions** through Pydantic AI's
+  `OpenAIChatModel`. What that leaves out, for the day the Responses API is
+  decided on: OpenAI's signed reasoning, which only the Responses API
+  returns, and, on the newest models, function tools with reasoning, which
+  OpenAI's documentation routes to the Responses API. The runtime sends no
+  `reasoning_effort`, so on such a model a turn with tools may be refused by
+  the vendor while a turn without tools answers.
+- **Reasoning a compatible endpoint streams in a field of its own**
+  (`reasoning`, `reasoning_content`) is read by the framework as thinking
+  and streamed as reasoning; it is unsigned and is not kept in the record.
+- **`ANTHROPIC_LOG`** and the vendor SDKs' request-body logging: the
+  runtime pins the SDKs' loggers below the level at which a request is a
+  record, and removes the variable, when it is built ("Model providers").
+- `logfire-api` arrives with `pydantic-graph` and `opentelemetry-api` with
+  `pydantic-ai-slim`. Neither is imported by the platform, and both are
+  named in the import rule ([layout.md](../layout.md)). Pydantic AI
+  instruments a run only when its agent's `instrument` says so; the runtime
+  sets it off per agent and sets the framework's `BANNER_ENABLED` to
+  `False`. `pydantic-graph` opens spans through `logfire_api`, a no-op shim
+  that replaces itself with the real `logfire` when that package is
+  importable, so `logfire` not being in the locked set is part of the
+  guarantee, and a test asserts it.
+- **Findings about the two engines' parity** — byte-identical Chat
+  Completions requests, the differences left between them, the shapes of a
+  streamed call each took or refused — are superseded by ADR 0005 and leave
+  with the LangGraph engine. What still matters is the runtime's own
+  behaviour, pinned by its tests.

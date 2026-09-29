@@ -58,8 +58,10 @@
 
 The format is the platform's own
 ([ADR 0002](../adr/0002-conversation-persistence.md)): not that of an
-agent framework, not that of a model vendor. Each engine translates to and
-from it on every turn ([agents.md](agents.md)).
+agent framework, not that of a model vendor. The runtime projects each message it
+completes into it; what the model is sent is the framework's own
+transcript, stored beside the record ("The native transcript", below;
+[ADR 0005](../adr/0005-one-agent-runtime.md)).
 
 **What a message can contain**
 
@@ -133,9 +135,8 @@ from it on every turn ([agents.md](agents.md)).
 - **Not in this version**, which keeps none of it **as content of a
   message**: an engine may stream it, every watcher sees it arrive, and what
   an engine returns as reasoning with a finished answer is dropped rather
-  than refused — an engine is not asked to know what the platform keeps. The
-  one thing a message may carry is the vendor's signed blocks, below, which
-  the platform never reads as reasoning.
+  than refused — an engine is not asked to know what the platform keeps. No message carries the vendor's signed blocks either: they live in the
+  native transcript, below.
 - **It is in the run's events all the same, and only there as reasoning.**
   What is published while an answer is being produced is what a watcher
   re-attaching in the middle of it is replayed ([runs.md](runs.md)), so the
@@ -153,56 +154,44 @@ from it on every turn ([agents.md](agents.md)).
   conversation.
 - It is included in a JSON export and left out of a Markdown export.
 - It is never sent to a vendor other than the one that produced it.
-- **The vendor's signed blocks are the one exception to "in no message",
-  and they are data to the platform, not reasoning.** On the models both
-  engines reach, thinking is on unless turned off, and an answer that makes
-  a tool call carries signed thinking blocks the vendor requires back,
-  unchanged, when the results go back. They are stored in the assistant
-  message's `extras` under the vendor's key (`extras.anthropic`), which is
-  exactly what that key was reserved for: the engine returns them with the
-  completed answer, the application stores them **unread** and bounded (the
-  64 KiB rule), the adapter that reaches that vendor replays them to it, and
-  every other reader reads past them. A block may carry the text of the
-  thinking the person was shown — that is the vendor's shape, and the
-  signature is over it — so what the platform promises is not that the text
-  is absent but that it is **never read as reasoning**: no reader renders
-  it, no Markdown export writes it, and no other vendor is sent it. A JSON
-  export writes the document whole, `extras` included. The blocks are bound
-  to the model that made them, so a conversation moved to another model
-  loses them and nothing else. Only a block the vendor takes back is kept
-  and replayed: a `thinking` block with its signature, or a
-  `redacted_thinking` block with its data. A model that signs nothing —
-  GPT through OpenRouter's Messages API sends its reasoning summary as an
-  unsigned `thinking` block — has that block streamed as reasoning and then
-  neither stored nor sent back, since the vendor refuses the whole request
-  over one; both engines hold to this, and the LangGraph adapter checks it
-  on the way back too. Blocks that do not fit the bound are left
-  out and the answer is stored without them, with a line in the log saying
-  what that may cost (the vendor may refuse the next round of a tool turn
-  replayed without its thinking). Where the blocks are also bound to the
-  prompt, what happens when the vendor refuses them is the adapter's: the
-  Pydantic AI adapter's framework retries once with the blocks marked as
-  dropped, the LangGraph adapter fails that turn — so on that engine an
-  operator editing an agent's prompt between turns does break a
-  conversation with bound blocks in it, which is known and not yet fixed
-  ([working-notes/mcp-plan.md](../working-notes/mcp-plan.md), "Open").
+- **The vendor's signed blocks live in the native transcript, not in the
+  record.** On the models the runtime reaches, thinking is on unless turned
+  off, and an answer that makes a tool call carries signed thinking blocks
+  the vendor requires back, unchanged, when the results go back. The
+  framework keeps them in its own transcript and replays them itself, and
+  the platform stores that transcript unread ("The native transcript"). No
+  message of the record holds them, so no reader renders them, no export
+  writes them, and no other vendor is sent them. `extras` stays reserved on
+  every document, and this version writes nothing into it.
 
-**What crosses a swap of engine or vendor**
+**The native transcript**
 
-- The portable content always crosses: text, images, files, the tool
-  history.
-- Vendor-specific extras — signed reasoning, provider message ids, cache
-  hints — are kept with the message as opaque vendor data, in `extras`
-  keyed by vendor. They are replayed only by the adapter that reaches the
-  vendor that produced them, and read past otherwise.
-- A swap never fails because of them, and it promises nothing about them:
-  a conversation started on one engine can be continued on the other, which
-  is the claim the swap test makes about the record, and what an adapter's
-  own context policy or a vendor's extras make of it is not part of that
-  claim ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)).
-  There is no intention to swap engines in the middle of a conversation;
-  models may change, and losing context when the model changes is
-  accepted.
+- Beside the record, each run stores the framework's own transcript of the
+  turn it ran — the messages the framework produced, serialised by the
+  framework's own serializer — as **one opaque document per run**, tagged
+  with the runtime's name and version
+  ([ADR 0005](../adr/0005-one-agent-runtime.md)). The platform never reads
+  it; it is what the model sees.
+- The native history of a turn is the concatenation of the slices of the
+  runs on the visible path, oldest first. So the tree, an edit and a
+  regeneration stay the platform's: they choose slices, and nothing edits a
+  slice in place.
+- Everything the framework adds for its own purposes lives there and
+  nowhere else: the vendor's signed thinking, provider message ids, the
+  summaries and compaction parts its context management produces, cache
+  hints. The record is never compacted.
+- A run that stored no slice — stopped, failed or interrupted before it
+  ended — contributes its messages **rebuilt from the record**, through the
+  runtime's lossy reverse projection: text, calls and results cross, and
+  what only the transcript held is lost. The same rebuild moves a
+  conversation to another runtime, or carries one across a framework
+  version that cannot read an old slice.
+- A conversation stays on the runtime it started on; **a model may
+  change** at any turn, and carrying the transcript to another model of the
+  same runtime is the framework's. Losing the vendor's signed parts on the
+  way is accepted.
+- Slices are deleted with their conversation, in the same transaction as
+  its messages and runs.
 
 **What an answer records**
 
@@ -227,6 +216,8 @@ from it on every turn ([agents.md](agents.md)).
   run's events ([runs.md](runs.md)) and not in the conversation. At any
   moment the stored conversation is consistent and complete up to that
   moment.
+- A run's native slice is stored when the run ends, with the run ("The
+  native transcript" above).
 - A stored conversation this build cannot read — a version above it, a
   kind of content it does not carry, a tree that is no tree — is a fault
   of the deployment and not of the request that met it. It is answered
@@ -344,12 +335,12 @@ from it on every turn ([agents.md](agents.md)).
 - Attachments are stored as `bytea`. The maximum size is an operator limit
   ([operations.md](operations.md)). An object store could later sit behind
   the same port.
-- Fitting a long history into a model's context is each agent adapter's
-  own policy ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)):
-  the application hands the port the full visible path, and what the model
-  sees of it — how much, in what order, with which cache breakpoints — is
-  decided per framework and per vendor. The one invariant kept above the
-  port is that the turn being answered is whole in what the model sees.
+- Fitting a long history into a model's context is the runtime's, through
+  the framework's own mechanisms — summarization, server-side compaction,
+  cache settings — configured per agent
+  ([ADR 0005](../adr/0005-one-agent-runtime.md)): applied to the native
+  transcript, never to the record. Rare, large cuts are preferred to sliding
+  windows, which break the prompt cache every turn.
 
 ## Open
 

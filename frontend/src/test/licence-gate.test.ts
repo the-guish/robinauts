@@ -320,6 +320,7 @@ describe("the lists come from the document, not from a second copy", () => {
       "cnri-python",
       "isc",
       "mit",
+      "mit-0",
       "postgresql",
       "psf-2.0",
       "unlicense",
