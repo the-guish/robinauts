@@ -9,8 +9,8 @@ the package (``docs/layout.md``). What sign-in needs is here: the allow list,
 the ID token's claims, the URLs, and the configuration's rules. So is what the
 conversation format needs: the rules of the tree, the one canonical encoding
 of a message, the derived title, and where a run may go next. Fitting a
-history into a model's context is **not** here: it is each agent adapter's own
-policy (ADR 0004). **One file holds two configurations** -- sign-in and models --
+history into a model's context is **not** here: it is each agent framework's
+own (ADR 0005). **One file holds two configurations** -- sign-in and models --
 and each parser is handed the whole of it and reads its own share, which is
 what ``TOP_LEVEL_KEYS`` is for.
 """
@@ -95,8 +95,8 @@ from robinauts.core.runs import (
     ResumePoint,
     active_run,
     active_run_stored,
+    check_backend_events,
     check_call_arguments,
-    check_engine_events,
     check_event_order,
     check_may_start_run,
     check_may_start_run_stored,
@@ -122,7 +122,6 @@ from robinauts.core.titles import (
     first_question,
     title_from_text,
 )
-from robinauts.core.tools import LeftOut, named_tools, split_tool_name, tools_for_run
 from robinauts.core.urls import (
     DEFAULT_RETURN_TO,
     MAX_RETURN_TO,
@@ -175,7 +174,6 @@ __all__ = [
     "UNSAID_ERROR",
     "URL_SAFE",
     "ConversationTree",
-    "LeftOut",
     "ResumePoint",
     "accepted_issuers",
     "active_run",
@@ -184,7 +182,7 @@ __all__ = [
     "authorization_url",
     "check_answers_calls",
     "check_call_arguments",
-    "check_engine_events",
+    "check_backend_events",
     "check_event_order",
     "check_id_token_claims",
     "check_may_start_run",
@@ -213,7 +211,6 @@ __all__ = [
     "message_from_data",
     "message_from_stored",
     "message_to_data",
-    "named_tools",
     "normalise_endpoint",
     "normalise_issuer",
     "normalise_origin",
@@ -232,9 +229,7 @@ __all__ = [
     "safe_return_to",
     "same_secret",
     "secret_hash",
-    "split_tool_name",
     "title_from_text",
-    "tools_for_run",
     "transition",
     "tree_of",
     "tree_of_stored",

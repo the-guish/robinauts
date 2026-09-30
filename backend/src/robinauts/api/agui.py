@@ -5,7 +5,7 @@
 
 **The mapping is the whole of what AG-UI is to this build** (``docs/specs/wire.md``).
 The application publishes the platform's own events -- ``RunStarted``,
-``MessageStarted``, ``TextDelta``, ``ReasoningDelta``, the three of a tool
+``MessageStarted``, ``TextPiece``, ``ReasoningPiece``, the three of a tool
 call and the one of a result, ``MessageCompleted``, ``RunEnded`` -- and this
 turns each of them into the events a chat client understands. Nothing below
 ``api`` knows that AG-UI exists, which is what makes
@@ -32,7 +32,7 @@ written for an operator (``robinauts.api.errors``).
 
 **Thinking is bracketed, which is why this is a class.** AG-UI streams
 reasoning as a message of its own -- opened, appended to, closed -- while the
-platform publishes bare ``ReasoningDelta``s. The brackets are therefore derived
+platform publishes bare ``ReasoningPiece``s. The brackets are therefore derived
 from the sequence: a reasoning delta with no stretch open opens one, and the
 first text delta, the completed message or the end of the run closes it. An
 answer may hold **several stretches** -- think, say something, think again --
@@ -98,13 +98,13 @@ from ag_ui.core import (
 from ag_ui.encoder import EventEncoder
 
 from robinauts.domain import (
-    ArgumentsDelta,
+    ArgumentsPiece,
     CallCompleted,
     CallStarted,
     InvalidValueError,
     MessageCompleted,
     MessageStarted,
-    ReasoningDelta,
+    ReasoningPiece,
     ResultLanded,
     RobinautsError,
     Role,
@@ -113,7 +113,7 @@ from robinauts.domain import (
     RunEvent,
     RunStarted,
     RunState,
-    TextDelta,
+    TextPiece,
     describe,
 )
 
@@ -323,9 +323,9 @@ class AguiMapper:
                 *self.closing(),
                 TextMessageStartEvent(message_id=str(inner.message_id), role=role),
             )
-        if isinstance(inner, ReasoningDelta):
+        if isinstance(inner, ReasoningPiece):
             return self._thought(inner, event.seq)
-        if isinstance(inner, TextDelta):
+        if isinstance(inner, TextPiece):
             if not inner.text:
                 return ()
             return (
@@ -341,7 +341,7 @@ class AguiMapper:
                     parent_message_id=str(inner.message_id),
                 ),
             )
-        if isinstance(inner, ArgumentsDelta):
+        if isinstance(inner, ArgumentsPiece):
             if not inner.text:
                 return ()
             return (
@@ -418,7 +418,7 @@ class AguiMapper:
         self._thinking = None
         return (ending,)
 
-    def _thought(self, delta: ReasoningDelta, position: int) -> tuple[BaseEvent, ...]:
+    def _thought(self, delta: ReasoningPiece, position: int) -> tuple[BaseEvent, ...]:
         """More thinking, opening the reasoning message if this is the first of it.
 
         ``position`` is where the delta falls in its run, and it is the id of

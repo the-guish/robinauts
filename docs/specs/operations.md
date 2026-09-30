@@ -38,7 +38,9 @@ What an internal platform team deploys and controls.
   servers offer runs without asking. A server configured with `auth =
   "none"` — a public one, such as Microsoft Learn's — is sent no credential
   at all: what it sees is the deployment's address and the arguments the
-  model wrote for the call, and nothing that names anyone.
+  model wrote for the call, and nothing that names anyone. The client that
+  connects is the agent framework's own MCP client, built from the server's
+  table and nothing else ([agents.md](agents.md), "Tools").
 
 ## Configuration
 
@@ -65,10 +67,13 @@ All optional, all set by the operator:
 - requests per minute per user;
 - a maximum attachment size;
 - timeouts for a model call, a tool call and a whole run; the bound on the
-  tool rounds one turn may take has a default and is not a setting yet;
-- a maximum context per agent. Fitting a history into it is each agent
-  adapter's own policy ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)),
-  so the setting is one an adapter reads;
+  tool rounds one turn may take is each agent adapter's own default and is
+  not a setting;
+- a model's `context_window`, in tokens, which is what the frameworks keep
+  a conversation's history within
+  ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)):
+  optional, since the frameworks know the windows of the vendors' own
+  models, and worth setting for a gateway's model ids, which they do not;
 - a token budget per user per period, which refuses new turns once spent
   and is shown to the user. It depends on usage recording and arrives with
   it.

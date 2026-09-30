@@ -21,14 +21,14 @@ from robinauts.core import conversation_format as format_module
 from robinauts.domain import (
     FIRST_POSITION,
     FORMAT_VERSION,
-    ArgumentsDelta,
+    ArgumentsPiece,
     CallCompleted,
     CallStarted,
     InvalidValueError,
     Message,
     MessageCompleted,
     MessageStarted,
-    ReasoningDelta,
+    ReasoningPiece,
     ResultLanded,
     Role,
     RunEnded,
@@ -36,8 +36,8 @@ from robinauts.domain import (
     RunStarted,
     RunState,
     StoredDataError,
-    TextDelta,
     TextPart,
+    TextPiece,
     ToolCallPart,
     ToolResultPart,
     TurnEvent,
@@ -69,10 +69,10 @@ def every_event() -> list[TurnEvent]:
         RunStarted(run_id=RUN, conversation_id=CONVERSATION),
         MessageStarted(run_id=RUN, message_id=MESSAGE, parent_id=PARENT),
         MessageStarted(run_id=RUN, message_id=MESSAGE, parent_id=PARENT, role=Role.TOOL),
-        TextDelta(run_id=RUN, message_id=MESSAGE, text="Some "),
-        ReasoningDelta(run_id=RUN, message_id=MESSAGE, text="thinking"),
+        TextPiece(run_id=RUN, message_id=MESSAGE, text="Some "),
+        ReasoningPiece(run_id=RUN, message_id=MESSAGE, text="thinking"),
         CallStarted(run_id=RUN, message_id=MESSAGE, call_id="toolu_01", name="github__search"),
-        ArgumentsDelta(run_id=RUN, message_id=MESSAGE, call_id="toolu_01", text='{"q": '),
+        ArgumentsPiece(run_id=RUN, message_id=MESSAGE, call_id="toolu_01", text='{"q": '),
         CallCompleted(run_id=RUN, message_id=MESSAGE, call_id="toolu_01"),
         ResultLanded(run_id=RUN, message_id=MESSAGE, call_id="toolu_01", text="found"),
         ResultLanded(run_id=RUN, message_id=MESSAGE, call_id="toolu_02", text="", is_error=True),
@@ -136,7 +136,7 @@ def test_a_completed_message_carries_the_message_document() -> None:
 )
 def test_a_delta_survives_whatever_text_it_carries(text: str) -> None:
     """What a provider sent, once the application made it storable."""
-    delta = TextDelta(run_id=RUN, message_id=MESSAGE, text=clean_text(text))
+    delta = TextPiece(run_id=RUN, message_id=MESSAGE, text=clean_text(text))
     assert event_from_data(event_to_data(delta)) == delta
 
 
@@ -193,7 +193,7 @@ def test_a_key_nobody_wrote_is_refused_by_count() -> None:
 
 def test_a_refusal_says_nothing_of_what_it_refused() -> None:
     secret = "a-password-somebody-typed-in-the-wrong-box"
-    data = event_to_data(TextDelta(run_id=RUN, message_id=MESSAGE, text="Some"))
+    data = event_to_data(TextPiece(run_id=RUN, message_id=MESSAGE, text="Some"))
     for broken in ({"run_id": secret}, {"message_id": secret}, {"text": {"said": secret}}):
         with pytest.raises(InvalidValueError) as refused:
             event_from_data({**data, **broken})

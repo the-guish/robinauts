@@ -19,36 +19,28 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import uuid
-from collections.abc import Sequence
 from typing import Any
 
 import pytest
 
 from aio import asyncio_test
-from contracts.tool_servers import ECHO, SEARCH
 from conversations import AGENT, MODEL, OTHER_MODEL, agent_definition, at, offered
 from fakes import (
     CountingIdSource,
     FakeClock,
     Gate,
     MemoryConversationStore,
-    MemoryToolServers,
     Raise,
+    ScriptedAgent,
     calls,
+    results,
     says,
 )
 from robinauts.adapters import AsyncioRunExecutor, MemoryRunSignals
-from robinauts.application import (
-    NO_ANSWER_AFTER_TOOLS,
-    NO_CONTENT,
-    NO_SUCH_TOOL,
-    TOO_MANY_ROUNDS,
-    Conversations,
-    Turns,
-    Watch,
-)
+from robinauts.application import NO_CONTENT, Conversations, Turns, Watch
 from robinauts.application.turns import _Pump
 from robinauts.core import (
     check_event_order,
@@ -60,18 +52,16 @@ from robinauts.domain import (
     ENDED_RUN_STATES,
     FIRST_POSITION,
     AgentDefinition,
-    AnswerCompleted,
-    AnswerReasoningDelta,
-    AnswerStarted,
-    AnswerTextDelta,
+    ArgumentsPiece,
+    Done,
+    Engine,
     IllegalTransitionError,
-    InvalidValueError,
-    Message,
     MessageCompleted,
     MessageStarted,
     PositionTakenError,
     ReasoningDelta,
     ReasoningPart,
+    ReasoningPiece,
     ResultLanded,
     Role,
     Run,
@@ -82,18 +72,10 @@ from robinauts.domain import (
     RunState,
     TextDelta,
     TextPart,
-    ToolCallArgumentsDelta,
-    ToolCallCompleted,
+    TextPiece,
+    ToolCall,
     ToolCallPart,
-    ToolCallStarted,
-    ToolDefinition,
-    ToolResult,
     ToolResultPart,
-    ToolServerConfig,
-    ToolServerError,
-    WaitingOnTools,
-    text_parts,
-    unanswered_calls,
 )
 from robinauts.ports import MAX_SWEPT, Agent
 from turns import (
@@ -122,6 +104,28 @@ engine was still letting go" and "it waited for the engine", where the engine
 in these tests never finishes.
 """
 
+SEARCH = "search"
+"""The one tool the scripted model asks for, by the name the framework showed it under."""
+
+ECHO = "echo"
+"""A second one, for a batch of two calls."""
+
+SEARCH_CALL = ("toolu_01", SEARCH, {"q": "robinauts"})
+"""A call the model makes, as ``calls`` wants it: the id, the name, the arguments."""
+
+ECHO_CALL = ("toolu_02", ECHO, {})
+
+FOUND = ("toolu_01", SEARCH, "found 3")
+"""What the search came back with, as ``results`` wants it."""
+
+ECHOED = ("toolu_02", ECHO, "waited")
+
+REMEMBERED = b'{"a": 1}'
+"""What an engine hands back as the conversation's memory, and is handed again."""
+
+REMEMBERED_NEXT = b'{"a": 2}'
+"""What the turn after that hands back, so the two are told apart."""
+
 
 # --- a turn that runs to its end ---------------------------------------------
 
@@ -138,16 +142,16 @@ async def test_a_streamed_answer_is_announced_streamed_stored_and_announced_agai
     assert kinds(events) == [
         "RunStarted",
         "MessageStarted",
-        "TextDelta",
-        "TextDelta",
-        "TextDelta",
+        "TextPiece",
+        "TextPiece",
+        "TextPiece",
         "MessageCompleted",
         "RunEnded",
     ]
     stored = await stored_messages(wiring.store, run.conversation_id)
     answered = stored[-1]
     # What was published, joined, is what was stored: character for character.
-    published = "".join(event.event.text for event in events if isinstance(event.event, TextDelta))
+    published = "".join(event.event.text for event in events if isinstance(event.event, TextPiece))
     assert published == answered.text == ANSWER
     assert answered.parent_id == run.message_id
     assert answered.role is Role.ASSISTANT
@@ -173,19 +177,23 @@ async def test_an_answer_that_was_never_streamed_is_stored_all_the_same() -> Non
 
 @asyncio_test
 async def test_two_answers_in_one_turn_hang_one_under_the_other() -> None:
-    wiring = wired(*says("First."), *says("Second."))
+    # Two answers in one turn take a tool round between them, now that the
+    # framework runs the loop and a turn ends with its ``Done``; the turn is
+    # still a chain.
+    wiring = wired(*calls(SEARCH_CALL, text="First."), *results(FOUND), *says("Second."))
     run = await begun(wiring)
 
     await wiring.turns.execute(run)
 
     events = await stored_events(wiring.store, run.id)
     readable(events, run)
-    question, first, second = await stored_messages(wiring.store, run.conversation_id)
+    question, first, batch, second = await stored_messages(wiring.store, run.conversation_id)
     assert (first.text, second.text) == ("First.", "Second.")
     # A turn is a chain: the first answer under the question, the next under
-    # the answer before it.
+    # the message before it.
     assert first.parent_id == question.id
-    assert second.parent_id == first.id
+    assert batch.parent_id == first.id
+    assert second.parent_id == batch.id
     assert (await wiring.store.run_by_id(run.id)).state is RunState.FINISHED
 
 
@@ -201,10 +209,9 @@ async def test_reasoning_is_kept_in_the_runs_events_and_in_no_message() -> None:
     nobody can re-attach to them any more.
     """
     wiring = wired(
-        AnswerStarted(),
-        AnswerReasoningDelta(text="Thinking about it."),
-        AnswerTextDelta(text=ANSWER),
-        AnswerCompleted(parts=(ReasoningPart("Thinking about it."), TextPart(ANSWER))),
+        ReasoningDelta(text="Thinking about it."),
+        TextDelta(text=ANSWER),
+        Done(text=ANSWER),
     )
     run = await begun(wiring)
 
@@ -212,7 +219,7 @@ async def test_reasoning_is_kept_in_the_runs_events_and_in_no_message() -> None:
 
     events = await stored_events(wiring.store, run.id)
     readable(events, run)
-    assert [event.event.text for event in events if isinstance(event.event, ReasoningDelta)] == [
+    assert [event.event.text for event in events if isinstance(event.event, ReasoningPiece)] == [
         "Thinking about it."
     ]
     # In the stored event document, which is what a re-attaching watcher is
@@ -228,11 +235,7 @@ async def test_reasoning_is_kept_in_the_runs_events_and_in_no_message() -> None:
 
 @asyncio_test
 async def test_an_answer_that_was_only_thinking_is_stored_as_an_empty_message() -> None:
-    wiring = wired(
-        AnswerStarted(),
-        AnswerReasoningDelta(text="Thought better of it."),
-        AnswerCompleted(parts=(ReasoningPart("Thought better of it."),)),
-    )
+    wiring = wired(ReasoningDelta(text="Thought better of it."), Done(text=""))
     run = await begun(wiring)
 
     await wiring.turns.execute(run)
@@ -247,10 +250,9 @@ async def test_an_answer_that_was_only_thinking_is_stored_as_an_empty_message() 
 @asyncio_test
 async def test_a_character_that_arrives_in_two_halves_is_published_whole() -> None:
     wiring = wired(
-        AnswerStarted(),
-        AnswerTextDelta(text="a\ud83d"),
-        AnswerTextDelta(text="\ude00b"),
-        AnswerCompleted(parts=(TextPart("a\U0001f600b"),)),
+        TextDelta(text="a\ud83d"),
+        TextDelta(text="\ude00b"),
+        Done(text="a\U0001f600b"),
     )
     run = await begun(wiring)
 
@@ -258,7 +260,7 @@ async def test_a_character_that_arrives_in_two_halves_is_published_whole() -> No
 
     events = await stored_events(wiring.store, run.id)
     readable(events, run)
-    published = [event.event.text for event in events if isinstance(event.event, TextDelta)]
+    published = [event.event.text for event in events if isinstance(event.event, TextPiece)]
     # The high half was held back until its other half arrived: nothing
     # published is half a character, and the pieces still add up.
     assert published == ["a", "\U0001f600b"]
@@ -305,11 +307,7 @@ async def test_an_engine_that_raises_before_any_answer_fails_the_run() -> None:
 
 @asyncio_test
 async def test_an_engine_that_raises_in_the_middle_leaves_the_answer_uncompleted() -> None:
-    wiring = wired(
-        AnswerStarted(),
-        AnswerTextDelta(text="As far as it g"),
-        Raise(RuntimeError("cut off")),
-    )
+    wiring = wired(TextDelta(text="As far as it g"), Raise(RuntimeError("cut off")))
     run = await begun(wiring)
 
     await wiring.turns.execute(run)
@@ -318,7 +316,7 @@ async def test_an_engine_that_raises_in_the_middle_leaves_the_answer_uncompleted
     # A message announced and never completed is exactly what this looks
     # like, and the stream still reads back.
     readable(events, run)
-    assert kinds(events) == ["RunStarted", "MessageStarted", "TextDelta", "RunEnded"]
+    assert kinds(events) == ["RunStarted", "MessageStarted", "TextPiece", "RunEnded"]
     assert (await wiring.store.run_by_id(run.id)).state is RunState.FAILED
     assert len(await stored_messages(wiring.store, run.conversation_id)) == 1
 
@@ -339,9 +337,20 @@ async def test_an_engine_that_raises_after_an_answer_keeps_what_was_produced() -
     assert (await wiring.store.run_by_id(run.id)).state is RunState.FAILED
 
 
+@pytest.mark.parametrize(
+    "steps",
+    [
+        # A stream with nothing in it at all.
+        [],
+        # One that stopped after its tool round without saying it was done: a
+        # run that finished on a tool message would be one nothing continues
+        # from, and this one did not finish.
+        [*calls(SEARCH_CALL), *results(FOUND)],
+    ],
+)
 @asyncio_test
-async def test_a_turn_that_produced_no_answer_is_a_failed_run() -> None:
-    wiring = wired()
+async def test_a_turn_that_produced_no_answer_is_a_failed_run(steps: list[Any]) -> None:
+    wiring = wired(*steps)
     run = await begun(wiring)
 
     await wiring.turns.execute(run)
@@ -357,7 +366,7 @@ async def test_a_turn_that_produced_no_answer_is_a_failed_run() -> None:
 async def test_a_turn_that_stopped_in_the_middle_of_an_answer_is_a_failed_run() -> None:
     # The engine returned without completing what it announced and without
     # raising: not a finish, since a finished run leaves nothing half-written.
-    wiring = wired(AnswerStarted(), AnswerTextDelta(text="half of it"))
+    wiring = wired(TextDelta(text="half of it"))
     run = await begun(wiring)
 
     await wiring.turns.execute(run)
@@ -370,28 +379,9 @@ async def test_a_turn_that_stopped_in_the_middle_of_an_answer_is_a_failed_run() 
 
 
 @asyncio_test
-async def test_an_answer_that_did_not_complete_with_what_it_streamed_fails_the_run() -> None:
-    # The promise a watcher is given is that what arrived is what is stored;
-    # an engine that breaks it is a failure, not a stream nobody can check.
-    wiring = wired(
-        AnswerStarted(),
-        AnswerTextDelta(text="what you saw"),
-        AnswerCompleted(parts=(TextPart("something else"),)),
-    )
-    run = await begun(wiring)
-
-    await wiring.turns.execute(run)
-
-    events = await stored_events(wiring.store, run.id)
-    readable(events, run)
-    assert (await wiring.store.run_by_id(run.id)).state is RunState.FAILED
-    assert len(await stored_messages(wiring.store, run.conversation_id)) == 1
-
-
-@asyncio_test
 async def test_a_turn_that_takes_too_long_is_failed_and_says_so() -> None:
     held = Gate()
-    wiring = wired(AnswerStarted(), AnswerTextDelta(text="Half of"), held, turn_seconds=0.25)
+    wiring = wired(TextDelta(text="Half of"), held, turn_seconds=0.25)
     run = await begun(wiring)
 
     turn = asyncio.create_task(wiring.turns.execute(run))
@@ -403,7 +393,7 @@ async def test_a_turn_that_takes_too_long_is_failed_and_says_so() -> None:
 
     events = await stored_events(wiring.store, run.id)
     readable(events, run)
-    assert kinds(events) == ["RunStarted", "MessageStarted", "TextDelta", "RunEnded"]
+    assert kinds(events) == ["RunStarted", "MessageStarted", "TextPiece", "RunEnded"]
     ended = await wiring.store.run_by_id(run.id)
     assert ended.state is RunState.FAILED
     assert ended.error == "the turn took longer than this deployment allows and was stopped"
@@ -417,7 +407,7 @@ async def test_a_turn_that_takes_too_long_is_failed_and_says_so() -> None:
 @asyncio_test
 async def test_cancelling_in_the_middle_of_an_answer_ends_the_run_and_keeps_nothing() -> None:
     held = Gate()
-    wiring = wired(AnswerStarted(), AnswerTextDelta(text="Half of an"), held)
+    wiring = wired(TextDelta(text="Half of an"), held)
     run = await begun(wiring)
     # Through the executor, which is where the work of a run lives and what
     # `cancel` asks: a request begins a turn exactly this way.
@@ -432,14 +422,16 @@ async def test_cancelling_in_the_middle_of_an_answer_ends_the_run_and_keeps_noth
     await settled(wiring, run)
     events = await stored_events(wiring.store, run.id)
     readable(events, run)
-    assert kinds(events) == ["RunStarted", "MessageStarted", "TextDelta", "RunEnded"]
+    assert kinds(events) == ["RunStarted", "MessageStarted", "TextPiece", "RunEnded"]
     assert events[-1].event.state is RunState.CANCELLED
     ended = await wiring.store.run_by_id(run.id)
     assert ended.state is RunState.CANCELLED
     assert ended.error is None
     # The answer in flight was never completed, so it is not in the
-    # conversation; the question is all there is.
+    # conversation; the question is all there is. And a run that did not
+    # finish leaves no memory.
     assert len(await stored_messages(wiring.store, run.conversation_id)) == 1
+    assert await wiring.store.engine_state(run.id) is None
     # And the engine was let go of.
     assert wiring.agent.released == 1
 
@@ -498,11 +490,13 @@ async def test_somebody_elses_run_is_answered_exactly_like_one_that_is_not_there
 @asyncio_test
 async def test_a_run_ended_under_the_task_executing_it_stops_it_quietly() -> None:
     held = Gate()
-    wiring = wired(AnswerStarted(), held, *says(ANSWER)[1:])
+    wiring = wired(held, *says(ANSWER))
     run = await begun(wiring)
     turn = asyncio.create_task(wiring.turns.execute(run))
     await held.reached.wait()
-    await written(wiring.store, run.id, 2)
+    # Nothing of the answer is announced before its first delta: the run has
+    # begun, and that is all that is stored.
+    await written(wiring.store, run.id, 1)
     # Somebody else ends it: another process, or this one after a restart.
     position = await wiring.store.last_position(run.id) + 1
     ending = RunEvent(
@@ -552,7 +546,7 @@ async def test_the_sweep_interrupts_every_run_this_process_is_not_executing() ->
 @asyncio_test
 async def test_the_sweep_leaves_the_runs_this_process_is_executing_alone() -> None:
     held = Gate()
-    wiring = wired(AnswerStarted(), held, *says(ANSWER)[1:])
+    wiring = wired(held, *says(ANSWER))
     run = await begun(wiring)
     turn = asyncio.create_task(wiring.turns.execute(run))
     await held.reached.wait()
@@ -568,7 +562,14 @@ async def test_the_sweep_leaves_the_runs_this_process_is_executing_alone() -> No
 class Raced(MemoryConversationStore):
     """A store where somebody else has always ended the run first."""
 
-    async def end_run(self, run: Run, event: RunEvent, event_document: object) -> None:
+    async def end_run(
+        self,
+        run: Run,
+        event: RunEvent,
+        event_document: object,
+        *,
+        engine_state: bytes | None = None,
+    ) -> None:
         raise IllegalTransitionError(f"run {run.id} has ended and is not written again")
 
 
@@ -604,13 +605,13 @@ async def test_the_sweep_does_not_interrupt_a_run_that_holds_no_process() -> Non
 async def test_a_watcher_re_attaches_at_every_point_of_a_run() -> None:
     inside, between = Gate(), Gate()
     wiring = wired(
-        AnswerStarted(),
-        AnswerTextDelta(text="Someone who "),
+        TextDelta(text="Let me "),
         inside,
-        AnswerTextDelta(text="plays fair."),
-        AnswerCompleted(parts=text_parts(ANSWER)),
+        TextDelta(text="look."),
+        *calls(SEARCH_CALL),
+        *results(FOUND),
         between,
-        *says("And that is all."),
+        *says("Found three."),
     )
     run = await begun(wiring)
     turn = asyncio.create_task(wiring.turns.execute(run))
@@ -622,11 +623,12 @@ async def test_a_watcher_re_attaches_at_every_point_of_a_run() -> None:
     await _re_attaches(wiring, run, messages=1)
     inside.open()
 
-    # After it completed: the answer is in the conversation now, and the
-    # replay begins after the event that announced it.
+    # After the round: the answer with its call and the tool message under it
+    # are in the conversation now, and the replay begins after the event that
+    # completed the last of them.
     await between.reached.wait()
-    await written(wiring.store, run.id, 5)
-    await _re_attaches(wiring, run, messages=2)
+    await written(wiring.store, run.id, 11)
+    await _re_attaches(wiring, run, messages=3)
     between.open()
 
     await turn
@@ -665,8 +667,17 @@ async def _re_attaches(wiring: Wiring, run: Run, *, messages: int) -> None:
 # --- what the engine is given ----------------------------------------------------
 
 
+async def followed(wiring: Wiring, run: Run, text: str = "And why?") -> Run:
+    """The next question of that run's conversation, under the last message stored, and its run."""
+    last = (await stored_messages(wiring.store, run.conversation_id))[-1]
+    started = await wiring.turns.start(
+        AUTHOR, conversation_id=run.conversation_id, text=text, parent_id=last.id
+    )
+    return started.run
+
+
 @asyncio_test
-async def test_the_engine_is_given_the_agent_and_the_path_to_the_question() -> None:
+async def test_the_engine_is_given_the_agent_the_question_and_at_first_no_memory() -> None:
     wiring = wired(*says(ANSWER))
     run = await begun(wiring)
 
@@ -674,7 +685,8 @@ async def test_the_engine_is_given_the_agent_and_the_path_to_the_question() -> N
 
     asked = wiring.agent.asked[-1]
     assert asked.agent == wiring.definition
-    assert [message.id for message in asked.history] == [run.message_id]
+    assert asked.prompt == "What is a robinaut?"
+    assert asked.state is None
 
 
 @asyncio_test
@@ -685,14 +697,9 @@ async def test_the_engine_is_given_the_model_the_conversation_was_moved_to() -> 
     first = await begun(wiring)
     await wiring.turns.execute(first)
     await wiring.turns.set_model(AUTHOR, first.conversation_id, OTHER_MODEL)
-    second = await wiring.turns.start(
-        AUTHOR,
-        conversation_id=first.conversation_id,
-        text="And why?",
-        parent_id=(await stored_messages(wiring.store, first.conversation_id))[-1].id,
-    )
+    second = await followed(wiring, first)
 
-    await wiring.turns.execute(second.run)
+    await wiring.turns.execute(second)
 
     assert [asked.model for asked in wiring.agent.asked] == [MODEL, OTHER_MODEL]
     answers = [
@@ -719,64 +726,197 @@ async def test_a_run_begun_before_the_model_was_changed_runs_on_the_one_it_began
     assert answer.provenance is not None and answer.provenance.model == MODEL
 
 
+# --- the memory ------------------------------------------------------------------
+
+
 @asyncio_test
-async def test_the_engine_is_handed_the_whole_path_and_no_tools_when_the_agent_has_none() -> None:
-    """Nothing is trimmed above the port (ADR 0004): the second turn's engine
-    sees the first question, its answer and the new question, in order. And
-    an agent that names no server is handed no tools, and no server is asked."""
-    wiring = wired(*says("A" * 20))
-    first = await begun(wiring, "Q" * 20)
-    await wiring.turns.execute(first)
-    second = await wiring.turns.start(
-        AUTHOR,
-        conversation_id=first.conversation_id,
-        text="R" * 20,
-        parent_id=(await stored_messages(wiring.store, first.conversation_id))[-1].id,
-    )
+async def test_a_finished_run_stores_the_memory_the_engine_handed_back() -> None:
+    wiring = wired(*says(ANSWER, state=REMEMBERED))
+    run = await begun(wiring)
 
-    await wiring.turns.execute(second.run)
+    await wiring.turns.execute(run)
 
-    assert [message.text for message in wiring.agent.history] == ["Q" * 20, "A" * 20, "R" * 20]
-    assert [message.role for message in wiring.agent.history] == [
-        Role.USER,
-        Role.ASSISTANT,
-        Role.USER,
-    ]
-    assert wiring.agent.asked[-1].tools == ()
-    assert wiring.tools.listings == []
+    assert (await wiring.store.run_by_id(run.id)).state is RunState.FINISHED
+    assert await wiring.store.engine_state(run.id) == REMEMBERED
 
 
-# --- the tool loop -----------------------------------------------------------------
-
-
-GITHUB = ToolServerConfig(
-    id="github", url="https://github.example.test/mcp/", secret_env="ROBINAUTS_GITHUB_TOKEN"
+@pytest.mark.parametrize(
+    "steps",
+    [
+        # Cut off in the middle of the answer.
+        [TextDelta(text="As far as it g"), Raise(RuntimeError("cut off"))],
+        # Done, memory and all, and then fell over: the run did not finish.
+        [*says(ANSWER, state=REMEMBERED), Raise(RuntimeError("and then it fell over"))],
+        # Stopped without saying it was done.
+        [TextDelta(text="half of it")],
+    ],
 )
-"""The one server the tooled agent names; its prefix is its id."""
+@asyncio_test
+async def test_a_run_that_did_not_finish_stores_no_memory(steps: list[Any]) -> None:
+    wiring = wired(*steps)
+    run = await begun(wiring)
 
-SEARCH_CALL = ("toolu_01", "github__search_repositories", {"q": "robinauts"})
-"""A call the model makes, as ``calls`` wants it: the full name, the arguments."""
+    await wiring.turns.execute(run)
 
-FOUND = ToolResult("found 3")
+    assert (await wiring.store.run_by_id(run.id)).state is RunState.FAILED
+    assert await wiring.store.engine_state(run.id) is None
 
 
-def tooled(*steps: Any, **changes: Any) -> Wiring:
-    """A wiring whose agent has the ``github`` server, listing ``SEARCH`` and ``ECHO``.
+@asyncio_test
+async def test_the_next_turn_is_handed_the_question_and_the_memory_of_the_turn_before() -> None:
+    """The model's memory is the framework's (ADR 0005): what one turn is done
+    with is handed to the next, unread, with the text of the new question --
+    and nothing of the transcript, which the platform keeps for people."""
+    wiring = wired(*says(ANSWER, state=REMEMBERED))
+    wiring.agent.then(*says("Because.", state=REMEMBERED_NEXT))
+    first = await begun(wiring)
+    await wiring.turns.execute(first)
+    second = await followed(wiring, first, "And why?")
 
-    ``search_repositories`` answers ``FOUND`` unless the test says otherwise;
-    ``echo`` has no answer scripted, which the fake answers as the server
-    having no such tool.
-    """
-    tools = MemoryToolServers()
-    tools.serving(GITHUB.id, SEARCH, ECHO)
-    tools.answering(GITHUB.id, SEARCH.name, FOUND)
-    return wired(
-        *steps,
-        definition=agent_definition(tools=(GITHUB.id,)),
-        servers={GITHUB.id: GITHUB},
-        tools=tools,
-        **changes,
+    await wiring.turns.execute(second)
+
+    before, after = wiring.agent.asked
+    assert (before.prompt, before.state) == ("What is a robinaut?", None)
+    assert (after.prompt, after.state) == ("And why?", REMEMBERED)
+    assert await wiring.store.engine_state(second.id) == REMEMBERED_NEXT
+    assert (await wiring.store.run_by_id(second.id)).state is RunState.FINISHED
+
+
+@asyncio_test
+async def test_a_regeneration_is_handed_the_memory_of_the_turn_before_the_one_it_replaces() -> None:
+    """A fork of the transcript is a fork of the memory: the new answer resumes
+    from what the turn before the replaced one left, and not from the answer
+    it replaces -- so the first answer, again, resumes from nothing."""
+    wiring = wired(*says(ANSWER, state=REMEMBERED))
+    wiring.agent.then(*says("Because.", state=REMEMBERED_NEXT))
+    wiring.agent.then(*says("Because, again."))
+    wiring.agent.then(*says("Someone fair, again."))
+    first = await begun(wiring)
+    await wiring.turns.execute(first)
+    second = await followed(wiring, first, "And why?")
+    await wiring.turns.execute(second)
+    _, answered, _, answered_again = await stored_messages(wiring.store, first.conversation_id)
+
+    later = await wiring.turns.regenerate(
+        AUTHOR, conversation_id=first.conversation_id, message_id=answered_again.id
     )
+    await wiring.turns.execute(later.run)
+    earlier = await wiring.turns.regenerate(
+        AUTHOR, conversation_id=first.conversation_id, message_id=answered.id
+    )
+    await wiring.turns.execute(earlier.run)
+
+    assert [asked.state for asked in wiring.agent.asked] == [None, REMEMBERED, REMEMBERED, None]
+    assert [asked.prompt for asked in wiring.agent.asked] == [
+        "What is a robinaut?",
+        "And why?",
+        "And why?",
+        "What is a robinaut?",
+    ]
+    for run in (later.run, earlier.run):
+        assert (await wiring.store.run_by_id(run.id)).state is RunState.FINISHED
+
+
+@asyncio_test
+async def test_a_turn_after_one_that_did_not_finish_resumes_from_the_memory_before_it() -> None:
+    """A run that did not finish left no memory, whatever it wrote into the
+    transcript: the walk goes on up to the finished run before it."""
+    wiring = wired(*says(ANSWER, state=REMEMBERED))
+    wiring.agent.then(
+        *says("Second.", state=REMEMBERED_NEXT), Raise(RuntimeError("and then it fell over"))
+    )
+    wiring.agent.then(*says("Third."))
+    first = await begun(wiring)
+    await wiring.turns.execute(first)
+    second = await followed(wiring, first, "And why?")
+    await wiring.turns.execute(second)
+    assert (await wiring.store.run_by_id(second.id)).state is RunState.FAILED
+    third = await followed(wiring, second, "Are you sure?")
+
+    await wiring.turns.execute(third)
+
+    # The second answer is in the transcript and the third question hangs
+    # under it; its run's memory is nobody's, and the third turn resumes from
+    # the first's.
+    stored = await stored_messages(wiring.store, first.conversation_id)
+    assert [message.text for message in stored] == [
+        "What is a robinaut?",
+        ANSWER,
+        "And why?",
+        "Second.",
+        "Are you sure?",
+        "Third.",
+    ]
+    assert stored[4].parent_id == stored[3].id
+    assert wiring.agent.asked[-1].state == REMEMBERED
+
+
+def on_the_other_engine(wiring: Wiring, *steps: Any) -> Wiring:
+    """The same deployment after a restart that moved the agent to the other engine.
+
+    Over the same store, clock and source of ids -- a restart puts no time
+    back and hands out no id twice -- with the agent's definition now naming
+    ``Engine.LANGGRAPH``, and an engine of that name running that script.
+    """
+    definition = agent_definition(engine=Engine.LANGGRAPH)
+    agent = ScriptedAgent(*steps)
+    executor = AsyncioRunExecutor()
+    signals = MemoryRunSignals()
+    return Wiring(
+        turns=Turns(
+            store=wiring.store,
+            clock=wiring.clock,
+            ids=wiring.ids,
+            agents={definition.id: definition},
+            models=offered(OTHER_MODEL),
+            engines={definition.engine: agent},
+            executor=executor,
+            signals=signals,
+        ),
+        conversations=Conversations(store=wiring.store, clock=wiring.clock),
+        watch=Watch(store=wiring.store, signals=signals),
+        executor=executor,
+        signals=signals,
+        store=wiring.store,
+        clock=wiring.clock,
+        ids=wiring.ids,
+        agent=agent,
+        definition=definition,
+    )
+
+
+@asyncio_test
+async def test_a_memory_written_by_the_other_engine_is_not_handed_over() -> None:
+    """A conversation stays with its engine (``docs/specs/agents.md``): a state
+    is one framework's, and the other begins with none rather than being
+    handed what it cannot read. The transcript stays what it was."""
+    wiring = wired(*says(ANSWER, state=REMEMBERED))
+    first = await begun(wiring)
+    await wiring.turns.execute(first)
+    moved = on_the_other_engine(wiring, *says("On the other engine.", state=b'{"other": 1}'))
+    second = await followed(moved, first, "And why?")
+
+    await moved.turns.execute(second)
+
+    assert second.engine is Engine.LANGGRAPH
+    assert moved.agent.asked[-1].state is None
+    assert (await moved.store.run_by_id(second.id)).state is RunState.FINISHED
+    assert await moved.store.engine_state(second.id) == b'{"other": 1}'
+    # And back again: what the other engine left is not this one's either.
+    wiring.agent.then(*says("Back here."))
+    third = await followed(wiring, second, "Are you sure?")
+    await wiring.turns.execute(third)
+    assert third.engine is Engine.PYDANTIC_AI
+    assert wiring.agent.asked[-1].state is None
+    engines = [
+        message.provenance.engine
+        for message in await stored_messages(wiring.store, first.conversation_id)
+        if message.provenance is not None
+    ]
+    assert engines == [Engine.PYDANTIC_AI, Engine.LANGGRAPH, Engine.PYDANTIC_AI]
+
+
+# --- a tool round -----------------------------------------------------------------
 
 
 def call_ids(events: list[RunEvent]) -> list[str]:
@@ -792,8 +932,7 @@ async def test_a_tool_round_stores_the_calling_answer_the_tool_message_and_the_a
     calls, with its call inside it; the one tool message of the batch, under
     it; the answer after, under that. Every event published, and the stream
     read back whole."""
-    wiring = tooled(*calls(SEARCH_CALL, text="Let me look."))
-    wiring.agent.then(*says("Found three."))
+    wiring = wired(*calls(SEARCH_CALL, text="Let me look."), *results(FOUND), *says("Found three."))
     run = await begun(wiring)
 
     await wiring.turns.execute(run)
@@ -803,179 +942,145 @@ async def test_a_tool_round_stores_the_calling_answer_the_tool_message_and_the_a
     assert kinds(events) == [
         "RunStarted",
         "MessageStarted",
-        "TextDelta",
+        "TextPiece",
         "CallStarted",
-        "ArgumentsDelta",
-        "ArgumentsDelta",
+        "ArgumentsPiece",
         "CallCompleted",
         "MessageCompleted",
         "MessageStarted",
         "ResultLanded",
         "MessageCompleted",
         "MessageStarted",
-        "TextDelta",
+        "TextPiece",
         "MessageCompleted",
         "RunEnded",
     ]
-    question, calling, results, done = await stored_messages(wiring.store, run.conversation_id)
-    assert (calling.role, results.role, done.role) == (Role.ASSISTANT, Role.TOOL, Role.ASSISTANT)
+    question, calling, batch, done = await stored_messages(wiring.store, run.conversation_id)
+    assert (calling.role, batch.role, done.role) == (Role.ASSISTANT, Role.TOOL, Role.ASSISTANT)
     assert calling.parent_id == question.id
-    assert results.parent_id == calling.id
-    assert done.parent_id == results.id
+    assert batch.parent_id == calling.id
+    assert done.parent_id == batch.id
     assert calling.text == "Let me look."
     assert calling.tool_calls == (ToolCallPart(*SEARCH_CALL),)
-    assert results.tool_results == (ToolResultPart("toolu_01", "found 3"),)
-    assert results.provenance is None
+    assert batch.tool_results == (ToolResultPart("toolu_01", "found 3"),)
+    assert batch.provenance is None
+    assert calling.provenance == done.provenance == run.provenance
     assert done.text == "Found three."
+    # The call went out whole: its arguments arrive known, so they are
+    # published as one piece of JSON.
+    (arguments,) = [event.event for event in events if isinstance(event.event, ArgumentsPiece)]
+    assert arguments == ArgumentsPiece(
+        run_id=run.id,
+        message_id=calling.id,
+        call_id="toolu_01",
+        text=json.dumps({"q": "robinauts"}),
+    )
     # What the run said of the result is what was stored of it.
     landed = [event.event for event in events if isinstance(event.event, ResultLanded)]
     assert landed == [
-        ResultLanded(run_id=run.id, message_id=results.id, call_id="toolu_01", text="found 3")
+        ResultLanded(run_id=run.id, message_id=batch.id, call_id="toolu_01", text="found 3")
     ]
     # The announced tool message hangs under the answer, and says its role.
     announced = [event.event for event in events if isinstance(event.event, MessageStarted)]
     assert announced[1] == MessageStarted(
-        run_id=run.id, message_id=results.id, parent_id=calling.id, role=Role.TOOL
+        run_id=run.id, message_id=batch.id, parent_id=calling.id, role=Role.TOOL
     )
-    # The server was asked the tool's own name, with the arguments the model wrote.
-    assert wiring.tools.calls == [(GITHUB.id, SEARCH.name, {"q": "robinauts"})]
     ended = await wiring.store.run_by_id(run.id)
     assert ended.state is RunState.FINISHED and ended.error is None
 
 
 @asyncio_test
-async def test_the_tools_are_listed_once_per_run_and_the_second_round_reads_the_history_back() -> (
-    None
-):
-    """Decision 5: one list, fetched before the engine is called and held for
-    the run. And the round after the results runs from the stored history --
-    the tool message included -- exactly as a run taken up again would."""
-    wiring = tooled(*calls(SEARCH_CALL))
-    wiring.agent.then(*says("Found three."))
-    run = await begun(wiring)
-
-    await wiring.turns.execute(run)
-
-    assert wiring.tools.listings == [GITHUB.id]
-    first, second = wiring.agent.asked
-    assert first.tools == second.tools
-    assert [tool.name for tool in first.tools] == [
-        "github__echo",
-        "github__search_repositories",
-    ]
-    assert first.tools[1] == ToolDefinition(
-        name="github__search_repositories",
-        description=SEARCH.description,
-        input_schema=SEARCH.input_schema,
-        annotations=SEARCH.annotations,
-    )
-    assert [message.role for message in first.history] == [Role.USER]
-    assert [message.role for message in second.history] == [Role.USER, Role.ASSISTANT, Role.TOOL]
-    assert second.history[2].tool_results == (ToolResultPart("toolu_01", "found 3"),)
-
-
-@asyncio_test
-async def test_the_next_turn_is_handed_the_tool_round_in_its_path() -> None:
-    wiring = tooled(*calls(SEARCH_CALL))
-    wiring.agent.then(*says("Found three."))
+async def test_the_next_turn_is_handed_the_memory_of_the_tool_round_in_its_path() -> None:
+    """The tool message on the path is the transcript's and holds no memory:
+    what the next turn resumes from is what the run of the round handed back."""
+    wiring = wired(*calls(SEARCH_CALL), *results(FOUND), *says("Found three.", state=REMEMBERED))
+    wiring.agent.then(*says("Three, as I said."))
     first = await begun(wiring)
     await wiring.turns.execute(first)
-    wiring.agent.steps = says("Three, as I said.")
-    second = await wiring.turns.start(
-        AUTHOR,
-        conversation_id=first.conversation_id,
-        text="How many?",
-        parent_id=(await stored_messages(wiring.store, first.conversation_id))[-1].id,
-    )
+    second = await followed(wiring, first, "How many?")
 
-    await wiring.turns.execute(second.run)
+    await wiring.turns.execute(second)
 
-    assert [message.role for message in wiring.agent.history] == [
-        Role.USER,
-        Role.ASSISTANT,
-        Role.TOOL,
-        Role.ASSISTANT,
-        Role.USER,
-    ]
-    assert (await wiring.store.run_by_id(second.run.id)).state is RunState.FINISHED
+    assert wiring.agent.asked[-1].state == REMEMBERED
+    assert wiring.agent.prompt == "How many?"
+    assert (await wiring.store.run_by_id(second.id)).state is RunState.FINISHED
 
 
 @asyncio_test
 async def test_a_question_may_follow_the_tool_message_a_stopped_turn_ended_on() -> None:
     """A turn stopped after its results were in leaves the tool message as
     the leaf; the next question hangs under it, so that the results stay on
-    the path the model sees (``docs/specs/conversations.md``) -- which is
-    where the chat sends it."""
-    wiring = tooled(*calls(SEARCH_CALL))
-    wiring.agent.then(*says("Found three."))
+    the path (``docs/specs/conversations.md``) -- and the memory the round's
+    run left is what that question's turn resumes from."""
+    wiring = wired(*calls(SEARCH_CALL), *results(FOUND), *says("Found three.", state=REMEMBERED))
+    wiring.agent.then(*says("Three, I said."))
     first = await begun(wiring)
     await wiring.turns.execute(first)
-    _, _, results, _ = await stored_messages(wiring.store, first.conversation_id)
-    wiring.agent.steps = says("Three, I said.")
+    _, _, batch, _ = await stored_messages(wiring.store, first.conversation_id)
     second = await wiring.turns.start(
-        AUTHOR, conversation_id=first.conversation_id, text="How many?", parent_id=results.id
+        AUTHOR, conversation_id=first.conversation_id, text="How many?", parent_id=batch.id
     )
 
     await wiring.turns.execute(second.run)
 
-    assert [message.role for message in wiring.agent.history] == [
-        Role.USER,
-        Role.ASSISTANT,
-        Role.TOOL,
-        Role.USER,
-    ]
+    assert wiring.agent.asked[-1].state == REMEMBERED
+    stored = await stored_messages(wiring.store, first.conversation_id)
+    assert (stored[-2].parent_id, stored[-1].parent_id) == (batch.id, stored[-2].id)
     assert (await wiring.store.run_by_id(second.run.id)).state is RunState.FINISHED
-
-
-def test_two_servers_under_one_prefix_are_refused_when_handed_in() -> None:
-    twin = ToolServerConfig(
-        id="gh", url="https://gh.example.test/mcp/", secret_env="ROBINAUTS_GH", prefix="github"
-    )
-    with pytest.raises(InvalidValueError, match="share the prefix 'github'"):
-        wired(definition=agent_definition(), servers={GITHUB.id: GITHUB, "gh": twin})
 
 
 @asyncio_test
 async def test_results_are_published_as_they_land_and_the_batch_completes_with_the_last() -> None:
-    """Decision 7: each result is published the moment it lands, and the one
-    tool message completes when the last is in -- so a watcher sees the fast
-    tool's result while the slow one is still running."""
-    slow = asyncio.Event()
-    wiring = tooled(*calls(SEARCH_CALL, ("toolu_02", "github__echo", {})))
-    wiring.tools.answering(GITHUB.id, ECHO.name, slow)
-    wiring.agent.then(*says("Both done."))
+    """Each result is published the moment it lands, in whatever order the
+    framework ran the tools, and the one tool message completes when the last
+    is in -- so a watcher sees the fast tool's result while the slow one is
+    still running."""
+    slow = Gate()
+    wiring = wired(
+        *calls(SEARCH_CALL, ECHO_CALL),
+        *results(ECHOED),
+        slow,
+        *results(FOUND),
+        *says("Both done."),
+    )
     run = await begun(wiring)
     submitted(wiring, run)
-    while not call_ids(await stored_events(wiring.store, run.id)):
-        await asyncio.sleep(0)
+    await slow.reached.wait()
+    # The answer with its two calls, the tool message announced, one result in it.
+    await written(wiring.store, run.id, 11)
 
     # The fast one has landed and is stored; the batch is still open.
     events = await stored_events(wiring.store, run.id)
     readable(events, run, ended=False)
-    assert call_ids(events) == ["toolu_01"]
-    assert kinds(events).count("MessageCompleted") == 1
-    assert wiring.tools.open_calls == 1
+    assert call_ids(events) == ["toolu_02"]
+    assert kinds(events)[-3:] == ["MessageCompleted", "MessageStarted", "ResultLanded"]
+    assert [
+        message.role for message in await stored_messages(wiring.store, run.conversation_id)
+    ] == [Role.USER, Role.ASSISTANT]
     assert (await wiring.store.run_by_id(run.id)).state is RunState.RUNNING
 
-    slow.set()
+    slow.open()
     await settled(wiring, run)
 
     events = await stored_events(wiring.store, run.id)
     readable(events, run)
-    assert call_ids(events) == ["toolu_01", "toolu_02"]
-    _, _, results, _ = await stored_messages(wiring.store, run.conversation_id)
-    assert results.tool_results == (
-        ToolResultPart("toolu_01", "found 3"),
+    assert call_ids(events) == ["toolu_02", "toolu_01"]
+    _, calling, batch, _ = await stored_messages(wiring.store, run.conversation_id)
+    assert calling.tool_calls == (ToolCallPart(*SEARCH_CALL), ToolCallPart(*ECHO_CALL))
+    assert batch.tool_results == (
         ToolResultPart("toolu_02", "waited"),
+        ToolResultPart("toolu_01", "found 3"),
     )
     assert (await wiring.store.run_by_id(run.id)).state is RunState.FINISHED
 
 
 @asyncio_test
 async def test_a_tool_that_fails_is_an_error_result_the_model_is_told() -> None:
-    wiring = tooled(*calls(SEARCH_CALL))
-    wiring.tools.answering(GITHUB.id, SEARCH.name, ToolResult("no such repository", is_error=True))
-    wiring.agent.then(*says("There is no such repository."))
+    wiring = wired(
+        *calls(SEARCH_CALL),
+        *results(("toolu_01", SEARCH, "no such repository", True)),
+        *says("There is no such repository."),
+    )
     run = await begun(wiring)
 
     await wiring.turns.execute(run)
@@ -992,285 +1097,182 @@ async def test_a_tool_that_fails_is_an_error_result_the_model_is_told() -> None:
             is_error=True,
         )
     ]
-    _, _, results, _ = await stored_messages(wiring.store, run.conversation_id)
-    assert results.tool_results == (
-        ToolResultPart("toolu_01", "no such repository", is_error=True),
-    )
-    assert [message.role for message in wiring.agent.asked[1].history][-1] is Role.TOOL
+    _, _, batch, _ = await stored_messages(wiring.store, run.conversation_id)
+    assert batch.tool_results == (ToolResultPart("toolu_01", "no such repository", is_error=True),)
     assert (await wiring.store.run_by_id(run.id)).state is RunState.FINISHED
 
 
+@pytest.mark.parametrize("output", ["", " \n "])
 @asyncio_test
-async def test_a_call_for_a_tool_the_run_was_not_handed_is_an_error_result_too() -> None:
-    """The model's mistake, not the platform's failure: a name with no
-    server's prefix, or another server's, is answered in words, and no server
-    is asked anything."""
-    wiring = tooled(
-        *calls(("toolu_01", "nonsense", {}), ("toolu_02", "jira__find", {"key": "R-1"}))
+async def test_a_result_with_no_text_is_stored_as_saying_so(output: str) -> None:
+    wiring = wired(
+        *calls(SEARCH_CALL), *results(("toolu_01", SEARCH, output)), *says("Nothing came back.")
     )
-    wiring.agent.then(*says("I cannot do that."))
-    run = await begun(wiring)
-
-    await wiring.turns.execute(run)
-
-    readable(await stored_events(wiring.store, run.id), run)
-    _, _, results, _ = await stored_messages(wiring.store, run.conversation_id)
-    assert set(results.tool_results) == {
-        ToolResultPart("toolu_01", NO_SUCH_TOOL.format(name="nonsense"), is_error=True),
-        ToolResultPart("toolu_02", NO_SUCH_TOOL.format(name="jira__find"), is_error=True),
-    }
-    assert wiring.tools.calls == []
-    assert (await wiring.store.run_by_id(run.id)).state is RunState.FINISHED
-
-
-@asyncio_test
-async def test_a_result_with_no_text_is_stored_as_saying_so() -> None:
-    wiring = tooled(*calls(SEARCH_CALL))
-    wiring.tools.answering(GITHUB.id, SEARCH.name, ToolResult(""))
-    wiring.agent.then(*says("Nothing came back."))
     run = await begun(wiring)
 
     await wiring.turns.execute(run)
 
     events = await stored_events(wiring.store, run.id)
     readable(events, run)
-    _, _, results, _ = await stored_messages(wiring.store, run.conversation_id)
-    assert results.tool_results == (ToolResultPart("toolu_01", NO_CONTENT),)
+    _, _, batch, _ = await stored_messages(wiring.store, run.conversation_id)
+    assert batch.tool_results == (ToolResultPart("toolu_01", NO_CONTENT),)
     assert [event.event.text for event in events if isinstance(event.event, ResultLanded)] == [
         NO_CONTENT
     ]
 
 
 @asyncio_test
-async def test_a_server_that_will_not_list_fails_the_run_before_the_engine_is_asked() -> None:
-    wiring = tooled(*calls(SEARCH_CALL))
-    wiring.tools.gone.add(GITHUB.id)
-    run = await begun(wiring)
-
-    await wiring.turns.execute(run)
-
-    ended = await wiring.store.run_by_id(run.id)
-    assert ended.state is RunState.FAILED
-    assert ended.error is not None and GITHUB.id in ended.error
-    events = await stored_events(wiring.store, run.id)
-    readable(events, run)
-    assert kinds(events) == ["RunStarted", "RunEnded"]
-    assert wiring.agent.asked == []
-
-
-@asyncio_test
-async def test_a_server_that_cannot_be_reached_for_a_call_fails_the_run_and_releases_the_rest() -> (
-    None
-):
-    """The one failure of a tool that is the platform's (``docs/specs/runs.md``,
-    "Tools"): the run fails naming the server, the answer with its calls
-    stays stored, the tool message never completes, and the call still
-    running is let go."""
-    slow = asyncio.Event()
-    wiring = tooled(*calls(SEARCH_CALL, ("toolu_02", "github__echo", {})))
-    wiring.tools.answering(
-        GITHUB.id, SEARCH.name, ToolServerError("tool server 'github' cannot be reached")
-    )
-    wiring.tools.answering(GITHUB.id, ECHO.name, slow)
-    run = await begun(wiring)
-
-    await wiring.turns.execute(run)
-
-    ended = await wiring.store.run_by_id(run.id)
-    assert ended.state is RunState.FAILED
-    assert ended.error is not None and "github" in ended.error
-    events = await stored_events(wiring.store, run.id)
-    readable(events, run)
-    assert kinds(events)[-3:] == ["MessageCompleted", "MessageStarted", "RunEnded"]
-    assert [
-        message.role for message in await stored_messages(wiring.store, run.conversation_id)
-    ] == [Role.USER, Role.ASSISTANT]
-    assert wiring.tools.open_calls == 0
-    assert wiring.agent.held == 0
-
-
-@asyncio_test
-async def test_cancelling_in_the_middle_of_a_call_leaves_the_calls_stored_with_no_result() -> None:
-    """What a suspended run looks like (plan, step 7): the answer and its
-    calls are in the conversation, no tool message is, and the record says
-    which calls went unanswered."""
-    never = asyncio.Event()
-    wiring = tooled(*calls(SEARCH_CALL))
-    wiring.tools.answering(GITHUB.id, SEARCH.name, never)
+async def test_cancelling_in_the_middle_of_a_batch_leaves_the_calls_stored_with_no_result() -> None:
+    """What a run stopped between the results looks like: the answer and its
+    calls are in the conversation, no tool message is, and the result that
+    did land is in the run's events alone."""
+    never = Gate()
+    wiring = wired(*calls(SEARCH_CALL, ECHO_CALL), *results(FOUND), never)
     run = await begun(wiring)
     submitted(wiring, run)
-    while wiring.tools.open_calls == 0:
-        await asyncio.sleep(0)
+    await never.reached.wait()
+    await written(wiring.store, run.id, 11)
 
     await wiring.turns.cancel(AUTHOR, run.id)
     await settled(wiring, run)
 
     assert (await wiring.store.run_by_id(run.id)).state is RunState.CANCELLED
-    assert wiring.tools.open_calls == 0
     events = await stored_events(wiring.store, run.id)
     readable(events, run)
-    assert call_ids(events) == []
+    assert kinds(events)[-4:] == ["MessageCompleted", "MessageStarted", "ResultLanded", "RunEnded"]
+    assert call_ids(events) == ["toolu_01"]
     stored = await stored_messages(wiring.store, run.conversation_id)
     assert [message.role for message in stored] == [Role.USER, Role.ASSISTANT]
-    assert unanswered_calls(stored) == {stored[1].id: (ToolCallPart(*SEARCH_CALL),)}
+    assert stored[1].tool_calls == (ToolCallPart(*SEARCH_CALL), ToolCallPart(*ECHO_CALL))
+    assert await wiring.store.engine_state(run.id) is None
+    assert wiring.agent.released == 1
 
 
 @asyncio_test
-async def test_a_turn_that_keeps_asking_for_tools_is_failed_at_the_bound() -> None:
-    """Decision 9: the script asks for a tool every time it is run, and the
-    turn is stopped after ``max_tool_rounds`` batches were answered, with the
-    last calling answer stored and no tool message under it."""
-    wiring = tooled(*calls(SEARCH_CALL), max_tool_rounds=2)
+async def test_cancelling_between_a_call_and_its_result_leaves_the_answer_uncompleted() -> None:
+    """An answer is whole at its first result -- until then the model may
+    still be adding calls to the batch -- so a run stopped before any result
+    leaves it announced, its call published, and nothing of it stored."""
+    never = Gate()
+    wiring = wired(*calls(SEARCH_CALL), never)
     run = await begun(wiring)
+    submitted(wiring, run)
+    await never.reached.wait()
+    await written(wiring.store, run.id, 5)
 
-    await wiring.turns.execute(run)
+    await wiring.turns.cancel(AUTHOR, run.id)
+    await settled(wiring, run)
 
-    ended = await wiring.store.run_by_id(run.id)
-    assert ended.state is RunState.FAILED and ended.error == TOO_MANY_ROUNDS
-    assert len(wiring.tools.calls) == 2
-    assert len(wiring.agent.asked) == 3
+    assert (await wiring.store.run_by_id(run.id)).state is RunState.CANCELLED
     events = await stored_events(wiring.store, run.id)
     readable(events, run)
-    assert kinds(events)[-2:] == ["MessageCompleted", "RunEnded"]
-    roles = [message.role for message in await stored_messages(wiring.store, run.conversation_id)]
-    assert roles == [Role.USER] + [Role.ASSISTANT, Role.TOOL] * 2 + [Role.ASSISTANT]
-    assert wiring.tools.listings == [GITHUB.id]
-
-
-@asyncio_test
-async def test_a_round_after_the_results_that_produces_no_answer_fails_the_run() -> None:
-    """A run that finished on a tool message would be one nothing continues
-    from: a question does not follow a tool message, and a tool message is
-    not regenerated. So it is the failure a turn that says nothing is."""
-    wiring = tooled(*calls(SEARCH_CALL))
-    wiring.agent.then()
-    run = await begun(wiring)
-
-    await wiring.turns.execute(run)
-
-    ended = await wiring.store.run_by_id(run.id)
-    assert ended.state is RunState.FAILED and ended.error == NO_ANSWER_AFTER_TOOLS
-    readable(await stored_events(wiring.store, run.id), run)
+    assert kinds(events) == [
+        "RunStarted",
+        "MessageStarted",
+        "CallStarted",
+        "ArgumentsPiece",
+        "CallCompleted",
+        "RunEnded",
+    ]
     assert [
         message.role for message in await stored_messages(wiring.store, run.conversation_id)
-    ] == [Role.USER, Role.ASSISTANT, Role.TOOL]
+    ] == [Role.USER]
 
 
+@pytest.mark.parametrize(
+    ("steps", "roles"),
+    [
+        # A call announced and never answered: the answer is still open.
+        (calls(SEARCH_CALL), [Role.USER]),
+        # One of two answered: the answer is whole and the tool message open.
+        ([*calls(SEARCH_CALL, ECHO_CALL), *results(FOUND)], [Role.USER, Role.ASSISTANT]),
+    ],
+)
 @asyncio_test
-async def test_a_bound_of_zero_rounds_fails_the_first_answer_that_asks_for_tools() -> None:
-    wiring = tooled(*calls(SEARCH_CALL), max_tool_rounds=0)
+async def test_a_stream_that_stopped_with_results_missing_is_a_failed_run(
+    steps: list[Any], roles: list[Role]
+) -> None:
+    # The framework's stream ended with a call unanswered and without saying
+    # it was done: not a finish, since a finished run leaves nothing
+    # half-written -- a batch of calls least of all.
+    wiring = wired(*steps)
     run = await begun(wiring)
 
     await wiring.turns.execute(run)
 
     ended = await wiring.store.run_by_id(run.id)
-    assert ended.state is RunState.FAILED and ended.error == TOO_MANY_ROUNDS
-    assert wiring.tools.calls == []
-    readable(await stored_events(wiring.store, run.id), run)
-
-
-@asyncio_test
-async def test_a_name_the_run_was_not_handed_is_never_sent_to_a_server() -> None:
-    """A tool the server did not list -- one the model made up under a known
-    prefix -- is the model's mistake: answered in words, and nothing asked."""
-    wiring = tooled(*calls(("toolu_01", "github__delete_everything", {})))
-    wiring.agent.then(*says("I cannot."))
-    run = await begun(wiring)
-
-    await wiring.turns.execute(run)
-
-    _, _, results, _ = await stored_messages(wiring.store, run.conversation_id)
-    assert results.tool_results == (
-        ToolResultPart(
-            "toolu_01", NO_SUCH_TOOL.format(name="github__delete_everything"), is_error=True
-        ),
-    )
-    assert wiring.tools.calls == []
-    # A result of nothing but whitespace is stored as saying so too.
-    wiring = tooled(*calls(SEARCH_CALL))
-    wiring.tools.answering(GITHUB.id, SEARCH.name, ToolResult(" \n "))
-    wiring.agent.then(*says("Nothing."))
-    run = await begun(wiring)
-    await wiring.turns.execute(run)
-    _, _, results, _ = await stored_messages(wiring.store, run.conversation_id)
-    assert results.tool_results == (ToolResultPart("toolu_01", NO_CONTENT),)
+    assert ended.state is RunState.FAILED
+    assert ended.error == "the agent began an answer and never completed it"
+    events = await stored_events(wiring.store, run.id)
+    readable(events, run)
+    assert [
+        message.role for message in await stored_messages(wiring.store, run.conversation_id)
+    ] == roles
+    assert await wiring.store.engine_state(run.id) is None
 
 
 @pytest.mark.parametrize(
     ("steps", "refused"),
     [
-        # A second answer after one that asked for tools, instead of waiting.
+        # The model goes on while a result of the batch is still to come.
         (
-            [*calls(SEARCH_CALL)[:-1], *says("more")],
-            "ends waiting on them",
+            [*calls(SEARCH_CALL, ECHO_CALL), *results(FOUND), TextDelta(text="more")],
+            "a tool message completes with every result before the model goes on",
         ),
-        # Anything after the turn ended waiting.
         (
-            [*calls(SEARCH_CALL), AnswerStarted()],
-            "yields nothing more",
+            [
+                *calls(SEARCH_CALL, ECHO_CALL),
+                *results(FOUND),
+                ToolCall(call_id="toolu_03", name=SEARCH),
+            ],
+            "a tool message completes with every result before the model goes on",
         ),
+        # A result with no answer being produced, for an answer that made no
+        # calls, or after the batch completed.
+        (results(FOUND), "a result answers a call of the answer being produced"),
+        (
+            [TextDelta(text="Nothing to do."), *results(FOUND)],
+            "a result answers a call of the answer being produced",
+        ),
+        (
+            [*calls(SEARCH_CALL), *results(FOUND, FOUND)],
+            "a result answers a call of the answer being produced",
+        ),
+        # A result for a call the answer did not make.
+        (
+            [*calls(SEARCH_CALL), *results(("toolu_09", SEARCH, "found 3"))],
+            "a result answers a call of the answer before it, once",
+        ),
+        # A second result for one call of the batch.
+        (
+            [*calls(SEARCH_CALL, ECHO_CALL), *results(FOUND, FOUND)],
+            "a result answers a call of the answer before it, once",
+        ),
+        # The turn ends with a result of the batch still to come.
+        (
+            [*calls(SEARCH_CALL, ECHO_CALL), *results(FOUND), Done(text="Found three.")],
+            "a turn ends with every call it announced answered",
+        ),
+        # The turn ends with no result at all.
+        (
+            [*calls(SEARCH_CALL), Done(text="Found three.")],
+            "a turn ends with every call it announced answered",
+        ),
+        # Anything after the turn ended.
+        ([*says(ANSWER), TextDelta(text="more")], "nothing follows the end of a turn"),
+        ([*says(ANSWER), *says("Second.")], "nothing follows the end of a turn"),
         # One call id named twice in one answer.
-        (
-            [
-                AnswerStarted(),
-                ToolCallStarted(call_id="toolu_01", name="github__search_repositories"),
-                ToolCallCompleted(call=ToolCallPart("toolu_01", "github__search_repositories", {})),
-                ToolCallStarted(call_id="toolu_01", name="github__echo"),
-            ],
-            "each tool call once",
-        ),
-        # A call completed under another name than it was announced with.
-        (
-            [
-                AnswerStarted(),
-                ToolCallStarted(call_id="toolu_01", name="github__search_repositories"),
-                ToolCallCompleted(call=ToolCallPart("toolu_01", "github__echo", {})),
-            ],
-            "completed as it was announced",
-        ),
-        # Arguments streamed that do not parse to the ones completed with.
-        (
-            [
-                AnswerStarted(),
-                ToolCallStarted(call_id="toolu_01", name="github__search_repositories"),
-                ToolCallArgumentsDelta(call_id="toolu_01", text='{"q": "x"}'),
-                ToolCallCompleted(
-                    call=ToolCallPart("toolu_01", "github__search_repositories", {"q": "y"})
-                ),
-            ],
-            "are the arguments it completed with",
-        ),
-        # An answer completed with a call still open.
-        (
-            [
-                AnswerStarted(),
-                ToolCallStarted(call_id="toolu_01", name="github__search_repositories"),
-                AnswerCompleted(
-                    parts=(ToolCallPart("toolu_01", "github__search_repositories", {}),)
-                ),
-            ],
-            "completed before its answer is",
-        ),
-        # Waiting on tools after an answer that asked for none.
-        (
-            [*says("Nothing to do."), WaitingOnTools()],
-            "waits on the tools an answer asked for",
-        ),
-        # An answer that asked for tools, and a turn that ended without saying so.
-        (
-            calls(SEARCH_CALL)[:-1],
-            "ends waiting on them",
-        ),
+        (calls(SEARCH_CALL, SEARCH_CALL), "an answer names each tool call once"),
     ],
 )
 @asyncio_test
 async def test_an_engine_out_of_order_fails_the_run_before_the_stream_is_unreadable(
     steps: list[Any], refused: str
 ) -> None:
-    """The order ``core.check_engine_events`` holds an engine to, held here
+    """The order ``core.check_backend_events`` holds an engine to, held here
     too, so that nothing an engine yields out of order leaves a stream
-    ``check_event_order`` refuses -- and no server is asked on the way."""
-    wiring = tooled(*steps)
+    ``check_event_order`` refuses."""
+    wiring = wired(*steps)
     run = await begun(wiring)
 
     await wiring.turns.execute(run)
@@ -1279,46 +1281,6 @@ async def test_an_engine_out_of_order_fails_the_run_before_the_stream_is_unreada
     assert ended.state is RunState.FAILED
     assert ended.error is not None and refused in ended.error
     readable(await stored_events(wiring.store, run.id), run)
-    assert wiring.tools.calls == []
-
-
-@asyncio_test
-async def test_an_answer_completed_with_calls_it_never_announced_fails_the_turn() -> None:
-    """The stream could not be read back (``core.check_event_order``: an
-    answer completes with exactly the calls it announced), so the turn fails
-    before any server is asked."""
-    made = ToolCallPart(*SEARCH_CALL)
-    wiring = tooled(AnswerStarted(), AnswerCompleted(parts=(made,)), WaitingOnTools())
-    run = await begun(wiring)
-
-    await wiring.turns.execute(run)
-
-    ended = await wiring.store.run_by_id(run.id)
-    assert ended.state is RunState.FAILED
-    assert ended.error is not None and "announced" in ended.error
-    readable(await stored_events(wiring.store, run.id), run)
-    assert wiring.tools.calls == []
-    assert [
-        message.role for message in await stored_messages(wiring.store, run.conversation_id)
-    ] == [Role.USER]
-
-
-@asyncio_test
-async def test_what_the_engine_hands_back_in_extras_is_stored_on_the_answer() -> None:
-    """The vendor's signed blocks ride on the answer as data the platform
-    never reads, so that the adapter that made them finds them in the history
-    it is handed next turn (``docs/specs/conversations.md``, "extras")."""
-    signed = {"anthropic": {"thinking": [{"type": "redacted_thinking", "data": "OPAQUE"}]}}
-    wiring = wired(*says("Found it.", extras=signed))
-    run = await begun(wiring)
-
-    await wiring.turns.execute(run)
-
-    stored = await stored_messages(wiring.store, run.conversation_id)
-    assert [message.extras for message in stored] == [{}, signed]
-    events = await stored_events(wiring.store, run.id)
-    (completed,) = [event.event for event in events if isinstance(event.event, MessageCompleted)]
-    assert completed.message.extras == signed
 
 
 # --- ending a run, whatever is happening to the task ---------------------------
@@ -1354,10 +1316,22 @@ class HeldEnding(MemoryConversationStore):
         self.ending = asyncio.Event()
         self.go = asyncio.Event()
 
-    async def end_run(self, run: Run, event: RunEvent, event_document: object) -> None:
+    async def end_run(
+        self,
+        run: Run,
+        event: RunEvent,
+        event_document: object,
+        *,
+        engine_state: bytes | None = None,
+    ) -> None:
         self.ending.set()
         await self.go.wait()
-        await super().end_run(run, event, event_document)  # type: ignore[arg-type]
+        await super().end_run(
+            run,
+            event,
+            event_document,  # type: ignore[arg-type]
+            engine_state=engine_state,
+        )
 
 
 class Unreachable(MemoryConversationStore):
@@ -1368,11 +1342,23 @@ class Unreachable(MemoryConversationStore):
         self.failures = failures
         self.attempts = 0
 
-    async def end_run(self, run: Run, event: RunEvent, event_document: object) -> None:
+    async def end_run(
+        self,
+        run: Run,
+        event: RunEvent,
+        event_document: object,
+        *,
+        engine_state: bytes | None = None,
+    ) -> None:
         self.attempts += 1
         if self.attempts <= self.failures:
             raise ConnectionError("the database is not answering")
-        await super().end_run(run, event, event_document)  # type: ignore[arg-type]
+        await super().end_run(
+            run,
+            event,
+            event_document,  # type: ignore[arg-type]
+            engine_state=engine_state,
+        )
 
 
 @asyncio_test
@@ -1404,7 +1390,7 @@ async def test_a_cancel_landing_on_a_finished_ending_still_ends_the_run() -> Non
     # cancels. Before, the cancellation propagated out of the write and the
     # run was never ended at all: the answer was in the conversation and the
     # conversation was blocked behind a run that said it was still going.
-    wiring = wired(*says(ANSWER), store=HeldEnding())
+    wiring = wired(*says(ANSWER, state=REMEMBERED), store=HeldEnding())
     run = await begun(wiring)
     turn = asyncio.create_task(wiring.turns.execute(run))
     await wiring.store.ending.wait()  # type: ignore[attr-defined]
@@ -1420,6 +1406,8 @@ async def test_a_cancel_landing_on_a_finished_ending_still_ends_the_run() -> Non
     readable(events, run)
     assert events[-1].event.state is RunState.FINISHED
     assert len(await stored_messages(wiring.store, run.conversation_id)) == 2
+    # Finished, memory and all.
+    assert await wiring.store.engine_state(run.id) == REMEMBERED
 
 
 @asyncio_test
@@ -1474,20 +1462,19 @@ async def test_a_run_that_could_not_be_ended_says_so_in_the_log(
 class BreaksWhenLetGo(Agent):
     """An engine whose release fails -- while the turn is being cancelled."""
 
-    def run_turn(
+    def stream(
         self,
         agent: AgentDefinition,
-        history: Sequence[Message],
-        tools: Sequence[ToolDefinition],
+        prompt: str,
         *,
         model: str,
+        state: bytes | None,
     ) -> Any:
         return self._events()
 
     async def _events(self) -> Any:
         try:
-            yield AnswerStarted()
-            yield AnswerTextDelta(text="Half of an")
+            yield TextDelta(text="Half of an")
             await asyncio.Event().wait()
         finally:
             raise RuntimeError("the client would not close")
@@ -1506,20 +1493,19 @@ class NeverLetsGo(Agent):
         self.closing = asyncio.Event()
         self.free = asyncio.Event()
 
-    def run_turn(
+    def stream(
         self,
         agent: AgentDefinition,
-        history: Sequence[Message],
-        tools: Sequence[ToolDefinition],
+        prompt: str,
         *,
         model: str,
+        state: bytes | None,
     ) -> Any:
         return self._events()
 
     async def _events(self) -> Any:
         try:
-            yield AnswerStarted()
-            yield AnswerTextDelta(text="Half of an")
+            yield TextDelta(text="Half of an")
             self.answering.set()
             await asyncio.Event().wait()
         finally:
@@ -1556,7 +1542,6 @@ def over(engine: Agent) -> Wiring:
         ids=CountingIdSource(),
         agent=engine,  # type: ignore[arg-type]
         definition=definition,
-        tools=MemoryToolServers(),
     )
 
 
@@ -1613,7 +1598,7 @@ async def test_a_cancelled_run_is_ended_although_its_engine_will_not_let_go(
         assert ended.state is RunState.CANCELLED
         events = await stored_events(wiring.store, run.id)
         readable(events, run)
-        assert kinds(events) == ["RunStarted", "MessageStarted", "TextDelta", "RunEnded"]
+        assert kinds(events) == ["RunStarted", "MessageStarted", "TextPiece", "RunEnded"]
     finally:
         await _freed(engine)
 
@@ -1654,7 +1639,7 @@ async def _freed(engine: NeverLetsGo) -> None:
 @asyncio_test
 async def test_a_run_is_executed_once_by_this_process() -> None:
     held = Gate()
-    wiring = wired(AnswerStarted(), held, *says(ANSWER)[1:])
+    wiring = wired(held, *says(ANSWER))
     run = await begun(wiring)
     turn = asyncio.create_task(wiring.turns.execute(run))
     await held.reached.wait()
@@ -1704,7 +1689,7 @@ async def test_a_claim_is_taken_up_by_the_execution_it_was_made_for() -> None:
 @asyncio_test
 async def test_a_run_records_when_it_began_before_it_records_anything_else() -> None:
     held = Gate()
-    wiring = wired(AnswerStarted(), held, *says(ANSWER)[1:])
+    wiring = wired(held, *says(ANSWER))
     run = await begun(wiring)
 
     turn = asyncio.create_task(wiring.turns.execute(run))
@@ -1788,9 +1773,21 @@ class Sluggish(MemoryConversationStore):
         await self._slowly()
         await super().append_event(event, document)  # type: ignore[arg-type]
 
-    async def end_run(self, run: Run, event: RunEvent, event_document: object) -> None:
+    async def end_run(
+        self,
+        run: Run,
+        event: RunEvent,
+        event_document: object,
+        *,
+        engine_state: bytes | None = None,
+    ) -> None:
         await self._slowly()
-        await super().end_run(run, event, event_document)  # type: ignore[arg-type]
+        await super().end_run(
+            run,
+            event,
+            event_document,  # type: ignore[arg-type]
+            engine_state=engine_state,
+        )
 
     async def last_position(self, run_id: uuid.UUID) -> int:
         await self._slowly()
@@ -1892,9 +1889,21 @@ class NeverAnswers(MemoryConversationStore):
         super().__init__()
         self.free = asyncio.Event()
 
-    async def end_run(self, run: Run, event: RunEvent, event_document: object) -> None:
+    async def end_run(
+        self,
+        run: Run,
+        event: RunEvent,
+        event_document: object,
+        *,
+        engine_state: bytes | None = None,
+    ) -> None:
         await self.free.wait()
-        await super().end_run(run, event, event_document)  # type: ignore[arg-type]
+        await super().end_run(
+            run,
+            event,
+            event_document,  # type: ignore[arg-type]
+            engine_state=engine_state,
+        )
 
 
 @asyncio_test
@@ -1932,10 +1941,22 @@ class Unhelpful(MemoryConversationStore):
         super().__init__()
         self.bad: uuid.UUID | None = None
 
-    async def end_run(self, run: Run, event: RunEvent, event_document: object) -> None:
+    async def end_run(
+        self,
+        run: Run,
+        event: RunEvent,
+        event_document: object,
+        *,
+        engine_state: bytes | None = None,
+    ) -> None:
         if run.id == self.bad:
             raise ConnectionError("not answering about that one")
-        await super().end_run(run, event, event_document)  # type: ignore[arg-type]
+        await super().end_run(
+            run,
+            event,
+            event_document,  # type: ignore[arg-type]
+            engine_state=engine_state,
+        )
 
     async def run_by_id(self, run_id: uuid.UUID) -> Run | None:
         if run_id == self.bad:
@@ -2016,20 +2037,19 @@ class SlowToClose(Agent):
         self.closing = asyncio.Event()
         self.free = asyncio.Event()
 
-    def run_turn(
+    def stream(
         self,
         agent: AgentDefinition,
-        history: Sequence[Message],
-        tools: Sequence[ToolDefinition],
+        prompt: str,
         *,
         model: str,
+        state: bytes | None,
     ) -> Any:
         return self._events()
 
     async def _events(self) -> Any:
         try:
-            yield AnswerStarted()
-            yield AnswerTextDelta(text="Half of an")
+            yield TextDelta(text="Half of an")
         finally:
             self.closing.set()
             await self.free.wait()
@@ -2047,8 +2067,8 @@ async def test_a_cancellation_while_a_stream_is_closing_is_not_swallowed(
     # exercises.
     engine = SlowToClose()
     wiring = over(engine)
-    events = engine.run_turn(wiring.definition, (), (), model=MODEL)
-    assert await anext(events) == AnswerStarted()
+    events = engine.stream(wiring.definition, "What is a robinaut?", model=MODEL, state=None)
+    assert await anext(events) == TextDelta(text="Half of an")
     pump = _Pump()
     pump.events = events
 

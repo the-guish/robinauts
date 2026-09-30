@@ -31,6 +31,7 @@ from robinauts.adapters.config_file import (
     check_api_keys,
     check_client_secrets,
     check_tool_secrets,
+    credential_header,
     environment,
     read_toml,
 )
@@ -86,6 +87,7 @@ __all__ = [
     "check_api_keys",
     "check_client_secrets",
     "check_tool_secrets",
+    "credential_header",
     "environment",
     "open_client",
     "read_toml",

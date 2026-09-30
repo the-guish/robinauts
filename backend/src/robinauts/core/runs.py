@@ -47,20 +47,17 @@ from robinauts.domain import (
     FAULTED_RUN_STATES,
     FIRST_POSITION,
     MAX_RUN_ERROR_CHARS,
-    AnswerCompleted,
-    AnswerReasoningDelta,
-    AnswerStarted,
-    AnswerTextDelta,
-    ArgumentsDelta,
+    ArgumentsPiece,
     CallCompleted,
     CallStarted,
-    EngineEvent,
+    Done,
+    Event,
     IllegalTransitionError,
     InvalidValueError,
     Message,
     MessageCompleted,
     MessageStarted,
-    ReasoningDelta,
+    ReasoningPiece,
     ResultLanded,
     Role,
     Run,
@@ -69,14 +66,11 @@ from robinauts.domain import (
     RunEvent,
     RunStarted,
     RunState,
-    TextDelta,
-    TextPart,
-    ToolCallArgumentsDelta,
-    ToolCallCompleted,
+    TextPiece,
+    ToolCall,
     ToolCallPart,
-    ToolCallStarted,
+    ToolResult,
     TurnEvent,
-    WaitingOnTools,
     checked_uuid,
     clean_text,
     describe,
@@ -239,152 +233,61 @@ def _refuse_if_active(running: Run | None) -> None:
         )
 
 
-# --- what an engine yields ---------------------------------------------------
-
-_ENGINE_DELTAS = (AnswerTextDelta, AnswerReasoningDelta)
+# --- what an adapter streams ------------------------------------------------
 
 
-def check_engine_events(events: Iterable[EngineEvent], *, cut_short: bool = False) -> None:
-    """The order an engine's events come in; ``InvalidValueError`` if they do not.
+def check_backend_events(events: Iterable[Event], *, cut_short: bool = False) -> None:
+    """The order an adapter's events come in; ``InvalidValueError`` if they do not.
 
-    What the shared contract suite holds both engines to
-    (``docs/specs/agents.md``):
+    What the shared contract suite holds both adapters to
+    (``docs/specs/agents.md``), and what the run lifecycle publishes by:
 
-    - an answer is announced by ``AnswerStarted``, then its deltas, then
-      ``AnswerCompleted``. One answer at a time, and a turn may hold several,
-      one after another;
-    - **streaming is optional, and what is streamed is what is kept.** An
-      answer that yielded no text delta may complete with any text: not every
-      provider, and not every path through one, streams. An answer that
-      yielded **any** text delta must complete with exactly what it streamed,
-      joined and made storable -- the platform's promise is that what a person
-      watched arrive is what was stored, so an engine whose framework rewrites
-      the final message builds its parts from what it streamed, or does not
-      stream;
-    - reasoning is held to nothing of the sort. An engine may yield
-      ``AnswerReasoningDelta`` and complete with no reasoning at all: this
-      version shows reasoning as it arrives and does not keep it;
-    - **a tool call is inside an answer, one at a time**: announced by
-      ``ToolCallStarted`` with its id and name, its arguments streamed by
-      ``ToolCallArgumentsDelta`` for that call, closed by ``ToolCallCompleted``
-      with the platform's part for it -- the same id and name, and arguments
-      the streamed JSON parses to, when any was streamed. The answer then
-      completes holding exactly the calls it announced, in that order, and no
-      call twice;
-    - **an answer that asked for tools ends the turn waiting**: it is followed
-      by ``WaitingOnTools`` and by nothing else, since the engine never runs a
-      tool -- the application does, and starts the next turn from the stored
-      history (``docs/specs/runs.md``, "Tools"). An answer that asked for none
-      is followed by no such event;
-    - nothing about a run: an engine has no ids of the platform's, no clock and
-      no rows, and the events that name those belong to the application.
+    - the events are the adapter's own (``robinauts.domain.events``) and
+      never the platform's: an adapter has no ids, no clock and no rows;
+    - a **tool call is announced once**, by its id, and a **result answers a
+      call announced before it**, once, under the name it was announced
+      with. The framework ran the tool; what the adapter says is which call
+      it was;
+    - ``Done`` comes **last and once**, with every call it announced
+      answered: a turn that ends holding a call without its result is a
+      turn the framework did not finish, and the transcript would show an
+      answer whose calls nothing answered under a run that says it finished.
 
-    **A turn produces at least one answer.** A run that ends with none is a
-    run that failed -- "the engine produced no answer" -- and never a finished
-    one (``docs/specs/runs.md``), so a stream with nothing in it is refused
-    here rather than turned into a conversation with a turn missing from it.
-
-    For a turn that ran to its end. **A turn cut short is not this**: an engine
-    reports a failure by raising, and a cancellation closes it where it stands
-    (``docs/specs/runs.md``), so what it yielded ends wherever it ended.
-    ``cut_short=True`` is for checking those: everything above holds, an
-    answer left announced and never completed is allowed at the end -- a call
-    left open inside it too -- and so is a stream that never began one, or
-    one that completed an answer with calls and never said it was waiting.
+    For a turn that ran to its end. **A turn cut short is not this**: an
+    adapter reports a failure by raising, and a cancellation closes it where
+    it stands (``docs/specs/runs.md``), so what it yielded ends wherever it
+    ended. ``cut_short=True`` is for checking those: everything above holds,
+    and a stream with no ``Done``, or with calls still unanswered, is allowed.
     """
-    open_answer = False
-    answers = 0
-    streamed: list[str] = []
-    calls: list[ToolCallPart] = []
-    open_call: ToolCallStarted | None = None
-    arguments: list[str] = []
-    waiting: bool | None = None
-    """Whether the last completed answer asked for tools; ``None`` before one has."""
-    over = False
+    open_calls: dict[str, ToolCall] = {}
+    answered: set[str] = set()
+    done = False
     for event in events:
         if isinstance(event, TurnEvent):
             raise InvalidValueError(
-                "an engine yields what the model said; a run's own events are the" " application's"
+                "an adapter yields what the model said; a run's own events are the application's"
             )
-        if not isinstance(event, EngineEvent):
-            raise InvalidValueError(f"an engine yields engine events, not {describe(event)}")
-        if over:
-            raise InvalidValueError("nothing follows a turn that ended waiting on tools")
-        if isinstance(event, AnswerStarted):
-            if open_answer:
-                raise InvalidValueError("an engine produces one answer at a time")
-            if waiting:
-                raise InvalidValueError("an answer that asked for tools ends the turn waiting")
-            open_answer, streamed, calls, answers = True, [], [], answers + 1
-        elif isinstance(event, _ENGINE_DELTAS):
-            if not open_answer:
-                raise InvalidValueError("a delta belongs to an answer being produced")
-            if isinstance(event, AnswerTextDelta):
-                streamed.append(event.text)
-        elif isinstance(event, ToolCallStarted):
-            if not open_answer:
-                raise InvalidValueError("a tool call belongs to an answer being produced")
-            if open_call is not None:
-                raise InvalidValueError("an engine announces one tool call at a time")
-            if any(call.call_id == event.call_id for call in calls):
-                raise InvalidValueError("an answer names each tool call once")
-            open_call, arguments = event, []
-        elif isinstance(event, ToolCallArgumentsDelta):
-            if open_call is None or event.call_id != open_call.call_id:
-                raise InvalidValueError("arguments belong to the tool call being made")
-            arguments.append(event.text)
-        elif isinstance(event, ToolCallCompleted):
-            if open_call is None:
-                raise InvalidValueError("a tool call is completed once, after it was announced")
-            _check_call(event.call, open_call, arguments)
-            calls.append(event.call)
-            open_call = None
-        elif isinstance(event, AnswerCompleted):
-            if not open_answer:
-                raise InvalidValueError("an answer is completed once, after it was announced")
-            if open_call is not None:
-                raise InvalidValueError("a tool call that was announced is completed")
-            said = "".join(part.text for part in event.parts if isinstance(part, TextPart))
-            # An answer that streamed nothing -- or nothing but empty deltas,
-            # which is the same thing -- may complete with any text.
-            joined = clean_text("".join(streamed))
-            if joined and joined != said:
-                raise InvalidValueError("an answer's text deltas are the text it completed with")
-            if list(part for part in event.parts if isinstance(part, ToolCallPart)) != calls:
-                raise InvalidValueError("an answer completes with exactly the calls it announced")
-            open_answer, waiting = False, bool(calls)
-        elif isinstance(event, WaitingOnTools):
-            if open_answer or not waiting:
-                raise InvalidValueError(
-                    "a turn waits on the tools the answer it completed asked for"
-                )
-            over = True
-    if not cut_short:
-        if open_answer:
-            raise InvalidValueError("an answer that was announced is completed")
-        if not answers:
-            raise InvalidValueError("a turn produces an answer; one that produces none failed")
-        if waiting and not over:
-            raise InvalidValueError("an answer that asked for tools ends the turn waiting")
-
-
-def _check_call(call: ToolCallPart, started: ToolCallStarted, arguments: Sequence[str]) -> None:
-    """The call that completes is the call that was announced, with what was streamed.
-
-    The arguments streamed are JSON text and the part holds them as data, so
-    the check is that the text, joined, parses to exactly that mapping -- as
-    JSON, where ``1``, ``1.0`` and ``true`` are three values, not as Python,
-    where they are one; a call that streamed nothing -- not every provider
-    does -- may complete with any arguments, as an answer that streamed no
-    text may. The deltas are bounded one by one and not in number, so text
-    nested past what the parser can follow is refused like any other text
-    that is not the call's JSON, rather than escaping as a ``RecursionError``.
-    """
-    if call.call_id != started.call_id or call.name != started.name:
-        raise InvalidValueError("a tool call is completed as it was announced")
-    joined = clean_text("".join(arguments))
-    if joined.strip():
-        check_call_arguments(joined, call)
+        if not isinstance(event, Event):
+            raise InvalidValueError(f"an adapter yields its events, not {describe(event)}")
+        if done:
+            raise InvalidValueError("nothing follows the end of a turn")
+        if isinstance(event, ToolCall):
+            if event.call_id in open_calls or event.call_id in answered:
+                raise InvalidValueError("a tool call is announced once")
+            open_calls[event.call_id] = event
+        elif isinstance(event, ToolResult):
+            made = open_calls.pop(event.call_id, None)
+            if made is None:
+                raise InvalidValueError("a result answers a call announced before it, once")
+            if made.name != event.name:
+                raise InvalidValueError("a result names the tool its call was announced with")
+            answered.add(event.call_id)
+        elif isinstance(event, Done):
+            if open_calls:
+                raise InvalidValueError("a turn ends with every call it announced answered")
+            done = True
+    if not cut_short and not done:
+        raise InvalidValueError("a turn ends by saying it is done")
 
 
 @dataclass(frozen=True, slots=True)
@@ -440,8 +343,8 @@ def resume_point(events: Sequence[RunEvent], *, answering: uuid.UUID) -> ResumeP
 
 # --- the order of a run's events --------------------------------------------
 
-_DELTAS = (TextDelta, ReasoningDelta)
-_CALL_EVENTS = (CallStarted, ArgumentsDelta, CallCompleted)
+_DELTAS = (TextPiece, ReasoningPiece)
+_CALL_EVENTS = (CallStarted, ArgumentsPiece, CallCompleted)
 
 
 def check_event_order(
@@ -479,7 +382,7 @@ def check_event_order(
       completed it. A watcher that saw an answer arrive has the answer that
       is in the conversation, character for character;
     - **tool calls are inside an answer**, one at a time: ``CallStarted``
-      after the answer's announcement, its ``ArgumentsDelta``s, its
+      after the answer's announcement, its ``ArgumentsPiece``s, its
       ``CallCompleted``, then the next; each call id once per message; the
       answer completes holding exactly the calls it announced, in that order,
       and the arguments streamed for a call parse to the arguments stored on
@@ -581,7 +484,7 @@ def check_event_order(
                 open_id, may_adopt, began_inside = event.message_id, False, True
             if event.message_id != open_id:
                 raise InvalidValueError("a delta belongs to a message being produced")
-            if isinstance(event, TextDelta):
+            if isinstance(event, TextPiece):
                 published.append(event.text)
         elif isinstance(event, _CALL_EVENTS):
             if open_id is None:
@@ -699,7 +602,7 @@ class _Calls:
         self.adopted: str | None = None
         self.lenient = lenient
 
-    def take(self, event: CallStarted | ArgumentsDelta | CallCompleted) -> None:
+    def take(self, event: CallStarted | ArgumentsPiece | CallCompleted) -> None:
         if isinstance(event, CallStarted):
             if self.open is not None:
                 raise InvalidValueError("an answer makes one tool call at a time")
@@ -720,7 +623,7 @@ class _Calls:
             self.open = self.adopted = event.call_id
             self.streamed[event.call_id] = []
             self.lenient = False
-        if isinstance(event, ArgumentsDelta):
+        if isinstance(event, ArgumentsPiece):
             if self.open is None or event.call_id != self.open:
                 raise InvalidValueError("arguments belong to the tool call being made")
             self.streamed[event.call_id].append(event.text)
@@ -757,10 +660,9 @@ class _Calls:
 def check_call_arguments(joined: str, call: ToolCallPart) -> None:
     """The text streamed for a call parses to its stored arguments, as JSON.
 
-    One rule, held in three places: of an engine's events
-    (``check_engine_events``), of a run's stored stream (``check_event_order``)
-    and by the run lifecycle as it publishes, so that nothing is stored that
-    the second would refuse. ``joined`` is what was streamed, cleaned and
+    One rule, held in two places: of a run's stored stream
+    (``check_event_order``) and by the run lifecycle as it publishes, so that
+    nothing is stored that the first would refuse. ``joined`` is what was streamed, cleaned and
     joined; a call that streamed nothing is not brought here.
     """
     try:

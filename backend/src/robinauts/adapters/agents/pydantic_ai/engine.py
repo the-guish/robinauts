@@ -1,89 +1,75 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""One turn on Pydantic AI: an agent built per turn, streamed, translated.
+"""One turn on Pydantic AI: the framework's agent runs the loop, the adapter streams it.
 
 The second implementation of the ``Agent`` port (``robinauts.ports.agents``),
 and the only module in the platform that may name Pydantic AI
 (``docs/layout.md``, enforced by the import contracts in
 ``backend/pyproject.toml``). Everything about the framework stops here: what
-crosses the port is the platform's own history in and the platform's own
-events out, and the **discard test** is that five places name this
+crosses the port is a question and the conversation's memory in, and the
+adapter's events out, and the **discard test** is that three places name this
 sub-package and deleting it and its dependencies breaks those and nothing
 else: its import in ``robinauts.app`` and its one entry in ``ENGINES``; the
 contract exceptions in ``backend/pyproject.toml`` that name the sub-package;
-this sub-package's own tests; and the **shared swap fixtures** under
-``tests/`` (``tests/engines.py``, ``tests/unit/test_engine_swap.py`` and the
-configuration swap in ``tests/integration/test_create_app.py``), which exist
-to name both engines at once and cannot be written without both. The
-composition tests (``tests/unit/test_app_composition.py``) fail too and name
-no adapter: they say that *both* engines are wired, which is a claim about the
-table and not about either sub-package (``docs/layout.md``).
+and this sub-package's own tests. The composition tests
+(``tests/unit/test_app_composition.py``) fail too and name no adapter: they
+say that *both* engines are wired, which is a claim about the table and not
+about either sub-package.
 
-**Stateless per turn** (ADR 0002). The framework's agent is built for the turn
-and thrown away, and the whole of the conversation goes in as
-``message_history``: nothing is remembered between calls, which is what lets
-the next turn of the same conversation run on the other engine.
+**The framework owns the loop, the context and the memory** (ADR 0005). A
+Pydantic AI ``Agent`` is built for the turn -- the model, the toolsets of the
+agent's MCP servers through the framework's own MCP client, the instructions,
+and the history processor that keeps the context within the window -- and
+``run_stream_events`` runs the whole turn: the model asks for a tool, the
+framework calls it, the result goes back, the model answers, as many times as
+the turn needs. What this adapter does is translate what it emits, exactly as
+the Pydantic AI backend of `agent-framework-examples
+<https://github.com/the-guish/agent-framework-examples>`_ does:
+
+- a ``PartStartEvent`` carries the first of a part and a ``PartDeltaEvent``
+  more of it: text becomes ``TextDelta`` and thinking ``ReasoningDelta``;
+- a ``FunctionToolCallEvent`` is a call the framework is about to make, and
+  becomes ``ToolCall`` with the vendor's id, the tool's name and its
+  arguments whole -- there is no reason to stream the arguments of a call the
+  framework runs itself;
+- a ``FunctionToolResultEvent`` is what the tool answered, and becomes
+  ``ToolResult``: a return the tool marked as failed, and a retry prompt the
+  framework wrote for a call it could not validate, are results with
+  ``is_error`` set, since the model reads both;
+- the ``AgentRunResultEvent`` ends the turn: its output is what the turn is
+  ``Done`` with, and its messages are the **memory**, serialised by the
+  framework's own type adapter and handed back as the state the platform
+  stores against the run and hands to the next turn
+  (``docs/specs/conversations.md``).
 
 **The system prompt is ``instructions=``, not ``system_prompt=``.** The two
 differ in exactly the way that matters here: a ``system_prompt`` becomes a
-``SystemPromptPart`` *in the message history*, carried along with it and
-replayed, while ``instructions`` are taken from the agent's definition at
-every run and never enter the history. The platform's history holds messages
-and no system prompt (``docs/specs/conversations.md``), and editing an agent
-must take effect at the next turn of its existing conversations
-(``docs/specs/agents.md``) -- both of which are what ``instructions`` means.
+part of the message history, carried along with it and replayed, while
+``instructions`` are taken from the agent's definition at every run. Editing
+an agent must take effect at the next turn of its existing conversations
+(``docs/specs/agents.md``), which is what ``instructions`` means.
 
-**One model call is the whole of a turn.** The graph is iterated until its
-first model request node has been streamed, and then left. What that keeps out
-is the framework's own tool loop and its retrying: a model asking for a tool
-makes Pydantic AI run it and ask the model again, and an answer with no text
-in it makes it send a *retry prompt* -- a second answer in one turn, charged
-to the operator, that nobody asked for. The platform owns the tool loop
-(``docs/specs/runs.md``, "Tools") and retrying is sending the message again,
-so the turn ends where the model's first answer ends, whatever it asked for.
+**The context is kept within the window** by a history processor
+(``within``): before every model call, and again on the memory handed back,
+the oldest exchanges are dropped until what is left fits the share of the
+window the turn may spend (``TRIM_AT``). An exchange is a question and
+everything up to the next one, so a tool call is never parted from its
+result. The window is the model's configured ``context_window``, then what
+the framework's profile says of the model, then ``DEFAULT_CONTEXT_WINDOW``.
 
-**Tools are declared and never run here.** The run's ``ToolDefinition``s go
-to the model as an ``ExternalToolset`` -- the framework's name for tools
-something outside it executes -- so the vendor is shown them as it would be
-any tool and the framework holds nothing that could run one; the turn ends
-before the framework would look for one anyway.
+**The vendor's cache is asked for** on every request (``settings``): the
+instructions, the tool definitions and the conversation so far are marked
+cacheable, which is how a long conversation stops paying for its whole
+history at every turn.
 
-**The mapping**, which is the whole of the translation (``_Answer``):
-
-- the node's stream yields ``PartStartEvent``s (a part, with the first of its
-  content already in it), ``PartDeltaEvent``s (more of one) and
-  ``PartEndEvent``s (the whole part, once it is). Text becomes
-  ``AnswerTextDelta``, thinking becomes ``AnswerReasoningDelta``, and the
-  first of anything opens the answer (``AnswerStarted``);
-- a **tool call** starting is ``ToolCallStarted`` with the vendor's id and the
-  tool's full name, each piece of its arguments is ``ToolCallArgumentsDelta``,
-  and the call is completed -- when its part ends, when the next part begins
-  or when the answer ends -- with what the pieces parse to (arguments the
-  framework hands over whole are written out as one piece);
-- ``PartEndEvent`` for text and thinking is passed over, as is every other
-  event of the stream: repeating it would store the answer twice;
-- **what was streamed is what is kept** (``docs/specs/agents.md``): the answer
-  completes with exactly the text deltas, joined, and exactly the calls it
-  announced. The response the framework assembled from the same stream is
-  read for two things only, neither of them content a person watched arrive:
-  the vendor's **signed thinking blocks**, kept in the answer's ``extras``
-  under the vendor's key and replayed to the model that made them and to no
-  other (``docs/specs/conversations.md``, "Reasoning"); and a call the
-  framework holds that was never announced, which is refused rather than
-  dropped;
-- **reasoning is never in the completed parts.** ``domain.kept_parts`` would
-  drop a ``ReasoningPart`` anyway; putting the model's thinking in the
-  answer's *text* is the mistake that would survive that, so the text part is
-  built from the text deltas alone -- and the signed blocks are never read
-  as reasoning either: they are carried and replayed, as the vendor's data.
-
-**Nothing phones home** (``docs/specs/core.md``). Pydantic AI's instrumentation
-is turned off explicitly on every agent it builds (``force_tracing_off``,
-``_runner``), so no tracer, no exporter and no Logfire client is ever made
-whatever the environment says; and a vendor's client is built from the
-configuration rather than from the environment -- the endpoint, the key and
-the key's header (``ANTHROPIC_ENDPOINT``, ``clear_client_overrides``).
+**Nothing phones home** (``docs/specs/core.md``). Pydantic AI's
+instrumentation is turned off explicitly on every agent it builds
+(``force_tracing_off``, ``instrument = False``), so no tracer, no exporter and
+no Logfire client is ever made whatever the environment says; and a vendor's
+client is built from the configuration rather than from the environment --
+the endpoint, the key and the key's header (``ANTHROPIC_ENDPOINT``,
+``clear_client_overrides``).
 
 **And nothing is written down either.** The platform's logs never carry
 conversation content: the vendor SDK's loggers that write request bodies --
@@ -91,90 +77,66 @@ which on ``ANTHROPIC_LOG``, and on any root logger turned up afterwards, put
 every request's messages and system prompt on standard error -- are pinned at
 ``WARNING`` when the engine is built (``quiet_client_logging``).
 
-**Failure and cancellation** are the port's. Whatever the provider raises
-travels out of the generator as it is; ``CancelledError`` is never swallowed;
-and the ``finally`` leaves the framework's two context managers, which is what
-lets go of the model's stream, the HTTP response underneath it and the
-connection.
-
-**What the ``finally`` does not do is close the vendor client.** A client is
-built per turn (``chat_model``) and is released to the garbage collector with
-the rest of the turn; its connection pool is closed by the HTTP client's own
-finaliser and not by this adapter. Both engines are the same in this, and a
-shared client held for the life of the process -- and closed by the lifespan,
-as the identity provider's is -- is a change to both adapters and to the
-composition root, which is a step of its own
-(``docs/working-notes/poc-progress.md``).
+**Failure and cancellation** are the port's. Whatever the provider, a tool
+server or the framework raises travels out of the generator as it is;
+``CancelledError`` is never swallowed; and the ``finally`` leaves the
+framework's context manager, which is what lets go of the model's stream, the
+HTTP response underneath it and the tool sessions. A turn that raised hands
+back no memory: the conversation resumes from the one it had.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from typing import Any
 
 import pydantic_ai
 from anthropic import AsyncAnthropic
+from pydantic import ValidationError
 from pydantic_ai import Agent as FrameworkAgent
-from pydantic_ai import ModelRequest, ModelResponse, ModelSettings
+from pydantic_ai import UsageLimits
+from pydantic_ai.capabilities import ProcessHistory
+from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.messages import (
-    BaseToolCallPart,
+    FunctionToolCallEvent,
+    FunctionToolResultEvent,
     ModelMessage,
-    ModelResponsePart,
-    ModelResponseStreamEvent,
+    ModelMessagesTypeAdapter,
+    ModelRequest,
     PartDeltaEvent,
-    PartEndEvent,
     PartStartEvent,
+    TextPart,
     TextPartDelta,
     ThinkingPart,
     ThinkingPartDelta,
-    ToolCallPartDelta,
     ToolReturnPart,
     UserPromptPart,
 )
-from pydantic_ai.messages import TextPart as FrameworkTextPart
-from pydantic_ai.messages import ToolCallPart as FrameworkToolCallPart
 from pydantic_ai.models import Model
-from pydantic_ai.models.anthropic import AnthropicModel
-from pydantic_ai.profiles import ModelProfile
+from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.providers.anthropic import AnthropicProvider
-from pydantic_ai.tools import ToolDefinition as FrameworkToolDefinition
-from pydantic_ai.toolsets import ExternalToolset
+from pydantic_ai.run import AgentRunResultEvent
+from pydantic_ai.toolsets import AbstractToolset
 
-from robinauts.adapters.config_file import ProviderKeys
+from robinauts.adapters.config_file import ProviderKeys, ToolServerSecrets, credential_header
 from robinauts.domain import (
-    NO_RESULT,
+    MAX_PART_CHARS,
     AgentDefinition,
-    AnswerCompleted,
-    AnswerReasoningDelta,
-    AnswerStarted,
-    AnswerTextDelta,
     ConfigError,
-    EngineEvent,
+    Done,
+    Event,
     InvalidValueError,
-    Message,
-    MessagePart,
     ModelConfig,
     ModelProviderConfig,
     ModelsConfig,
     ProviderKind,
-    Role,
-    ToolCallArgumentsDelta,
-    ToolCallCompleted,
-    ToolCallPart,
-    ToolCallStarted,
-    ToolDefinition,
-    ToolResultPart,
-    UnsupportedContentError,
-    WaitingOnTools,
-    chain,
-    checked_data,
-    clean_text,
-    text_parts,
-    tools_for_request,
-    unanswered_calls,
+    ReasoningDelta,
+    TextDelta,
+    ToolCall,
+    ToolResult,
+    ToolServerConfig,
 )
 from robinauts.ports import Agent
 
@@ -205,9 +167,9 @@ Deliberately empty, and named all the same so that the claim is written down
 rather than merely true today. Pydantic AI has **no environment switch for
 instrumentation**: it traces when, and only when, an agent's ``instrument``
 says so -- set by ``logfire.instrument_pydantic_ai()``, by
-``Agent.instrument_all()`` or per agent -- and ``_runner`` sets it to ``False``
-on every agent this engine builds, which beats both of the others. Nothing is
-read from ``LOGFIRE_TOKEN``, ``LOGFIRE_SEND_TO_LOGFIRE``,
+``Agent.instrument_all()`` or per agent -- and the engine sets it to ``False``
+on every agent it builds, which beats both of the others. Nothing is read
+from ``LOGFIRE_TOKEN``, ``LOGFIRE_SEND_TO_LOGFIRE``,
 ``OTEL_EXPORTER_OTLP_ENDPOINT``, ``OTEL_TRACES_EXPORTER`` or any
 ``PYDANTIC_AI_*`` variable on the path a turn takes: an ``OTel`` tracer
 provider is asked for only while *building* instrumentation settings, which
@@ -291,15 +253,11 @@ the provider had already accepted. A turn is bounded by the application
 (``robinauts.application.Turns``), a failure is reported by raising, and
 retrying is sending the message again (``docs/specs/runs.md``).
 
-**One retry this does not switch off is the framework's own.** For the models
-whose thinking blocks Anthropic binds to a conversation, Pydantic AI answers
-the vendor's refusal of a replayed block ("bound to a different
-conversation") by sending the request once more with the blocks marked to be
-dropped, and says so through ``warnings``. That is the "ask the vendor to
-drop what it can no longer match" of the plan's open question
-(``docs/working-notes/mcp-plan.md``), happening on this engine and not on
-the other, which fails that turn; left as the framework has it, and to be
-seen in a live turn on such a model after the system prompt was edited.
+**What this does not switch off is the framework's own retrying**, which is
+the loop's and is now wanted: a tool call the framework could not validate
+is sent back to the model as a retry prompt, once, before the turn fails; and
+for the models whose thinking blocks Anthropic binds to a conversation, a
+replayed block the vendor refuses is sent once more marked to be dropped.
 """
 
 DEFAULT_ANTHROPIC_OUTPUT_TOKENS = 8192
@@ -311,15 +269,62 @@ platform's, which is why ``ModelConfig.max_output_tokens`` defaults to "leave
 it to the engine" and this is where "the engine" answers.
 """
 
+MAX_TOOL_ROUNDS = 25
+"""How many times one turn may go back to the model with tool results.
+
+A bound on the loop, so that a model that keeps calling tools cannot run a
+turn for ever on the operator's account; the framework's request limit is set
+from it (``REQUEST_LIMIT``), and a turn that reaches it fails with what the
+framework says. Twenty-five rounds is far past what a turn that is getting
+somewhere needs and far short of what a turn that is not would spend.
+"""
+
+REQUEST_LIMIT = MAX_TOOL_ROUNDS + 1
+"""The framework's bound on a turn: one model request per round, and the first."""
+
+DEFAULT_CONTEXT_WINDOW = 200_000
+"""The context window assumed for a model nobody said the window of.
+
+For a model the framework has no profile for -- a gateway's model id -- and
+no ``context_window`` in the configuration. Haiku 4.5's, and conservative
+for a bigger model: trimming too early loses history, trimming too late costs
+a refused request.
+"""
+
+TRIM_AT = 0.8
+"""The share of the window the history may fill before the oldest exchanges go."""
+
+CHARS_PER_TOKEN = 4
+"""How the history is measured without a tokeniser: a token is about four characters.
+
+Rough, and on the side of trimming early: what it measures is the message
+serialised whole, which is longer than what the vendor tokenises.
+"""
+
+ANTHROPIC_MODELS = frozenset({ProviderKind.ANTHROPIC, ProviderKind.ANTHROPIC_COMPATIBLE})
+
 
 ChatModelFactory = Callable[[ModelConfig, ModelProviderConfig, str], Model]
 """How a model is built: the model, its provider, and the provider's key.
 
 Injectable so that the tests run the engine over one of Pydantic AI's own test
-models -- the graph, the streaming, the mapping and the releasing are then
+models -- the agent, its loop, its streaming and its releasing are then
 exercised for real with no network and no key (``docs/layout.md``, "Testing
 strategy").
 """
+
+ToolsetsFactory = Callable[
+    [Sequence[ToolServerConfig], ToolServerSecrets], Sequence[AbstractToolset[Any]]
+]
+"""How the toolsets of the agent's servers are built for a turn.
+
+Injectable for the same reason: the tests hand the engine plain functions as
+a toolset, as the examples do, and the framework runs them exactly as it runs
+a server's.
+"""
+
+HistoryProcessor = Callable[[list[ModelMessage]], Awaitable[list[ModelMessage]]]
+"""What ``within`` hands the framework: the messages, kept to the window."""
 
 
 def force_tracing_off() -> None:
@@ -334,11 +339,11 @@ def force_tracing_off() -> None:
     then is an OpenTelemetry tracer provider asked for, which is the only thing
     that would open an exporter and send a conversation to a third party.
 
-    Two of those three are answered where an agent is built: ``_runner`` sets
-    ``instrument = False`` on every agent this engine makes, which **beats**
-    the process-wide default, and the model comes from this adapter's own
-    factory and is never an instrumented one. There is deliberately no
-    environment variable to unset, because there is none to read
+    Two of those three are answered where an agent is built: the engine sets
+    ``instrument = False`` on every agent it makes, which **beats** the
+    process-wide default, and the model comes from this adapter's own factory
+    and is never an instrumented one. There is deliberately no environment
+    variable to unset, because there is none to read
     (``TRACING_VARIABLES_REMOVED``).
 
     What is left, and what this function is for, is the **banner**: on its
@@ -490,9 +495,9 @@ def chat_model(model: ModelConfig, provider: ModelProviderConfig, key: str) -> M
     itself is taken out of the environment when the engine is built
     (``clear_client_overrides``).
 
-    The timeout and the output ceiling are **not** here: they travel with the
-    request, as ``ModelSettings`` (``_runner``), which is where the model's
-    configuration reaches a turn.
+    The timeout, the output ceiling and the cache are **not** here: they
+    travel with the request, as the model settings (``settings``), which is
+    where the model's configuration reaches a turn.
     """
     client = AsyncAnthropic(
         api_key=key,
@@ -500,31 +505,76 @@ def chat_model(model: ModelConfig, provider: ModelProviderConfig, key: str) -> M
         max_retries=MAX_RETRIES,
         default_headers={ANTHROPIC_KEY_HEADER: key},
     )
-    return AnthropicModel(
-        model.name, provider=AnthropicProvider(anthropic_client=client), profile=_schemas_as_given
+    return AnthropicModel(model.name, provider=AnthropicProvider(anthropic_client=client))
+
+
+def settings(model: ModelConfig, provider: ModelProviderConfig) -> AnthropicModelSettings:
+    """What the model's configuration says about one request, and the cache it asks for.
+
+    The timeout is per model call and is the configuration's
+    (``domain.ModelConfig``); the ceiling is required by Anthropic on every
+    request, so the engine sends one whether or not the operator set it
+    (``DEFAULT_ANTHROPIC_OUTPUT_TOKENS``). Both travel with the request rather
+    than with the client, so that two models of one provider can differ.
+
+    The cache: the instructions and the tool definitions are marked, and so is
+    the conversation -- with the vendor's own automatic breakpoint, which it
+    moves forward as the conversation grows, or, at a gateway that speaks the
+    Messages API without that top-level parameter, with a breakpoint on the
+    last message. The framework ignores every one of these for a model that
+    is not the vendor's, which is what lets a scripted model take the same
+    settings in the tests.
+    """
+    at_the_vendor = provider.kind is ProviderKind.ANTHROPIC
+    return AnthropicModelSettings(
+        timeout=model.timeout_seconds,
+        max_tokens=model.max_output_tokens or DEFAULT_ANTHROPIC_OUTPUT_TOKENS,
+        anthropic_cache_instructions=True,
+        anthropic_cache_tool_definitions=True,
+        anthropic_cache=at_the_vendor,
+        anthropic_cache_messages=not at_the_vendor,
     )
 
 
-def _schemas_as_given(profile: ModelProfile) -> ModelProfile:
-    """The framework's profile for the model, less its rewriting of a tool's schema.
+def mcp_toolset(server: ToolServerConfig, secrets: ToolServerSecrets) -> AbstractToolset[Any]:
+    """That server as the framework's client connects to it, its tools under its id.
 
-    The framework's Anthropic profile runs every tool's input schema through
-    a transformer that strips ``title`` and ``$schema`` at every depth. The
-    platform promises the opposite: a tool's schema is the server's, handed
-    to the vendor as it is, and two engines send byte-identical lists
-    (``docs/specs/agents.md``, "Tools"; ``domain.ToolDefinition``) -- the
-    other engine passes it through untouched, and this one now does too.
-    Everything else the profile says about the model is kept.
+    The endpoint is the configured one and nothing else, the credential is the
+    one start-up read for the server (``credential_header``: ``Bearer``,
+    ``Basic``, or no header at all under ``auth = "none"``), and the server's
+    ``timeout_seconds`` bounds the connection and every read from it.
+    ``HTTPS_PROXY`` is obeyed by the client's ``httpx`` as by every other
+    outbound call of the process (``docs/specs/agents.md``, "Tools").
+
+    The tools are named ``<server id>_<tool>`` (``prefixed``) so that two
+    servers offering ``search`` never collide, and a tool the server says
+    failed is a **failed result the model reads** rather than a failure of
+    the turn or a retry charged against the tool (``tool_error_behavior``);
+    a server that cannot be reached raises, which fails the turn. Nothing
+    connects here: the framework opens the session at the first turn that
+    lists or calls a tool, and closes it with the run.
     """
-    return {**profile, "json_schema_transformer": None}
+    return MCPToolset(
+        server.url,
+        id=server.id,
+        headers=credential_header(server, secrets) or None,
+        init_timeout=server.timeout_seconds,
+        read_timeout=server.timeout_seconds,
+        tool_error_behavior="failed",
+    ).prefixed(server.id)
+
+
+def mcp_toolsets(
+    servers: Sequence[ToolServerConfig], secrets: ToolServerSecrets
+) -> Sequence[AbstractToolset[Any]]:
+    """The toolsets of those servers, one each, in the agent's order."""
+    return [mcp_toolset(server, secrets) for server in servers]
 
 
 class PydanticAIAgent(Agent):
     """The Pydantic AI engine: one turn, one agent, built and thrown away."""
 
-    kinds: frozenset[ProviderKind] = frozenset(
-        {ProviderKind.ANTHROPIC, ProviderKind.ANTHROPIC_COMPATIBLE}
-    )
+    kinds: frozenset[ProviderKind] = ANTHROPIC_MODELS
     """The provider kinds this build of the engine has a client for.
 
     One client, two kinds: ``AsyncAnthropic`` reaches Anthropic itself and any
@@ -555,17 +605,23 @@ class PydanticAIAgent(Agent):
         self,
         models: ModelsConfig,
         keys: ProviderKeys,
+        tool_secrets: ToolServerSecrets | None = None,
         *,
         model_for: ChatModelFactory = chat_model,
+        toolsets_for: ToolsetsFactory = mcp_toolsets,
     ) -> None:
         force_tracing_off()
         clear_client_overrides()
         quiet_client_logging()
         self._models = models
-        """The models a turn may run on, and the provider each is reached through."""
+        """The models a turn may run on, the provider each is reached through,
+        and the tool servers an agent may name."""
         self._keys = keys
         """The providers' keys, as start-up read them. It prints nothing."""
+        self._tool_secrets = tool_secrets if tool_secrets is not None else ToolServerSecrets({})
+        """The tool servers' secrets, likewise."""
         self._model_for = model_for
+        self._toolsets_for = toolsets_for
         self._open = 0
 
     @property
@@ -574,29 +630,26 @@ class PydanticAIAgent(Agent):
 
         Zero once every turn has ended or been closed, which is the promise a
         cancelled run depends on (``robinauts.ports.agents``). It counts the
-        engine's own turns; the framework's run and the model's stream live
-        inside one and go with it.
+        engine's own turns; the framework's run, the model's stream and the
+        tool sessions live inside one and go with it.
 
         **One engine, one count, however many turns it is running.** A
         deployment shares one ``PydanticAIAgent`` between every conversation,
         so this says "is anything still open", not "is *that* turn still
-        open": a caller watching one turn while another is in flight reads the
-        other one's stream in this number. Nothing in the platform needs the
-        finer answer -- the application releases a turn by closing its own
-        stream and never asks -- and the contract suite reads it between turns,
-        one at a time, which is when the two questions have the same answer.
+        open"; the contract suite reads it between turns, one at a time, which
+        is when the two questions have the same answer.
         """
         return self._open
 
-    def run_turn(
+    def stream(
         self,
         agent: AgentDefinition,
-        history: Sequence[Message],
-        tools: Sequence[ToolDefinition],
+        prompt: str,
         *,
         model: str,
-    ) -> AsyncGenerator[EngineEvent, None]:
-        """Answer ``history`` as ``agent`` on ``model``, streaming the events of the turn.
+        state: bytes | None,
+    ) -> AsyncGenerator[Event, None]:
+        """Send ``prompt`` as the next user turn and stream the turn's events.
 
         Not a coroutine and nothing is done here: everything -- building the
         model, building the framework's agent, opening the stream -- happens
@@ -604,83 +657,60 @@ class PydanticAIAgent(Agent):
         failure of the turn, reported by raising where the caller is iterating,
         and not an exception thrown at whoever asked for the stream.
         """
-        return self._turn(agent, history, tuple(tools), model)
+        return self._turn(agent, prompt, model, state)
 
     async def _turn(
-        self,
-        agent: AgentDefinition,
-        history: Sequence[Message],
-        tools: tuple[ToolDefinition, ...],
-        model_id: str,
-    ) -> AsyncGenerator[EngineEvent, None]:
+        self, agent: AgentDefinition, prompt: str, model_id: str, state: bytes | None
+    ) -> AsyncGenerator[Event, None]:
         # The run's model, never the agent's default: the conversation may
         # have been moved to another (``robinauts.ports.agents``).
         model = self._models.model_by_id(model_id)
         provider = self._models.provider_for(model)
         client = self._model_for(model, provider, self._keys.key_for(provider.id))
-        runner = _runner(agent, client, tools, history)
-        settings = _settings(model)
-        # The vendor's own name for itself is the key its blocks are kept
-        # under (``VENDOR`` for the two kinds this engine reaches).
-        messages = _messages(history, model_id, client.system)
-        answer = _Answer()
-        response: ModelResponse | None = None
+        servers = [self._models.tool_servers[server_id] for server_id in agent.tools]
+        history = read_state(state)
+        kept_within = within(context_window(client, model))
+        text, remembered = "", history
         self._open += 1
         try:
-            async with runner.iter(message_history=messages, model_settings=settings) as run:
-                async for node in run:
-                    # The user prompt node and everything after the model's
-                    # answer are passed over: the first is a question already
-                    # in the history, and the rest is where the framework would
-                    # run a tool or retry (see the module docstring).
-                    if not FrameworkAgent.is_model_request_node(node):
-                        continue
-                    async with node.stream(run.ctx) as answering:
-                        async for event in answering:
-                            for made in answer.events_of(event):
-                                yield made
-                        response = answering.response
-                    break
-            # ``response`` is ``None`` only if no model request node was
-            # reached, which the framework does not do with a history the
-            # port guarantees -- one ending in the message being answered
-            # (``robinauts.ports.agents``) -- and does not do with an
-            # off-contract one either in this version, which asks the model
-            # once regardless. Kept for a framework that would leave the loop
-            # above with no iterations: that is a turn that produced an empty
-            # answer rather than one that produced none, which would be a
-            # failed run and is the application's to decide.
-            for made in answer.complete(response, client.system):
-                yield made
+            runner = runner_for(
+                agent, client, list(self._toolsets_for(servers, self._tool_secrets)), kept_within
+            )
+            async with runner.run_stream_events(
+                prompt,
+                message_history=history,
+                model_settings=settings(model, provider),
+                usage_limits=UsageLimits(request_limit=REQUEST_LIMIT),
+            ) as events:
+                async for event in events:
+                    if isinstance(event, AgentRunResultEvent):
+                        text, remembered = event.result.output, event.result.all_messages()
+                    else:
+                        for made in _events_of(event):
+                            yield made
+            yield Done(text=text, state=write_state(await kept_within(list(remembered))))
         finally:
             # Reached when the turn ends, when it raises, and when the
-            # iteration is closed -- which is what a cancellation does. The two
-            # context managers above are left on the way out, which is what
+            # iteration is closed -- which is what a cancellation does. The
+            # context manager above is left on the way out, which is what
             # releases the model's stream and the response under it.
             self._open -= 1
 
 
-def _runner(
+def runner_for(
     agent: AgentDefinition,
-    model: Model,
-    tools: tuple[ToolDefinition, ...],
-    history: Sequence[Message],
+    client: Model,
+    toolsets: Sequence[AbstractToolset[Any]],
+    kept_within: HistoryProcessor,
 ) -> FrameworkAgent[None, str]:
-    """The framework's agent for one turn: this model, this prompt, these tools.
+    """The framework's agent for one turn: this model, these instructions, these tools.
 
     **The system prompt is ``instructions``** and not ``system_prompt``: it is
     the agent's, it is taken from the definition as it stands now, and it is
     not one of the messages (``docs/specs/conversations.md``). An empty one is
-    left out rather than sent as an empty instruction.
-
-    **The tools are declared, not given.** The run's definitions go in as an
-    ``ExternalToolset``, the framework's own kind for tools it does not
-    execute: the model is shown them as any tool, the framework holds no
-    function to call, and the turn ends before it would try
-    (``PydanticAIAgent._turn``). The port is a seam a test double crosses too,
-    so what comes over it is checked to be the platform's definition and
-    nothing that looks like one. **No output type**: the default output of a
-    Pydantic AI agent is plain text, which declares no output tool.
+    left out rather than sent as an empty instruction. **No output type**: the
+    default output of a Pydantic AI agent is plain text, which declares no
+    output tool.
 
     ``instrument`` is set to ``False`` rather than left alone, which is the
     strongest of the three switches: it beats ``Agent.instrument_all()``, so
@@ -690,432 +720,141 @@ def _runner(
     It is given a ``name``, which is also what keeps the framework from
     looking for one in the caller's stack frame at every turn.
     """
-    for tool in tools:
-        if not isinstance(tool, ToolDefinition):
-            raise InvalidValueError(f"a run's tools are ToolDefinitions, not {tool!r}")
-    # With a stub for every name the history calls that the run lacks: the
-    # vendor refuses tool blocks its request defines no tool for
-    # (``core.tools_for_request``).
-    defined = tools_for_request(tools, history)
     runner: FrameworkAgent[None, str] = FrameworkAgent(
-        model=model,
+        model=client,
         name=agent.id,
         instructions=agent.system_prompt or None,
-        toolsets=[ExternalToolset([_declared(tool) for tool in defined])] if defined else None,
+        toolsets=list(toolsets) or None,
+        capabilities=[ProcessHistory(kept_within)],
     )
     runner.instrument = False
     return runner
 
 
-def _declared(tool: ToolDefinition) -> FrameworkToolDefinition:
-    """The definition as the framework takes one, as it stands.
+def context_window(client: Model, model: ModelConfig) -> int:
+    """The window the context is kept within, in tokens."""
+    if model.context_window is not None:
+        return model.context_window
+    known = client.profile.get("context_window")
+    if isinstance(known, int) and known > 0:
+        return known
+    return DEFAULT_CONTEXT_WINDOW
 
-    The name is the full name the platform gave it, the schema is the
-    server's, as plain data, and an empty description is none -- MCP's is
-    optional, and the vendors take a tool without one.
+
+def within(window: int) -> HistoryProcessor:
+    """A history processor that keeps the messages to that window.
+
+    The oldest **exchanges** go first -- a question and everything up to the
+    next one, so that a tool call is never parted from its result -- until
+    what is left measures under ``TRIM_AT`` of the window; the latest
+    exchange stays whatever it measures, since a turn with nothing in front
+    of the model is no turn. What the framework is handed before each model
+    call is what the memory is trimmed to on the way out, so the platform
+    stores what the model saw and no more.
     """
-    return FrameworkToolDefinition(
-        name=tool.name,
-        parameters_json_schema=dict(tool.input_schema),
-        description=tool.description or None,
+    budget = window * TRIM_AT
+
+    async def kept(messages: list[ModelMessage]) -> list[ModelMessage]:
+        starts = [at for at, message in enumerate(messages) if _begins_an_exchange(message)]
+        if len(starts) < 2:
+            return messages
+        # Whatever precedes the first question goes with it.
+        ends = [*starts[1:], len(messages)]
+        measured = 0.0
+        # From the newest exchange back: the first that does not fit, and
+        # everything before it, is what goes.
+        for start, end in reversed(list(zip([0, *starts[1:]], ends, strict=True))):
+            measured += sum(_measured(message) for message in messages[start:end])
+            if measured > budget and end != len(messages):
+                _log.info("the history was trimmed to the window: %d messages dropped", end)
+                return messages[end:]
+        return messages
+
+    return kept
+
+
+def _begins_an_exchange(message: ModelMessage) -> bool:
+    """Whether that message is a question: a request holding what a person said."""
+    return isinstance(message, ModelRequest) and any(
+        isinstance(part, UserPromptPart) for part in message.parts
     )
 
 
-def _settings(model: ModelConfig) -> ModelSettings:
-    """What the model's configuration says about one request.
+def _measured(message: ModelMessage) -> float:
+    """That message's size in tokens, as ``CHARS_PER_TOKEN`` estimates it."""
+    return len(ModelMessagesTypeAdapter.dump_json([message])) / CHARS_PER_TOKEN
 
-    The timeout is per model call and is the configuration's
-    (``domain.ModelConfig``); the ceiling is required by Anthropic on every
-    request, so the engine sends one whether or not the operator set it
-    (``DEFAULT_ANTHROPIC_OUTPUT_TOKENS``). Both travel with the request rather
-    than with the client, so that two models of one provider can differ.
+
+def read_state(state: bytes | None) -> list[ModelMessage]:
+    """The memory as the framework's messages; nothing for a conversation with none.
+
+    A state this engine cannot read is a fault -- the platform hands an engine
+    its own states only (``docs/specs/agents.md``) -- and is refused, which
+    fails the turn, rather than read as nothing.
     """
-    return ModelSettings(
-        timeout=model.timeout_seconds,
-        max_tokens=model.max_output_tokens or DEFAULT_ANTHROPIC_OUTPUT_TOKENS,
-    )
-
-
-VENDOR = "anthropic"
-"""The key the vendor's opaque blocks are kept under in a message's ``extras``.
-
-One vendor's key for one vendor's blocks (``docs/specs/conversations.md``,
-"Reasoning"), and the framework's own name for the vendor (``Model.system``),
-which is what the engine reads at run time: the two kinds this engine reaches
-speak Anthropic's Messages API through one client, so what it stores and
-what it replays are Anthropic's thinking blocks under this key -- the same
-key and the same blocks as the other engine's, which is what lets a
-conversation cross the swap with its thinking (``docs/specs/conversations.md``,
-"What crosses a swap"). An adapter reaching another vendor reads past it.
-"""
-
-REDACTED = "redacted_thinking"
-"""The block the vendor sends in place of thinking it will not show.
-
-Opaque throughout: the framework carries it as a ``ThinkingPart`` with this
-``id``, no content and the block's data for a signature, and that is how it
-is stored (``{"type": "redacted_thinking", "data": ...}``) and replayed.
-"""
-
-BLOCKS_LEFT_OUT = (
-    "the vendor's signed thinking blocks did not fit a message's extras and were left"
-    " out; if the model asked for tools, the vendor may refuse the next round"
-)
-"""What the log says when an answer's blocks are bigger than ``extras`` may be.
-
-The plan's open question, answered here as the other engine answers it
-(``docs/working-notes/mcp-plan.md``, "Open"): the answer is stored without
-them rather than the turn failing over the size of the thinking, and the
-line in the log is what an operator finds when the vendor then refuses.
-"""
-
-BLOCK_NOT_REPLAYED = (
-    "a stored thinking block of the vendor's is not of a shape this engine replays, and"
-    " was left out"
-)
-"""What the log says of a block in ``extras`` that is not one the vendor made."""
-
-
-def _messages(history: Sequence[Message], model_id: str, vendor: str) -> list[ModelMessage]:
-    """The history as the framework's messages. The system prompt is not here.
-
-    It is the agent's, it is passed as ``instructions`` (``_runner``), and it
-    is deliberately not a message: what goes in ``message_history`` is the
-    conversation and nothing else, so the history the model is given is the
-    history the platform stored (``docs/specs/conversations.md``).
-
-    **Text, calls and results.** A question is one ``UserPromptPart``. An
-    answer is its stored text, its calls as the framework's ``ToolCallPart``s
-    -- the vendor's id and the tool's full name, the arguments as data -- and,
-    in front of them, the vendor's signed thinking blocks kept in its
-    ``extras``, **only when the run's model is the one that made them**
-    (``_replayed``): a signature is the model's own, and a block sent to
-    another model is refused by the vendor or, worse, turned into text by the
-    framework. A tool message is one ``ToolReturnPart`` per result, naming
-    the call it answers by the id and by the name the answer before it gave
-    that id, and whether it went wrong -- which the framework folds into the
-    one ``user`` turn of ``tool_result`` blocks the vendor wants back. An
-    answer whose calls no tool message answers is followed by one error
-    result per call saying no result of it was recorded (``domain.NO_RESULT``). The
-    reasoning a previous turn streamed is not carried back: what is stored of
-    it is the platform's record, not the vendor's.
-
-    A message with no text at all still becomes a message, empty, because
-    dropping it *here* would be this engine deciding what a turn that said
-    nothing means. What becomes of it is the **vendor mapping's**, and it is
-    the same answer under both engines: Anthropic's API refuses an empty
-    content block, so Pydantic AI leaves an empty text part out and then
-    leaves out the assistant message it emptied -- unless it has calls, which
-    stand on their own -- and langchain-anthropic drops an assistant message
-    whose content came out empty. The model is shown the same history either
-    way, which is what the swap needs. (Their rules differ in one case --
-    langchain keeps a *trailing* empty assistant message and Pydantic AI does
-    not -- and that case cannot arise here: a history ends in the message
-    being answered, ``robinauts.ports.agents``.)
-
-    So the line this adapter draws is that the framework decides, from the
-    same input, rather than this adapter deciding for it; if a mapping ever
-    changed, it would change under both engines together or be a finding about
-    one of them.
-
-    The last of them is the message being answered -- the question, or the
-    tool message of a round -- which is what the port guarantees, so the turn
-    is run with no separate prompt and the whole of the history in one place.
-    """
-    messages: list[ModelMessage] = []
-    named: dict[str, str] = {}
-    """The calls of the answer before, by id: what a result is named after."""
-    unanswered = unanswered_calls(history)
-    for message in history:
-        if message.role is Role.USER:
-            messages.append(ModelRequest(parts=[UserPromptPart(content=message.text)]))
-        elif message.role is Role.ASSISTANT:
-            messages.append(_response(message, model_id, vendor))
-            named = {call.call_id: call.name for call in message.tool_calls}
-            if message.id in unanswered:
-                # A call no tool message answers is answered here with what
-                # the record says of it (``domain.NO_RESULT``): the vendor
-                # refuses a call with nothing answering it, and the record,
-                # which keeps the call without a result, is not what is edited.
-                messages.append(
-                    ModelRequest(
-                        parts=[
-                            _returned(ToolResultPart(call.call_id, NO_RESULT, is_error=True), named)
-                            for call in unanswered[message.id]
-                        ]
-                    )
-                )
-        else:
-            # A tool message holds results and nothing else (``domain.Message``);
-            # one that holds anything else is a fault of ours, refused here
-            # rather than sent as an empty turn.
-            if len(message.tool_results) != len(message.parts):
-                raise InvalidValueError("a tool message holds tool results only")
-            messages.append(
-                ModelRequest(parts=[_returned(part, named) for part in message.tool_results])
-            )
-    return messages
-
-
-def _response(message: Message, model_id: str, vendor: str) -> ModelResponse:
-    """A stored answer as the framework's response: blocks, text, calls, in that order."""
-    parts: list[ModelResponsePart] = list(_replayed(message, model_id, vendor))
-    parts.append(FrameworkTextPart(content=message.text))
-    parts.extend(
-        FrameworkToolCallPart(
-            tool_name=call.name, args=dict(call.arguments), tool_call_id=call.call_id
-        )
-        for call in message.tool_calls
-    )
-    return ModelResponse(parts=parts)
-
-
-def _returned(part: ToolResultPart, named: Mapping[str, str]) -> ToolReturnPart:
-    """One result as the framework's return part, named after the call it answers.
-
-    The tree already holds a tool message to its parent's calls
-    (``core.check_answers_calls``), so a result naming no call of the answer
-    before it is a fault of ours and not the model's: ``InvalidValueError``.
-    """
-    name = named.get(part.call_id)
-    if name is None:
+    if state is None:
+        return []
+    try:
+        return list(ModelMessagesTypeAdapter.validate_json(state))
+    except (ValidationError, ValueError) as unreadable:
         raise InvalidValueError(
-            f"a tool result answers a call of the answer before it, not {part.call_id!r}"
-        )
-    return ToolReturnPart(
-        tool_name=name,
-        content=part.text,
-        tool_call_id=part.call_id,
-        outcome="failed" if part.is_error else "success",
-    )
+            "the conversation's memory is not one this engine wrote"
+        ) from unreadable
 
 
-def _replayed(message: Message, model_id: str, vendor: str) -> list[ThinkingPart]:
-    """The vendor's blocks stored on that answer, as the framework replays them.
-
-    Only for the model that made them, and only the two shapes the vendor
-    makes (``_extras``): a ``thinking`` block with its signature, or a
-    ``redacted_thinking`` block whose data rides as the signature. The
-    framework sends a signed part back as the vendor's block and would send
-    an unsigned one as *text* between thinking tags, so a block of any other
-    shape is left out with a line in the log rather than handed over.
-    """
-    if message.provenance is None or message.provenance.model != model_id:
-        return []
-    kept = message.extras.get(vendor)
-    blocks = kept.get("thinking") if isinstance(kept, Mapping) else None
-    if not isinstance(blocks, list):
-        return []
-    parts: list[ThinkingPart] = []
-    for block in blocks:
-        part = _thinking_part(block, vendor)
-        if part is None:
-            _log.warning(BLOCK_NOT_REPLAYED)
-        else:
-            parts.append(part)
-    return parts
+def write_state(messages: Sequence[ModelMessage]) -> bytes:
+    """The framework's messages as the memory: Pydantic AI's own encoding, as JSON."""
+    return bytes(ModelMessagesTypeAdapter.dump_json(list(messages)))
 
 
-def _thinking_part(block: object, vendor: str) -> ThinkingPart | None:
-    """One stored block as the framework's part, or ``None`` for a shape it is not."""
-    if not isinstance(block, Mapping):
-        return None
-    if block.get("type") == REDACTED and isinstance(block.get("data"), str) and block["data"]:
-        return ThinkingPart(content="", id=REDACTED, signature=block["data"], provider_name=vendor)
-    if (
-        block.get("type") == "thinking"
-        and isinstance(block.get("thinking"), str)
-        and isinstance(block.get("signature"), str)
-        and block["signature"]
-    ):
-        return ThinkingPart(
-            content=block["thinking"], signature=block["signature"], provider_name=vendor
-        )
-    return None
-
-
-class _Answer:
-    """One answer as it streams: what was said, what was called, and the events.
-
-    The order the port asks for (``robinauts.core.check_engine_events``) is
-    kept here: the answer is announced on its first piece, a call is announced
-    when its part starts and completed when that part ends, when the next
-    begins or when the answer ends, and what the call completes with is what
-    its pieces parse to.
-    """
-
-    def __init__(self) -> None:
-        self.started = False
-        self.streamed: list[str] = []
-        self.calls: list[ToolCallPart] = []
-        self._open: tuple[str, str] | None = None
-        """The call being made -- its id and name -- while its arguments arrive."""
-        self._pieces: list[str] = []
-        """The pieces of JSON streamed for the open call."""
-
-    def events_of(self, event: ModelResponseStreamEvent) -> list[EngineEvent]:
-        """The events one stream event carries, in the order they came.
-
-        A part **starting** arrives with the first of its content already in
-        it, a **delta** is more of one, and a part **ending** carries the whole
-        part: for a call, the moment it is complete; for anything else, a
-        repeat, passed over. A part of a kind this version does not carry --
-        a file, a citation -- is passed over too, because an engine that
-        guessed at one would be inventing content; but **a call of a kind this
-        engine did not declare** -- the vendor's own server-side tools, which
-        the framework spells as another class -- is refused, because passing
-        it over would finish the turn with an answer that looks whole and is
-        half of one.
-        """
-        events: list[EngineEvent] = []
-        if isinstance(event, PartStartEvent):
-            part = event.part
-            if isinstance(part, FrameworkToolCallPart):
-                events.extend(self._closed())
-                self._open, self._pieces = (part.tool_call_id, part.tool_name), []
-                events.append(ToolCallStarted(call_id=part.tool_call_id, name=part.tool_name))
-                events.extend(self._argued(part.args, part.tool_call_id))
-            elif isinstance(part, BaseToolCallPart):
-                raise UnsupportedContentError(
-                    "the model asked for a tool of a kind this engine did not declare"
+def _events_of(event: object) -> list[Event]:
+    """What one of the framework's events is to the port; nothing, for most."""
+    if isinstance(event, PartStartEvent):
+        if isinstance(event.part, TextPart) and event.part.content:
+            return [TextDelta(text=event.part.content)]
+        if isinstance(event.part, ThinkingPart) and event.part.content:
+            return [ReasoningDelta(text=event.part.content)]
+    elif isinstance(event, PartDeltaEvent):
+        if isinstance(event.delta, TextPartDelta) and event.delta.content_delta:
+            return [TextDelta(text=event.delta.content_delta)]
+        if isinstance(event.delta, ThinkingPartDelta) and event.delta.content_delta:
+            return [ReasoningDelta(text=event.delta.content_delta)]
+    elif isinstance(event, FunctionToolCallEvent):
+        return [
+            ToolCall(
+                call_id=event.part.tool_call_id,
+                name=event.part.tool_name,
+                arguments=event.part.args_as_dict(),
+            )
+        ]
+    elif isinstance(event, FunctionToolResultEvent):
+        part = event.part
+        if isinstance(part, ToolReturnPart):
+            return [
+                ToolResult(
+                    call_id=part.tool_call_id,
+                    name=part.tool_name,
+                    output=_bounded(part.model_response_str(wrap_if_error=False)),
+                    is_error=part.outcome != "success",
                 )
-            elif isinstance(part, FrameworkTextPart):
-                events.extend(self._said(part.content))
-            elif isinstance(part, ThinkingPart):
-                events.extend(self._thought(part.content))
-        elif isinstance(event, PartDeltaEvent):
-            delta = event.delta
-            if isinstance(delta, ToolCallPartDelta):
-                events.extend(self._argued(delta.args_delta, delta.tool_call_id))
-            elif isinstance(delta, TextPartDelta):
-                events.extend(self._said(delta.content_delta))
-            elif isinstance(delta, ThinkingPartDelta):
-                events.extend(self._thought(delta.content_delta or ""))
-        elif isinstance(event, PartEndEvent):
-            part = event.part
-            if isinstance(part, FrameworkToolCallPart) and self._open is not None:
-                if part.tool_call_id == self._open[0]:
-                    events.extend(self._closed())
-        if events and not self.started:
-            self.started = True
-            events.insert(0, AnswerStarted())
-        return events
-
-    def complete(self, response: ModelResponse | None, vendor: str) -> list[EngineEvent]:
-        """The events that end the answer, given the response the framework assembled.
-
-        ``response`` is read for the vendor's signed blocks and for the calls
-        it holds, which have to be the calls that were announced: one it holds
-        that never started -- a part the framework made in some way this
-        engine did not see -- is refused rather than dropped, because an
-        answer missing a call would be half an answer that looks whole.
-        """
-        events: list[EngineEvent] = list(self._closed())
-        if not self.started:
-            # Nothing was streamed: the answer is announced and completed in
-            # one breath -- an engine is never required to stream.
-            events.append(AnswerStarted())
-            self.started = True
-        announced = {call.call_id for call in self.calls}
-        held = [] if response is None else response.parts
-        if any(
-            isinstance(part, FrameworkToolCallPart) and part.tool_call_id not in announced
-            for part in held
-        ):
-            raise UnsupportedContentError(
-                "the model asked for a tool in a form this engine did not translate"
+            ]
+        # A retry prompt: the framework could not validate the call, and
+        # tells the model so under the call's id.
+        return [
+            ToolResult(
+                call_id=part.tool_call_id,
+                name=part.tool_name or "",
+                output=_bounded(part.model_response()),
+                is_error=True,
             )
-        parts: list[MessagePart] = []
-        text = clean_text("".join(self.streamed))
-        if text or not self.calls:
-            parts.extend(text_parts(text))
-        parts.extend(self.calls)
-        events.append(AnswerCompleted(parts=tuple(parts), extras=_extras(held, vendor)))
-        if self.calls:
-            events.append(WaitingOnTools())
-        return events
-
-    def _said(self, text: str) -> list[EngineEvent]:
-        if not text:
-            return []
-        self.streamed.append(text)
-        return [AnswerTextDelta(text=text)]
-
-    def _thought(self, text: str) -> list[EngineEvent]:
-        return [AnswerReasoningDelta(text=text)] if text else []
-
-    def _argued(self, arguments: object, call_id: str | None) -> list[EngineEvent]:
-        """A piece of the open call's arguments, streamed as JSON.
-
-        The framework hands a piece over as text -- the JSON as the model
-        writes it -- or, from a model that does not stream its arguments, as
-        the whole object at once; the second is written out as one piece, so
-        that what was published parses to what the call completes with either
-        way (``core.check_engine_events``), and a model that did both in one
-        call has written something that is not JSON and fails the turn.
-        """
-        if arguments is None or arguments == "":
-            return []
-        if self._open is None or (call_id is not None and call_id != self._open[0]):
-            raise UnsupportedContentError(
-                "the model streamed arguments for no tool call this engine announced"
-            )
-        piece = json.dumps(arguments) if isinstance(arguments, Mapping) else str(arguments)
-        self._pieces.append(piece)
-        return [ToolCallArgumentsDelta(call_id=self._open[0], text=piece)]
-
-    def _closed(self) -> list[EngineEvent]:
-        """Complete the call being made, if there is one, with what it streamed."""
-        if self._open is None:
-            return []
-        call_id, name = self._open
-        joined = clean_text("".join(self._pieces))
-        arguments = _parsed(joined) if joined.strip() else {}
-        call = ToolCallPart(call_id=call_id, name=name, arguments=arguments)
-        self.calls.append(call)
-        self._open, self._pieces = None, []
-        return [ToolCallCompleted(call=call)]
+        ]
+    return []
 
 
-def _parsed(arguments: str) -> dict[str, Any]:
-    """The JSON the model wrote for a call, as the object it has to be."""
-    try:
-        parsed = json.loads(arguments)
-    except (ValueError, RecursionError):
-        raise UnsupportedContentError(
-            "the model's arguments for a tool call were not JSON"
-        ) from None
-    if not isinstance(parsed, dict):
-        raise UnsupportedContentError("the model's arguments for a tool call were not an object")
-    return parsed
+def _bounded(text: str) -> str:
+    """A tool's output as the transcript can hold it: cut to a part's bound.
 
-
-def _extras(parts: Sequence[ModelResponsePart], vendor: str) -> dict[str, Any]:
-    """The vendor's signed blocks off the response, keyed by vendor.
-
-    The framework's signed ``ThinkingPart``s, put back into the vendor's own
-    two shapes so that both engines store the same thing; a part with no
-    signature -- an interrupted stream, a model that signs nothing -- is not
-    a block the vendor would take back and is left out, its text having been
-    streamed as reasoning already. Bounded as every ``extras`` is: blocks
-    that do not fit are left out with a line in the log (``BLOCKS_LEFT_OUT``)
-    rather than failing the turn over the size of the thinking.
+    What the model was sent is the framework's; what the transcript records of
+    a result longer than one part may be is its beginning.
     """
-    blocks: list[dict[str, Any]] = []
-    for part in parts:
-        if not isinstance(part, ThinkingPart) or part.provider_name != vendor or not part.signature:
-            continue
-        if part.id == REDACTED:
-            blocks.append({"type": REDACTED, "data": part.signature})
-        else:
-            blocks.append(
-                {"type": "thinking", "thinking": part.content, "signature": part.signature}
-            )
-    if not blocks:
-        return {}
-    extras = {vendor: {"thinking": blocks}}
-    try:
-        return checked_data(extras, "an answer's extras")
-    except InvalidValueError as too_big:
-        _log.warning("%s: %s", BLOCKS_LEFT_OUT, chain(too_big))
-        return {}
+    return text if len(text) <= MAX_PART_CHARS else text[:MAX_PART_CHARS]

@@ -100,10 +100,8 @@ from robinauts.adapters import (
 # agent framework.
 from robinauts.adapters.agents.langgraph import LangGraphAgent
 from robinauts.adapters.agents.pydantic_ai import PydanticAIAgent
-from robinauts.adapters.tools.mcp import McpToolServers
 from robinauts.api import NOT_BUILT, create_api, ui_inside
 from robinauts.application import (
-    DEFAULT_MAX_TOOL_ROUNDS,
     DEFAULT_TURN_SECONDS,
     DEFAULT_WAIT_SECONDS,
     ENDING_BUDGET_SECONDS,
@@ -132,7 +130,6 @@ from robinauts.domain import (
     ModelsConfig,
     ProviderKind,
     SignInConfig,
-    ToolServerConfig,
     is_loopback_bind_host,
 )
 from robinauts.ports import (
@@ -142,7 +139,6 @@ from robinauts.ports import (
     CredentialStore,
     IdentityProvider,
     SecretSource,
-    ToolServers,
 )
 
 _log = logging.getLogger(__name__)
@@ -204,17 +200,19 @@ class EngineAdapter(Protocol):
     """What the composition root needs of an agent adapter, and no more.
 
     Two things: what it can reach (``kinds``, which the port declares) and how
-    to build one -- the model configuration and the providers' keys, which is
-    the same constructor for every engine because it is the platform's
-    configuration and not a framework's (``docs/specs/agents.md``). Written as
-    a protocol rather than a base class so that an adapter satisfies it by
-    being what it already is.
+    to build one -- the model configuration with the providers' keys, and the
+    tool servers' secrets, which is the same constructor for every engine
+    because it is the platform's configuration and not a framework's
+    (``docs/specs/agents.md``). Written as a protocol rather than a base class
+    so that an adapter satisfies it by being what it already is.
     """
 
     kinds: frozenset[ProviderKind]
 
-    def __call__(self, models: ModelsConfig, keys: ProviderKeys) -> Agent:
-        """Build the engine for this deployment's models."""
+    def __call__(
+        self, models: ModelsConfig, keys: ProviderKeys, tool_secrets: ToolServerSecrets
+    ) -> Agent:
+        """Build the engine for this deployment's models and tool servers."""
         ...  # pragma: no cover -- a structural type, never called
 
 
@@ -226,10 +224,9 @@ ENGINES: Mapping[Engine, EngineAdapter] = {
 
 **The whole of the choice of agent framework** (``docs/layout.md``,
 "infrastructure"): adding an engine is an entry here, and removing one is the
-same entry and the import above. Both of the specified engines are here, which
-is what makes the swap a line of configuration: an agent moved from one to the
-other keeps its conversations, because the conversation record is the whole of
-the state (ADR 0002) and both engines are handed the same history.
+same entry and the import above. Both of the specified engines are here, and
+an agent runs on the one its definition names; a conversation stays with the
+engine that holds its memory (ADR 0005).
 
 An engine this build does not construct is a start-up refusal naming what to
 do (``robinauts.core.parse_models_config``) rather than a deployment that
@@ -395,9 +392,6 @@ class Deployment:
         engines: Mapping[Engine, Agent] | None = None,
         turn_seconds: float = DEFAULT_TURN_SECONDS,
         tool_secrets: ToolServerSecrets | None = None,
-        tool_servers: ToolServers | None = None,
-        servers: Mapping[str, ToolServerConfig] | None = None,
-        max_tool_rounds: int = DEFAULT_MAX_TOOL_ROUNDS,
     ) -> None:
         if (config is None) == (local_development_host is None):
             raise ConfigError([BOTH_MODES] if config is not None else [NO_MODE])
@@ -469,16 +463,10 @@ class Deployment:
         """The tool servers' secrets, as start-up read them (``check_tool_secrets``).
 
         Read at start-up so that a deployment refuses to start with one
-        unset, naming every one; handed to the MCP adapter ``open`` builds. A
-        deployment built without them has none to hand over.
+        unset, naming every one; handed to the engines, whose frameworks
+        connect to the servers. A deployment built without them has none to
+        hand over.
         """
-        self._tool_servers = tool_servers
-        """What reaches the tool servers, if a test handed one in; else ``open``
-        builds the MCP adapter.
-        """
-        self._servers = dict(servers or {})
-        """The tool servers the configuration names, by id (``[mcp_servers.*]``)."""
-        self._max_tool_rounds = max_tool_rounds
         self._agents = dict(agents or {})
         """The agents this deployment offers, as the operator defined them.
 
@@ -527,9 +515,6 @@ class Deployment:
         models: Mapping[str, ModelConfig] | None = None,
         engines: Mapping[Engine, Agent] | None = None,
         turn_seconds: float = DEFAULT_TURN_SECONDS,
-        tool_servers: ToolServers | None = None,
-        servers: Mapping[str, ToolServerConfig] | None = None,
-        max_tool_rounds: int = DEFAULT_MAX_TOOL_ROUNDS,
     ) -> Deployment:
         """Read the configuration and refuse, once, with everything wrong with it.
 
@@ -660,29 +645,18 @@ class Deployment:
                 " build constructs reach the configuration's models, so configure them,"
                 " or hand in the engines as well"
             )
-        if servers is not None and tool_servers is None:
-            # The same rule for tools: the adapter `open` builds holds the
-            # secrets start-up read for the **file's** servers, so a server
-            # handed in beside it would be reached with no credential -- and
-            # found out in the middle of somebody's turn.
-            problems.append(
-                "tool servers were handed in without the port that reaches them: the"
-                " adapter this build constructs holds the secrets of the configuration's"
-                " servers, so configure them, or hand in the tool servers as well"
-            )
-        wired_servers = servers if servers is not None else configured_models.tool_servers
-        if agents is not None:
-            # An agent's servers are checked against what will be wired, as
-            # the parser checks the file's agents against the file's servers:
-            # `Turns` refuses the pair at `open` otherwise, which is the wrong
-            # moment and the wrong kind of error.
+        if agents is not None and engines is None:
+            # An agent's servers are checked against what the engines built
+            # below will know, as the parser checks the file's agents against
+            # the file's servers: an engine handed a server it was never
+            # configured with would find out in the middle of somebody's turn.
             problems.extend(
                 f"the agent {agent_id!r} that was handed in uses tool server"
-                f" {server_id!r}, which is not configured: configure the server, or"
-                f" hand it in beside the agent"
+                f" {server_id!r}, which is not in the configuration: configure the"
+                f" server, or hand in the engine that is to run the agent"
                 for agent_id, definition in agents.items()
                 for server_id in definition.tools
-                if server_id not in wired_servers
+                if server_id not in configured_models.tool_servers
             )
         if engines is not None:
             # Whatever runs them, a conversation runs on a model this
@@ -717,22 +691,20 @@ class Deployment:
             agents=agents if agents is not None else configured_models.agents,
             models=models if models is not None else configured_models.models,
             # Built whether or not an agent uses it: it holds nothing -- a
-            # graph and a client are made per turn -- and constructing it is
-            # what turns hosted tracing off for this process, which is true of
-            # every deployment and not only of one that answers.
+            # graph, a client and the tool connections are made per turn --
+            # and constructing it is what turns hosted tracing off for this
+            # process, which is true of every deployment and not only of one
+            # that answers.
             engines=(
                 engines
                 if engines is not None
-                else {name: adapter(configured_models, keys) for name, adapter in ENGINES.items()}
+                else {
+                    name: adapter(configured_models, keys, tool_secrets)
+                    for name, adapter in ENGINES.items()
+                }
             ),
             turn_seconds=turn_seconds,
             tool_secrets=tool_secrets,
-            # The port a test hands in stands where the MCP adapter would;
-            # the servers it names stand for the configuration's, as the
-            # agents and the models handed in do.
-            tool_servers=tool_servers,
-            servers=wired_servers,
-            max_tool_rounds=max_tool_rounds,
         )
 
     async def open(self) -> SignIn | None:
@@ -789,14 +761,6 @@ class Deployment:
             # The services, in both modes: the local development mode changes
             # who is asking and nothing about conversations or runs.
             self.conversations = Conversations(store=self.conversation_store, clock=self._clock)
-            # The one thing that reaches a tool server, built here so that its
-            # connection pool is closed with the rest (``aclose``); a test
-            # hands in the fake instead.
-            tool_servers = self._tool_servers
-            if tool_servers is None:
-                built = McpToolServers(self.tool_secrets)
-                self._closing.append(built.aclose)
-                tool_servers = built
             self.turns = Turns(
                 store=self.conversation_store,
                 clock=self._clock,
@@ -807,9 +771,6 @@ class Deployment:
                 executor=self._executor,
                 signals=self._signals,
                 turn_seconds=self.turn_seconds,
-                tool_servers=tool_servers,
-                servers=self._servers,
-                max_tool_rounds=self._max_tool_rounds,
             )
             self.watch = Watch(
                 store=self.conversation_store,

@@ -51,7 +51,7 @@ from robinauts.domain import (
     RunStarted,
     RunState,
     StoredDataError,
-    TextDelta,
+    TextPiece,
     TurnEvent,
     User,
 )
@@ -199,7 +199,7 @@ async def test_opening_a_conversation_with_a_run_in_flight_says_where_to_attach(
         asked,
         RunStarted(run_id=RUN, conversation_id=CONVERSATION),
         MessageStarted(run_id=RUN, message_id=done.id, parent_id=asked.id),
-        TextDelta(run_id=RUN, message_id=done.id, text="Someone "),
+        TextPiece(run_id=RUN, message_id=done.id, text="Someone "),
         MessageCompleted(run_id=RUN, message=done),
         MessageStarted(run_id=RUN, message_id=still_going, parent_id=done.id),
     )
@@ -230,7 +230,7 @@ async def test_opening_during_a_regeneration_shows_the_thread_up_to_its_question
         first,
         RunStarted(run_id=RUN, conversation_id=CONVERSATION),
         MessageStarted(run_id=RUN, message_id=coming, parent_id=first.id),
-        TextDelta(run_id=RUN, message_id=coming, text="1, "),
+        TextPiece(run_id=RUN, message_id=coming, text="1, "),
     )
 
     opened = await wiring.service.open(AUTHOR, CONVERSATION)

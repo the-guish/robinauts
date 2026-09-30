@@ -13,21 +13,20 @@ from robinauts.domain import (
     ACTIVE_RUN_STATES,
     ENDED_RUN_STATES,
     FIRST_POSITION,
+    MAX_ENGINE_STATE_BYTES,
     MAX_EXTRAS_BYTES,
     MAX_PART_CHARS,
     MAX_POSITION,
-    AnswerCompleted,
-    AnswerReasoningDelta,
-    AnswerStarted,
-    AnswerTextDelta,
-    ArgumentsDelta,
+    ArgumentsPiece,
     CallCompleted,
     CallStarted,
-    EngineEvent,
+    Done,
+    Event,
     InvalidValueError,
     MessageCompleted,
     MessageStarted,
     ReasoningDelta,
+    ReasoningPiece,
     ResultLanded,
     Role,
     RunEnded,
@@ -35,7 +34,9 @@ from robinauts.domain import (
     RunStarted,
     RunState,
     TextDelta,
-    TextPart,
+    TextPiece,
+    ToolCall,
+    ToolResult,
     TurnEvent,
     clean_text,
     flush,
@@ -96,8 +97,8 @@ def test_a_run_never_announces_a_question() -> None:
 def test_a_message_arrives_in_pieces() -> None:
     events = [
         started(),
-        ReasoningDelta(run_id=RUN, message_id=MESSAGE, text="thinking"),
-        TextDelta(run_id=RUN, message_id=MESSAGE, text="Hi"),
+        ReasoningPiece(run_id=RUN, message_id=MESSAGE, text="thinking"),
+        TextPiece(run_id=RUN, message_id=MESSAGE, text="Hi"),
     ]
     assert all(isinstance(event, TurnEvent) for event in events)
     assert all(event.run_id == RUN for event in events)
@@ -108,9 +109,9 @@ def test_what_the_platform_publishes_is_storable_text() -> None:
     delta that could not be encoded could not be stored or sent."""
     for half in ("a\ud800", "\x00"):
         with pytest.raises(InvalidValueError):
-            TextDelta(run_id=RUN, message_id=MESSAGE, text=half)
+            TextPiece(run_id=RUN, message_id=MESSAGE, text=half)
         with pytest.raises(InvalidValueError):
-            ReasoningDelta(run_id=RUN, message_id=MESSAGE, text=half)
+            ReasoningPiece(run_id=RUN, message_id=MESSAGE, text=half)
 
 
 def test_a_half_of_a_character_waits_for_its_other_half() -> None:
@@ -121,14 +122,14 @@ def test_a_half_of_a_character_waits_for_its_other_half() -> None:
     published = []
     for fragment in ("a\ud83d", "\x00", "\ude00b", "c"):
         pieces, carry = publishable(carry, fragment)
-        published.extend(TextDelta(run_id=RUN, message_id=MESSAGE, text=piece) for piece in pieces)
+        published.extend(TextPiece(run_id=RUN, message_id=MESSAGE, text=piece) for piece in pieces)
     assert [delta.text for delta in published] == ["a", "\U0001f600b", "c"]
     assert flush(carry) == ""
 
     # A half that never finds its other half is replaced, at the end.
     pieces, carry = publishable("", "\ud83d")
     assert (pieces, carry) == ((), "\ud83d")
-    assert TextDelta(run_id=RUN, message_id=MESSAGE, text=flush(carry)).text == "\ufffd"
+    assert TextPiece(run_id=RUN, message_id=MESSAGE, text=flush(carry)).text == "\ufffd"
 
 
 def test_what_is_published_always_fits_in_one_delta() -> None:
@@ -139,7 +140,7 @@ def test_what_is_published_always_fits_in_one_delta() -> None:
     assert carry == ""
     assert "".join(pieces) == "\ufffd" + "a" * MAX_PART_CHARS
     for piece in pieces:
-        assert TextDelta(run_id=RUN, message_id=MESSAGE, text=piece).text == piece
+        assert TextPiece(run_id=RUN, message_id=MESSAGE, text=piece).text == piece
 
 
 def test_everything_published_is_everything_that_is_stored() -> None:
@@ -167,7 +168,7 @@ def test_everything_published_is_everything_that_is_stored() -> None:
             for piece in pieces:
                 assert piece, "nothing empty is published"
                 assert len(piece) <= MAX_PART_CHARS
-                assert TextDelta(run_id=RUN, message_id=MESSAGE, text=piece).text == piece
+                assert TextPiece(run_id=RUN, message_id=MESSAGE, text=piece).text == piece
             published.extend(pieces)
         published.append(flush(carry))
         assert "".join(published) == clean_text("".join(fragments))
@@ -217,8 +218,8 @@ def test_a_failure_says_what_went_wrong_and_a_good_end_has_nothing_to_say() -> N
         lambda bad: RunStarted(run_id=RUN, conversation_id=bad),
         lambda bad: started(message_id=bad),
         lambda bad: started(parent_id=bad),
-        lambda bad: TextDelta(run_id=bad, message_id=MESSAGE, text="hi"),
-        lambda bad: ReasoningDelta(run_id=RUN, message_id=bad, text="hi"),
+        lambda bad: TextPiece(run_id=bad, message_id=MESSAGE, text="hi"),
+        lambda bad: ReasoningPiece(run_id=RUN, message_id=bad, text="hi"),
         lambda bad: MessageCompleted(run_id=bad, message=question()),
         lambda bad: RunEnded(run_id=bad, state=RunState.FINISHED),
     ],
@@ -230,11 +231,11 @@ def test_every_event_is_about_a_real_id(event: object, bad: object) -> None:
 
 
 def test_a_delta_is_bounded_text() -> None:
-    assert TextDelta(run_id=RUN, message_id=MESSAGE, text="a" * MAX_PART_CHARS).text
+    assert TextPiece(run_id=RUN, message_id=MESSAGE, text="a" * MAX_PART_CHARS).text
     with pytest.raises(InvalidValueError):
-        TextDelta(run_id=RUN, message_id=MESSAGE, text="a" * (MAX_PART_CHARS + 1))
+        TextPiece(run_id=RUN, message_id=MESSAGE, text="a" * (MAX_PART_CHARS + 1))
     with pytest.raises(InvalidValueError):
-        ReasoningDelta(run_id=RUN, message_id=MESSAGE, text=7)
+        ReasoningPiece(run_id=RUN, message_id=MESSAGE, text=7)
 
 
 def test_a_runs_state_is_a_state() -> None:
@@ -268,62 +269,77 @@ def test_an_envelope_carries_a_turn_event() -> None:
         RunEvent(run_id=RUN, seq=1, event={"type": "run_started"})
 
 
-# --- what an engine yields --------------------------------------------------
+# --- what an adapter streams -------------------------------------------------
 
 
-def test_an_engine_says_what_the_model_said_and_nothing_about_a_run() -> None:
-    """No ids, no times, no provenance: an engine has none of them."""
+def test_an_adapter_says_what_the_model_said_and_nothing_about_a_run() -> None:
+    """No ids, no times, no provenance: an adapter has none of them."""
     for event in (
-        AnswerStarted(),
-        AnswerTextDelta(text="Hi"),
-        AnswerReasoningDelta(text="thinking"),
-        AnswerCompleted(parts=(TextPart("Hi"),)),
+        TextDelta(text="Hi"),
+        ReasoningDelta(text="thinking"),
+        ToolCall(call_id="toolu_01", name="search", arguments={"q": "x"}),
+        ToolResult(call_id="toolu_01", name="search", output="found"),
+        Done(text="Hi"),
     ):
-        assert isinstance(event, EngineEvent)
+        assert isinstance(event, Event)
         assert not isinstance(event, TurnEvent)
         assert not hasattr(event, "run_id")
         assert not hasattr(event, "message_id")
 
 
-def test_an_engines_delta_may_carry_half_a_character() -> None:
-    assert AnswerTextDelta(text="a\ud800").text == "a\ud800"
-    assert AnswerReasoningDelta(text="\x00").text == "\x00"
+def test_an_adapters_delta_may_carry_half_a_character() -> None:
+    assert TextDelta(text="a\ud800").text == "a\ud800"
+    assert ReasoningDelta(text="\x00").text == "\x00"
     with pytest.raises(InvalidValueError):
-        AnswerTextDelta(text="a" * (MAX_PART_CHARS + 1))
+        TextDelta(text="a" * (MAX_PART_CHARS + 1))
     with pytest.raises(InvalidValueError):
-        AnswerTextDelta(text=7)
+        TextDelta(text=7)  # type: ignore[arg-type]
 
 
-def test_a_completed_answer_carries_the_vendors_extras_as_a_bounded_copy() -> None:
-    """What a vendor needs back with the history, and the platform never
-    reads: kept as a copy, bounded as every ``extras`` is, and empty unless
-    the engine said otherwise."""
-    assert AnswerCompleted(parts=(TextPart("hi"),)).extras == {}
-    given: dict[str, object] = {"anthropic": {"thinking": [{"signature": "sig"}]}}
-    completed = AnswerCompleted(parts=(TextPart("hi"),), extras=given)
-    given["anthropic"] = "changed"
-    assert completed.extras == {"anthropic": {"thinking": [{"signature": "sig"}]}}
+def test_a_call_is_announced_whole_with_the_vendors_id_and_a_bounded_copy_of_its_arguments() -> (
+    None
+):
+    given: dict[str, object] = {"q": "robinauts"}
+    made = ToolCall(call_id="toolu_01", name="github_search", arguments=given)
+    given["q"] = "changed"
+    assert made.arguments == {"q": "robinauts"}
+    assert ToolCall(call_id="toolu_01", name="search").arguments == {}
+    with pytest.raises(InvalidValueError):
+        ToolCall(call_id="two words", name="search")
+    with pytest.raises(InvalidValueError):
+        ToolCall(call_id="toolu_01", name="has space")
+    with pytest.raises(InvalidValueError):
+        ToolCall(call_id="toolu_01", name="search", arguments="q=x")  # type: ignore[arg-type]
     with pytest.raises(InvalidValueError, match="at most"):
-        AnswerCompleted(parts=(TextPart("hi"),), extras={"v": "x" * MAX_EXTRAS_BYTES})
-    for broken in ("text", ["a"], {"a": object()}):
-        with pytest.raises(InvalidValueError):
-            AnswerCompleted(parts=(TextPart("hi"),), extras=broken)  # type: ignore[arg-type]
+        ToolCall(call_id="toolu_01", name="search", arguments={"q": "x" * MAX_EXTRAS_BYTES})
 
 
-def test_a_completed_answer_is_the_platforms_own_content() -> None:
-    assert AnswerCompleted(parts=[TextPart("one")]).parts == (TextPart("one"),)
-    with pytest.raises(InvalidValueError, match="at least one part"):
-        AnswerCompleted(parts=())
+def test_a_result_is_text_and_a_flag_bounded_as_a_part_is() -> None:
+    landed = ToolResult(call_id="toolu_01", name="search", output="found")
+    assert landed.is_error is False
+    with pytest.raises(InvalidValueError, match="yes or no"):
+        ToolResult(call_id="toolu_01", name="search", output="x", is_error="no")  # type: ignore[arg-type]
     with pytest.raises(InvalidValueError):
-        AnswerCompleted(parts=("one",))
+        ToolResult(call_id="toolu_01", name="search", output="x" * (MAX_PART_CHARS + 1))
     with pytest.raises(InvalidValueError):
-        AnswerCompleted(parts=(TextPart("a\x00b"),))
+        ToolResult(call_id="", name="search", output="x")
+
+
+def test_the_end_of_a_turn_carries_the_answer_and_a_bounded_state() -> None:
+    assert Done(text="Hi").state is None
+    assert Done(text="", state=b"{}").state == b"{}"
+    with pytest.raises(InvalidValueError, match="bytes"):
+        Done(text="Hi", state="{}")  # type: ignore[arg-type]
+    with pytest.raises(InvalidValueError, match="at most"):
+        Done(text="Hi", state=b"x" * (MAX_ENGINE_STATE_BYTES + 1))
+    with pytest.raises(InvalidValueError):
+        Done(text=7)  # type: ignore[arg-type]
 
 
 def test_the_two_vocabularies_do_not_overlap() -> None:
-    assert not isinstance(RunStarted(run_id=RUN, conversation_id=CONVERSATION), EngineEvent)
-    assert not isinstance(started(), EngineEvent)
-    assert not isinstance(AnswerStarted(), TurnEvent)
+    assert not isinstance(RunStarted(run_id=RUN, conversation_id=CONVERSATION), Event)
+    assert not isinstance(started(), Event)
+    assert not isinstance(Done(text=""), TurnEvent)
 
 
 # --- the tool events a run publishes ----------------------------------------------
@@ -343,12 +359,12 @@ def test_a_call_is_announced_inside_a_message_with_the_vendors_id_and_the_full_n
 
 def test_arguments_and_results_are_storable_text_bounded_as_a_part_is() -> None:
     assert (
-        ArgumentsDelta(run_id=RUN, message_id=MESSAGE, call_id="c", text='{"q": ').text == '{"q": '
+        ArgumentsPiece(run_id=RUN, message_id=MESSAGE, call_id="c", text='{"q": ').text == '{"q": '
     )
     with pytest.raises(InvalidValueError):
-        ArgumentsDelta(run_id=RUN, message_id=MESSAGE, call_id="c", text="x" * (MAX_PART_CHARS + 1))
+        ArgumentsPiece(run_id=RUN, message_id=MESSAGE, call_id="c", text="x" * (MAX_PART_CHARS + 1))
     with pytest.raises(InvalidValueError):
-        ArgumentsDelta(run_id=RUN, message_id=MESSAGE, call_id="c", text="half \ud83d")
+        ArgumentsPiece(run_id=RUN, message_id=MESSAGE, call_id="c", text="half \ud83d")
     landed = ResultLanded(run_id=RUN, message_id=MESSAGE, call_id="c", text="found")
     assert landed.is_error is False
     with pytest.raises(InvalidValueError, match="yes or no"):

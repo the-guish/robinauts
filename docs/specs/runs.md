@@ -71,20 +71,25 @@ depend on the request that started it.
   position. That is not a weaker cancellation: **a run that has ended takes no
   more writes**, so a task still executing it is refused at its next event and
   stops there. The registry is the fast path; the store is the rule.
-- An engine reports a failure by **raising**. The run ends `failed`, with a
+- An adapter reports a failure by **raising**. The run ends `failed`, with a
   description of what was raised recorded on it — made storable and cut to
-  fit — and the answer that was in flight is left uncompleted.
+  fit — the answer that was in flight is left uncompleted, and no memory is
+  stored: the next turn resumes from the memory the conversation had
+  ([agents.md](agents.md)).
 - **A turn that ends without an answer is a failed run**, never a finished
   one: the run records that the engine produced no answer. A `finished` run
   has at least one message in the conversation. So is a turn that **announced
   an answer and never completed it** while neither raising nor being
   cancelled: a finished run leaves nothing half-written, and a turn that
   stopped without saying so is a turn that went wrong.
-- **An answer that does not match what was published fails the run.** If any
-  text was published for an answer and the answer completes with different
-  text, the promise a watcher was given is broken, and what would be stored is
-  a stream that cannot be read back against the conversation. The run is
-  failed and the answer is not stored, rather than either being kept.
+- **What was published is what is stored.** An answer's text on the
+  transcript is what the adapter streamed, joined; what the adapter says it
+  is done with is the answer only when nothing was streamed — a provider
+  that does not stream — so the promise a watcher was given cannot be
+  broken by a framework that rewrites the final message.
+- **A finished run stores the memory the adapter handed back**, in the same
+  transaction as its ending, and a run that ended any other way stores
+  none ([agents.md](agents.md)).
 
 ## States
 
@@ -120,9 +125,10 @@ Which state may follow which:
   because its error would not fit.
 
 A run records the conversation, the message it answers, the agent, the
-engine and the model it used, its state, its times, and its error if any. The
-model is the conversation's at the moment the run is begun, and it is what
-the engine is handed, so a run keeps it however the conversation's changes
+engine and the model it used, its state, its times, its error if any, and —
+once it has finished — the model's memory as its engine left it. The model
+is the conversation's at the moment the run is begun, and it is what the
+adapter is handed, so a run keeps it however the conversation's changes
 ([agents.md](agents.md)).
 
 ## Tools
@@ -134,53 +140,38 @@ them.
   is a message of the conversation, persisted like any other: **the results
   of one call batch are one tool message** under that assistant message,
   one result per call ([conversations.md](conversations.md)).
-- **Short tools** run inside the run: the model calls the tools, the
-  platform runs them in parallel, publishes each result as it lands, writes
-  the tool message when the last one is in, and continues the turn from the
-  stored history — in one execution, as many rounds as the turn needs up
-  to `max_tool_rounds`. **The run stays `running` through the loop**; the
-  engine's "waiting on these calls" is how one round ends, and the `waiting`
-  state below is a run that holds no process. Every call has its own
-  timeout; the turn's timeout holds over the whole turn.
+- **The framework runs the loop inside the run.** The model calls the
+  tools, the framework runs them and asks the model again, and the adapter
+  streams each call and each result as it happens; the platform publishes
+  each result as it lands, writes the tool message when the last one is in,
+  and the answer after them under it — in one execution, as many rounds as
+  the turn needs up to the adapter's own bound
+  ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
+  **The run stays `running` through the loop**; the `waiting` state below
+  is a run that holds no process. Every call has its own timeout; the
+  turn's timeout holds over the whole turn.
 - **Long tools** need nothing more: the run outlives the request, the UI
   shows it as running and re-attaches at will.
 - **Tools that outlast a process** — an external job, a person's approval —
-  suspend the run. The conversation holds a tool call without a result, the
-  run is `waiting`, and no process holds anything. When the result arrives
-  it is appended as the tool message, and execution resumes from the
-  history. **Deferred in this iteration**: the loop is written so that "the
-  result arrives later" is the same code path as "the result arrives now",
-  and a batch with one result missing is what a suspended run looks like,
-  but nothing suspends a run yet and no route appends a result
-  ([working-notes/mcp-plan.md](../working-notes/mcp-plan.md), step 7).
-- Resuming is therefore the ordinary stateless turn
-  ([ADR 0002](../adr/0002-conversation-persistence.md)): **the conversation
-  record is the checkpoint.** It works the same with either engine and
-  needs no framework persistence.
-- The agent port's result is either "finished" or "waiting on these tool
-  calls". Without tools it is always "finished".
+  would suspend the run: the conversation holds a tool call without a
+  result, the run is `waiting`, and no process holds anything. **Deferred**,
+  and further off than it was: the loop is the framework's now, and
+  suspending it is a question for each framework's deferred-tool support
+  rather than for the record alone. Nothing suspends a run yet and no
+  route appends a result.
 - **A tool's error is a result, not a failure.** A server answering that
-  the call failed, or a call that ran out of its time, becomes a result
-  marked as an error, and the model is told. Only a server that cannot be
-  reached at all — or that will not list its tools when the run begins —
-  fails the run, naming the server.
+  the call failed, or a call the framework sent back to the model for
+  another try, becomes a result marked as an error, and the model is told.
+  Only a server that cannot be reached at all fails the run.
 - **A run stopped in the middle of a batch leaves the calls without a
   result message**, which the format allows: a cancellation, an
   interruption or a failure between the assistant message and the tool
   message ends the run with the calls stored and no result. Nothing is
   re-executed on its own: a retry is a new run from the question, which
   puts the unanswered calls off the visible path
-  ([conversations.md](conversations.md)). When such an answer is on the
-  visible path of a later turn — a question asked after the stop — the
-  model is told, for each call, that no result of it was recorded and
-  whether it ran is not known; that sentence is the adapter's, the same
-  under both engines, and is never stored
-  ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)). The MCP annotations a server
-  sends with a tool (`readOnlyHint`, `destructiveHint`, `idempotentHint`)
-  are carried on the definition and are what a policy would read — to
-  re-execute a safe call after an interruption, or to ask a person before
-  a destructive one — and no policy reads them yet
-  ([agents.md](agents.md), "Tools").
+  ([conversations.md](conversations.md)) — and, since a run that did not
+  end stored no memory, the model never saw them either: the next turn
+  resumes from the memory of the last finished run on its path.
 
 ## Where the work happens
 
@@ -230,14 +221,14 @@ them.
 ## In the layout
 
 - `application` owns the run lifecycle: start, persist as it goes, publish
-  events, suspend, finish, cancel, retry. **The engine's events are not the
-  run's events.** An engine says an answer has begun, more of its text, more
-  of its thinking, and here are the parts it ended with: it has no ids, no
-  clock and no rows, so it can neither name a message nor say that one is
-  stored ([agents.md](agents.md)). The application is what gives an answer
-  its id, its parent and its provenance, writes it down, and only then
-  publishes it as a message. What it publishes are the platform's own turn
-  events, in this order:
+  events, finish, cancel, retry. **The adapter's events are not the run's
+  events.** An adapter says more of the answer's text, more of its thinking,
+  a tool is being called, here is what it answered, and the turn is done:
+  it has no ids, no clock and no rows, so it can neither name a message nor
+  say that one is stored ([agents.md](agents.md)). The application is what
+  gives an answer its id, its parent and its provenance, writes it down, and
+  only then publishes it as a message. What it publishes are the platform's
+  own turn events, in this order:
   - the run started, once, before anything else;
   - for each message: it is announced — with its role and the message it
     hangs under, so that a watcher can place it before any of it exists —
@@ -263,7 +254,7 @@ them.
   middle of an answer, or in the middle of a batch of tool calls, looks
   like. **What was published is what was stored** holds for a tool message
   too: the results published for it are the results of the message that
-  completed it, and the arguments streamed for a call parse to the
+  completed it, and the arguments published for a call parse to the
   arguments stored on it.
 - **Two ports and a watcher**, where this document first said one port. A
   `RunExecutor` carries the work of a run in the background and cancels it,
@@ -430,6 +421,8 @@ them.
 - A later `robinauts worker` process role — the same wheel, claiming runs
   from the database — would be another adapter of `RunExecutor`. It is not
   planned.
-- With LangGraph, a graph that keeps state of its own beyond the messages
-  cannot be resumed from the conversation alone. That case belongs to the
-  open discussion in ADR 0002.
+- The memory a run stores is the framework's serialisation of its history
+  at the end of the turn, and nothing is stored for a turn that did not
+  end. A state per step of the loop is the remedy if a cancelled turn's
+  calls and results turning out to be forgotten by the model matters
+  ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).

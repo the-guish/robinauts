@@ -58,8 +58,14 @@
 
 The format is the platform's own
 ([ADR 0002](../adr/0002-conversation-persistence.md)): not that of an
-agent framework, not that of a model vendor. Each engine translates to and
-from it on every turn ([agents.md](agents.md)).
+agent framework, not that of a model vendor. It is the **transcript** of
+the conversation — what the people reading it see, what the exports carry,
+what analytics reads — written from what the adapter streamed, and the
+model is never fed from it. What the model is fed is its **memory**: the
+framework's own history of the conversation, in the framework's own format,
+stored by the platform on the run that produced it and never read
+([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md),
+[agents.md](agents.md)).
 
 **What a message can contain**
 
@@ -153,49 +159,29 @@ from it on every turn ([agents.md](agents.md)).
   conversation.
 - It is included in a JSON export and left out of a Markdown export.
 - It is never sent to a vendor other than the one that produced it.
-- **The vendor's signed blocks are the one exception to "in no message",
-  and they are data to the platform, not reasoning.** On the models both
-  engines reach, thinking is on unless turned off, and an answer that makes
-  a tool call carries signed thinking blocks the vendor requires back,
-  unchanged, when the results go back. They are stored in the assistant
-  message's `extras` under the vendor's key (`extras.anthropic`), which is
-  exactly what that key was reserved for: the engine returns them with the
-  completed answer, the application stores them **unread** and bounded (the
-  64 KiB rule), the adapter that reaches that vendor replays them to it, and
-  every other reader reads past them. A block may carry the text of the
-  thinking the person was shown — that is the vendor's shape, and the
-  signature is over it — so what the platform promises is not that the text
-  is absent but that it is **never read as reasoning**: no reader renders
-  it, no Markdown export writes it, and no other vendor is sent it. A JSON
-  export writes the document whole, `extras` included. The blocks are bound
-  to the model that made them, so a conversation moved to another model
-  loses them and nothing else. Blocks that do not fit the bound are left
-  out and the answer is stored without them, with a line in the log saying
-  what that may cost (the vendor may refuse the next round of a tool turn
-  replayed without its thinking). Where the blocks are also bound to the
-  prompt, what happens when the vendor refuses them is the adapter's: the
-  Pydantic AI adapter's framework retries once with the blocks marked as
-  dropped, the LangGraph adapter fails that turn — so on that engine an
-  operator editing an agent's prompt between turns does break a
-  conversation with bound blocks in it, which is known and not yet fixed
-  ([working-notes/mcp-plan.md](../working-notes/mcp-plan.md), "Open").
+- **The vendor's signed blocks are in the memory, not in the transcript.**
+  On the models both engines reach, thinking is on unless turned off, and
+  an answer that makes a tool call carries signed thinking blocks the vendor
+  requires back, unchanged, when the results go back. They are the
+  framework's to keep and to replay, and they live in the memory with the
+  rest of its history; no message carries them, and no reader has them to
+  read past. Where the blocks are bound to the prompt, what happens when the
+  vendor refuses them is the framework's: Pydantic AI retries once with the
+  blocks marked as dropped, LangChain fails that turn.
 
-**What crosses a swap of engine or vendor**
+**What crosses a change of engine or model**
 
-- The portable content always crosses: text, images, files, the tool
-  history.
-- Vendor-specific extras — signed reasoning, provider message ids, cache
-  hints — are kept with the message as opaque vendor data, in `extras`
-  keyed by vendor. They are replayed only by the adapter that reaches the
-  vendor that produced them, and read past otherwise.
-- A swap never fails because of them, and it promises nothing about them:
-  a conversation started on one engine can be continued on the other, which
-  is the claim the swap test makes about the record, and what an adapter's
-  own context policy or a vendor's extras make of it is not part of that
-  claim ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)).
-  There is no intention to swap engines in the middle of a conversation;
-  models may change, and losing context when the model changes is
+- A conversation stays with its engine. Its memory is one framework's, and
+  the other cannot read it: a turn that finds a memory written by another
+  engine begins from nothing, with the transcript intact and a line in the
+  log ([agents.md](agents.md)). There is no intention to swap engines in
+  the middle of a conversation.
+- A change of model keeps the memory — it is the framework's history, not
+  the vendor's — and what a vendor makes of another vendor's blocks in it is
+  the framework's business. Losing context when the model changes is
   accepted.
+- The transcript crosses everything: it is the platform's, and every
+  message of it is read whatever engine or model produced it.
 
 **What an answer records**
 
@@ -208,8 +194,8 @@ from it on every turn ([agents.md](agents.md)).
 
 **The system prompt**
 
-- It is not a message. It is taken from the agent's current configuration
-  at every turn.
+- It is not a message, and it is not in the memory. It is taken from the
+  agent's current configuration at every turn.
 - Editing an agent therefore takes effect at the next turn of its existing
   conversations.
 
@@ -220,6 +206,13 @@ from it on every turn ([agents.md](agents.md)).
   run's events ([runs.md](runs.md)) and not in the conversation. At any
   moment the stored conversation is consistent and complete up to that
   moment.
+- **The memory is stored once, with the run's ending.** A turn resumes from
+  the memory of the nearest finished run on its visible path — for a
+  question, the run that produced the answer it hangs under; for a
+  regeneration or an edit, the run before the turn being replaced — so a
+  fork of the transcript is a fork of the memory, and what was discarded
+  from view is discarded from the model's memory with it. A run that did
+  not finish stored none ([runs.md](runs.md)).
 - A stored conversation this build cannot read — a version above it, a
   kind of content it does not carry, a tree that is no tree — is a fault
   of the deployment and not of the request that met it. It is answered
@@ -337,12 +330,11 @@ from it on every turn ([agents.md](agents.md)).
 - Attachments are stored as `bytea`. The maximum size is an operator limit
   ([operations.md](operations.md)). An object store could later sit behind
   the same port.
-- Fitting a long history into a model's context is each agent adapter's
-  own policy ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)):
-  the application hands the port the full visible path, and what the model
-  sees of it — how much, in what order, with which cache breakpoints — is
-  decided per framework and per vendor. The one invariant kept above the
-  port is that the turn being answered is whole in what the model sees.
+- Fitting a long history into a model's context is the framework's, with
+  the framework's own means — summarising on one engine, dropping the
+  oldest exchanges on the other — over the framework's own memory
+  ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md),
+  [agents.md](agents.md)). Neither ever cuts the turn it is answering.
 
 ## Open
 

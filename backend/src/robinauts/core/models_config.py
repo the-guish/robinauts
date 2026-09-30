@@ -39,11 +39,14 @@ providers people sign in with, and the two live in one file
 **A tool server is a table beside the providers** (``docs/specs/agents.md``,
 "Tools"): its ``url``, checked as every configured endpoint is; ``secret_env``,
 the name of the variable its secret is read from; ``auth``, ``bearer`` unless
-said otherwise, or ``basic`` with the ``user`` part written down; ``prefix``,
-what its tools are shown to the model under, the server's id when left out;
-and ``timeout_seconds`` per tool call. An agent names the servers it may use
-in ``tools``, each one configured; two servers under one prefix are refused,
-since a call is routed to its server from the name alone.
+said otherwise, or ``basic`` with the ``user`` part written down; and
+``timeout_seconds`` per tool call. An agent names the servers it may use in
+``tools``, each one configured. What the server's tools are called is the
+framework's.
+
+A model's ``context_window``, in tokens, is optional: what an adapter's
+context management measures against when its framework has no table for the
+model, such as a gateway's model ids.
 
 A ``title``, an agent's or a model's, is what a person picks it by, and is
 optional: left out, it is the entry's id.
@@ -85,13 +88,13 @@ from robinauts.domain import (
     MAX_BASE_URL_CHARS,
     MAX_BASIC_USER_CHARS,
     MAX_CONFIG_ID_CHARS,
+    MAX_CONTEXT_WINDOW,
     MAX_ENV_NAME_CHARS,
     MAX_MODEL_NAME_CHARS,
     MAX_MODEL_TIMEOUT_SECONDS,
     MAX_MODEL_TITLE_CHARS,
     MAX_OUTPUT_TOKENS,
     MAX_SYSTEM_PROMPT_CHARS,
-    MAX_TOOL_PREFIX_CHARS,
     MAX_TOOL_TIMEOUT_SECONDS,
     AgentDefinition,
     ConfigError,
@@ -106,14 +109,15 @@ from robinauts.domain import (
     is_config_id,
     is_endpoint_url,
     is_env_name,
-    is_tool_prefix,
     sends_alone,
 )
 
 MODEL_PROVIDER_KEYS = frozenset({"kind", "api_key_env", "base_url"})
-MODEL_ENTRY_KEYS = frozenset({"provider", "name", "title", "timeout_seconds", "max_output_tokens"})
+MODEL_ENTRY_KEYS = frozenset(
+    {"provider", "name", "title", "timeout_seconds", "max_output_tokens", "context_window"}
+)
 AGENT_KEYS = frozenset({"title", "model", "engine", "system_prompt", "tools"})
-TOOL_SERVER_KEYS = frozenset({"url", "auth", "user", "secret_env", "prefix", "timeout_seconds"})
+TOOL_SERVER_KEYS = frozenset({"url", "auth", "user", "secret_env", "timeout_seconds"})
 
 _KINDS = {kind.value: kind for kind in ProviderKind}
 _ENGINES = {engine.value: engine for engine in Engine}
@@ -179,22 +183,6 @@ def parse_models_config(
         server = _tool_server(server_id, table, problems)
         if server is not None:
             servers[server.id] = server
-    # Two servers under one prefix would be two servers a call could name:
-    # said here, by both ids, with the rest of the file's problems -- over
-    # the **declared** tables, so that a server with another mistake in it
-    # is still one the clash is reported against, in the same pass.
-    under: dict[str, str] = {}
-    for server_id, table in declared_servers.items():
-        prefix = _declared_prefix(server_id, table)
-        if prefix is None:
-            continue
-        first = under.setdefault(prefix, str(server_id))
-        if first != server_id:
-            problems.append(
-                f"mcp_servers.{server_id}: its tools would be named under {prefix!r},"
-                f" as mcp_servers.{first}'s are; give one of them a prefix of its own"
-            )
-
     if problems:
         raise ConfigError(problems)
     return ModelsConfig(providers=providers, models=models, agents=agents, tool_servers=servers)
@@ -324,6 +312,9 @@ def _model(
     tokens = _tokens(table, where, problems)
     if tokens is not None:
         given["max_output_tokens"] = tokens
+    window = _window(table, where, problems)
+    if window is not None:
+        given["context_window"] = window
 
     if len(problems) > before:
         return None
@@ -420,18 +411,6 @@ def _agent(
     )
 
 
-def _declared_prefix(server_id: object, table: object) -> str | None:
-    """The prefix a declared server would name its tools under, if it is known yet."""
-    if not isinstance(table, Mapping):
-        return None
-    written = table.get("prefix")
-    if isinstance(written, str) and is_tool_prefix(written):
-        return written
-    if written is None and is_tool_prefix(server_id):
-        return str(server_id)
-    return None
-
-
 def _tool_server(server_id: object, table: object, problems: list[str]) -> ToolServerConfig | None:
     where = f"mcp_servers.{server_id}"
     if not is_config_id(server_id):
@@ -490,19 +469,6 @@ def _tool_server(server_id: object, table: object, problems: list[str]) -> ToolS
             problems.append(f"{where}.user: only basic auth has a user part; {sends_alone(auth)}")
     elif auth is ToolServerAuth.BASIC:
         problems.append(f"{where}.user: basic auth names the user part; there is nothing to guess")
-    if "prefix" in table:
-        prefix = _string(table, "prefix", where, problems, limit=MAX_TOOL_PREFIX_CHARS)
-        if prefix and not is_tool_prefix(prefix):
-            problems.append(
-                f"{where}.prefix: letters, digits, _ and -, at most {MAX_TOOL_PREFIX_CHARS} of"
-                f" them, holding no '__' and not ending in '_'"
-            )
-        given["prefix"] = prefix
-    elif not is_tool_prefix(server_id):
-        problems.append(
-            f"{where}: this id is not one its tools can be named under (at most"
-            f" {MAX_TOOL_PREFIX_CHARS} characters, no '__', not ending in '_'); write a prefix"
-        )
     seconds = _seconds(table, where, problems, MAX_TOOL_TIMEOUT_SECONDS)
     if seconds is not None:
         given["timeout_seconds"] = seconds
@@ -558,6 +524,24 @@ def _tokens(table: Mapping[str, Any], where: str, problems: list[str]) -> int | 
         problems.append(
             f"{where}.max_output_tokens: a whole number of tokens over 0 and at most"
             f" {MAX_OUTPUT_TOKENS}, not {tokens!r}"
+        )
+        return None
+    return tokens
+
+
+def _window(table: Mapping[str, Any], where: str, problems: list[str]) -> int | None:
+    """``context_window``, or ``None`` to leave it to the engine."""
+    if "context_window" not in table:
+        return None
+    tokens = table["context_window"]
+    if (
+        isinstance(tokens, bool)
+        or not isinstance(tokens, int)
+        or not 0 < tokens <= MAX_CONTEXT_WINDOW
+    ):
+        problems.append(
+            f"{where}.context_window: a whole number of tokens over 0 and at most"
+            f" {MAX_CONTEXT_WINDOW}, not {tokens!r}"
         )
         return None
     return tokens

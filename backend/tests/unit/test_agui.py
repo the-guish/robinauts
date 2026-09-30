@@ -42,14 +42,14 @@ from robinauts.api import (
 from robinauts.domain import (
     ENDED_RUN_STATES,
     FAULTED_RUN_STATES,
-    ArgumentsDelta,
+    ArgumentsPiece,
     CallCompleted,
     CallStarted,
     InvalidValueError,
     Message,
     MessageCompleted,
     MessageStarted,
-    ReasoningDelta,
+    ReasoningPiece,
     ResultLanded,
     RobinautsError,
     Role,
@@ -57,7 +57,7 @@ from robinauts.domain import (
     RunEvent,
     RunStarted,
     RunState,
-    TextDelta,
+    TextPiece,
     ToolResultPart,
     TurnEvent,
 )
@@ -109,12 +109,12 @@ def announced() -> MessageStarted:
     return MessageStarted(run_id=RUN, message_id=MESSAGE, parent_id=QUESTION)
 
 
-def text(said: str) -> TextDelta:
-    return TextDelta(run_id=RUN, message_id=MESSAGE, text=said)
+def text(said: str) -> TextPiece:
+    return TextPiece(run_id=RUN, message_id=MESSAGE, text=said)
 
 
-def thought(said: str) -> ReasoningDelta:
-    return ReasoningDelta(run_id=RUN, message_id=MESSAGE, text=said)
+def thought(said: str) -> ReasoningPiece:
+    return ReasoningPiece(run_id=RUN, message_id=MESSAGE, text=said)
 
 
 def completed() -> MessageCompleted:
@@ -125,8 +125,8 @@ def call_started(name: str = "github__search") -> CallStarted:
     return CallStarted(run_id=RUN, message_id=MESSAGE, call_id=CALL, name=name)
 
 
-def arguments(written: str) -> ArgumentsDelta:
-    return ArgumentsDelta(run_id=RUN, message_id=MESSAGE, call_id=CALL, text=written)
+def arguments(written: str) -> ArgumentsPiece:
+    return ArgumentsPiece(run_id=RUN, message_id=MESSAGE, call_id=CALL, text=written)
 
 
 def call_completed() -> CallCompleted:
@@ -610,10 +610,10 @@ def test_every_kind_of_turn_event_is_mapped() -> None:
     sample: dict[type, TurnEvent] = {
         RunStarted: started(),
         MessageStarted: announced(),
-        TextDelta: text("Someone"),
-        ReasoningDelta: thought("Hmm."),
+        TextPiece: text("Someone"),
+        ReasoningPiece: thought("Hmm."),
         CallStarted: call_started(),
-        ArgumentsDelta: arguments("{}"),
+        ArgumentsPiece: arguments("{}"),
         CallCompleted: call_completed(),
         MessageCompleted: completed(),
         ResultLanded: landed(),

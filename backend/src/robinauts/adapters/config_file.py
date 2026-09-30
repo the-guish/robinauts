@@ -26,11 +26,14 @@ than one at a time as people try to sign in or to ask an agent something.
 What ``check_api_keys`` read travels on in a ``ProviderKeys``, which prints
 nothing: the keys have to reach the engine adapter, and the shortest path
 from the environment to the vendor's client is the one with the fewest places
-a key could be written down.
+a key could be written down. ``ToolServerSecrets`` is the same carrier for the
+tool servers, and ``credential_header`` is the one place that turns a server's
+table and its secret into the header the framework's MCP client sends.
 """
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import tomllib
@@ -38,7 +41,13 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from robinauts.domain import ConfigError, ModelsConfig, SignInConfig, ToolServerAuth
+from robinauts.domain import (
+    ConfigError,
+    ModelsConfig,
+    SignInConfig,
+    ToolServerAuth,
+    ToolServerConfig,
+)
 
 SecretLookup = Callable[[str], str | None]
 """How a secret is asked for: given a variable's name, its value or ``None``.
@@ -252,6 +261,24 @@ def check_tool_secrets(
     if problems:
         raise ConfigError(problems)
     return ToolServerSecrets(secrets)
+
+
+def credential_header(server: ToolServerConfig, secrets: ToolServerSecrets) -> dict[str, str]:
+    """The header that carries this server's credential; empty for a public server.
+
+    ``Authorization: Bearer <secret>`` or ``Authorization: Basic
+    base64(<user>:<secret>)`` as the table says (``docs/specs/agents.md``,
+    "Tools"). Both agent adapters send it through their framework's MCP client,
+    so the spelling lives here, next to the carrier, rather than once per
+    framework.
+    """
+    if server.auth is ToolServerAuth.NONE:
+        return {}
+    secret = secrets.secret_for(server.id)
+    if server.auth is ToolServerAuth.BASIC:
+        pair = base64.b64encode(f"{server.user}:{secret}".encode()).decode("ascii")
+        return {"Authorization": f"Basic {pair}"}
+    return {"Authorization": f"Bearer {secret}"}
 
 
 def check_api_keys(config: ModelsConfig, *, secret_for: SecretLookup = environment) -> ProviderKeys:

@@ -30,11 +30,13 @@ dependencies = [
     "asyncpg>=0.30",
     "fastapi>=0.141,<0.142",
     "httpx>=0.28",
+    "langchain>=1.4,<2",
     "langchain-anthropic>=1.2,<2",
     "langchain-core>=1.2,<2",
+    "langchain-mcp-adapters>=0.1",
     "langgraph>=1.2,<2",
     "langsmith>=0.3.45,<1",
-    "pydantic-ai-slim[anthropic]>=2.47,<3",
+    "pydantic-ai-slim[anthropic,mcp]>=2.47,<3",
     # The ASGI server `robinauts start` runs (docs/specs/backend.md, "Web"),
     # imported by `robinauts.cli` and by nothing else -- the import-linter
     # contract below has named it since before it was a dependency. BSD-3-Clause,
@@ -362,7 +364,7 @@ source_modules = [
 ]
 forbidden_modules = ["ag_ui"]
 
-# The agent frameworks are swappable: each is confined to its own adapter.
+# The agent frameworks are replaceable: each is confined to its own adapter.
 # Every provider client is named, installed or not: `langchain-openai` and the
 # rest arrive the day a provider's tree passes the licence policy, and a
 # contract written then would be a contract written after the fact.
@@ -395,6 +397,9 @@ forbidden_modules = [
     "langchain_openai",
     "langchain_google_genai",
     "langchain_aws",
+    # The framework's MCP client, which is how that adapter reaches the tool
+    # servers (docs/specs/agents.md, "Tools").
+    "langchain_mcp_adapters",
     # Imported by the adapter for one call -- `langsmith.configure(enabled=
     # False)`, which is how hosted tracing is turned off -- and for nothing
     # else. Naming it here is what keeps "nothing phones home" from becoming
@@ -438,6 +443,9 @@ forbidden_modules = [
     # policy, this rule already covers it.
     "pydantic_ai",
     "pydantic_graph",
+    # The MCP client Pydantic AI's `MCP` capability is built on, which is how
+    # that adapter reaches the tool servers (docs/specs/agents.md, "Tools").
+    "fastmcp",
     # Pydantic AI's hosted observability, and the tracing API underneath it.
     # `logfire_api` arrives with `pydantic-graph` and `opentelemetry-api` with
     # `pydantic-ai-slim`; neither is imported by this platform at all, and
@@ -487,19 +495,16 @@ ignore_imports = [
 ]
 unmatched_ignore_imports_alerting = "none"
 
-# The MCP Python SDK, confined to the one adapter that speaks the protocol --
-# and **not adopted**: its tree fails the licence gate (DEPENDENCIES.md, "Known
-# exclusions": `cffi` states MIT-0, which is on no list, and `pywin32` a
-# licence family only), so `adapters/tools/mcp/` is a client of our own over
-# `httpx` for the three calls a client needs (docs/specs/agents.md, "Known
-# findings").
-# The rule is written all the same, before the import exists, as `uvicorn`'s
-# was: the day the tree passes, the SDK belongs here and nowhere else, and a
-# contract written the day the import is written is a contract written after
-# the fact. Same shape as the two framework rules above -- `robinauts.adapters`
-# named as a package, the exception written as an exception.
+# The MCP Python SDK, confined to the two agent adapters: each framework
+# reaches the tool servers through its own MCP client (langchain-mcp-adapters,
+# and fastmcp under Pydantic AI's `MCP` capability), and both are built on the
+# SDK (docs/specs/agents.md, "Tools"). The platform itself speaks no MCP: a
+# client of our own over `httpx` was the fallback while the SDK's tree failed
+# the licence gate, and it went with the tool loop (ADR 0005). Same shape as
+# the two framework rules above -- `robinauts.adapters` named as a package, the
+# exceptions written as exceptions.
 [[tool.importlinter.contracts]]
-name = "the MCP SDK only under adapters.tools.mcp"
+name = "the MCP SDK only under the two agent adapters"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = [
@@ -515,8 +520,10 @@ source_modules = [
 ]
 forbidden_modules = ["mcp"]
 ignore_imports = [
-    "robinauts.adapters.tools.mcp -> *",
-    "robinauts.adapters.tools.mcp.** -> *",
+    "robinauts.adapters.agents.langgraph -> *",
+    "robinauts.adapters.agents.langgraph.** -> *",
+    "robinauts.adapters.agents.pydantic_ai -> *",
+    "robinauts.adapters.agents.pydantic_ai.** -> *",
 ]
 unmatched_ignore_imports_alerting = "none"
 

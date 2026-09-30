@@ -27,13 +27,13 @@ from robinauts.domain import (
     KINDS_WITH_BASE_URL,
     LOOPBACK_HOSTS,
     MAX_AGENT_TITLE_CHARS,
+    MAX_CONTEXT_WINDOW,
     MAX_ENV_NAME_CHARS,
     MAX_MODEL_NAME_CHARS,
     MAX_MODEL_TIMEOUT_SECONDS,
     MAX_MODEL_TITLE_CHARS,
     MAX_OUTPUT_TOKENS,
     MAX_SYSTEM_PROMPT_CHARS,
-    MAX_TOOL_PREFIX_CHARS,
     MAX_TOOL_TIMEOUT_SECONDS,
     AgentDefinition,
     ConfigError,
@@ -145,6 +145,22 @@ def test_a_model_may_say_its_own_timeout_and_ceiling() -> None:
 
     assert config.models["sonnet"].timeout_seconds == 30.0
     assert config.models["sonnet"].max_output_tokens == 4096
+
+
+def test_a_model_may_say_its_context_window_for_a_framework_that_cannot_look_it_up() -> None:
+    config = parse_models_config(data(models={"sonnet": {**SONNET, "context_window": 200_000}}))
+
+    assert config.models["sonnet"].context_window == 200_000
+    assert parse_models_config(data()).models["sonnet"].context_window is None
+
+
+@pytest.mark.parametrize("tokens", [0, -1, 1.5, True, "200k", MAX_CONTEXT_WINDOW + 1])
+def test_a_context_window_is_a_whole_number_inside_its_bounds(tokens: Any) -> None:
+    assert only(model(context_window=tokens)).startswith(
+        "models.sonnet.context_window: a whole number of tokens over 0 and at most"
+    )
+    with pytest.raises(InvalidValueError, match="context_window"):
+        ModelConfig(id="sonnet", provider="anthropic", name="x", context_window=tokens)
 
 
 def test_an_agent_carries_its_system_prompt_and_can_go_without_one() -> None:
@@ -760,7 +776,6 @@ def test_a_tool_server_becomes_its_record_and_an_agent_names_it() -> None:
         url="https://api.githubcopilot.com/mcp/",
         secret_env="ROBINAUTS_GITHUB_TOKEN",
         auth=ToolServerAuth.BEARER,
-        prefix="github",
         timeout_seconds=DEFAULT_TOOL_TIMEOUT_SECONDS,
     )
     assert config.agents["assistant"].tools == ("github",)
@@ -770,28 +785,26 @@ def test_what_a_tool_server_does_not_say_is_left_to_the_defaults() -> None:
     config = parse_models_config(data(mcp_servers={"github": dict(GITHUB)}))
 
     github = config.tool_servers["github"]
-    assert (github.auth, github.user, github.prefix) == (ToolServerAuth.BEARER, "", "github")
+    assert (github.auth, github.user) == (ToolServerAuth.BEARER, "")
     assert github.timeout_seconds == DEFAULT_TOOL_TIMEOUT_SECONDS
     assert config.agents["assistant"].tools == ()
 
 
-def test_a_tool_server_may_use_basic_auth_a_prefix_and_a_timeout_of_its_own() -> None:
+def test_a_tool_server_may_use_basic_auth_and_a_timeout_of_its_own() -> None:
     jira = {
         "url": "https://your-site.atlassian.net/mcp",
         "auth": "basic",
         "user": "robinauts@example.com",
         "secret_env": "JIRA",
-        "prefix": "atlassian",
         "timeout_seconds": 30,
     }
 
     config = parse_models_config(data(mcp_servers={"jira": jira}))
 
     server_ = config.tool_servers["jira"]
-    assert (server_.auth, server_.user, server_.prefix, server_.timeout_seconds) == (
+    assert (server_.auth, server_.user, server_.timeout_seconds) == (
         ToolServerAuth.BASIC,
         "robinauts@example.com",
-        "atlassian",
         30.0,
     )
 
@@ -907,49 +920,6 @@ def test_basic_auth_names_the_user_part_and_bearer_has_none() -> None:
     assert only(server(auth="digest", user="me")).startswith("mcp_servers.github.auth:")
 
 
-@pytest.mark.parametrize("prefix", ["git__hub", "github_", "GitHub Tools"])
-def test_a_prefix_is_a_name_a_tool_can_be_told_apart_under(prefix: str) -> None:
-    assert only(server(prefix=prefix)) == (
-        f"mcp_servers.github.prefix: letters, digits, _ and -, at most {MAX_TOOL_PREFIX_CHARS} of"
-        f" them, holding no '__' and not ending in '_'"
-    )
-
-
-def test_a_prefix_is_bounded_and_written_or_left_out() -> None:
-    assert only(server(prefix="g" * (MAX_TOOL_PREFIX_CHARS + 1))) == (
-        f"mcp_servers.github.prefix: at most {MAX_TOOL_PREFIX_CHARS} characters"
-    )
-    assert only(server(prefix="")) == (
-        "mcp_servers.github.prefix: missing, or not a non-empty string"
-    )
-
-
-def test_an_id_that_would_not_do_as_a_prefix_needs_one_written_down() -> None:
-    long = "g" * (MAX_TOOL_PREFIX_CHARS + 1)
-    assert only(problems(mcp_servers={long: dict(GITHUB)})) == (
-        f"mcp_servers.{long}: this id is not one its tools can be named under (at most"
-        f" {MAX_TOOL_PREFIX_CHARS} characters, no '__', not ending in '_'); write a prefix"
-    )
-    assert only(problems(mcp_servers={"git__hub": dict(GITHUB)})).startswith(
-        "mcp_servers.git__hub: this id is not one"
-    )
-    # With one written, the id is free to be what it is.
-    config = parse_models_config(data(mcp_servers={long: {**GITHUB, "prefix": "github"}}))
-    assert config.tool_servers[long].prefix == "github"
-
-
-def test_two_servers_under_one_prefix_are_refused_by_both_names() -> None:
-    jira = {**GITHUB, "secret_env": "JIRA", "prefix": "github"}
-
-    assert only(problems(mcp_servers={"github": dict(GITHUB), "jira": jira})) == (
-        "mcp_servers.jira: its tools would be named under 'github', as mcp_servers.github's"
-        " are; give one of them a prefix of its own"
-    )
-    # In the same pass as the other mistakes in the clashing table.
-    found = problems(mcp_servers={"github": dict(GITHUB), "jira": {**jira, "url": "not a url"}})
-    assert [line.split(":")[0] for line in found] == ["mcp_servers.jira.url", "mcp_servers.jira"]
-
-
 @pytest.mark.parametrize("seconds", [0, -1, "30", True, float("inf"), MAX_TOOL_TIMEOUT_SECONDS + 1])
 def test_a_tool_call_s_timeout_is_a_number_of_seconds_inside_its_bounds(seconds: Any) -> None:
     assert only(server(timeout_seconds=seconds)).startswith(
@@ -1006,17 +976,6 @@ def tool_server(**changes: Any) -> ToolServerConfig:
     return ToolServerConfig(**fields)
 
 
-def test_a_tool_server_record_fills_its_prefix_in_from_its_id() -> None:
-    assert tool_server().prefix == "github"
-
-
-def test_a_tool_server_record_refuses_an_id_it_cannot_name_tools_under_unless_told() -> None:
-    with pytest.raises(InvalidValueError, match="needs a prefix written down"):
-        tool_server(id="git__hub")
-
-    assert tool_server(id="git__hub", prefix="gh").prefix == "gh"
-
-
 def test_a_tool_server_record_holds_basic_auth_to_its_user_part() -> None:
     with pytest.raises(InvalidValueError, match="names the user part"):
         tool_server(auth=ToolServerAuth.BASIC)
@@ -1045,7 +1004,7 @@ def test_a_tool_server_record_holds_its_endpoint_to_the_same_rule_as_the_parser(
     assert str(raised.value).startswith("a tool server's url is an https:// endpoint")
 
 
-def test_the_whole_configuration_holds_agents_to_configured_servers_and_prefixes_apart() -> None:
+def test_the_whole_configuration_holds_agents_to_configured_servers() -> None:
     config = parse_models_config(data(mcp_servers={"github": dict(GITHUB)}))
     github = config.tool_servers["github"]
     uses_jira = AgentDefinition(
@@ -1063,12 +1022,6 @@ def test_the_whole_configuration_holds_agents_to_configured_servers_and_prefixes
             models=config.models,
             agents={"a": uses_jira},
             tool_servers={"github": github},
-        )
-    with pytest.raises(InvalidValueError, match="would both name their tools under 'github'"):
-        ModelsConfig(
-            providers=config.providers,
-            models=config.models,
-            tool_servers={"github": github, "jira": tool_server(id="jira", prefix="github")},
         )
 
 

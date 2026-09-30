@@ -498,12 +498,27 @@ class ConversationStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def end_run(self, run: Run, event: RunEvent, event_document: Document) -> None:
+    async def end_run(
+        self,
+        run: Run,
+        event: RunEvent,
+        event_document: Document,
+        *,
+        engine_state: bytes | None = None,
+    ) -> None:
         """Put the run in its ended state and append the event that says so.
 
         One transaction: a run is never recorded as over without the event
         that announced it, and no watcher is ever told a run ended that the
         record still says is going.
+
+        ``engine_state`` is the conversation as the engine left it after this
+        run -- the framework's own serialisation of its history, which the
+        platform never reads (``docs/specs/conversations.md``, "The model's
+        memory") -- and is stored with the ending, in the same transaction,
+        so that a run that finished and the memory it left are one write.
+        ``None`` for a run that ended without one, which is every run that
+        did not finish. ``engine_state`` reads it back.
 
         ``run`` is the ended record, and ``event`` carries the announcement at
         its position. **The two must say the same thing**, and the store reads
@@ -521,6 +536,18 @@ class ConversationStore(ABC):
         this one must), or does not say what the record says. Which of them a
         call that breaks more than one gets is not specified; what is, is that
         it wrote nothing.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def engine_state(self, run_id: uuid.UUID) -> bytes | None:
+        """The state the engine left after that run, or ``None``.
+
+        ``None`` for a run that ended without one, for one still going, and
+        for a run that is not there: the caller walks a conversation's path
+        for the nearest finished run and asks this of each candidate, so a
+        run without a state is an answer and not a refusal. What comes back
+        is the bytes ``end_run`` was given, whole and unread.
         """
         raise NotImplementedError
 

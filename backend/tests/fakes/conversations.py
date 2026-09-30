@@ -69,6 +69,7 @@ from robinauts.domain import (
     RunState,
     checked_config_id,
     checked_line,
+    describe,
 )
 from robinauts.ports import (
     MAX_PAGE,
@@ -91,6 +92,8 @@ class MemoryConversationStore(ConversationStore):
         self._messages: dict[uuid.UUID, dict[uuid.UUID, Message]] = {}
         """The records beside them: what a real store's own columns hold."""
         self._runs: dict[uuid.UUID, Run] = {}
+        self._states: dict[uuid.UUID, bytes] = {}
+        """What the engine left after a finished run, by run id, as it was given."""
         self._active: dict[uuid.UUID, uuid.UUID] = {}
         """Which run of a conversation is going. One id, so there is one run."""
         self._events: dict[uuid.UUID, dict[int, tuple[RunEvent, Document]]] = {}
@@ -229,6 +232,7 @@ class MemoryConversationStore(ConversationStore):
             ]:
                 del self._runs[run_id]
                 self._events.pop(run_id, None)
+                self._states.pop(run_id, None)
             self._documents.pop(conversation_id, None)
             self._messages.pop(conversation_id, None)
             self._active.pop(conversation_id, None)
@@ -376,10 +380,19 @@ class MemoryConversationStore(ConversationStore):
             await _a_turn()
             self._put_run(run)
 
-    async def end_run(self, run: Run, event: RunEvent, event_document: Document) -> None:
+    async def end_run(
+        self,
+        run: Run,
+        event: RunEvent,
+        event_document: Document,
+        *,
+        engine_state: bytes | None = None,
+    ) -> None:
         _typed(run, Run, "a run")
         _typed(event, RunEvent, "a run event")
         _document(event_document)
+        if engine_state is not None and not isinstance(engine_state, bytes):
+            raise InvalidValueError(f"a framework's state is bytes, not {describe(engine_state)}")
         if run.state not in ENDED_RUN_STATES:
             raise InvalidValueError(
                 f"end_run ends a run; {run.id} was offered as {run.state.value}"
@@ -400,10 +413,16 @@ class MemoryConversationStore(ConversationStore):
                 )
             await _a_turn()
             self._put_run(run)
+            if engine_state is not None:
+                self._states[run.id] = bytes(engine_state)
             # Two writes with a turn between them, as two statements are. What
             # holds them together is the lock; without it a reader sees one.
             await _a_turn()
             self._put_event(event, event_document)
+
+    async def engine_state(self, run_id: uuid.UUID) -> bytes | None:
+        async with self._locked():
+            return self._states.get(run_id)
 
     # Events.
 

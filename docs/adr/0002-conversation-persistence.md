@@ -1,8 +1,13 @@
 # ADR 0002 — Conversation persistence: the platform owns the record, agent frameworks are stateless per turn
 
-- Status: accepted; superseded in part by
+- Status: superseded in part by
   [ADR 0004](0004-context-management-in-the-adapter.md) (the paragraph on
-  what lives above the agent port, and its trimming example)
+  what lives above the agent port, and its trimming example) and by
+  [ADR 0005](0005-the-framework-owns-the-loop-and-the-memory.md) (the
+  frameworks keep the model's memory between turns, stored by the platform
+  and never read; a conversation stays with its engine). What stands: the
+  platform owns the conversation record, in its own format, in its own
+  schema, and no framework creates or migrates a table
 - Date: 2026-09-20
 
 ## Context

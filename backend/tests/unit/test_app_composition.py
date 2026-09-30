@@ -31,7 +31,6 @@ import httpx
 import pytest
 
 from aio import asyncio_test
-from contracts.tool_servers import SEARCH
 from conversations import (
     AGENT,
     CONVERSATION,
@@ -48,15 +47,12 @@ from fakes import (
     Gate,
     MemoryConversationStore,
     MemoryCredentialStore,
-    MemoryToolServers,
     ScriptedAgent,
     ScriptedIdentityProvider,
-    calls,
     says,
 )
 from robinauts import app as app_module
-from robinauts.adapters import HttpIdentityProvider, SecretLookup, ToolServerSecrets
-from robinauts.adapters.tools.mcp import McpToolServers
+from robinauts.adapters import HttpIdentityProvider, SecretLookup
 from robinauts.app import (
     AUTH_CONFIG_VARIABLE,
     CONFIG_VARIABLE,
@@ -70,16 +66,13 @@ from robinauts.application import DEFAULT_TURN_SECONDS, ENDING_BUDGET_SECONDS, T
 from robinauts.core import message_to_data
 from robinauts.domain import (
     ACTIVE_RUN_STATES,
-    AnswerStarted,
-    AnswerTextDelta,
     ConfigError,
     Engine,
     InvalidValueError,
     Run,
     RunQuietError,
     RunState,
-    ToolResult,
-    ToolServerConfig,
+    TextDelta,
 )
 from turns import AUTHOR, readable, stored_events
 from webapp import PUBLIC_URL, running
@@ -567,13 +560,7 @@ async def test_shutting_down_interrupts_the_runs_this_process_was_answering(
     # and it is written into the record and announced to whoever is watching.
     held = Gate()
     store = MemoryConversationStore()
-    deployment = answering(
-        tmp_path,
-        AnswerStarted(),
-        AnswerTextDelta(text="Half of an"),
-        held,
-        store=store,
-    )
+    deployment = answering(tmp_path, TextDelta(text="Half of an"), held, store=store)
     await deployment.open()
     assert deployment.turns is not None
     started = await deployment.turns.begin(AUTHOR, agent_id=AGENT, text="What is a robinaut?")
@@ -768,121 +755,23 @@ auth = "none"
     assert repr(deployment.tool_secrets) == "ToolServerSecrets()"
 
 
-@asyncio_test
-async def test_opening_builds_the_mcp_adapter_over_the_secrets_read_and_closing_lets_it_go(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The one thing that reaches a tool server is built at ``open``, over the
-    secrets start-up read, and given back with the rest at ``aclose``: its
-    connection pool is the process's for its life, like the identity
-    provider's client."""
-    built: list[Recording] = []
-
-    class Recording(McpToolServers):
-        def __init__(self, secrets: ToolServerSecrets) -> None:
-            super().__init__(secrets)
-            self.secrets = secrets
-            self.closed = 0
-            built.append(self)
-
-        async def aclose(self) -> None:
-            self.closed += 1
-            await super().aclose()
-
-    monkeypatch.setattr(app_module, "McpToolServers", Recording)
-    deployment = with_agents(
-        tmp_path,
-        WITH_TOOLS,
-        secret_for=reading({**BOTH_KEYS, "ROBINAUTS_GITHUB_TOKEN": "ghp-x"}),
-        provider=ScriptedIdentityProvider(),
-    )
-
-    await deployment.open()
-    assert [adapter.secrets is deployment.tool_secrets for adapter in built] == [True]
-    assert built[0].closed == 0
-    await deployment.aclose()
-
-    assert built[0].closed == 1
-
-
-def test_tool_servers_handed_in_without_the_port_and_an_agent_naming_an_unknown_one_are_refused(
+def test_an_agent_handed_in_naming_a_tool_server_the_configuration_has_not_got_is_refused(
     tmp_path: Path,
 ) -> None:
     """Refused at configuration, not found out in the middle of somebody's
-    turn: the adapter ``open`` builds holds the file's secrets and no
-    others, and an agent's servers must be among those to be wired."""
+    turn: the engines built from the file are configured with the file's
+    servers and no others, and an agent handed in to run on them names one
+    of those -- as the parser holds the file's agents to the file's servers."""
     definition = agent_definition(tools=("github",))
-    github = ToolServerConfig(
-        id="github", url="https://github.example.test/mcp/", secret_env="ROBINAUTS_GITHUB_TOKEN"
-    )
-    with pytest.raises(ConfigError) as raised:
-        deployed(
-            tmp_path,
-            agents={definition.id: definition},
-            models=offered(),
-            engines={definition.engine: ScriptedAgent()},
-            servers={"github": github},
-        )
-    assert list(raised.value.problems) == [
-        "tool servers were handed in without the port that reaches them: the adapter"
-        " this build constructs holds the secrets of the configuration's servers, so"
-        " configure them, or hand in the tool servers as well"
-    ]
 
     with pytest.raises(ConfigError) as raised:
-        deployed(
-            tmp_path,
-            agents={definition.id: definition},
-            models=offered(),
-            engines={definition.engine: ScriptedAgent()},
-            tool_servers=MemoryToolServers(),
-        )
+        with_agents(tmp_path, agents={definition.id: definition})
+
     assert list(raised.value.problems) == [
         "the agent 'assistant' that was handed in uses tool server 'github', which is not"
-        " configured: configure the server, or hand it in beside the agent"
+        " in the configuration: configure the server, or hand in the engine that is to"
+        " run the agent"
     ]
-
-
-@asyncio_test
-async def test_a_tool_servers_port_handed_in_is_the_one_a_turn_reaches(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A test's fake stands where the MCP adapter would, and nothing builds
-    the adapter: a whole tool round runs through the deployment's own
-    ``turns`` and reaches the fake with the tool's own name."""
-    monkeypatch.setattr(app_module, "McpToolServers", None)  # nothing here may build it
-    store = MemoryConversationStore()
-    tools = MemoryToolServers()
-    tools.serving("github", SEARCH)
-    tools.answering("github", SEARCH.name, ToolResult("found 3"))
-    github = ToolServerConfig(
-        id="github", url="https://github.example.test/mcp/", secret_env="ROBINAUTS_GITHUB_TOKEN"
-    )
-    engine = ScriptedAgent(*calls(("toolu_01", "github__search_repositories", {"q": "x"})))
-    engine.then(*says("Found three."))
-    definition = agent_definition(tools=("github",))
-    deployment = deployed(
-        tmp_path,
-        conversation_store=store,
-        agents={definition.id: definition},
-        models=offered(),
-        engines={definition.engine: engine},
-        provider=ScriptedIdentityProvider(),
-        tool_servers=tools,
-        servers={"github": github},
-    )
-    await deployment.open()
-    assert deployment.turns is not None
-
-    started = await deployment.turns.begin(AUTHOR, agent_id=AGENT, text="What is a robinaut?")
-    while (await store.run_by_id(started.run.id)).state in ACTIVE_RUN_STATES:
-        await asyncio.sleep(0.005)
-    await deployment.aclose()
-
-    assert (await store.run_by_id(started.run.id)).state is RunState.FINISHED
-    assert tools.listings == ["github"]
-    assert tools.calls == [("github", "search_repositories", {"q": "x"})]
-    readable(await stored_events(store, started.run.id), started.run)
 
 
 def test_the_key_itself_is_in_none_of_what_a_start_up_refusal_says(tmp_path: Path) -> None:
@@ -904,9 +793,9 @@ async def test_an_agent_may_name_either_of_the_engines_this_build_runs(
 
     The same file, the same model, the same agent -- one word changed -- and
     the deployment starts either way. That is the whole of what changing an
-    agent's engine costs (``docs/specs/agents.md``); what makes it safe is that
-    the conversation record is the state (ADR 0002), which is proved in
-    ``tests/unit/test_engine_swap.py``.
+    agent's engine costs (``docs/specs/agents.md``): the transcript is the
+    platform's whichever engine wrote it (ADR 0002), and a conversation's
+    memory stays with the engine that wrote it (ADR 0005).
     """
     text = WITH_AGENTS.replace('engine = "langgraph"', 'engine = "pydantic-ai"')
 

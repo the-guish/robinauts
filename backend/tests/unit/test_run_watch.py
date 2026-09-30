@@ -30,15 +30,13 @@ import pytest
 
 from aio import asyncio_test
 from conversations import AGENT
-from fakes import Gate, MemoryConversationStore, says
+from fakes import Gate, MemoryConversationStore, calls, results, says
 from robinauts.adapters import MemoryRunSignals
 from robinauts.application import Watch
 from robinauts.core import check_event_order
 from robinauts.domain import (
     ACTIVE_RUN_STATES,
-    AnswerCompleted,
-    AnswerStarted,
-    AnswerTextDelta,
+    Done,
     InvalidValueError,
     MessageStarted,
     Run,
@@ -48,8 +46,8 @@ from robinauts.domain import (
     RunQuietError,
     RunStarted,
     RunState,
+    TextDelta,
     User,
-    text_parts,
 )
 from robinauts.ports import Document
 from turns import (
@@ -69,6 +67,16 @@ from turns import (
 
 ANSWER = "Someone who plays fair."
 AGAIN = "And that is all."
+
+LOOKED = ("toolu_01", "search", {"q": "robinauts"})
+"""A call the first answer makes, as ``calls`` wants it.
+
+What puts two answers in one turn now that the framework runs the loop: the
+second follows the tool message that answers the first.
+"""
+
+FOUND = ("toolu_01", "search", "found 3")
+"""What the tool came back with, as ``results`` wants it."""
 
 SLOW = 0.5
 """How long one write of the slow store below takes."""
@@ -162,9 +170,16 @@ class Slow(MemoryConversationStore):
         await asyncio.sleep(SLOW)
         await super().append_event(event, document)
 
-    async def end_run(self, run: Run, event: RunEvent, event_document: Document) -> None:
+    async def end_run(
+        self,
+        run: Run,
+        event: RunEvent,
+        event_document: Document,
+        *,
+        engine_state: bytes | None = None,
+    ) -> None:
         await asyncio.sleep(SLOW)
-        await super().end_run(run, event, event_document)
+        await super().end_run(run, event, event_document, engine_state=engine_state)
 
 
 def watching(
@@ -262,9 +277,9 @@ async def test_a_watcher_at_zero_receives_the_whole_run_and_then_ends() -> None:
     assert kinds(seen) == [
         "RunStarted",
         "MessageStarted",
-        "TextDelta",
-        "TextDelta",
-        "TextDelta",
+        "TextPiece",
+        "TextPiece",
+        "TextPiece",
         "MessageCompleted",
         "RunEnded",
     ]
@@ -293,13 +308,14 @@ async def test_two_watchers_of_one_run_each_receive_all_of_it() -> None:
 @asyncio_test
 async def test_a_watcher_attaching_mid_run_receives_exactly_the_rest() -> None:
     between = Gate()
-    wiring = wired(*says(ANSWER), between, *says(AGAIN))
+    wiring = wired(*calls(LOOKED, text=ANSWER), *results(FOUND), between, *says(AGAIN))
     run = await begun(wiring)
     submitted(wiring, run)
-    # Stopped between the two answers: the first is in the conversation,
-    # announced and completed (positions 1 to 4).
+    # Stopped between the two answers: the first, with its call, and the tool
+    # message that answers it are in the conversation, announced and
+    # completed (positions 1 to 10).
     await between.reached.wait()
-    await written(wiring.store, run.id, 4)
+    await written(wiring.store, run.id, 10)
 
     opened = await wiring.conversations.open(AUTHOR, run.conversation_id)
     watcher, seen = watching(wiring, run, after=opened.resume.after)
@@ -316,7 +332,7 @@ async def test_a_watcher_attaching_mid_run_receives_exactly_the_rest() -> None:
         after=opened.resume.after,
         ended=True,
     )
-    assert kinds(seen) == ["MessageStarted", "TextDelta", "MessageCompleted", "RunEnded"]
+    assert kinds(seen) == ["MessageStarted", "TextPiece", "MessageCompleted", "RunEnded"]
     # And nothing the conversation already held was sent again.
     assert seen[0].seq == opened.resume.after + 1
 
@@ -325,11 +341,10 @@ async def test_a_watcher_attaching_mid_run_receives_exactly_the_rest() -> None:
 async def test_a_watcher_attaching_inside_an_answer_is_given_the_rest_of_it() -> None:
     inside = Gate()
     wiring = wired(
-        AnswerStarted(),
-        AnswerTextDelta(text="Someone who "),
+        TextDelta(text="Someone who "),
         inside,
-        AnswerTextDelta(text="plays fair."),
-        AnswerCompleted(parts=text_parts(ANSWER)),
+        TextDelta(text="plays fair."),
+        Done(text=ANSWER),
     )
     run = await begun(wiring)
     submitted(wiring, run)
@@ -354,7 +369,7 @@ async def test_a_watcher_attaching_inside_an_answer_is_given_the_rest_of_it() ->
         open_message=announced,
         ended=True,
     )
-    assert kinds(seen) == ["TextDelta", "MessageCompleted", "RunEnded"]
+    assert kinds(seen) == ["TextPiece", "MessageCompleted", "RunEnded"]
 
 
 # --- watching a run that is over ----------------------------------------------
@@ -397,7 +412,7 @@ async def test_a_watcher_past_the_end_of_a_run_is_sent_nothing_and_ends() -> Non
 @asyncio_test
 async def test_a_watcher_that_goes_away_mid_run_leaves_nothing_behind() -> None:
     between = Gate()
-    wiring = wired(*says(ANSWER), between, *says(AGAIN))
+    wiring = wired(*calls(LOOKED, text=ANSWER), *results(FOUND), between, *says(AGAIN))
     run = await begun(wiring)
     submitted(wiring, run)
     events = wiring.watch.events(AUTHOR, run.id)
@@ -450,7 +465,7 @@ async def test_a_watcher_attached_past_everything_finishes_when_the_run_ends() -
     # in a handful of reads.
     held = Gate()
     counted = Counted()
-    wiring = wired(AnswerStarted(), AnswerTextDelta(text="Half of an"), held, store=counted)
+    wiring = wired(TextDelta(text="Half of an"), held, store=counted)
     run = await begun(wiring)
     submitted(wiring, run)
     await held.reached.wait()
@@ -558,13 +573,7 @@ async def test_a_watcher_says_once_that_the_signals_are_failing(
     # place a deployment is looked at. So the rest are DEBUG.
     held = Gate()
     signals = Mute()
-    wiring = wired(
-        AnswerStarted(),
-        AnswerTextDelta(text="Half of an"),
-        held,
-        signals=signals,
-        wait_seconds=0.01,
-    )
+    wiring = wired(TextDelta(text="Half of an"), held, signals=signals, wait_seconds=0.01)
     run = await begun(wiring)
     submitted(wiring, run)
     await held.reached.wait()
@@ -593,7 +602,7 @@ async def test_a_watcher_says_once_that_the_signals_are_failing(
 @asyncio_test
 async def test_cancelling_reaches_the_work_and_the_watcher_is_told() -> None:
     held = Gate()
-    wiring = wired(AnswerStarted(), AnswerTextDelta(text="Half of an"), held)
+    wiring = wired(TextDelta(text="Half of an"), held)
     started = await wiring.turns.begin(AUTHOR, agent_id=AGENT, text="What is a robinaut?")
     run = started.run
     watcher, seen = watching(wiring, run)
@@ -679,7 +688,7 @@ async def test_a_process_that_stops_interrupts_its_runs_and_says_so() -> None:
     # Nobody cancelled this run: the process went away with it, which is a
     # different thing for its author and a different state in the record.
     held = Gate()
-    wiring = wired(AnswerStarted(), AnswerTextDelta(text="Half of an"), held)
+    wiring = wired(TextDelta(text="Half of an"), held)
     started = await wiring.turns.begin(AUTHOR, agent_id=AGENT, text="What is a robinaut?")
     run = started.run
     watcher, seen = watching(wiring, run)

@@ -25,7 +25,6 @@ from robinauts.ports.ids import IdSource
 from robinauts.ports.run_executor import RunExecutor, RunReport, RunWork
 from robinauts.ports.run_signals import RunSignals
 from robinauts.ports.secrets import SECRET_BITS, SecretSource
-from robinauts.ports.tool_servers import ToolServers
 
 __all__ = [
     "MAX_PAGE",
@@ -45,5 +44,4 @@ __all__ = [
     "RunWork",
     "SecretSource",
     "Snapshot",
-    "ToolServers",
 ]

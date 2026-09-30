@@ -17,10 +17,7 @@ reader sees is one path of it. The rules over a collection of messages --
 which parents are legal, which path is the visible one -- are pure functions
 in ``robinauts.core.conversation_tree``, and the one
 encoding of all this is ``robinauts.core.conversation_format``. A record here
-holds and checks; it does not decide and it does not serialise. The one
-rule over a path that is here, ``unanswered_calls``, is here because its
-callers are the agent adapters, which may import domain and not core
-(``docs/layout.md``).
+holds and checks; it does not decide and it does not serialise.
 
 **Room without building it.** The format names every kind of content the
 specs give a message -- text, image, file, reasoning, tool call, tool result
@@ -52,7 +49,7 @@ nearly all of them, stored unread and written back as it was.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -60,7 +57,7 @@ from typing import Any, ClassVar
 
 from robinauts.domain.agents import Engine, checked_config_id
 from robinauts.domain.errors import InvalidValueError, UnsupportedContentError
-from robinauts.domain.tools import ToolDefinition, checked_call_id, checked_tool_name
+from robinauts.domain.tools import checked_call_id, checked_tool_name
 from robinauts.domain.values import (
     MAX_PART_CHARS,
     checked_data,
@@ -355,9 +352,9 @@ class Provenance:
     """What produced an answer: the agent, the engine, the model, the run.
 
     Every assistant message records it and the interface can show it
-    (``docs/specs/conversations.md``). It is what makes an engine swap
-    visible after the fact: the answers of a conversation say which engine and
-    which model each of them came from.
+    (``docs/specs/conversations.md``). It is what makes a change of engine or
+    of model visible after the fact: the answers of a conversation say which
+    engine and which model each of them came from.
     """
 
     agent: str
@@ -524,57 +521,3 @@ class Conversation:
         checked_line(self.title, "a conversation's title", MAX_TITLE_CHARS)
         checked_instant(self.created_at, "created_at")
         checked_instant(self.updated_at, "updated_at")
-
-
-NO_LONGER_OFFERED = "This tool is no longer offered to this agent; a call to it is not run."
-"""The description of a stub definition for a tool the history names and the run lacks."""
-
-
-def tools_for_request(
-    tools: Sequence[ToolDefinition], history: Sequence[Message]
-) -> tuple[ToolDefinition, ...]:
-    """The definitions a request carries: the run's, and a stub per other name the history calls.
-
-    Anthropic refuses a request whose messages hold ``tool_use`` or
-    ``tool_result`` blocks and whose ``tools`` do not define them, so a
-    conversation that once used a tool would fail every later turn once the
-    agent's servers list nothing, the tool was left out, or the agent's
-    ``tools`` line was removed -- the operator's edit between turns that must
-    not break a conversation. Each such name is defined as a stub the model
-    is told not to call (``NO_LONGER_OFFERED``); a call to one is answered by
-    the loop as a name the run was not handed, and no server is asked. The
-    run's own list comes first, unchanged, and the stubs follow in the order
-    the history first named them. Here rather than in an adapter because
-    both adapters serve the same vendor and must send the same definitions
-    (``docs/specs/agents.md``, "Tools").
-    """
-    offered = {tool.name for tool in tools}
-    stubs: dict[str, ToolDefinition] = {}
-    for message in history:
-        for call in message.tool_calls:
-            if call.name not in offered and call.name not in stubs:
-                stubs[call.name] = ToolDefinition(
-                    name=call.name,
-                    description=NO_LONGER_OFFERED,
-                    input_schema={"type": "object"},
-                )
-    return (*tools, *stubs.values())
-
-
-def unanswered_calls(history: Sequence[Message]) -> dict[uuid.UUID, tuple[ToolCallPart, ...]]:
-    """The calls on that path no tool message answers, by the answer that made them.
-
-    A path is the platform's (``core.check_tree``): a tool message hangs under
-    the answer whose calls it answers and answers all of them, so an answer's
-    calls are answered when the next message on the path is a tool message
-    and unanswered otherwise. An answer that made no calls is not here. What
-    a model is told of such a call is ``NO_RESULT`` (``robinauts.domain.tools``).
-    """
-    found: dict[uuid.UUID, tuple[ToolCallPart, ...]] = {}
-    for position, message in enumerate(history):
-        if message.role is not Role.ASSISTANT or not message.tool_calls:
-            continue
-        following = history[position + 1] if position + 1 < len(history) else None
-        if following is None or following.role is not Role.TOOL:
-            found[message.id] = message.tool_calls
-    return found
