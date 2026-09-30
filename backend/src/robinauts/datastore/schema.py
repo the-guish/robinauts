@@ -6,8 +6,8 @@
 ``schema.sql`` beside this module is the whole schema of a deployment, and
 it is shipped in the wheel. Nothing here runs at start-up but
 ``check_schema``: the server never creates or changes the schema on its own,
-a command does (``docs/specs/backend.md``), and until that command exists
-(step 5 of the plan) these are the functions it will be made of.
+a command does (``robinauts db init``, ``docs/specs/backend.md``), and these
+are the functions it is made of.
 
 **One schema, named once.** ``schema.sql`` creates its tables unqualified, so
 they land in ``current_schema()`` -- the first schema on the connection's
@@ -79,7 +79,7 @@ again. The schema as released is version 1, and from then on every change is
 a migration that moves this number (``docs/specs/backend.md``, "Schema").
 """
 
-SCHEMA_SHA256 = "3d18c6d8824d3b5aa57e0ea8915f96f0700957b46516c5682ac5f2fff67500ab"
+SCHEMA_SHA256 = "83a9a729adefcfb3ee87f665a5677eba82d51c110d845058cbc3795240540b22"
 """``schema.sql`` as this build was written against it.
 
 Before the first release every edit to ``schema.sql`` updates this pin and

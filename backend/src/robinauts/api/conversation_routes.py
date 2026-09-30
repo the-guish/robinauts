@@ -31,9 +31,9 @@ bug.
 **HEAD is not served.** A GET here answers a GET, and nothing turns it into a
 HEAD: asking for one is a 405 naming the methods there are. Nothing calls
 these routes that way -- a client that wants the size of a conversation asks
-for it -- and the step that serves the built interface is where HEAD is
-decided for the static side, which is the part a browser and a cache really do
-ask it of (``docs/specs/frontend.md``).
+for it -- and ``robinauts.api.ui``, which serves the built interface, is where
+HEAD is answered for the static side, which is the part a browser and a cache
+really do ask it of (``docs/specs/frontend.md``).
 
 **A path is a path.** The application does not redirect a trailing slash
 (``robinauts.api.create_api``): ``/api/conversations/`` is not a route, so it

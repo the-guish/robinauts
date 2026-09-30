@@ -351,8 +351,9 @@ CREATE INDEX IF NOT EXISTS runs_conversation_id_created_at_idx
 -- next, so this is the backstop under that rule, translated by name into
 -- `PositionTakenError`.
 --
--- `kind` is the name of the record's class (robinauts.domain: `RunStarted`,
--- `MessageStarted`, `TextDelta`, `ReasoningDelta`, `MessageCompleted`,
+-- `kind` is the name of the record's class (robinauts.domain.turn: `RunStarted`,
+-- `MessageStarted`, `TextPiece`, `ReasoningPiece`, `CallStarted`,
+-- `ArgumentsPiece`, `CallCompleted`, `ResultLanded`, `MessageCompleted`,
 -- `RunEnded`). It is a column and not something read out of the document
 -- because the store may not read a document at all, and it exists for the
 -- partial unique index below -- which is why the store writes it and reads

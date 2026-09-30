@@ -47,8 +47,9 @@ with no licence to renegotiate.
 - Tools over MCP: assistants can call remote tool servers such as GitHub,
   Atlassian or Microsoft Learn. Each call is shown in the chat.
 - UI for managing conversation history. Message editing and replaying.
-- Two AI agent frameworks built in, LangGraph and Pydantic AI,
-  interchangeable by configuration without touching stored data.
+- Two AI agent frameworks built in, LangGraph and Pydantic AI. Each
+  assistant runs on one of them, chosen in the configuration, and a
+  conversation stays with the framework it started on.
 
 
 ![Robinauts chat, with the model picker and the history panel](docs/images/robinauts-chat.png)
@@ -86,9 +87,10 @@ services of the AI frameworks are switched off. The only outbound traffic
 is to the identity provider at sign-in, the AI vendors, and the tool
 servers the company configured.
 
-**Tools under control.** Robinauts, not the AI framework, runs every tool
-call, and records each call and its result in the conversation. Only tool
-servers the company configured are reachable, over HTTPS.
+**Tools under control.** Only tool servers the company configured are
+reachable, over HTTPS. The AI framework runs each call inside the turn, and
+Robinauts records every call and its result in the conversation as it
+happens.
 
 **Fails early and clearly.** The configuration is checked when the server
 starts: a misspelt setting, a missing key or a database that does not

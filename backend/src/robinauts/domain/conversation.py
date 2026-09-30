@@ -207,7 +207,8 @@ class ToolCallPart:
     A part of the **assistant** message that made the call
     (``docs/specs/conversations.md``). The id is the vendor's, carried as
     data (``robinauts.domain.tools``); the name is the full name the model was
-    shown, ``<prefix>__<name>``, which is how the call is routed to its server;
+    shown, ``<server id>_<tool>``, spelt by the framework that ran the call
+    (``docs/specs/agents.md``, "Tools");
     and the arguments are what the model wrote, as plain data, bounded and
     checked the way ``extras`` is because they are attacker-influenced text on
     their way to a server and to a browser (``docs/specs/agents.md``).

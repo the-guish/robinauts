@@ -17,8 +17,8 @@ Two things live here, and they are deliberately apart:
   for is a check that stops working the day somebody adds another kind. The
   escape hatch is that list and nothing else: it is keyed on the name the walk
   reports, so a served directory or a ``frontend()`` at ``/ui`` is allowed by
-  writing ``"/ui"`` in it -- which is how the step that serves the built
-  interface will do it -- and an ``APIRoute`` is never allowed by it at all.
+  writing ``"/ui"`` in it -- which is how ``robinauts.api.ui`` serves the built
+  interface -- and an ``APIRoute`` is never allowed by it at all.
 
   A router keeps its routes in **more than one list**: ``routes``, and
   ``_low_priority_routes``, which is where ``frontend()`` puts what it serves.

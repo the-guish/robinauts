@@ -123,7 +123,7 @@ class ReasoningPiece:
     Storable text, like ``TextPiece``, and for the same reason. Shown as it
     arrives, collapsed under the answer, and **not stored as content**: this
     version keeps no reasoning (``docs/working-notes/poc-scope.md``, "Out").
-    An engine that yields ``AnswerReasoningDelta`` has it published as this,
+    An engine that yields ``ReasoningDelta`` has it published as this,
     and a ``ReasoningPart`` among the parts of a completed answer is dropped
     by the application rather than refused -- an engine is not asked to know
     what this version keeps.
@@ -188,7 +188,7 @@ class CallStarted:
     """The answer being produced is making a tool call: its id, and the tool's full name.
 
     Inside an assistant message, after its announcement and before its
-    completion, as the engine announced it (``ToolCallStarted``) and with the
+    completion, as the engine announced it (``ToolCall``) and with the
     platform's facts attached. The id is the vendor's, carried as data, and
     is what the call's arguments, its completion and its result are matched
     by -- on the wire, in the events and in the conversation

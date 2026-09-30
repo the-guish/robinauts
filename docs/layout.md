@@ -177,8 +177,8 @@ Control flow and business rules. Orchestrates a turn as a run
 on the visible path, call the agent port with the question and that memory,
 publish events, append each new message as it completes, then finish the run
 with the memory the adapter handed back — or fail or cancel it with none.
-Also the sign-in flow, conversation management (list, rename, delete) and
-usage export.
+Also the sign-in flow and conversation management (list, rename, delete,
+changing the model). Usage export joins them when usage reporting is built.
 
 This is the "controller" of the core spec: it knows the `Agent` port and
 nothing about any agent framework.
@@ -278,8 +278,9 @@ application or api.
 
 A special case of adapter for owned state: where application state lives.
 It implements the store ports (`ConversationStore` — which owns
-conversations, messages, runs and run events — `UsageStore`,
-`CredentialStore`) over the one database of the deployment. Its schema is
+conversations, messages, runs and run events — and `CredentialStore`; a
+`UsageStore` joins them with usage reporting) over the one database of the
+deployment. Its schema is
 entirely the platform's; no framework creates or migrates tables in it
 (ADR 0002).
 
@@ -394,7 +395,8 @@ cover:
 - **core and domain**: plain unit tests, input and output only.
 - **application**: unit tests with in-memory fakes for every port (fake
   agent, fake clock, fake stores, fake identity provider). This is where
-  the turn lifecycle, sign-in rules and usage recording are proven.
+  the turn lifecycle and the sign-in rules are proven, and where usage
+  recording will be.
 - **agent adapters**: one shared contract suite that both implementations
   must pass, run over each framework's own scripted test model and tools
   that are plain functions: a streamed answer, one that was not, a tool
