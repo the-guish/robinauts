@@ -466,16 +466,12 @@ def test_the_tool_servers_example_in_the_specification_reads_and_parses(tmp_path
     )
 
     github, jira = config.tool_servers["github"], config.tool_servers["jira"]
-    assert (github.auth, github.prefix, github.user) == (ToolServerAuth.BEARER, "github", "")
-    assert (jira.auth, jira.prefix, jira.user) == (
-        ToolServerAuth.BASIC,
-        "atlassian",
-        "robinauts@example.com",
-    )
+    assert (github.auth, github.user) == (ToolServerAuth.BEARER, "")
+    assert (jira.auth, jira.user) == (ToolServerAuth.BASIC, "robinauts@example.com")
     assert jira.timeout_seconds == 30.0
     # The public server: no credential, so no variable named.
     learn = config.tool_servers["learn"]
-    assert (learn.auth, learn.secret_env, learn.prefix) == (ToolServerAuth.NONE, "", "learn")
+    assert (learn.auth, learn.secret_env) == (ToolServerAuth.NONE, "")
     assert config.agents["assistant-with-tools"].tools == ("github", "jira", "learn")
 
 

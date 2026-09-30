@@ -3,75 +3,66 @@
 
 """Running one turn: the seam between the platform and an agent framework.
 
-**One method, because a turn is one thing** (``docs/specs/agents.md``): given
-the agent the operator defined, the model the turn runs on and the history to
-answer, stream what the model said. Everything else about a turn -- which
-ids the messages get, what they hang under, what is written down, what a
-watcher is told -- belongs to the application, which is why none of it is in
-this signature.
+**The contract is the examples'** (`agent-framework-examples
+<https://github.com/the-guish/agent-framework-examples>`_, ``common/base.py``
+on ``feature/event-streaming``): an ``AgentBackend`` is one conversation in
+one framework, whose framework keeps the state between turns and runs the
+whole turn -- tools included -- and ``stream(prompt)`` yields the turn's
+events as they happen, in a form no framework defines. Here the same thing is
+one method on one object per engine, made asynchronous and handed the
+conversation's state rather than holding it, because a deployment runs many
+conversations through one adapter and keeps their memory in its database
+(``docs/specs/agents.md``, "The agent port").
 
-**What crosses.** In: an ``AgentDefinition`` (the system prompt and the
-engine, read afresh every turn, because editing an agent takes effect at the
-next turn of its existing conversations); the **model**, by the platform's id
-for it, which is the run's and not the agent's -- the agent's model is only
-the default a conversation starts with, and the conversation's may have been
-changed since (``docs/specs/agents.md``); a **history**: the **full** visible
-path from a root to the user message being answered, never trimmed above the
-port; and the **tools** the run has, fetched once for the run from the servers
-the agent names (``docs/specs/agents.md``, "Tools"). Out: ``EngineEvent``s,
-which carry no ids of the platform's, no times and no provenance, because an
-engine has none.
+**What crosses.** In: an ``AgentDefinition`` (the system prompt and the tool
+servers it may use, read afresh every turn); the **prompt**, the text of the
+question being answered; the **model**, by the platform's id for it, which is
+the run's and not the agent's; and the **state**, the conversation as the
+framework left it after the last finished turn, or ``None`` for a conversation
+with no memory yet. Out: ``domain.events`` -- more text, more thinking, a tool
+call, its result, and ``Done`` with the final answer and the state after this
+turn -- which carry no ids of the platform's, no times and no provenance.
 
-**What of the history the model sees is the adapter's to decide** (ADR 0004):
-ordering, trimming and every other kind of context management, and prompt
-caching, are per framework and per vendor, because a real policy counts the
-vendor's tokens and places the vendor's cache breakpoints. The one invariant
-kept above the port, and checked in each adapter's own tests, is that the
-question being answered is whole in what the model sees.
-
-**Both engines are stateless per turn** (ADR 0002). Nothing is remembered
-between calls: the conversation record is the whole of the state, and the
-history handed in is where a turn starts from, whichever engine ran the turn
-before it.
+**The framework owns the loop, the context and the memory** (ADR 0005). The
+model asks for a tool, the framework calls it, the result goes back and the
+model answers, as many times as the turn needs, and the adapter translates
+what it sees. What the model is sent of the history -- how much, summarised
+how, with which cache breakpoints -- is the framework's middleware over the
+framework's own history; the platform keeps a transcript for people and never
+feeds the model from it. The one thing kept above the port is that the
+question being answered is whole in what the model sees, which is what every
+framework does with the turn it is answering.
 
 **How it ends.**
 
-- normally: the last event is an ``AnswerCompleted`` or, when that answer
-  asked for tools, the ``WaitingOnTools`` after it. A turn produces at least
-  one answer; one that produces none is a failed run
-  (``docs/specs/runs.md``), and the application is what records that.
+- normally: the last event is ``Done``, once, with every call the turn
+  announced answered. The application stores ``Done.state`` with the run's
+  ending and hands it to the conversation's next turn.
 - by **raising**: any exception ends the turn. The application records the run
-  ``failed`` with a description of what was raised and leaves the answer that
-  was in flight uncompleted. An engine yields nothing after an error.
+  ``failed`` with a description of what was raised and leaves the message that
+  was in flight uncompleted. An adapter yields nothing after an error, and
+  the turn leaves no state: the conversation resumes from the memory it had.
 - by **cancellation**: the application cancels the task the iteration runs in,
-  and closes the stream. An engine must not swallow ``CancelledError``; it
-  lets it through, and what it holds is released by the ``finally`` of the
-  generator, which closing runs.
+  and closes the stream. An adapter must not swallow ``CancelledError``; it
+  lets it through, and what it holds -- the framework's run, the HTTP
+  response, the connections to the tool servers -- is released by the
+  ``finally`` of the generator, which closing runs.
 
-**Waiting on tool calls.** A turn ends either "finished" or "waiting on these
-tool calls" (``docs/specs/runs.md``). The second is an answer completed with
-``ToolCallPart``s -- each announced, its arguments streamed and completed on
-the way -- followed by ``WaitingOnTools`` and by nothing else: **an engine
-never executes a tool**. The application runs the calls, appends their results
-as one tool message and starts the next engine turn from the stored history,
-so an engine sees a tool round as an ordinary turn whose history ends in a
-tool message rather than in a question.
-
-The contract suite both engines are held to is
+The contract suite both adapters are held to is
 ``backend/tests/contracts/agents.py``, and the order it holds them to is
-``robinauts.core.check_engine_events``.
+``robinauts.core.check_backend_events``.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator
 
-from robinauts.domain import AgentDefinition, EngineEvent, Message, ProviderKind, ToolDefinition
+from robinauts.domain import AgentDefinition, Event, ProviderKind
 
 
 class Agent(ABC):
-    """One engine, able to run one turn of one agent."""
+    """One engine, able to run one turn of any of the operator's agents."""
 
     kinds: frozenset[ProviderKind] = frozenset()
     """The model provider kinds this engine has a client for.
@@ -83,39 +74,26 @@ class Agent(ABC):
     then refused at start-up, naming the provider, instead of a person
     waiting for an answer from a client that was never built.
 
-    Declared here and not in an adapter so that asking costs the root no
-    second name from a framework's sub-package -- the one import and the one
-    construction are what deleting an adapter must break, and nothing else
-    (``docs/layout.md``, the discard test).
-
     Empty by default, which is a test double's honest answer: a scripted
-    engine reaches no provider at all, and a deployment wired with one
-    configures no model provider either.
+    engine reaches no provider at all.
     """
 
     @abstractmethod
-    def run_turn(
+    def stream(
         self,
         agent: AgentDefinition,
-        history: Sequence[Message],
-        tools: Sequence[ToolDefinition],
+        prompt: str,
         *,
         model: str,
-    ) -> AsyncGenerator[EngineEvent, None]:
-        """Answer ``history`` as ``agent`` on ``model`` with ``tools``, streaming the turn.
+        state: bytes | None,
+    ) -> AsyncGenerator[Event, None]:
+        """Send ``prompt`` as the next user turn and yield the turn's events as they happen.
 
-        ``history`` is the visible path of the conversation ending in the
-        **user message being answered** or, inside a tool round, in the
-        **tool message** holding the results the model is to go on from; it
-        is never empty and never ends anywhere else. It is the whole path:
-        what of it the model sees is this engine's to decide (ADR 0004). The
-        system prompt is ``agent``'s and is not one of the messages
-        (``docs/specs/conversations.md``).
-
-        ``tools`` is the list the run fetched once and holds for the turn,
-        sorted by name and bounded (``docs/specs/agents.md``, "Tools");
-        empty for an agent that names no server. The engine binds them to the
-        model as they are and executes none of them.
+        ``agent`` is the definition as the operator has it now: its system
+        prompt is sent with every request and never enters the memory, so
+        editing an agent takes effect at the next turn of its existing
+        conversations; its ``tools`` name the servers the framework connects
+        to for the turn (``docs/specs/agents.md``, "Tools").
 
         ``model`` is the id of the model the **run** records
         (``domain.Run.model``), never ``agent.model``: that is the agent's
@@ -124,6 +102,12 @@ class Agent(ABC):
         (``domain.UnknownModelError``), raised where the stream is iterated,
         like any other.
 
+        ``state`` is what this engine's last finished turn of the conversation
+        handed back in ``Done.state``, or ``None``. It is this engine's own
+        serialisation of its history and is handed back as it was given; an
+        engine is never given another engine's state (``docs/specs/agents.md``,
+        "A conversation stays with its engine").
+
         Not a coroutine: it hands back the stream, which is then iterated.
 
         **An async generator, and that is part of the port.** What it hands
@@ -131,10 +115,9 @@ class Agent(ABC):
         application releases what the engine holds -- when the turn ends,
         when it fails, and above all when the task running it is cancelled,
         which is how a run is cancelled. An implementation is therefore an
-        ``async def`` with ``yield``s in it, whose ``finally`` releases the
-        HTTP response, the client or the file; the contract suite asks the
-        object for ``aclose`` and asks the engine what it still holds
-        afterwards.
+        ``async def`` with ``yield``s in it, whose ``finally`` releases what
+        the turn opened; the contract suite asks the object for ``aclose``
+        and asks the engine what it still holds afterwards.
 
         The close is **bounded** by the application: an engine that takes too
         long to let go is abandoned rather than allowed to hold up the run

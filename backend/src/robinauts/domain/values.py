@@ -249,7 +249,7 @@ def publishable(carry: str, fragment: str) -> tuple[tuple[str, ...], str]:
 
         pieces, carry = publishable(carry, fragment.text)
         for piece in pieces:
-            publish(TextDelta(..., text=piece))
+            publish(TextPiece(..., text=piece))
         ...
         last = flush(carry)   # at the end of the answer
 

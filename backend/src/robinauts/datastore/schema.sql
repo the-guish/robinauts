@@ -269,7 +269,8 @@ CREATE INDEX IF NOT EXISTS messages_conversation_id_created_at_idx
 -- (docs/specs/runs.md). Unlike a message, a run is columns and no document --
 -- every field of it is something this store orders, filters or decides by --
 -- and the store builds the record back out of them inside
--- `domain.reading_stored`.
+-- `domain.reading_stored`. The one column that is neither is `engine_state`,
+-- below, which is opaque bytes handed back as they were given.
 --
 -- `(conversation_id, message_id)` points at a message of **that**
 -- conversation: a run answers a question of the conversation it is in, and
@@ -297,6 +298,13 @@ CREATE TABLE IF NOT EXISTS runs (
     started_at timestamptz,
     finished_at timestamptz,
     error text,
+    -- The conversation as the agent framework left it after this run: the
+    -- framework's own serialisation of its history, written with the run's
+    -- ending and read by the conversation's next turn, and never read by
+    -- anything of the platform's (docs/specs/conversations.md, "The model's
+    -- memory"). NULL for a run that did not finish, which leaves the memory
+    -- where the run before it left it. The transcript is in `messages`.
+    engine_state bytea,
     CONSTRAINT runs_message_id_fkey FOREIGN KEY (conversation_id, message_id)
         REFERENCES messages (conversation_id, id) ON DELETE CASCADE
 );

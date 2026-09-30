@@ -35,9 +35,8 @@ import pytest
 from ag_ui.core import EventType
 
 from aio import asyncio_test
-from contracts.tool_servers import SEARCH
-from conversations import AGENT, MODEL, OTHER_MODEL, agent_definition, conversation
-from fakes import Gate, MemoryConversationStore, MemoryToolServers, Step, calls, says
+from conversations import AGENT, MODEL, OTHER_MODEL, conversation
+from fakes import Gate, MemoryConversationStore, Step, calls, results, says
 from robinauts.api import (
     CONVERSATION_ID_HEADER,
     GENERIC_DETAIL,
@@ -71,16 +70,12 @@ from robinauts.application import StartedTurn
 from robinauts.domain import (
     MAX_CONFIG_ID_CHARS,
     MAX_MESSAGE_CHARS,
-    AnswerCompleted,
-    AnswerReasoningDelta,
-    AnswerStarted,
-    AnswerTextDelta,
+    Done,
+    ReasoningDelta,
     ReasoningPart,
     RunState,
-    ToolResult,
-    ToolServerConfig,
+    TextDelta,
     User,
-    text_parts,
 )
 from sse import Sent, Streamed, events, streaming
 from turns import NOW, SOMEBODY_ELSE, Wiring, settled, stored_messages
@@ -140,8 +135,8 @@ async def served(
 ) -> AsyncIterator[Served]:
     """The real application with a session open, over services on the fakes.
 
-    ``changes`` is what else ``turns.wired`` takes: the agent, the tool
-    servers and the port over them, for a turn that calls a tool.
+    ``changes`` is what else ``turns.wired`` takes: the agent's definition,
+    or the models on offer.
     """
     deployment = wired()
     secret, user = await open_session(deployment)
@@ -310,36 +305,19 @@ def two_stretches(text: str) -> list[Step]:
     """
     half = len(text) // 2
     return [
-        AnswerStarted(),
-        AnswerReasoningDelta(text="Let me think. "),
-        AnswerTextDelta(text=text[:half]),
-        AnswerReasoningDelta(text="And again. "),
-        AnswerTextDelta(text=text[half:]),
-        AnswerCompleted(parts=text_parts(text)),
+        ReasoningDelta(text="Let me think. "),
+        TextDelta(text=text[:half]),
+        ReasoningDelta(text="And again. "),
+        TextDelta(text=text[half:]),
+        Done(text=text),
     ]
 
 
-GITHUB = ToolServerConfig(
-    id="github", url="https://github.example.test/mcp/", secret_env="ROBINAUTS_GITHUB_TOKEN"
-)
+SEARCH_CALL = ("toolu_01", "github_search_repositories", {"q": "robinauts"})
+"""One call of the ``github`` server's search tool, as the framework announces it."""
 
-SEARCH_CALL = ("toolu_01", "github__search_repositories", {"q": "robinauts"})
-
-
-def tooled() -> dict[str, Any]:
-    """What ``served`` is handed for an agent with the ``github`` server.
-
-    The server lists ``SEARCH`` and answers it with a result; a test that
-    wants an error result changes the fake's answer.
-    """
-    tools = MemoryToolServers()
-    tools.serving(GITHUB.id, SEARCH)
-    tools.answering(GITHUB.id, SEARCH.name, ToolResult("found 3"))
-    return {
-        "definition": agent_definition(tools=(GITHUB.id,)),
-        "servers": {GITHUB.id: GITHUB},
-        "tools": tools,
-    }
+SEARCH_RESULT = ("toolu_01", "github_search_repositories", "found 3")
+"""What that call comes back with, where a test does not want an error."""
 
 
 def refusal(response: httpx.Response) -> tuple[int, dict[str, str], object]:
@@ -420,16 +398,18 @@ async def test_a_tool_round_is_the_calls_events_the_results_and_nothing_for_the_
     and no text message for the tool message -- announced or completed, it
     sends nothing, so those two positions carry no ``id:`` and a client
     re-attaching at the last id it saw is replayed nothing it had."""
-    async with served(*calls(SEARCH_CALL, text="Let me look."), **tooled()) as it:
-        it.wiring.agent.then(*says("Found three.", pieces=1))
-        it.wiring.tools.answering(GITHUB.id, SEARCH.name, ToolResult("no such repo", is_error=True))
+    async with served(
+        *calls(SEARCH_CALL, text="Let me look."),
+        *results(("toolu_01", "github_search_repositories", "no such repo", True)),
+        *says("Found three.", pieces=1),
+    ) as it:
         answered = await it.client.post(
             "/api/turns", json={"agent_id": AGENT, "text": QUESTION}, headers=WRITE
         )
         run_id = uuid.UUID(answered.headers[RUN_ID_HEADER])
         stored = await it.wiring.store.last_position(run_id)
-        question, calling, results, done = await stored_messages(
-            it.wiring.store, it.wiring.agent.asked[-1].history[0].conversation_id
+        question, calling, landed, done = await stored_messages(
+            it.wiring.store, uuid.UUID(answered.headers[CONVERSATION_ID_HEADER])
         )
 
     blocks = events(answered.text)
@@ -438,38 +418,38 @@ async def test_a_tool_round_is_the_calls_events_the_results_and_nothing_for_the_
         (EventType.TEXT_MESSAGE_START.value, "2"),
         (EventType.TEXT_MESSAGE_CONTENT.value, "3"),
         (EventType.TOOL_CALL_START.value, "4"),
+        # The arguments arrive whole, so they go out whole: one piece.
         (EventType.TOOL_CALL_ARGS.value, "5"),
-        (EventType.TOOL_CALL_ARGS.value, "6"),
-        (EventType.TOOL_CALL_END.value, "7"),
-        (EventType.TEXT_MESSAGE_END.value, "8"),
-        # Position 9 is the tool message announced, which sends nothing.
-        (EventType.TOOL_CALL_RESULT.value, "10"),
-        # Position 11 is the tool message completed: nothing again.
-        (EventType.TEXT_MESSAGE_START.value, "12"),
-        (EventType.TEXT_MESSAGE_CONTENT.value, "13"),
-        (EventType.TEXT_MESSAGE_END.value, "14"),
-        (EventType.RUN_FINISHED.value, "15"),
+        (EventType.TOOL_CALL_END.value, "6"),
+        (EventType.TEXT_MESSAGE_END.value, "7"),
+        # Position 8 is the tool message announced, which sends nothing.
+        (EventType.TOOL_CALL_RESULT.value, "9"),
+        # Position 10 is the tool message completed: nothing again.
+        (EventType.TEXT_MESSAGE_START.value, "11"),
+        (EventType.TEXT_MESSAGE_CONTENT.value, "12"),
+        (EventType.TEXT_MESSAGE_END.value, "13"),
+        (EventType.RUN_FINISHED.value, "14"),
     ]
-    assert stored == 15
-    start, *args, end = blocks[3:7]
+    assert stored == 14
+    start, *args, end = blocks[3:6]
     assert start.body == {
         "type": EventType.TOOL_CALL_START.value,
         "toolCallId": "toolu_01",
-        "toolCallName": "github__search_repositories",
+        "toolCallName": "github_search_repositories",
         "parentMessageId": str(calling.id),
     }
     assert "".join(block.body["delta"] for block in args) == '{"q": "robinauts"}'
     assert end.body == {"type": EventType.TOOL_CALL_END.value, "toolCallId": "toolu_01"}
-    assert blocks[8].body == {
+    assert blocks[7].body == {
         "type": EventType.TOOL_CALL_RESULT.value,
-        "messageId": str(results.id),
+        "messageId": str(landed.id),
         "toolCallId": "toolu_01",
         "content": "no such repo",
         "role": "tool",
         "metadata": {"isError": True},
     }
-    assert results.parent_id == calling.id and done.parent_id == results.id
-    assert blocks[9].body["messageId"] == str(done.id)
+    assert landed.parent_id == calling.id and done.parent_id == landed.id
+    assert blocks[8].body["messageId"] == str(done.id)
     # The result's text is on the wire once, as content, and nowhere else.
     assert answered.text.count("no such repo") == 1
 
@@ -501,23 +481,20 @@ async def test_dropping_anywhere_and_re_attaching_gives_the_whole_stream_once(
     run that **finished** and of one that was **cancelled**, since how a run
     ends is part of what a client is owed, and through both ways of saying
     where to carry on from. And of a turn with a **tool round** before that
-    answer (``shape``), so that the cuts fall inside a call's arguments,
+    answer (``shape``), so that the cuts fall on a call's arguments,
     across the two positions a tool message sends nothing for, and on a
     result.
     """
     gate = Gate()
     steps = two_stretches(ANSWER)
     if ending is RunState.CANCELLED:
-        steps.insert(3, gate)
-    changes: dict[str, Any] = {}
+        # After the first text of the answer, before its second thought.
+        steps.insert(2, gate)
     reached = 4
     if shape == "tools":
-        changes = tooled()
-        steps, second = list(calls(SEARCH_CALL, text="Let me look.")), steps
-        reached = 4 + 10  # the round before adds ten positions; the run started is shared
-    async with served(*steps, **changes) as it:
-        if shape == "tools":
-            it.wiring.agent.then(*second)
+        steps = [*calls(SEARCH_CALL, text="Let me look."), *results(SEARCH_RESULT), *steps]
+        reached = 4 + 9  # the round before adds nine positions; the run started is shared
+    async with served(*steps) as it:
         started = await it.begun()
         if ending is RunState.CANCELLED:
             await stream_reached(it.wiring.store, started.run.id, reached)
@@ -546,7 +523,7 @@ async def test_dropping_anywhere_and_re_attaching_gives_the_whole_stream_once(
     assert len(blocks) >= 7
     if shape == "tools":
         assert EventType.TOOL_CALL_RESULT.value in types(blocks)
-        assert types(blocks).count(EventType.TOOL_CALL_ARGS.value) == 2
+        assert types(blocks).count(EventType.TOOL_CALL_ARGS.value) == 1
     whole_sequence = sequence(blocks)
     for cut, answered in enumerate(rest):
         carried_on = sequence(blocks[: cut + 1] + events(answered.text))
@@ -1479,7 +1456,7 @@ async def test_a_stream_that_ends_in_an_error_closes_the_thinking_first() -> Non
     """A thinking block nothing closed would be shown, open, for ever."""
     gate = Gate()
     steps = says(ANSWER, reasoning="Let me think.")
-    steps.insert(2, gate)
+    steps.insert(1, gate)
     async with served(*steps, quiet_seconds=0.05, wait_seconds=0.05) as it:
         async with streaming(
             it.app,

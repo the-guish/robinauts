@@ -164,7 +164,7 @@ came back, as text ([../docs/specs/agents.md](../docs/specs/agents.md),
 `[mcp_servers.learn]` table and off one agent's `tools = ["learn"]` line in
 `robinauts.toml.in`, restart (`demo/stop.sh`, then `demo/start.sh`), and ask
 that agent something about, say, Azure: the model calls
-`learn__microsoft_docs_search`, the answer arrives with the call's toggle
+`learn_microsoft_docs_search`, the answer arrives with the call's toggle
 above it, and the conversation records both. **The demo then reaches
 `learn.microsoft.com` from this machine** for as long as the line is on. What
 the request carries is no credential and nothing that names you, but it does

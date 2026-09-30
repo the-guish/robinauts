@@ -82,8 +82,8 @@ from robinauts.domain import (
     RunNotFoundError,
     RunStarted,
     RunState,
-    TextDelta,
     TextPart,
+    TextPiece,
     ToolCallPart,
     ToolResultPart,
 )
@@ -105,7 +105,7 @@ def started(run_id: uuid.UUID, *, conversation_id: uuid.UUID = CONVERSATION) -> 
 def delta(run_id: uuid.UUID, seq: int, text: str = "more") -> RunEvent:
     """A piece of a message being produced, at ``seq``."""
     return RunEvent(
-        run_id=run_id, seq=seq, event=TextDelta(run_id=run_id, message_id=OTHER_RUN, text=text)
+        run_id=run_id, seq=seq, event=TextPiece(run_id=run_id, message_id=OTHER_RUN, text=text)
     )
 
 
@@ -545,6 +545,52 @@ class ConversationRunsContract(ConversationStoreContract):
                 FIRST_POSITION,
                 FIRST_POSITION + 1,
             ]
+
+    @asyncio_test
+    async def test_a_run_that_finished_keeps_the_state_the_engine_left(self) -> None:
+        """The memory of a conversation is what the engine handed back with the
+        run's ending: stored with it, in one write, handed back as it was given
+        and never read (``docs/specs/conversations.md``, "The model's memory")."""
+        async with self.opened() as store:
+            await _begun(store)
+            over_with = transition(await _stored(store), RunState.FINISHED, now=at(4))
+            event = over(RUN, FIRST_POSITION + 1, RunState.FINISHED)
+            given = bytearray(b'{"messages": [1, 2]}')
+
+            await store.end_run(
+                over_with, event, run_event_to_data(event), engine_state=bytes(given)
+            )
+            given[0:1] = b"["
+
+            assert await store.engine_state(RUN) == b'{"messages": [1, 2]}'
+
+    @asyncio_test
+    async def test_a_run_ended_without_a_state_and_one_still_going_have_none(self) -> None:
+        async with self.opened() as store:
+            await _begun(store)
+            assert await store.engine_state(RUN) is None
+            await _ended(store, RunState.CANCELLED)
+
+            assert await store.engine_state(RUN) is None
+            assert await store.engine_state(uuid.uuid4()) is None
+
+    @asyncio_test
+    async def test_a_state_is_bytes_and_nothing_is_written_for_anything_else(self) -> None:
+        async with self.opened() as store:
+            await _begun(store)
+            over_with = transition(await _stored(store), RunState.FINISHED, now=at(4))
+            event = over(RUN, FIRST_POSITION + 1, RunState.FINISHED)
+
+            with pytest.raises(InvalidValueError, match="bytes"):
+                await store.end_run(
+                    over_with,
+                    event,
+                    run_event_to_data(event),
+                    engine_state="{}",  # type: ignore[arg-type]
+                )
+
+            assert (await _stored(store)).state is RunState.RUNNING
+            assert await store.last_position(RUN) == FIRST_POSITION
 
     @asyncio_test
     async def test_a_run_that_has_ended_is_never_written_again(self) -> None:

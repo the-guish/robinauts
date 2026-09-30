@@ -100,21 +100,31 @@ topic documents listed under [Documents](#documents).
 ### The agent engine is a port
 
 - The controller — the main application flow — is independent of any agent
-  framework. It knows only the agent port.
-- There are two implementations: one on LangGraph (or LangChain; open
+  framework. It knows only the agent port: hand the adapter a question and
+  the conversation's memory, and write down what it streams. The tool
+  loop, the context and the memory are the framework's, behind the port
+  ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
+- There are two implementations: one on LangChain (or LangGraph; open
   source parts only, none of their commercial or hosted offerings), one on
   Pydantic AI.
-- The two are swappable at any time: by configuration, with no change to
-  the controller and no change to stored data.
+- Both are wired in every deployment and held to one contract suite, so the
+  seam is agent-framework agnostic and a third framework is a third
+  adapter. A conversation stays with the engine it started on.
 
-### Persistence is framework-neutral and vendor-neutral
+### The transcript is the platform's; the memory is the framework's
 
 - Conversations are persisted in the database, in a format the platform
-  owns — not the format of any agent framework or any model vendor.
-- Any conversation can be continued with any framework and any vendor.
-- A framework's own persistence is never the source of truth; both engines
-  are stateless per turn.
-  [ADR 0002](../adr/0002-conversation-persistence.md).
+  owns — not the format of any agent framework or any model vendor — as
+  the **transcript**: what the people reading the conversation see, what
+  the exports carry, what analytics reads.
+- The model's **memory** — the framework's own history of the conversation,
+  in the framework's own format, with whatever it kept in it — is stored by
+  the platform, on the run that produced it, as opaque data the platform
+  never reads, and handed back to the same framework at the next turn.
+- A framework's own persistence is never used: no checkpointer, no tables
+  of a framework's in the deployment's schema.
+  [ADR 0002](../adr/0002-conversation-persistence.md),
+  [ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md).
 
 ### Dependency scanning from day zero
 
@@ -142,8 +152,8 @@ topic documents listed under [Documents](#documents).
   this project owns, and the chat in the middle; the application opens on
   an empty chat. [frontend.md](frontend.md).
 - **Conversations.** A tree of messages in the platform's own format —
-  text, images, files, reasoning, tool calls and their results — portable
-  across engines and vendors; with attachments, search and export.
+  text, images, files, reasoning, tool calls and their results — the
+  transcript of what was said; with attachments, search and export.
   [conversations.md](conversations.md).
 - **Privacy.** Private by default; projects; share links; admins see
   metadata and never content; soft delete, retention, audit.
@@ -152,16 +162,17 @@ topic documents listed under [Documents](#documents).
   engine, and the tool servers it may use. Users pick one per conversation.
   [agents.md](agents.md).
 - **Tools.** Remote MCP servers the operator configures like model
-  providers; the platform owns the loop — it calls the tool, stores the
-  result and runs the engine again from the record — and no framework ever
-  executes one. [agents.md](agents.md), [runs.md](runs.md).
+  providers; the framework's own MCP client calls them inside its loop, and
+  the platform writes each call and result into the transcript as it
+  happens. [agents.md](agents.md), [runs.md](runs.md).
 - **A turn.** The UI posts a message, which starts a **run**: the
-  controller loads the history from the database, calls the agent port,
-  publishes the answer as AG-UI events, and appends each new message as it
-  is produced. The run executes in the background and is persisted: if the
-  request drops, the agent keeps working, and the UI re-attaches. One
-  active run per conversation. [runs.md](runs.md), [agents.md](agents.md),
-  [wire.md](wire.md).
+  controller finds the conversation's memory, hands the agent port the
+  question and that memory, publishes what the adapter streams as AG-UI
+  events, appends each new message as it completes, and stores the memory
+  the adapter hands back. The run executes in the background and is
+  persisted: if the request drops, the agent keeps working, and the UI
+  re-attaches. One active run per conversation. [runs.md](runs.md),
+  [agents.md](agents.md), [wire.md](wire.md).
 - **Channels.** One API for every delivery channel. The web UI is the
   first client; a mobile application and a Slack bridge are planned, and
   consume the same agents and conversations through the same API.
@@ -177,8 +188,10 @@ hard, the decision is taken with them in mind.
 - Tools that suspend a run — a person's approval before a tool runs, an
   external job whose result arrives later — and per-user credentials to a
   tool server ([runs.md](runs.md), [agents.md](agents.md)).
-- Memories. When they come they live in the one database and are
-  framework-neutral, like conversations.
+- Memories a person keeps across conversations. When they come they live
+  in the one database and are framework-neutral, like the transcript; the
+  model's memory of one conversation is the framework's and is already
+  stored ([agents.md](agents.md)).
 - Usage reporting (goal 7).
 - API tokens.
 - More delivery channels: a mobile application, a Slack bridge; and a way

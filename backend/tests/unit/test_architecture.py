@@ -77,10 +77,8 @@ class Framework:
     """One confined library, its contract, and the sub-package it belongs to.
 
     The two agent frameworks, and the MCP SDK -- which is confined the same
-    way, to ``adapters/tools/mcp/``, before it is a dependency at all
-    (``backend/pyproject.toml``): a probe that imports a package nobody has
-    installed is still an import the contract sees, which is the point of
-    writing the rule first.
+    way, to the two agent adapters, since each framework reaches the tool
+    servers through its own MCP client (``backend/pyproject.toml``).
     """
 
     module: str
@@ -117,12 +115,17 @@ FRAMEWORKS = (
     ),
     Framework(
         module="mcp",
-        contract="the MCP SDK only under adapters.tools.mcp",
-        sub_package="tools/mcp",
+        contract="the MCP SDK only under the two agent adapters",
+        sub_package="agents/langgraph",
         probe="mcp",
     ),
 )
-"""Both frameworks and the SDK, so that every probe below runs against every contract."""
+"""Both frameworks and the SDK, so that every probe below runs against every contract.
+
+The SDK is allowed under **both** agent adapters; one of the two stands for
+the exception here, and a probe beside it (``adapters/agents/``) is still
+outside the rule.
+"""
 
 
 def lint_imports(tree: Path = ROOT) -> subprocess.CompletedProcess[str]:
@@ -289,9 +292,9 @@ def test_the_exception_covers_the_sub_package_and_nothing_beside_it(
 ) -> None:
     """The same module, one directory further in, is still outside the exception.
 
-    ``adapters/agents/`` is not ``adapters/agents/<framework>/``, and
-    ``adapters/tools/`` is not ``adapters/tools/mcp/``: the exception names one
-    sub-package, and a module beside it is held to the rule like every other.
+    ``adapters/agents/`` is not ``adapters/agents/<framework>/``: the
+    exception names a sub-package, and a module beside it is held to the rule
+    like every other.
     """
     beside = Path(framework.sub_package).parent
     where = f"_probe_beside_the_exception_{framework.probe}"

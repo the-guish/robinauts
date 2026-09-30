@@ -100,7 +100,6 @@ from robinauts.domain import (
     SignInError,
     SignInErrorCode,
     StoredDataError,
-    ToolServerError,
     UnknownAgentError,
     UnknownModelError,
     UnknownProviderError,
@@ -260,12 +259,6 @@ STATUS_OF: dict[type[RobinautsError], int] = {
     InvalidIdTokenError: 403,
     UnknownProviderError: 404,
     ProviderUnavailableError: 502,
-    # A tool server that cannot be reached, or will not list its tools, fails
-    # the run that needed it, which the run's stream reports; no route raises
-    # this. It is here so that one escaping from anywhere else names what it
-    # is -- somebody else's server, not this deployment -- and so that the
-    # table stays exhaustive.
-    ToolServerError: 502,
     # Content of a kind the format names and this build does not carry: the
     # request asked for something that is not there yet, not something wrong.
     UnsupportedContentError: 422,

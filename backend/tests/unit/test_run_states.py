@@ -30,7 +30,7 @@ from robinauts.core import (
     ResumePoint,
     active_run,
     active_run_stored,
-    check_engine_events,
+    check_backend_events,
     check_event_order,
     check_may_start_run,
     check_may_start_run_stored,
@@ -46,20 +46,17 @@ from robinauts.domain import (
     ENDED_RUN_STATES,
     FIRST_POSITION,
     MAX_RUN_ERROR_CHARS,
-    AnswerCompleted,
-    AnswerReasoningDelta,
-    AnswerStarted,
-    AnswerTextDelta,
-    ArgumentsDelta,
+    ArgumentsPiece,
     CallCompleted,
     CallStarted,
+    Done,
     IllegalTransitionError,
     InvalidValueError,
     Message,
     MessageCompleted,
     MessageStarted,
     ReasoningDelta,
-    ReasoningPart,
+    ReasoningPiece,
     ResultLanded,
     Role,
     RunAlreadyActiveError,
@@ -70,12 +67,11 @@ from robinauts.domain import (
     StoredDataError,
     TextDelta,
     TextPart,
-    ToolCallArgumentsDelta,
-    ToolCallCompleted,
+    TextPiece,
+    ToolCall,
     ToolCallPart,
-    ToolCallStarted,
+    ToolResult,
     ToolResultPart,
-    WaitingOnTools,
 )
 
 LEGAL = {
@@ -262,315 +258,95 @@ def test_rows_of_ours_that_contradict_each_other_are_a_fault_of_ours() -> None:
     assert check_may_start_run_stored([ended(RunState.FINISHED)]) is None
 
 
-# --- what an engine yields ---------------------------------------------------
+# --- what an adapter streams -------------------------------------------------
+
+
+CALL = ToolCall(call_id="toolu_01", name="github_search", arguments={"q": "robinauts"})
+RESULT = ToolResult(call_id="toolu_01", name="github_search", output="found 3")
 
 
 def answered(text: str = "Some one") -> tuple[object, ...]:
-    """One answer, streamed in two pieces and completed."""
+    """One answer, thought about, streamed in two pieces and done."""
     return (
-        AnswerStarted(),
-        AnswerReasoningDelta(text="thinking"),
-        AnswerTextDelta(text=text[:4]),
-        AnswerTextDelta(text=text[4:]),
-        AnswerCompleted(parts=(TextPart(text),)),
+        ReasoningDelta(text="thinking"),
+        TextDelta(text=text[:4]),
+        TextDelta(text=text[4:]),
+        Done(text=text, state=b"{}"),
     )
 
 
-def test_what_an_engine_yields_for_a_turn() -> None:
-    assert check_engine_events(answered()) is None
-    assert check_engine_events((*answered("one"), *answered("two"))) is None
+def with_a_tool(text: str = "Found three.") -> tuple[object, ...]:
+    """A turn that calls a tool, gets its result and answers."""
+    return (TextDelta(text="Let me look."), CALL, RESULT, TextDelta(text=text), Done(text=text))
 
 
-CALL = ToolCallPart("toolu_01", "github__search", {"q": "robinauts"})
+def test_what_an_adapter_streams_for_a_turn() -> None:
+    assert check_backend_events(answered()) is None
+    assert check_backend_events(with_a_tool()) is None
+    # A turn that streamed nothing and answered whole, and one that answered
+    # with nothing at all, are turns.
+    assert check_backend_events((Done(text="all at once"),)) is None
+    assert check_backend_events((Done(text=""),)) is None
 
 
-def asked_for_tools(*, streamed: bool = True) -> tuple[object, ...]:
-    """One answer that calls a tool, and the turn ending waiting on it."""
-    arguments: tuple[object, ...] = ()
-    if streamed:
-        arguments = (
-            ToolCallArgumentsDelta(call_id=CALL.call_id, text='{"q": "robi'),
-            ToolCallArgumentsDelta(call_id=CALL.call_id, text='nauts"}'),
-        )
-    return (
-        AnswerStarted(),
-        AnswerTextDelta(text="Let me look."),
-        ToolCallStarted(call_id=CALL.call_id, name=CALL.name),
-        *arguments,
-        ToolCallCompleted(call=CALL),
-        AnswerCompleted(parts=(TextPart("Let me look."), CALL)),
-        WaitingOnTools(),
-    )
-
-
-def test_an_answer_that_asks_for_tools_ends_the_turn_waiting() -> None:
-    assert check_engine_events(asked_for_tools()) is None
-    assert check_engine_events(asked_for_tools(streamed=False)) is None
-    # After answers that asked for none, and never before another answer.
-    assert check_engine_events((*answered("first"), *asked_for_tools())) is None
-    with pytest.raises(InvalidValueError, match="ends the turn waiting"):
-        check_engine_events(asked_for_tools()[:-1])
-    with pytest.raises(InvalidValueError, match="ends the turn waiting"):
-        check_engine_events((*asked_for_tools()[:-1], *answered("then more")))
+def test_a_turn_ends_by_saying_it_is_done_once_and_last() -> None:
+    with pytest.raises(InvalidValueError, match="ends by saying it is done"):
+        check_backend_events(())
+    with pytest.raises(InvalidValueError, match="ends by saying it is done"):
+        check_backend_events((TextDelta(text="half an ans"),))
     with pytest.raises(InvalidValueError, match="nothing follows"):
-        check_engine_events((*asked_for_tools(), *answered("then more")))
-    # And a turn that asked for none never says it is waiting.
-    with pytest.raises(InvalidValueError, match="waits on the tools"):
-        check_engine_events((*answered(), WaitingOnTools()))
-    with pytest.raises(InvalidValueError, match="waits on the tools"):
-        check_engine_events((AnswerStarted(), WaitingOnTools()))
-    # Cut short, a turn may stop before saying so: that is what a failure
-    # between the answer and the waiting looks like.
-    assert check_engine_events(asked_for_tools()[:-1], cut_short=True) is None
+        check_backend_events((Done(text="one"), Done(text="two")))
+    with pytest.raises(InvalidValueError, match="nothing follows"):
+        check_backend_events((Done(text="one"), TextDelta(text="more")))
 
 
-def test_a_tool_call_is_announced_inside_an_answer_one_at_a_time() -> None:
-    started, said, announced, first, second, completed, answer, waiting = asked_for_tools()
-    with pytest.raises(InvalidValueError, match="belongs to an answer"):
-        check_engine_events((announced, started))
-    with pytest.raises(InvalidValueError, match="one tool call at a time"):
-        check_engine_events((started, announced, announced))
-    other = ToolCallStarted(call_id="toolu_02", name="jira__find")
-    with pytest.raises(InvalidValueError, match="one tool call at a time"):
-        check_engine_events((started, announced, other))
-    # The same id twice in one answer would answer nothing.
-    twice = ToolCallCompleted(call=CALL)
-    with pytest.raises(InvalidValueError, match="each tool call once"):
-        check_engine_events((started, announced, twice, announced, twice, answer, waiting))
-    with pytest.raises(InvalidValueError, match="that was announced is completed"):
-        check_engine_events((started, announced, first, answer))
-    with pytest.raises(InvalidValueError, match="completed once, after it was announced"):
-        check_engine_events((started, completed))
+def test_a_call_is_announced_once_and_answered_once_under_its_name() -> None:
+    with pytest.raises(InvalidValueError, match="announced once"):
+        check_backend_events((CALL, CALL, RESULT, Done(text="")))
+    with pytest.raises(InvalidValueError, match="announced once"):
+        check_backend_events((CALL, RESULT, CALL, RESULT, Done(text="")))
+    with pytest.raises(InvalidValueError, match="answers a call announced before it"):
+        check_backend_events((RESULT, CALL, Done(text="")))
+    with pytest.raises(InvalidValueError, match="answers a call announced before it"):
+        check_backend_events((CALL, RESULT, RESULT, Done(text="")))
+    with pytest.raises(InvalidValueError, match="names the tool"):
+        check_backend_events((CALL, replace(RESULT, name="jira_find"), Done(text="")))
+    # Two calls of one batch may be answered in either order.
+    other = ToolCall(call_id="toolu_02", name="jira_find")
+    answered_other = ToolResult(call_id="toolu_02", name="jira_find", output="none")
+    assert check_backend_events((CALL, other, answered_other, RESULT, Done(text=""))) is None
 
 
-def test_a_tool_calls_arguments_belong_to_the_open_call_and_are_what_it_completes_with() -> None:
-    started, said, announced, first, second, completed, answer, waiting = asked_for_tools()
-    with pytest.raises(InvalidValueError, match="belong to the tool call being made"):
-        check_engine_events((started, first))
-    stray = ToolCallArgumentsDelta(call_id="toolu_02", text="{}")
-    with pytest.raises(InvalidValueError, match="belong to the tool call being made"):
-        check_engine_events((started, announced, stray))
-    with pytest.raises(InvalidValueError, match="are the arguments it completed with"):
-        check_engine_events(
-            (
-                started,
-                announced,
-                first,
-                ToolCallArgumentsDelta(call_id=CALL.call_id, text='x"}'),
-                completed,
-            )
-        )
-    with pytest.raises(InvalidValueError, match="are JSON"):
-        check_engine_events(
-            (
-                started,
-                announced,
-                ToolCallArgumentsDelta(call_id=CALL.call_id, text="not json"),
-                completed,
-            )
-        )
-    # Whitespace alone is nothing streamed, as an empty text delta is.
-    blank = ToolCallArgumentsDelta(call_id=CALL.call_id, text=" ")
-    assert check_engine_events((started, announced, blank, completed, answer, waiting)) is None
-    # A character cut in half across two deltas -- a surrogate pair the
-    # vendor split -- is joined before it is read, as an answer's text is.
-    high = ToolCallArgumentsDelta(call_id=CALL.call_id, text='{"q": "\ud83d')
-    low = ToolCallArgumentsDelta(call_id=CALL.call_id, text='\ude00"}')
-    smiled = ToolCallCompleted(call=ToolCallPart(CALL.call_id, CALL.name, {"q": "\U0001f600"}))
-    whole = AnswerCompleted(parts=(TextPart("Let me look."), smiled.call))
-    assert check_engine_events((started, announced, high, low, smiled, whole, waiting)) is None
-
-
-def test_streamed_arguments_are_compared_as_json_and_refused_past_what_the_parser_follows() -> None:
-    started, said, announced, first, second, completed, answer, waiting = asked_for_tools()
-    # ``1`` and ``1.0`` are one value to Python and two to JSON; the record
-    # holds what was streamed, so the wire and the store must agree as JSON.
-    completed_as_int = ToolCallCompleted(call=ToolCallPart(CALL.call_id, CALL.name, {"n": 1}))
-    streamed_as_float = ToolCallArgumentsDelta(call_id=CALL.call_id, text='{"n": 1.0}')
-    with pytest.raises(InvalidValueError, match="are the arguments it completed with"):
-        check_engine_events((started, announced, streamed_as_float, completed_as_int))
-    streamed_as_bool = ToolCallArgumentsDelta(call_id=CALL.call_id, text='{"n": true}')
-    with pytest.raises(InvalidValueError, match="are the arguments it completed with"):
-        check_engine_events((started, announced, streamed_as_bool, completed_as_int))
-    # Deltas are bounded one by one and not in number: text nested past what
-    # the parser can follow is refused as not the call's JSON, not raised as
-    # a RecursionError from a place that promised a refusal.
-    deep = [ToolCallArgumentsDelta(call_id=CALL.call_id, text="[" * 5_000) for _ in range(40)]
-    with pytest.raises(InvalidValueError, match="are JSON"):
-        check_engine_events((started, announced, *deep, completed))
-
-
-def test_a_tool_call_completes_as_it_was_announced_and_the_answer_holds_exactly_the_calls() -> None:
-    started, said, announced, first, second, completed, answer, waiting = asked_for_tools()
-    renamed = ToolCallCompleted(call=ToolCallPart(CALL.call_id, "other__tool", CALL.arguments))
-    with pytest.raises(InvalidValueError, match="completed as it was announced"):
-        check_engine_events((started, announced, renamed))
-    # The completed answer holds the calls it announced, and no other.
-    with pytest.raises(InvalidValueError, match="exactly the calls it announced"):
-        check_engine_events(
-            (
-                started,
-                announced,
-                first,
-                second,
-                completed,
-                AnswerCompleted(parts=(TextPart("Let me look."),)),
-                waiting,
-            )
-        )
-    with pytest.raises(InvalidValueError, match="exactly the calls it announced"):
-        check_engine_events((AnswerStarted(), AnswerCompleted(parts=(CALL,)), WaitingOnTools()))
-
-
-def test_a_turn_produces_an_answer_and_one_that_produces_none_failed() -> None:
-    """A run that ends with no answer is a failed run, never a finished one,
-    so a stream with nothing in it is refused rather than turned into a
-    conversation with a turn missing from it."""
-    with pytest.raises(InvalidValueError, match="one that produces none failed"):
-        check_engine_events(())
-    assert check_engine_events((), cut_short=True) is None
-    # A turn that announced an answer and never finished it is cut short,
-    # which is the failure case and not a turn that produced nothing.
-    assert check_engine_events((AnswerStarted(),), cut_short=True) is None
-
-
-def test_an_engine_produces_one_answer_at_a_time() -> None:
-    started, *rest = answered()
-    with pytest.raises(InvalidValueError, match="one answer at a time"):
-        check_engine_events((started, started, *rest))
-
-
-def test_an_answer_is_announced_before_its_deltas_and_completed_after_them() -> None:
-    started, thinking, first, second, completed = answered()
-    with pytest.raises(InvalidValueError, match="an answer being produced"):
-        check_engine_events((first, started, second, completed))
-    with pytest.raises(InvalidValueError, match="completed once"):
-        check_engine_events((completed,))
-    with pytest.raises(InvalidValueError, match="that was announced is completed"):
-        check_engine_events((started, thinking, first, second))
-
-
-def test_an_answer_that_streamed_nothing_may_complete_with_anything() -> None:
-    """Not every provider streams, and not every path through one does."""
-    assert (
-        check_engine_events((AnswerStarted(), AnswerCompleted(parts=(TextPart("all at once"),))))
-        is None
-    )
-    assert (
-        check_engine_events(
-            (
-                AnswerStarted(),
-                AnswerReasoningDelta(text="thinking"),
-                AnswerCompleted(parts=(TextPart("all at once"),)),
-            )
-        )
-        is None
-    )
-
-
-def test_a_turn_may_stream_one_answer_and_not_the_next() -> None:
-    assert (
-        check_engine_events(
-            (*answered("one"), AnswerStarted(), AnswerCompleted(parts=(TextPart("two"),)))
-        )
-        is None
-    )
-    with pytest.raises(InvalidValueError, match="text deltas are the text"):
-        check_engine_events(
-            (
-                AnswerStarted(),
-                AnswerCompleted(parts=(TextPart("one"),)),
-                AnswerStarted(),
-                AnswerTextDelta(text="two"),
-                AnswerCompleted(parts=(TextPart("something else"),)),
-            )
-        )
+def test_a_turn_ends_with_every_call_it_announced_answered() -> None:
+    with pytest.raises(InvalidValueError, match="every call it announced answered"):
+        check_backend_events((CALL, Done(text="")))
+    assert check_backend_events((CALL,), cut_short=True) is None
 
 
 def test_a_turn_cut_short_is_checked_only_when_it_is_asked_for() -> None:
-    """An engine reports a failure by raising and a cancellation closes it
+    """An adapter reports a failure by raising and a cancellation closes it
     where it stands, so what it yielded ends wherever it ended."""
-    cut = (AnswerStarted(), AnswerTextDelta(text="half an ans"))
-    with pytest.raises(InvalidValueError, match="that was announced is completed"):
-        check_engine_events(cut)
-    assert check_engine_events(cut, cut_short=True) is None
-    assert check_engine_events(answered(), cut_short=True) is None
+    cut = (TextDelta(text="half an ans"),)
+    with pytest.raises(InvalidValueError, match="ends by saying it is done"):
+        check_backend_events(cut)
+    assert check_backend_events(cut, cut_short=True) is None
+    assert check_backend_events((), cut_short=True) is None
+    assert check_backend_events(answered(), cut_short=True) is None
     # Everything else still holds when a turn was cut short.
-    with pytest.raises(InvalidValueError, match="one answer at a time"):
-        check_engine_events((AnswerStarted(), AnswerStarted()), cut_short=True)
+    with pytest.raises(InvalidValueError, match="announced once"):
+        check_backend_events((CALL, CALL), cut_short=True)
 
 
-def test_reasoning_is_streamed_and_never_has_to_be_completed_with() -> None:
-    """This version shows it as it arrives and keeps none of it."""
-    assert (
-        check_engine_events(
-            (
-                AnswerStarted(),
-                AnswerReasoningDelta(text="a long thought"),
-                AnswerTextDelta(text="Hi"),
-                AnswerCompleted(parts=(TextPart("Hi"),)),
-            )
-        )
-        is None
-    )
-    # And an engine that does return it is not refused: the application drops
-    # it, because an engine is not asked to know what the platform keeps.
-    assert (
-        check_engine_events(
-            (
-                AnswerStarted(),
-                AnswerTextDelta(text="Hi"),
-                AnswerCompleted(parts=(ReasoningPart("a long thought"), TextPart("Hi"))),
-            )
-        )
-        is None
-    )
-
-
-def test_what_an_engine_streamed_is_what_it_completed_with() -> None:
-    """An engine that streamed one thing and returned another would be two
-    engines, and a conversation started on one would not continue on the
-    other."""
-    started, thinking, first, second, _ = answered()
-    with pytest.raises(InvalidValueError, match="text deltas are the text"):
-        check_engine_events(
-            (started, thinking, first, second, AnswerCompleted(parts=(TextPart("something else"),)))
-        )
-    # The pieces are joined before they are compared, so half a character
-    # arriving on a boundary is not a difference.
-    split = (
-        AnswerStarted(),
-        AnswerTextDelta(text="a\ud83d"),
-        AnswerTextDelta(text="\ude00b"),
-        AnswerCompleted(parts=(TextPart("a\U0001f600b"),)),
-    )
-    assert check_engine_events(split) is None
-
-
-def test_reasoning_is_streamed_and_need_not_be_kept() -> None:
-    """This version drops it; an engine that streams it is still in order."""
-    assert (
-        check_engine_events(
-            (
-                AnswerStarted(),
-                AnswerReasoningDelta(text="thinking"),
-                AnswerCompleted(parts=(TextPart(""),)),
-            )
-        )
-        is None
-    )
-
-
-def test_an_engine_knows_nothing_of_runs_ids_or_rows() -> None:
+def test_an_adapter_knows_nothing_of_runs_ids_or_rows() -> None:
     for event in (
         RunStarted(run_id=RUN, conversation_id=CONVERSATION),
         RunEnded(run_id=RUN, state=RunState.FINISHED),
         MessageStarted(run_id=RUN, message_id=uuid.uuid4(), parent_id=uuid.uuid4()),
     ):
         with pytest.raises(InvalidValueError, match="the application"):
-            check_engine_events((event,))
-    with pytest.raises(InvalidValueError, match="engine events"):
-        check_engine_events(("an answer",))
+            check_backend_events((event,))
+    with pytest.raises(InvalidValueError, match="its events"):
+        check_backend_events(("an answer",))  # type: ignore[arg-type]
 
 
 # --- the order of a run's events --------------------------------------------
@@ -587,8 +363,8 @@ def produced(messages: int = 1) -> tuple[Message, list[Message], tuple[object, .
         made = answer(parent, text, seconds=step + 1)
         events.append(MessageStarted(run_id=RUN, message_id=made.id, parent_id=made.parent_id))
         # What is published is what is stored, so the delta is the text.
-        events.append(TextDelta(run_id=RUN, message_id=made.id, text=text))
-        events.append(ReasoningDelta(run_id=RUN, message_id=made.id, text="thinking"))
+        events.append(TextPiece(run_id=RUN, message_id=made.id, text=text))
+        events.append(ReasoningPiece(run_id=RUN, message_id=made.id, text="thinking"))
         events.append(MessageCompleted(run_id=RUN, message=made))
         said.append(made)
         parent = made
@@ -681,7 +457,7 @@ def test_a_delta_belongs_to_the_message_being_produced() -> None:
         ordered((begun, delta, announced, thinking, completed, over), follows=asked.id)
     with pytest.raises(InvalidValueError, match="a message being produced"):
         ordered((begun, announced, thinking, completed, delta, over), follows=asked.id)
-    elsewhere = TextDelta(run_id=RUN, message_id=uuid.uuid4(), text="Some")
+    elsewhere = TextPiece(run_id=RUN, message_id=uuid.uuid4(), text="Some")
     with pytest.raises(InvalidValueError, match="a message being produced"):
         ordered((begun, announced, elsewhere, completed, over), follows=asked.id)
 
@@ -736,14 +512,14 @@ def test_what_was_published_for_a_message_is_the_message_that_was_stored() -> No
     with pytest.raises(InvalidValueError, match="is the message that was stored"):
         # The last piece was never published: a flush nobody wrote.
         ordered((begun, announced, delta, thinking, forgotten, over), follows=asked.id)
-    rewritten = TextDelta(run_id=RUN, message_id=said[0].id, text="something else")
+    rewritten = TextPiece(run_id=RUN, message_id=said[0].id, text="something else")
     with pytest.raises(InvalidValueError, match="is the message that was stored"):
         ordered((begun, announced, rewritten, thinking, completed, over), follows=asked.id)
     # A message nothing was published for may be stored whole: not every
     # answer is streamed, and a delta that carried nothing is nothing
     # published -- as on the engine's side of the same promise.
     assert ordered((begun, announced, thinking, completed, over), follows=asked.id) is None
-    nothing = TextDelta(run_id=RUN, message_id=said[0].id, text="")
+    nothing = TextPiece(run_id=RUN, message_id=said[0].id, text="")
     assert ordered((begun, announced, nothing, thinking, completed, over), follows=asked.id) is None
 
 
@@ -796,7 +572,7 @@ def test_a_long_answer_is_checked_in_one_pass() -> None:
         RunStarted(run_id=RUN, conversation_id=CONVERSATION),
         MessageStarted(run_id=RUN, message_id=said.id, parent_id=said.parent_id),
     ]
-    events.extend(TextDelta(run_id=RUN, message_id=said.id, text="x") for _ in range(50_000))
+    events.extend(TextPiece(run_id=RUN, message_id=said.id, text="x") for _ in range(50_000))
     events.append(MessageCompleted(run_id=RUN, message=said))
     events.append(RunEnded(run_id=RUN, state=RunState.FINISHED))
 
@@ -1015,11 +791,11 @@ def generated_run(rng: random.Random) -> tuple[Message, list[Message], list[RunE
         made = answer(parent, text, seconds=step + 1)
         events.append(MessageStarted(run_id=RUN, message_id=made.id, parent_id=made.parent_id))
         if rng.random() < 0.5:
-            events.append(ReasoningDelta(run_id=RUN, message_id=made.id, text="thinking"))
+            events.append(ReasoningPiece(run_id=RUN, message_id=made.id, text="thinking"))
         # Streamed piece by piece, or not streamed at all: both are answers.
         if rng.random() < 0.7:
             for piece in text:
-                events.append(TextDelta(run_id=RUN, message_id=made.id, text=piece))
+                events.append(TextPiece(run_id=RUN, message_id=made.id, text=piece))
         if left_open and step == messages - 1:
             break
         events.append(MessageCompleted(run_id=RUN, message=made))
@@ -1099,15 +875,15 @@ def tool_round(*, streamed: bool = True) -> tuple[Message, Message, Message, tup
     arguments: tuple[object, ...] = ()
     if streamed:
         arguments = (
-            ArgumentsDelta(
+            ArgumentsPiece(
                 run_id=RUN, message_id=calling.id, call_id="toolu_01", text='{"q": "robi'
             ),
-            ArgumentsDelta(run_id=RUN, message_id=calling.id, call_id="toolu_01", text='nauts"}'),
+            ArgumentsPiece(run_id=RUN, message_id=calling.id, call_id="toolu_01", text='nauts"}'),
         )
     events: tuple[object, ...] = (
         RunStarted(run_id=RUN, conversation_id=CONVERSATION),
         MessageStarted(run_id=RUN, message_id=calling.id, parent_id=asked.id),
-        TextDelta(run_id=RUN, message_id=calling.id, text="Let me look."),
+        TextPiece(run_id=RUN, message_id=calling.id, text="Let me look."),
         CallStarted(run_id=RUN, message_id=calling.id, call_id="toolu_01", name="github__search"),
         *arguments,
         CallCompleted(run_id=RUN, message_id=calling.id, call_id="toolu_01"),
@@ -1121,7 +897,7 @@ def tool_round(*, streamed: bool = True) -> tuple[Message, Message, Message, tup
         ResultLanded(run_id=RUN, message_id=results.id, call_id="toolu_01", text="found 3"),
         MessageCompleted(run_id=RUN, message=results),
         MessageStarted(run_id=RUN, message_id=done.id, parent_id=results.id),
-        TextDelta(run_id=RUN, message_id=done.id, text="Found three."),
+        TextPiece(run_id=RUN, message_id=done.id, text="Found three."),
         MessageCompleted(run_id=RUN, message=done),
         RunEnded(run_id=RUN, state=RunState.FINISHED),
     )
@@ -1165,7 +941,7 @@ def test_a_tool_call_is_announced_inside_an_answer_one_at_a_time_and_completed()
     with pytest.raises(InvalidValueError, match="completed before its answer"):
         ordered(tuple(event for event in events if event is not last_completed), follows=asked.id)
     # Arguments for a call that is not the one being made.
-    stray = ArgumentsDelta(run_id=RUN, message_id=calling.id, call_id="toolu_02", text="{}")
+    stray = ArgumentsPiece(run_id=RUN, message_id=calling.id, call_id="toolu_02", text="{}")
     with pytest.raises(InvalidValueError, match="belong to the tool call being made"):
         ordered((*events[:4], stray, *events[4:]), follows=asked.id)
 
@@ -1273,7 +1049,7 @@ def test_a_slice_may_begin_inside_a_calls_arguments_and_adopts_that_one_call() -
     # Between the two halves of the first call's arguments: what was streamed
     # before the cut was not seen, so the tail is not asked to parse.
     inside = numbered[5:]
-    assert isinstance(inside[0].event, ArgumentsDelta) and inside[0].event.text == 'nauts"}'
+    assert isinstance(inside[0].event, ArgumentsPiece) and inside[0].event.text == 'nauts"}'
     assert ordered(inside, follows=asked.id, after=numbered[4].seq) is None
     # Every cut of the round is a slice that reads back.
     for cut in range(1, len(numbered)):
@@ -1290,7 +1066,7 @@ def test_a_slice_may_begin_inside_a_calls_arguments_and_adopts_that_one_call() -
             after=numbered[4].seq,
         )
     # The calls announced after the cut are checked as ever: their arguments parse.
-    broken = ArgumentsDelta(run_id=RUN, message_id=calling.id, call_id="toolu_02", text="{")
+    broken = ArgumentsPiece(run_id=RUN, message_id=calling.id, call_id="toolu_02", text="{")
     with pytest.raises(InvalidValueError, match="streamed arguments are JSON"):
         ordered(
             stream((*events[:8], broken, *events[8:]))[5:], follows=asked.id, after=numbered[4].seq

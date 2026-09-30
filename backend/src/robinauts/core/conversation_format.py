@@ -87,7 +87,7 @@ from robinauts.domain import (
     MAX_EXTRAS_DEPTH,
     MAX_EXTRAS_NODES,
     MAX_PARTS,
-    ArgumentsDelta,
+    ArgumentsPiece,
     CallCompleted,
     CallStarted,
     Channel,
@@ -99,16 +99,16 @@ from robinauts.domain import (
     MessageStarted,
     PartKind,
     Provenance,
-    ReasoningDelta,
     ReasoningPart,
+    ReasoningPiece,
     ResultLanded,
     Role,
     RunEnded,
     RunEvent,
     RunStarted,
     RunState,
-    TextDelta,
     TextPart,
+    TextPiece,
     ToolCallPart,
     ToolResultPart,
     TurnEvent,
@@ -541,10 +541,10 @@ RUN_ENDED = "run_ended"
 _EVENT_KIND: Mapping[type, str] = {
     RunStarted: RUN_STARTED,
     MessageStarted: MESSAGE_STARTED,
-    TextDelta: TEXT_DELTA,
-    ReasoningDelta: REASONING_DELTA,
+    TextPiece: TEXT_DELTA,
+    ReasoningPiece: REASONING_DELTA,
     CallStarted: CALL_STARTED,
-    ArgumentsDelta: ARGUMENTS_DELTA,
+    ArgumentsPiece: ARGUMENTS_DELTA,
     CallCompleted: CALL_COMPLETED,
     ResultLanded: RESULT_LANDED,
     MessageCompleted: MESSAGE_COMPLETED,
@@ -596,7 +596,7 @@ def event_to_data(event: TurnEvent) -> dict[str, Any]:
             "parent_id": str(event.parent_id),
             "role": event.role.value,
         }
-    if isinstance(event, TextDelta | ReasoningDelta):
+    if isinstance(event, TextPiece | ReasoningPiece):
         return {
             "kind": _EVENT_KIND[type(event)],
             "run_id": str(event.run_id),
@@ -611,7 +611,7 @@ def event_to_data(event: TurnEvent) -> dict[str, Any]:
             "call_id": event.call_id,
             "name": event.name,
         }
-    if isinstance(event, ArgumentsDelta):
+    if isinstance(event, ArgumentsPiece):
         return {
             "kind": ARGUMENTS_DELTA,
             "run_id": str(event.run_id),
@@ -690,7 +690,7 @@ def event_from_data(data: object) -> TurnEvent:
             role=check_supported_role(_enum(fields.get("role"), Role, "a message's role")),
         )
     if kind in (TEXT_DELTA, REASONING_DELTA):
-        made = TextDelta if kind == TEXT_DELTA else ReasoningDelta
+        made = TextPiece if kind == TEXT_DELTA else ReasoningPiece
         return made(
             run_id=run_id,
             message_id=_uuid(fields.get("message_id"), "a message's id"),
@@ -704,7 +704,7 @@ def event_from_data(data: object) -> TurnEvent:
             name=_required(fields, "name", "a tool's name"),
         )
     if kind == ARGUMENTS_DELTA:
-        return ArgumentsDelta(
+        return ArgumentsPiece(
             run_id=run_id,
             message_id=_uuid(fields.get("message_id"), "a message's id"),
             call_id=_required(fields, "call_id", "a tool call's id"),

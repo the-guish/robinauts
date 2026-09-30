@@ -34,7 +34,6 @@ from types import MappingProxyType
 from urllib.parse import urlsplit
 
 from robinauts.domain.errors import InvalidValueError, UnknownModelError
-from robinauts.domain.tools import MAX_TOOL_PREFIX_CHARS, checked_tool_prefix, is_tool_prefix
 from robinauts.domain.values import checked_line, checked_text, describe
 
 MAX_CONFIG_ID_CHARS = 40
@@ -244,6 +243,9 @@ Nothing close to any model's limit; it is here so that a digit typed twice is
 refused at start-up rather than paid for.
 """
 
+MAX_CONTEXT_WINDOW = 100_000_000
+"""The largest ``context_window`` a model may be configured with, for the same reason."""
+
 
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 """What a portable environment variable's name is spelt with (POSIX)."""
@@ -415,6 +417,16 @@ class ModelConfig:
     to the client and moves with the vendor's models. An engine that must send
     one says what it sends.
     """
+    context_window: int | None = None
+    """The model's context window, in tokens; ``None`` leaves it to the engine.
+
+    What an adapter's context management measures against
+    (``docs/specs/agents.md``, "A turn"): the frameworks know the window of
+    the models they have a table for, and a gateway's model ids -- OpenRouter's
+    ``anthropic/claude-haiku-4.5`` -- are in no table, which is what this is
+    written for. Left out, the adapter asks its framework and falls back to
+    its own default.
+    """
     title: str = ""
     """What a person picks it by; empty is the model's id.
 
@@ -454,6 +466,15 @@ class ModelConfig:
             raise InvalidValueError(
                 f"a model's max_output_tokens is a whole number over 0 and at most"
                 f" {MAX_OUTPUT_TOKENS}, not {describe(self.max_output_tokens)}"
+            )
+        if self.context_window is not None and (
+            isinstance(self.context_window, bool)
+            or not isinstance(self.context_window, int)
+            or not 0 < self.context_window <= MAX_CONTEXT_WINDOW
+        ):
+            raise InvalidValueError(
+                f"a model's context_window is a whole number of tokens over 0 and at most"
+                f" {MAX_CONTEXT_WINDOW}, not {describe(self.context_window)}"
             )
 
 
@@ -506,10 +527,9 @@ class ToolServerConfig:
     variable, exactly as a model provider's ``api_key_env`` is: the secret is
     the operator's, read once at start-up, never in this file, never logged --
     and empty under ``auth = "none"``, which has no secret to read.
-    ``prefix`` is what the server's tools are shown to the model under
-    (``<prefix>__<name>``), the server's id when the operator wrote none --
-    and an id that would not do as a prefix (too long, or one a name could not
-    be told apart from) is refused until one is written.
+    What the server's tools are called is the framework's business
+    (``docs/specs/agents.md``, "Tools"): each names them as it names an MCP
+    server's tools, and a server's id is the name it knows the server by.
     """
 
     id: str
@@ -519,8 +539,6 @@ class ToolServerConfig:
     auth: ToolServerAuth = ToolServerAuth.BEARER
     user: str = ""
     """The user part of a ``basic`` credential; empty for ``bearer``, which has none."""
-    prefix: str = ""
-    """What this server's tools are named under for the model; empty is the id."""
     timeout_seconds: float = DEFAULT_TOOL_TIMEOUT_SECONDS
     """How long one call to one of this server's tools may take."""
 
@@ -559,15 +577,6 @@ class ToolServerConfig:
                 raise InvalidValueError("the user part of a basic credential holds no ':'")
         elif self.user:
             raise InvalidValueError(f"only basic auth has a user part; {sends_alone(self.auth)}")
-        if not self.prefix:
-            if not is_tool_prefix(self.id):
-                raise InvalidValueError(
-                    f"tool server {self.id!r} needs a prefix written down: its id is not one"
-                    f" its tools can be named under (at most {MAX_TOOL_PREFIX_CHARS} characters,"
-                    f" no '__', not ending in '_')"
-                )
-            object.__setattr__(self, "prefix", self.id)
-        checked_tool_prefix(self.prefix, "a tool server's prefix")
         if (
             isinstance(self.timeout_seconds, bool)
             or not isinstance(self.timeout_seconds, int | float)
@@ -586,8 +595,8 @@ class ModelsConfig:
 
     Four tables that refer to one another, held together so that the thing
     handed to the composition root is whole: every agent names a model that is
-    here and tool servers that are here, every model names a provider that is
-    here, and no two servers name their tools under one prefix. ``core`` is
+    here and tool servers that are here, and every model names a provider that
+    is here. ``core`` is
     what proves that of an operator's file; this record is what the proof
     produces, and a caller may look things up in it without wondering.
 
@@ -629,14 +638,6 @@ class ModelsConfig:
                         f"agent {agent.id!r} uses tool server {server_id!r}, which is not"
                         f" configured"
                     )
-        prefixes: dict[str, str] = {}
-        for server in self.tool_servers.values():
-            other = prefixes.setdefault(server.prefix, server.id)
-            if other != server.id:
-                raise InvalidValueError(
-                    f"tool servers {other!r} and {server.id!r} would both name their tools"
-                    f" under {server.prefix!r}: give one a prefix of its own"
-                )
 
     def model_by_id(self, model_id: str) -> ModelConfig:
         """The model of that id; ``UnknownModelError`` if this deployment has none.

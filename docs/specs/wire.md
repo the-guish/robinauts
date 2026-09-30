@@ -43,12 +43,14 @@ delivery channel uses ([channels.md](channels.md)).
   and the wire is the same whatever the engine.
 - **Tool calls are AG-UI's tool events.** A call the model makes is part of
   the assistant message that made it ([conversations.md](conversations.md)),
-  and is sent as `TOOL_CALL_START` (the call's id, the tool's full name, the
-  assistant message it belongs to), `TOOL_CALL_ARGS` (its arguments as they
-  stream, as JSON text) and `TOOL_CALL_END`; each result of the tool message
+  and is sent as `TOOL_CALL_START` (the call's id, the tool's name, the
+  assistant message it belongs to), `TOOL_CALL_ARGS` (its arguments as JSON
+  text — in one piece, since the framework hands them over whole once it is
+  about to run the call; a client built for arguments that stream reads one
+  piece as it reads several) and `TOOL_CALL_END`; each result of the tool message
   that answers the batch is sent as `TOOL_CALL_RESULT` as it lands, naming
   the call it answers. The call's id is the one stored on the part — the
-  vendor's, carried by the engine as data ([agents.md](agents.md)) — so
+  vendor's, carried by the adapter as data ([agents.md](agents.md)) — so
   that a result, a re-attach and the conversation loaded afterwards all
   name one call one way. A result that is an error says so as
   `metadata: {"isError": true}` on its `TOOL_CALL_RESULT` — AG-UI 1.0 has no

@@ -21,11 +21,16 @@
   falling back to the agent's default: the point of choosing is knowing who
   answers.
 - The engine is a property of the agent. Both engines run side by side in
-  one deployment. Changing an agent's engine takes effect at the next turn
-  of its existing conversations — which is the swap the persistence design
-  guarantees. Changing an agent's **model** reaches new conversations only:
-  the default was copied into each existing one when it started, and what a
-  conversation runs on is read off the conversation alone.
+  one deployment. **A conversation stays with its engine**: its memory is
+  one framework's, in that framework's own format, and the other cannot
+  read it ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
+  Changing an agent's engine in the configuration therefore reaches its
+  existing conversations as a **loss of memory**, once: the next turn finds
+  a memory written by another engine, does not read it, and begins from
+  nothing with the transcript intact and a line in the log. Changing an
+  agent's **model** reaches new conversations only: the default was copied
+  into each existing one when it started, and what a conversation runs on
+  is read off the conversation alone.
 - **In this version that means the next turn after a restart.** The
   configuration is read once, at start-up, and the definitions are handed to
   the controller then; a turn looks its agent up afresh, so nothing but a
@@ -34,116 +39,144 @@
 
 ## The agent port
 
+The port is the one
+[agent-framework-examples](https://github.com/the-guish/agent-framework-examples)
+reached: an adapter is handed a question and the conversation's memory, runs
+the whole turn on its framework, and streams what happened in a form no
+framework defines.
+
 - The controller knows one port, `Agent`: given the agent's definition, the
-  model the run records (the conversation's when the run began, never read
-  off the agent), a history and the **tools** the run has, **stream the
-  engine's own events** — an answer has begun, more of its text, more of its
-  thinking, a tool call announced with its id and name, its arguments as
-  they stream, the call complete, the answer is complete and here are its
-  parts — and end either "finished" or "waiting on these tool calls"
-  ([runs.md](runs.md), "Tools" below). **No usage**: what a turn cost is
-  reported in the platform's own terms when usage reporting is built, and
-  until then an engine's events carry none and no field is written for one.
-- **The history is the full visible path of the conversation, ending in the
-  user message being answered** — never trimmed above the port — and the
-  system prompt is the agent's and is not one of the messages. So there is no
-  second argument for "the new message": the message to answer is the last
-  of the history, which is also what a resumed turn, a regenerated one and
-  the next round of a tool loop look like, and an engine has one thing to
-  translate rather than two. **What of that path the model sees is the
-  adapter's to decide** ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)):
-  ordering, trimming and other context management, and prompt caching, are
-  per framework and per vendor. The one invariant kept above the port -- by
-  each adapter's own tests, since the shared suite has no hook for what the
-  model was shown -- is that the question being answered is whole in what
-  the model sees.
-- **An agent named by a request that this deployment does not have is not
-  there**: it is refused exactly as an id that reaches nothing is refused, and
-  so is a conversation bound to an agent the operator has since removed.
+  **question** as the person wrote it, the model the run records (the
+  conversation's when the run began, never read off the agent) and the
+  conversation's **memory** — the state the last finished turn handed back,
+  or nothing for a conversation with none — **stream the adapter's events**
+  and end with `Done`. Five events, and no more:
+  - `TextDelta`: more of the answer's text, as it arrives;
+  - `ReasoningDelta`: more of the model's thinking, as it arrives;
+  - `ToolCall`: a call the framework is about to make — the vendor's id
+    for it, the tool's name and its arguments, whole. An adapter announces
+    a call once its arguments are known, since the framework runs it and
+    nothing is gained by streaming what the framework will parse anyway;
+  - `ToolResult`: what the tool answered, under the call's id and name,
+    and whether it is an error;
+  - `Done`: the turn is over, with the final answer's text and the memory
+    after the turn — the framework's own serialisation of its history, as
+    bytes, which the platform stores and never reads.
+- **No usage**: what a turn cost is reported in the platform's own terms
+  when usage reporting is built, and until then an adapter's events carry
+  none and no field is written for one.
+- **The framework owns the loop, the context and the memory.** The model
+  asks for a tool, the framework calls it, the result goes back, the model
+  answers — as many times as the turn needs — and the platform sees it
+  happen as events. What the model is sent is the framework's history, kept
+  by the framework's own means within the model's window ("A turn" below);
+  the system prompt is the agent's, taken from its definition at every turn,
+  and is never part of the memory.
 - Those events carry no ids of the platform's, no times and no provenance,
-  because an engine has none: it was given a history and a model. The
-  application turns them into the platform's messages and its own turn
-  events, which is where a message's id, a parent, a run and a row come from.
-  An engine that had to invent one would be deciding something that is not
-  its to decide. **A tool call's id is the vendor's**, chosen by the model
-  and carried by the engine as data: it is stored on the call's part, the
-  result names it, the wire sends it as it is, and the adapter replays it to
-  the vendor unchanged ([conversations.md](conversations.md)).
-- Both engines are held to the order of their events by the shared contract
-  suite: an answer is announced, then streamed, then completed, one at a
-  time.
-- **Streaming is optional; what is streamed is what is kept.** An engine
-  that yields no text delta for an answer may complete it with any text —
-  not every provider streams. An engine that yields any must complete with
-  exactly what it streamed: what a person watched arrive is what is stored,
-  so an engine whose framework rewrites the final message builds its parts
-  from what it streamed, or does not stream at all.
-- An engine may stream reasoning, and may return it with a finished answer.
-  This version shows it, keeps it in the run's events so that a watcher can
-  re-attach, and puts none of it in a message
+  because an adapter has none: it was given a question and a memory. The
+  application turns them into the platform's messages and its own run
+  events, which is where a message's id, a parent, a run and a row come from
+  ([runs.md](runs.md)). **A tool call's id is the vendor's**, chosen by the
+  model and carried by the adapter as data: it is stored on the call's part,
+  the result names it, and the wire sends it as it is
   ([conversations.md](conversations.md)).
+- Both engines are held to the order of their events by the shared contract
+  suite: text and reasoning before `Done`; a result answers a call announced
+  before it, once, under the name it was announced with; `Done` last and
+  once, with every call it announced answered.
+- **Streaming is optional; what is streamed is what is kept.** An adapter
+  that yields no text delta for an answer may be done with any text — not
+  every provider streams. An adapter that yields any is done with exactly
+  what it streamed: what a person watched arrive is what is stored, and the
+  application keeps the streamed text over `Done`'s.
+- An adapter may stream reasoning. This version shows it, keeps it in the
+  run's events so that a watcher can re-attach, and puts none of it in a
+  message ([conversations.md](conversations.md)).
 - **A turn produces at least one answer.** A turn that ends without one is
   a failed run ([runs.md](runs.md)), not a finished turn with nothing in
   it.
-- **An engine reports a failure by raising.** Any exception ends the turn;
-  the application records the run `failed` with a description of it and
-  leaves the answer that was in flight uncompleted. An engine never yields
+- **An adapter reports a failure by raising.** Any exception ends the turn;
+  the application records the run `failed` with a description of it, leaves
+  the answer that was in flight uncompleted, and stores no memory: the
+  conversation resumes from the memory it had. An adapter never yields
   anything after an error.
-- **A cancellation is the application cancelling the engine's task.** An
-  engine must not swallow `CancelledError`: it lets it through and releases
-  what it holds — an HTTP response, a client, a file. What was produced
-  before the cancellation stays ([runs.md](runs.md)).
+- **A cancellation is the application cancelling the adapter's task.** An
+  adapter must not swallow `CancelledError`: it lets it through, which lets
+  the framework's run go, and releases what it holds — an HTTP response, a
+  client, a tool session. What was produced before the cancellation stays in
+  the transcript, and no memory is stored ([runs.md](runs.md)).
 - Two implementations:
-  - **LangGraph** (or LangChain). Open source parts only: no LangSmith, no
-    LangGraph Platform.
+  - **LangChain** (the engine is still named `langgraph` in the
+    configuration and on every run: the adapter is on LangChain's
+    `create_agent`, which is a LangGraph graph). Open source parts only: no
+    LangSmith, no LangGraph Platform.
   - **Pydantic AI.**
 - Each is confined to its own adapter sub-package, and that is enforced:
   no other code imports the framework, and the two do not import each
-  other ([layout.md](../layout.md)). **The discard test:** five places name an
-  adapter, and deleting it and its dependencies breaks those and nothing else
-  — the import in the composition root and its one entry in the table of
-  engines, the import contracts' exceptions for the sub-package, the
-  sub-package's own tests, and the shared **swap fixtures**, which exist to
-  name both engines at once and cannot be written without both. The
-  composition tests fail too, and name no adapter: they say that both engines
-  are wired, which is a claim about the table.
-- Both must pass one shared contract suite. It includes the swap: a
-  conversation started on one engine continues on the other.
+  other ([layout.md](../layout.md)). **The discard test:** three places name
+  an adapter, and deleting it and its dependencies breaks those and nothing
+  else — the import in the composition root and its one entry in the table
+  of engines, the import contracts' exceptions for the sub-package, and the
+  sub-package's own tests. The composition tests fail too, and name no
+  adapter: they say that both engines are wired, which is a claim about the
+  table.
+- Both must pass one shared contract suite: a streamed answer, an answer
+  that was not streamed, a tool round the framework runs, the memory coming
+  back and going in, a failure, a cancellation, and holding nothing
+  afterwards. The suite hands each adapter its framework's own test model,
+  scripted, and tools that are plain functions, exactly as the examples
+  hand them over; it asks nothing about the framework.
 
 ## A turn
 
-Both engines are stateless per turn
-([ADR 0002](../adr/0002-conversation-persistence.md)). A turn executes as a
-**run** ([runs.md](runs.md)): a record in the database, executed in the
-background, independent of the request that started it. The controller
-runs every turn the same way:
+A turn executes as a **run** ([runs.md](runs.md)): a record in the database,
+executed in the background, independent of the request that started it. The
+controller runs every turn the same way:
 
-1. Load the conversation's messages from the database, and take the path
-   down to the message being answered.
-2. Fetch the tools of the servers the agent names, once for the run, and
-   call the agent port with the agent, the run's model, that history and
-   those tools; publish the events, which the UI watches
+1. Load the conversation's messages from the database, take the path down
+   to the question being answered, and find the **memory** the turn resumes
+   from: the state of the nearest finished run of the same engine on that
+   path — for a question, the run that produced the answer it hangs under;
+   for a regeneration or an edit, the run before the turn being replaced.
+   So a fork of the transcript is a fork of the memory
+   ([conversations.md](conversations.md)).
+2. Call the agent port with the agent, the run's model, the question's text
+   and that memory; publish the events, which the UI watches
    ([wire.md](wire.md)).
-3. Translate each new message into the platform's format and append it to
-   the conversation as it is produced.
-4. If the engine ended waiting on tool calls, call the tools, append their
-   results as one tool message, and go back to step 2's call with the
-   history read from the store again — which is also what a resumed run
-   does, so there is one path. Bounded by `max_tool_rounds` and by the
-   turn's timeout ("Tools" below).
-5. The next turn starts again from step 1, with whichever engine the agent
-   has at that moment and whichever model the conversation names.
+3. Turn the events into the platform's messages as they complete — an
+   answer with the calls it made, the one tool message of a batch once its
+   last result is in, the answer after the results — and append each to
+   the conversation.
+4. At `Done`, store the memory it carries against the run, in the same
+   transaction as the run's ending.
+5. The next turn starts again from step 1, with whichever model the
+   conversation names.
 
-- The LangGraph engine compiles its graph without a checkpointer; the
-  Pydantic AI engine passes `message_history`. Neither remembers anything
-  between turns.
-- **Each adapter owns its context policy**: what of the full path it sends,
-  in what order, with which cache breakpoints
-  ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)). What must
-  behave the same under both engines is the record — what is stored, and
-  the order of a run's events — and that lives above the port.
-- No framework persistence is used, and none is needed for tools: the
-  conversation record is the checkpoint (ADR 0002).
+- **The frameworks keep the context within the window**, each by its own
+  means. The LangChain adapter runs `create_agent` with the summarisation
+  middleware, which summarises the older history once it passes a share of
+  the window and keeps the recent messages as they were — the change is
+  saved in the memory, so it is paid for once — and the vendor's cache
+  middleware. The Pydantic AI adapter runs an `Agent` with a history
+  processor that drops the oldest exchanges — a question and everything up
+  to the next one, so that a call is never parted from its result — until
+  what is left fits, before every model call and on the memory handed back,
+  and asks for the vendor's cache in the model settings. The window each
+  measures against is the model's `context_window` when the operator
+  configured one, then what the framework knows of the model, then the
+  adapter's own default — a gateway's model ids are in no framework's
+  table. Neither ever cuts the turn it is answering.
+- **The bound on tool rounds is each adapter's.** A model that keeps asking
+  for tools cannot run a turn for ever on the operator's account: LangChain's
+  recursion limit and Pydantic AI's request limit bound the loop at the
+  adapter's own default, and a turn that reaches it fails saying what the
+  framework said. The turn's timeout holds over the whole turn, above the
+  port.
+- Neither framework's persistence is used: no checkpointer, no tables of a
+  framework's in the deployment's database. The memory is a column of the
+  run ([backend.md](backend.md)), which is what lets one mechanism serve
+  both frameworks, a fork of the transcript fork the memory, and a deleted
+  conversation take its memory with it.
 
 ## Model providers
 
@@ -201,9 +234,11 @@ runs every turn the same way:
 ## Tools
 
 An agent can use tools served by **remote MCP servers** the operator
-configured. A model asks for a tool, the platform calls it, the result goes
+configured. A model asks for a tool, the framework calls it, the result goes
 back to the model, and the model answers — as many times as the turn needs.
-The decisions behind this, and their order of work, are in
+The decisions behind this are in
+[working-notes/framework-loop-plan.md](../working-notes/framework-loop-plan.md);
+the configuration's shape came with
 [working-notes/mcp-plan.md](../working-notes/mcp-plan.md).
 
 - **Servers are remote, over Streamable HTTP, and nothing else.** No stdio,
@@ -223,58 +258,38 @@ The decisions behind this, and their order of work, are in
 - An agent names the servers it may use (`tools`). An agent naming a server
   the deployment has not got is refused at start-up, as one naming an engine
   that is not wired is. The secrets are read at start-up by variable name,
-  every missing one reported together, and printed nowhere.
-- **The platform owns the tool loop.** The application calls the tool,
-  appends the result to the conversation and starts the next engine turn
-  from the stored history. Neither framework ever executes a tool, and no
-  framework checkpointer is used: an engine yields a tool call as an event
-  and its turn ends there, "waiting on these calls". LangGraph's `ToolNode`
-  and Pydantic AI's own tool execution and retry prompts stay out. This is
-  ADR 0002 kept — the conversation record is the checkpoint
-  ([runs.md](runs.md)) — and it answers the question ADR 0002 left open for
-  the day tools came ([ADR 0004](../adr/0004-context-management-in-the-adapter.md)).
-- **The tool set is fetched once per run and holds for the run.** When a
-  turn begins the application asks each server the agent names for its
-  tools (`tools/list`), in parallel, and every model call inside that run's
-  loop is handed that one list: a stable list for the whole turn, which is
-  what a cached prefix wants, and the same list under both engines. There is
-  **no cache**: nothing in the process, nothing to size or expire. A server
-  that will not list fails the run before the engine is called and before
-  any answer is written, naming the server; one that refuses the credential is reported the same way, by name,
-  at the first turn of an agent naming it — start-up does not connect to a
-  server. A run taken up again after `waiting` lists again, which is the
-  ordinary stateless turn.
-- **A tool is shown to the model as `<prefix>__<name>`**, where the prefix
-  is the server's — written in its table, and defaulting to the server's id
-  — so that a call is routed to its server from the name alone and two
-  servers offering `search` never collide. Two servers with one prefix are
-  refused at start-up, with the rest of the configuration's problems, and so
-  is a prefix a name could not be told apart from (one holding `__`, or
-  ending in `_`). The vendors bound a tool name at
-  64 characters of `[a-zA-Z0-9_-]`, and that is the platform's bound on the
-  full name; the prefix is bounded at configuration time so that a real name
-  fits after it, and a server's tool whose full name still does not fit is
-  left out of that run's list with a line in the log naming the tool — as
-  is one whose input schema is not a JSON Schema object at the top, which
-  both vendors require of a tool's parameters, and one the server listed
-  twice (the second time). The list is sorted by full name, so two engines
-  and two runs send byte-identical lists. The run records nothing about its
-  tools: the messages already record every call and result by name.
+  every missing one reported together, and printed nowhere. Start-up does
+  not connect to a server: whether a server takes the credential is found
+  out at the first turn of an agent naming it.
+- **The frameworks' own MCP clients connect, list and call.** The LangChain
+  adapter hands `create_agent` the tools `langchain-mcp-adapters` lists for
+  the agent's servers; the Pydantic AI adapter hands its `Agent` one MCP
+  toolset per server. Each is built from the server's table — the endpoint,
+  the credential as a header, the server's `timeout_seconds` on the
+  connection and on every call — and obeys `HTTPS_PROXY` as every outbound
+  call of the process does. Neither framework is handed a secret it does not
+  send, and neither logs a request.
+- **A tool's name on the transcript is the name the framework used for it**,
+  which both frameworks spell `<server id>_<tool>` so that two servers
+  offering `search` never collide. The platform does not name, sort or bound
+  a server's tools: the framework lists them and the model is shown what it
+  lists.
 - **The results of one call batch are one tool message.** A model may ask
-  for several tools in one answer; the platform runs them in parallel,
-  publishes each result as it lands, and stores one `tool` message under the
-  assistant message that made the calls, holding one result per call, once
-  the last one is in ([conversations.md](conversations.md)).
-- **A tool's error is a result, not a failure.** A server answering
-  `isError`, or one call timing out, becomes a result marked as an error,
-  and the model is told. Only a server that cannot be reached at all fails
-  the run. Result content is text in this iteration: a text result is stored
-  as it is, and a part of another kind (an image, an embedded resource)
-  becomes a text note saying what was left out.
+  for several tools in one answer; the framework runs them, the adapter
+  yields each result as it lands, and the platform stores one `tool`
+  message under the assistant message that made the calls, holding one
+  result per call, once the last one is in
+  ([conversations.md](conversations.md)).
+- **A tool's error is a result, not a failure.** A server answering that a
+  call failed, or a call the framework could not validate and sent back to
+  the model, becomes a result marked as an error, and the model is told.
+  Only a server that cannot be reached at all fails the run. Result content
+  is text in this iteration: what the transcript records of a result longer
+  than one part may be is its beginning; what the model was sent is the
+  framework's, whole.
 - **Every call has its own timeout** (`timeout_seconds` on the server, with
-  a default), the turn's timeout holds over the whole turn, and
-  `max_tool_rounds` bounds how many times one turn may go back to the model
-  with results; a run that reaches it fails saying so.
+  a default), the turn's timeout holds over the whole turn, and each
+  adapter's bound on tool rounds holds over the loop ("A turn" above).
 - **One identity per deployment.** The secret in the operator's
   configuration means every user's turns act as that principal, and the
   server's audit log names the service account and not the person. Per-user
@@ -283,19 +298,7 @@ The decisions behind this, and their order of work, are in
 - **Every tool the agent's servers offer runs without asking.** Approval
   before a tool runs is deferred: in this iteration the operator's control
   over what an agent may do is the credential's scopes and the server's own
-  admin gates. The MCP annotations a server sends with a tool
-  (`readOnlyHint`, `destructiveHint` and the rest) are carried on the
-  definition and read by nothing yet; they are what an approval policy would
-  read ([runs.md](runs.md)).
-- **The engine's share**: bind the definitions to the model; yield a call
-  where it used to refuse one — announced with its id and name, its
-  arguments as they stream, then complete — and end the turn "waiting on
-  these calls", which is the port's word for how one round ended and not the
-  run's `waiting` state: the run stays `running` through the loop
-  ([runs.md](runs.md)); translate `tool` messages and the two tool parts in
-  both directions; and
-  carry the vendor's signed reasoning out with the answer and back with the
-  history ([conversations.md](conversations.md), "Reasoning").
+  admin gates ([runs.md](runs.md)).
 - Tool arguments and results are attacker-influenced text going to a model
   and to a browser: bounded on the way in like every part, stored as data,
   rendered as data ([wire.md](wire.md)).
@@ -303,7 +306,7 @@ The decisions behind this, and their order of work, are in
 ## Details likely to change
 
 - Each engine reaches the providers through its own framework's clients:
-  - LangGraph: `langchain-openai`, `langchain-anthropic`,
+  - LangChain: `langchain-openai`, `langchain-anthropic`,
     `langchain-google-genai`, `langchain-aws`;
   - Pydantic AI: `pydantic-ai-slim` with the provider extras needed, not
     the all-inclusive `pydantic-ai`.
@@ -314,18 +317,19 @@ The decisions behind this, and their order of work, are in
     is how it is reached in this build (below).
 - Every one of these packages passes the licence and vulnerability gates
   at its pinned version, with its transitive tree
-  ([open-source.md](open-source.md)). A provider whose client fails is not
+  ([open-source.md](open-source.md)) — or is adopted pending the decision
+  the "Known findings" below record. A provider whose client fails is not
   offered by that engine until it passes.
-- Not every model has to exist under both engines, but an agent's engine
-  can be swapped only if the models its conversations run on do.
 - A sketch of the configuration. It is written in the **same file** as
   sign-in ([sign-in.md](sign-in.md)), which is why the model providers are
   `[model_providers.*]` and not `[providers.*]`: that name is already the
   identity providers people sign in with, and one file cannot have a table
   that means one of them here and the other there. `timeout_seconds` (per
-  model call) and `max_output_tokens` are optional; what they default to is
-  the platform's and the engine's business respectively. `title` is optional
-  too, and is the model's id when it is left out.
+  model call), `max_output_tokens` and `context_window` (tokens, what the
+  adapters keep the history within) are optional; what they default to is
+  the platform's, the engine's and the framework's knowledge of the model
+  respectively. `title` is optional too, and is the model's id when it is
+  left out.
 
 ```toml
 [model_providers.anthropic]
@@ -338,6 +342,7 @@ name = "claude-sonnet-5"
 title = "Claude Sonnet 5"
 timeout_seconds = 120
 max_output_tokens = 8192
+context_window = 200000
 
 [agents.assistant]
 title = "Assistant"
@@ -354,7 +359,8 @@ system_prompt = "Play fair."
   **prefix** the client appends the protocol's own path to, so it stops at
   `/api` and the request goes to
   `https://openrouter.ai/api/v1/messages`; the model names are
-  OpenRouter's, `<vendor>/<model>`:
+  OpenRouter's, `<vendor>/<model>`, which no framework has a table for —
+  which is what `context_window` is for:
 
 ```toml
 [model_providers.openrouter]
@@ -365,6 +371,7 @@ api_key_env = "ROBINAUTS_OPENROUTER_KEY"
 [models.sonnet-via-openrouter]
 provider = "openrouter"
 name = "anthropic/claude-sonnet-5"
+context_window = 200000
 
 [agents.assistant-openrouter]
 title = "Assistant (OpenRouter)"
@@ -392,14 +399,13 @@ api_key_env = "ROBINAUTS_GATEWAY_KEY"
   `auth`, which is `bearer` unless said otherwise, `basic`, which also
   names the `user` part and takes the token from the variable, or `none`
   for a public server, which names no variable; `secret_env`, the **name**
-  of the variable the secret is read from, left out under `none`; `prefix`,
-  what the server's tools are shown to the model under, the server's id
-  when left out; and `timeout_seconds`, per tool call and optional. The
-  token's scopes, and the organisation's own policy on tokens, bound what
-  the server will do; nothing here does. Spelt so that an operator
-  connecting GitHub or Atlassian copies it and changes the url and the
-  variable name — one server with `bearer`, one with `basic`, and one
-  public server with `none`:
+  of the variable the secret is read from, left out under `none`; and
+  `timeout_seconds`, per tool call and optional. The token's scopes, and
+  the organisation's own policy on tokens, bound what the server will do;
+  nothing here does. Spelt so that an operator connecting GitHub or
+  Atlassian copies it and changes the url and the variable name — one
+  server with `bearer`, one with `basic`, and one public server with
+  `none`:
 
 ```toml
 [mcp_servers.github]
@@ -411,7 +417,6 @@ url = "https://mcp.atlassian.com/v2/mcp"
 auth = "basic"
 user = "robinauts@example.com"
 secret_env = "ROBINAUTS_JIRA_TOKEN"
-prefix = "atlassian"
 timeout_seconds = 30
 
 [mcp_servers.learn]
@@ -426,30 +431,29 @@ tools = ["github", "jira", "learn"]
 ```
 
   The agent's `tools` names the servers; the model then sees
-  `github__search_repositories`, `atlassian__search_issues` and
-  `learn__microsoft_docs_search`, and a call is routed to its server by the
-  name alone. Start-up reads the two variables and refuses to start naming
-  every one that is unset — the public server names none — and it does not
-  connect to any server ([runs.md](runs.md), "Tools").
+  `github_search_repositories`, `jira_search_issues` and
+  `learn_microsoft_docs_search`, named by the framework under the server's
+  id. Start-up reads the two variables and refuses to start naming every
+  one that is unset — the public server names none — and it does not
+  connect to any server.
 
 ## Known findings
 
-- **The MCP Python SDK (`mcp`) is not adopted**: its tree fails the licence
-  gate. `pyjwt[crypto]` brings `cryptography`, which brings `cffi`, whose
-  metadata states `MIT-0` -- a licence on no list of
-  [DEPENDENCIES.md](../../DEPENDENCIES.md) -- and `pywin32`, Windows-only,
-  states a licence family and no licence (checked 2026-09-28, at 2.2.0). The
-  plan named the fallback for this case
-  ([working-notes/mcp-plan.md](../working-notes/mcp-plan.md), step 2): the
-  MCP adapter is a client of our own over `httpx` for the three calls a
-  client needs -- `initialize`, `tools/list`, `tools/call` -- over Streamable
-  HTTP, with session ids, protocol-version negotiation and an SSE response
-  read by hand. The import rule confining the SDK to `adapters/tools/mcp/` is
-  written all the same, before the fact ([layout.md](../layout.md)).
-
+- **The MCP Python SDK (`mcp`), `langchain-mcp-adapters` and `fastmcp` are
+  adopted pending a licence decision.** The frameworks' MCP clients are
+  built on the SDK, and its tree was known to fail the licence gate:
+  `pyjwt[crypto]` brings `cryptography`, which brings `cffi`, whose
+  metadata states `MIT-0` — a licence on no list of
+  [DEPENDENCIES.md](../../DEPENDENCIES.md) — and `pywin32`, Windows-only,
+  states a licence family and no licence (checked 2026-09-28, at 2.2.0).
+  The gate is expected red until the decision is taken; what it would take
+  is recorded there ("Known exclusions"). The client of our own that stood
+  in for the SDK is gone with the loop it served
+  ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
 - `langgraph-checkpoint-postgres` depends on `psycopg`, which is
-  LGPL-3.0-only. It cannot be adopted as it is (ADR 0002). The LangGraph
-  core is not affected.
+  LGPL-3.0-only. It cannot be adopted as it is, and it is not needed: the
+  memory is a column of the platform's own schema, not a checkpointer's
+  tables ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
 - `langchain-openai` requires `tiktoken`, which states its licence as the
   licence *text* and no identifier, and which in turn requires `regex`,
   `Apache-2.0 AND CNRI-Python`. Neither resolves under the policy, so the
@@ -461,12 +465,11 @@ tools = ["github", "jira", "learn"]
 - The same tree keeps the same two kinds out of the **Pydantic AI** engine:
   `pydantic-ai-slim[openai]` requires `tiktoken` too.
 - So both engines reach **`anthropic` and `anthropic-compatible`**, with
-  one client each and nothing else added, and the swap holds for every
-  model either of them has. OpenRouter is reached as an
+  one client each and nothing else added. OpenRouter is reached as an
   `anthropic-compatible` provider, which is what the exclusion above costs
   and does not cost: a vendor behind an OpenAI-only endpoint is still out
   of reach, and one that also speaks the Messages API is not.
-- `langsmith` is a hard dependency of `langchain-core`, and the LangGraph
+- `langsmith` is a hard dependency of `langchain-core`, and the LangChain
   adapter imports it for **one call**: `langsmith.configure(enabled=False)`,
   made when the engine is constructed, which is the switch langchain-core
   itself consults before the environment. Nothing else in the platform uses
@@ -495,3 +498,9 @@ tools = ["github", "jira", "learn"]
   `logfire`** the moment that package is importable — outside anything the
   per-agent switch reaches. So `logfire` not being in the locked set is part
   of the guarantee, and a test asserts it.
+- **A turn that did not end leaves no memory.** A cancelled or failed run
+  wrote its calls and results into the transcript and nothing into the
+  memory, so the model does not remember it at the next turn. The remedy,
+  if a person's cancelled turn turning out to be forgotten by the model
+  matters in practice, is a state per step of the loop rather than one at
+  the end.

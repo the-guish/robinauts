@@ -35,11 +35,9 @@ from urllib.parse import urlsplit
 import httpx
 import pytest
 from ag_ui.core import EventType
-from fastapi import FastAPI
 
 from aio import asyncio_test
 from conversations import agent_definition, offered
-from engines import Scripts, both_engines, scripts
 from fakes import ScriptedAgent, says
 from postgres import DATABASE_URL, TemporarySchema, requires_postgres
 from robinauts.api import CONVERSATION_ID_HEADER, SSE_MEDIA_TYPE
@@ -57,7 +55,6 @@ from robinauts.domain import (
     LOCAL_USER_NAME,
     ConfigError,
     Conversation,
-    Engine,
     Message,
     Role,
     SchemaError,
@@ -619,130 +616,3 @@ def test_the_local_development_mode_refuses_a_file_that_signs_anybody_in(
         )
 
     assert any("cannot be combined" in problem for problem in raised.value.problems)
-
-
-# The swap, by configuration, on the real store.
-
-
-SWAP_TABLES = """
-[model_providers.anthropic]
-kind = "anthropic"
-api_key_env = "{key_variable}"
-
-[models.sonnet]
-provider = "anthropic"
-name = "claude-sonnet-5"
-
-[agents.assistant]
-title = "Assistant"
-model = "sonnet"
-engine = "{engine}"
-system_prompt = "Play fair."
-"""
-"""A whole configuration file whose one agent's engine a test writes in.
-
-The local development mode's file: model tables and no sign-in. One agent, one
-model, one provider, and the only thing that differs between the two
-deployments below is the word after ``engine``.
-"""
-
-SWAP_ANSWERED = "Someone who plays fair."
-"""What both scripted models say, so that only the engine can differ."""
-
-SWAP_ASKED = ("What is a robinaut?", "And a robin?")
-
-
-def configured_on(path: Path, engine: Engine) -> Path:
-    """Write the deployment's file, with its agent on that engine.
-
-    The same path both times: the second deployment is the operator editing
-    the file and starting the server again, which is what an engine swap is
-    (``docs/specs/agents.md``).
-    """
-    path.write_text(
-        SWAP_TABLES.format(key_variable=KEY_VARIABLE, engine=engine.value), encoding="utf-8"
-    )
-    return path
-
-
-def swapped(temporary: TemporarySchema, path: Path, engine: Engine, said: Scripts) -> FastAPI:
-    """A deployment on that engine, over the schema of this test, in local mode.
-
-    What is handed in is the pair of **real** engines over models this test
-    wrote the answers for: the vendor is replaced and nothing else, so the
-    adapters, the application, the routes and the store are the deployment's
-    own. Which of the two answers a turn is decided by the file.
-    """
-    return create_app(
-        local_development_host="127.0.0.1",
-        config_path=configured_on(path, engine),
-        database_url=in_schema(temporary.name),
-        secret_for={KEY_VARIABLE: "sk-not-a-real-key"}.get,
-        engines=both_engines(said),
-    )
-
-
-@asyncio_test
-async def test_a_conversation_continues_on_the_engine_the_configuration_now_names(
-    tmp_path: Path,
-) -> None:
-    """The swap as an operator makes it: edit one word, restart, carry on.
-
-    The seam the project exists to prove (``docs/specs/agents.md``; goal 3 of
-    ``docs/working-notes/poc-scope.md``), end to end on the real store. One
-    conversation, two deployments, one PostgreSQL: the first answers a turn on
-    Pydantic AI, the file is edited and the server started again, and the
-    second answers the next turn of the **same** conversation on LangGraph --
-    from the rows the first one wrote, because the conversation record is the
-    whole of the state (ADR 0002) and nothing else survived the restart.
-
-    What compares the two stored documents key by key is the unit swap test
-    (``tests/unit/test_engine_swap.py``); what only this can show is that the
-    swap survives a restart, a real database and the whole of the wire.
-    """
-    said = scripts(SWAP_ANSWERED)
-    path = tmp_path / "models.toml"
-    async with schema() as temporary:
-        first = swapped(temporary, path, Engine.PYDANTIC_AI, said)
-        async with running(first), local_browser(first) as client:
-            begun = await client.post(
-                "/api/turns",
-                json={"agent_id": "assistant", "text": SWAP_ASKED[0]},
-                headers=LOCAL_WRITE,
-            )
-            conversation_id = begun.headers[CONVERSATION_ID_HEADER]
-            answered = await client.get(f"/api/conversations/{conversation_id}")
-
-        # The restart: a second process, the same database, the edited file.
-        second = swapped(temporary, path, Engine.LANGGRAPH, said)
-        async with running(second), local_browser(second) as client:
-            await client.post(
-                f"/api/conversations/{conversation_id}/turns",
-                json={
-                    "text": SWAP_ASKED[1],
-                    "parent_id": answered.json()["messages"][-1]["id"],
-                },
-                headers=LOCAL_WRITE,
-            )
-            whole = await client.get(f"/api/conversations/{conversation_id}")
-
-    messages = whole.json()["messages"]
-    assert [[part["text"] for part in message["parts"]] for message in messages] == [
-        [SWAP_ASKED[0]],
-        [SWAP_ANSWERED],
-        [SWAP_ASKED[1]],
-        [SWAP_ANSWERED],
-    ]
-    # Each answer records the engine that produced it, so the conversation is
-    # itself the record of the swap.
-    assert [message["provenance"]["engine"] for message in messages if message["provenance"]] == [
-        Engine.PYDANTIC_AI.value,
-        Engine.LANGGRAPH.value,
-    ]
-    # And the second engine was given the first one's turn out of the database:
-    # the question, the answer as it was stored, and the new question.
-    user, assistant = Role.USER.value, Role.ASSISTANT.value
-    assert said.pydantic_ai.heard == [((user, SWAP_ASKED[0]),)]
-    assert said.langgraph.heard == [
-        ((user, SWAP_ASKED[0]), (assistant, SWAP_ANSWERED), (user, SWAP_ASKED[1]))
-    ]

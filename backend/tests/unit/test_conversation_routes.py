@@ -578,7 +578,7 @@ BEGUN = 1
 ANSWERED = 4
 """Where a run's stream stands once one answer is complete.
 
-``RunStarted``, ``MessageStarted``, one ``TextDelta`` and
+``RunStarted``, ``MessageStarted``, one ``TextPiece`` and
 ``MessageCompleted``, numbered from 1 with no gaps (``docs/specs/runs.md``).
 """
 

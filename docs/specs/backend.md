@@ -39,8 +39,12 @@ in [layout.md](../layout.md). This document holds the component choices.
   every deadline from the clock port and gives the stores absolute times,
   and tells them what "now" is. The stores keep no clock of their own.
 - The schema is entirely the platform's. No framework creates or migrates
-  tables in it
-  ([ADR 0002](../adr/0002-conversation-persistence.md)).
+  tables in it ([ADR 0002](../adr/0002-conversation-persistence.md)). The
+  model's memory of a conversation — the agent framework's own history, in
+  its own format — is a column of the run that produced it, stored as bytes
+  the platform never reads
+  ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)):
+  the frameworks keep no tables of their own.
 
 ## Schema
 

@@ -131,6 +131,7 @@ from robinauts.domain import (
     RunState,
     checked_config_id,
     checked_line,
+    describe,
     reading_stored,
 )
 from robinauts.ports import (
@@ -700,10 +701,19 @@ class PostgresConversationStore(ConversationStore):
             run.error,
         )
 
-    async def end_run(self, run: Run, event: RunEvent, event_document: Document) -> None:
+    async def end_run(
+        self,
+        run: Run,
+        event: RunEvent,
+        event_document: Document,
+        *,
+        engine_state: bytes | None = None,
+    ) -> None:
         _typed(run, Run, "a run")
         _typed(event, RunEvent, "a run event")
         written = _document(event_document)
+        if engine_state is not None and not isinstance(engine_state, bytes):
+            raise InvalidValueError(f"a framework's state is bytes, not {describe(engine_state)}")
         if run.state not in ENDED_RUN_STATES:
             raise InvalidValueError(
                 f"end_run ends a run; {run.id} was offered as {run.state.value}"
@@ -719,23 +729,37 @@ class PostgresConversationStore(ConversationStore):
                 f"run {run.id} ended {run.state.value} and the event announces"
                 f" {event.event.state.value}"
             )
-        await self._transacted(lambda connection: self._end_run(connection, run, event, written))
+        await self._transacted(
+            lambda connection: self._end_run(connection, run, event, written, engine_state)
+        )
 
     async def _end_run(
-        self, connection: asyncpg.Connection, run: Run, event: RunEvent, document: str
+        self,
+        connection: asyncpg.Connection,
+        run: Run,
+        event: RunEvent,
+        document: str,
+        engine_state: bytes | None,
     ) -> None:
         _check_run_change(await self._held_run(connection, run.id), run, ending=True)
         await self._check_position(connection, event)
         await connection.execute(
-            "UPDATE runs SET state = $2, started_at = $3, finished_at = $4, error = $5"
-            " WHERE id = $1",
+            "UPDATE runs SET state = $2, started_at = $3, finished_at = $4, error = $5,"
+            " engine_state = $6 WHERE id = $1",
             run.id,
             run.state.value,
             run.started_at,
             run.finished_at,
             run.error,
+            engine_state,
         )
         await self._store_event(connection, event, document)
+
+    async def engine_state(self, run_id: uuid.UUID) -> bytes | None:
+        row = await self._pool.fetchrow("SELECT engine_state FROM runs WHERE id = $1", run_id)
+        if row is None or row["engine_state"] is None:
+            return None
+        return bytes(row["engine_state"])
 
     # Events.
 
