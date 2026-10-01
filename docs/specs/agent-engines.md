@@ -120,9 +120,10 @@ anything else.
 - **create** a session by id. Creating one that already exists is an error.
 - **exists**: whether the engine has that session.
 - **stream** a turn: the session id, the agent definition, the question, the
-  model, the checkpoint id to continue from (none for the first turn), and
-  whether to resume. Yields the events as they happen and ends with the
-  answer and a new checkpoint id.
+  model, the checkpoint id to continue from (none for the first turn), a
+  timeout in seconds after which the engine ends the turn with an error,
+  and whether to resume. Yields the events as they happen and ends with
+  the answer and a new checkpoint id.
 - **fork** a session into a new one, at a checkpoint of the source. The new
   session has the memory as it was at that checkpoint and nothing after it.
   The source's earlier checkpoints stay valid in the fork. From then on the

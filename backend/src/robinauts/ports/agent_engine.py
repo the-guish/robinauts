@@ -1,206 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""An agent engine: the seam between the platform and an agent framework, sessions included.
-
-The port that is to replace ``robinauts.ports.agents.Agent``, which stays as it
-is until this one is settled. What changes is who keeps the memory. Under the
-old port the framework hands its memory back as bytes at the end of every
-turn and is handed them again at the next; under this one **the engine keeps
-its sessions itself**, in storage of its own, and the platform keeps of a
-session one thing: the id of a checkpoint, an opaque token the engine hands
-back when a turn finishes, stored on the answer that ended the turn. That is
-the contract `agent-framework-examples
-<https://github.com/the-guish/agent-framework-examples>`_ reached on
-``feature/event-streaming-b`` -- an ``AgentBackend`` is one conversation in
-one framework, its framework keeps the state between turns in storage the
-backend owns, and the caller's record names the backend, the model and the
-conversation id -- with one addition, so that a session can be forked and a
-turn can be continued from where the platform knows it stands.
-
-**A session is the engine's memory of one conversation.** It is what Claude
-calls a session too: a durable unit under an id, continued turn by turn,
-resumable days later, forkable, and the same whether a person is typing
-into it or a task is running in it unattended. The id is the caller's:
-for the platform, its conversation's id, so that the platform's record and
-the engine's session are one thing by one name. An engine keeps nothing of
-a session but the memory; the transcript, the owner, the agent and the
-model are the platform's.
-
-**An engine is more than an agent.** It runs the operator's agents, one turn
-at a time; it keeps every session those turns build, in its framework's
-own format, in storage of its own, from the moment the platform creates one
-until the platform deletes it; it copies one into another at a checkpoint,
-which is a fork; it reaches the model providers its framework has a client
-for; and it releases what a turn opened. An ``AgentDefinition`` -- the
-system prompt and the tool servers -- is what it is handed to run a turn
-*with*; the engine is what runs it.
-
-**An engine is standalone.** What it imports of the platform is this port
-and what crosses it -- the events, the definition, the errors -- and
-nothing else; what it is handed to build on is a **storage**, as the
-examples' backends are handed a store and its kind: a connection pool to a
-PostgreSQL, under which it keeps tables of its own; a folder, under which it
-keeps files of its own; or nothing, for a test, and it keeps everything in
-memory. It opens that storage with its own driver, makes it ready itself
-(``setup``), and names no table of the platform's: the platform's schema is
-the platform's, the engine's is the engine's, nothing cascades from one to
-the other, and ``forget`` is the one way a session leaves an engine. The
-platform never applies an engine's DDL, never reads its tables, and is
-never imported by one.
-
-**An engine is built by a function of one signature** (``EngineFactory``),
-as the examples' backends are by their ``init_*`` functions: handed the
-**settings** every engine needs -- the models and the tool servers, and
-where to ask for a provider's key and a server's secret -- and a **storage**
-to build on, it hands back an engine. Each adapter exports one such
-function, and the composition root keeps a table of them by engine name,
-so that adding an engine is a key and a function and nothing else. Which
-storage an engine is built on is the root's choice: the storage is plain
-data, a kind and its options, as the examples' ``StorageConfig`` is.
-
-**A checkpoint is the memory at the end of a finished turn, and nothing
-else.** A turn makes whatever intermediate state its framework makes -- a
-LangGraph checkpoint per step, a history after each model call -- and none of
-it is the platform's business: none of it is stored by the platform, named by
-the platform, or kept by the engine past the turn on the platform's account.
-The one point the platform knows is the end of a turn, which the engine names
-in ``Done.checkpoint_id``. What the id is, is the engine's: LangGraph's own
-checkpoint id for the checkpoint the turn ended on, as it is; an id the
-Pydantic AI adapter mints for the snapshot of the history it wrote. The
-platform stores it as bounded text (``domain.MAX_CHECKPOINT_ID_CHARS``),
-never parses it, and hands it back to the engine that produced it and to no
-other. An engine keeps, for every checkpoint id it handed back, enough to
-give that memory back, for as long as the session exists or a retention
-rule says otherwise.
-
-**The platform says where a turn continues from.** ``stream`` is handed the
-checkpoint of the session's last stored answer, and the turn continues from
-that memory, whatever else the engine holds for the session. So when the
-engine finished a turn and the platform never received it -- a crash between
-the engine's write and the platform's -- the next turn does not continue from
-the orphan: the engine continues from the checkpoint it was given, and
-whatever it holds past it is partial progress the platform never had, which
-the engine may discard. The transcript is the authority on where a session
-stands; the engine never assumes "the latest".
-
-**Unless the platform asks to resume.** A turn that was interrupted -- the
-process died, the task was cancelled, the engine raised -- may have left
-partial work past the checkpoint: a loop half way through its tool calls, as
-the framework's own per-step state holds it. For a chat that work is not
-worth keeping, and the next turn starts from the checkpoint. For a task that
-had run for two hours unattended it is, so a caller re-running the same turn
-may ask for it with ``resume``, and the engine takes the turn up from where
-its own state left it rather than from the checkpoint. What is resumed is
-the engine's to keep: a framework with a checkpoint per step resumes from
-the last one; one that keeps nothing of a turn before its end starts the
-turn again, which is still correct, only longer.
-
-**A session is created on purpose, and never by a turn.** ``create`` is the
-one call that makes a session exist in the engine; ``stream`` refuses one
-that was not created, as the examples' runner refuses to resume what was
-never stored. A turn that could create what it was asked to continue would
-let a caller with the wrong id -- a typo, a stale record, a conversation
-already deleted -- start a session nobody asked for and answer into it, and
-the platform would never know. The refusal is where the mistake is found.
-
-**Flat, not a handle.** Every call names the session it is about, and
-nothing of a session is held in the engine between calls: a run outlives
-the request that started it and may be taken up by another process, so
-whatever a turn needs is read from the engine's storage when the turn begins
-and is written there as the turn goes. The examples open a backend object per
-conversation and close it; here the same lifetime is the one call that uses
-it, ``stream``, whose generator releases on its way out. One object per
-engine, built once by the composition root and shared by every session, as
-the old port's was.
-
-**What crosses.** In: the **session** by its id; the **checkpoint** to
-continue from, by its id, or none for a session's first turn; the **agent**
-as the operator has it now, read afresh every turn; the **prompt**, the text
-of the question being answered; the **model**, by the platform's id for it,
-which is the run's and not the agent's. Out: ``domain.events`` -- more text,
-more thinking, a tool call, its result, and ``Done`` with the final answer
-and the new checkpoint's id -- which carry no ids of the platform's, no times
-and no provenance. **No memory crosses**, in either direction: a checkpoint
-id is a name for one, handed out by the engine and handed back as it was.
-
-**The framework owns the loop, the context and the memory** (ADR 0005). The
-model asks for a tool, the framework calls it, the result goes back and the
-model answers, as many times as the turn needs, and the engine translates
-what it sees. What the model is sent of the history -- how much, summarised
-how, with which cache breakpoints -- is the framework's middleware over the
-framework's own history. The platform keeps a transcript for people and never
-feeds the model from it; the engine never reads the transcript.
-
-**The memory is the engine's, where the engine keeps it.** Written as the
-turn goes, by the framework's own means or the engine's. Deleted with the
-session (``forget``). Never inspected, exported or migrated by the platform:
-the transcript is the durable record, the memory is the framework's cache of
-it, and an engine that cannot read what it once wrote reports a failed turn
-rather than reading it as nothing.
-
-**Forking is copying the memory as it was at a checkpoint** (``fork``;
-``docs/specs/conversations.md``, "Forking"). The platform names the
-checkpoint from the answer the person forked from, and the engine makes the
-new session exist with that memory and nothing after it. **The source's
-earlier checkpoints stay valid in the fork**: the platform copies the
-transcript up to the answer, checkpoint ids and all, so the engine copies
-the memories those ids name along with the one forked at, under the same
-ids, and the fork can then be continued, forked or cut back at any of them
-exactly as the source could. The two are independent from then on.
-
-**How a turn ends.**
-
-- normally: the last event is ``Done``, once, with every call the turn
-  announced answered and the id of the checkpoint the turn ended on. The
-  checkpoint is written before ``Done`` is yielded, so a session whose turn
-  finished is remembered whatever the platform then does with the
-  transcript -- and if the platform does nothing with it, the id is never
-  stored, and the next turn is told to continue from the one before.
-- by **raising**: any exception ends the turn. The application records the run
-  ``failed`` with a description of what was raised and leaves the message that
-  was in flight uncompleted. An engine yields nothing after an error, and
-  **what the turn said is not in the memory the next turn runs with**: the
-  next turn continues from the checkpoint it is given, which is the one the
-  platform had -- unless it asks to ``resume`` this very turn.
-- by **cancellation**: the application cancels the task the iteration runs in,
-  and closes the stream. An engine must not swallow ``CancelledError``; it
-  lets it through, and what it holds -- the framework's run, the HTTP
-  response, the connections to the tool servers -- is released by the
-  ``finally`` of the generator, which closing runs. The same promise about the
-  memory holds as for a turn that raised.
-
-**Every refusal, and its error**, the same ones the conversation store uses
-for the same mistakes (``robinauts.ports.conversations``). The domain names
-them after the conversation, which a session is the engine's side of; a
-session error of its own is the domain's to add, not this port's:
-
-- a session created twice, or forked onto one already created:
-  ``InvalidValueError``, as an id already stored is -- a bug in the caller,
-  not something to overwrite;
-- a turn of, or a fork from, a session that was not created or was
-  forgotten: ``ConversationNotFoundError``, raised where the stream is
-  iterated for a turn;
-- a checkpoint id the engine does not hold for that session -- another
-  session's, a turn that did not finish, another engine's, since forgotten:
-  ``CheckpointNotFoundError``, raised where the stream is iterated for a
-  turn, and nothing is done with it;
-- a ``resume`` whose prompt is not the one the partial work was answering:
-  ``InvalidValueError``, raised where the stream is iterated, and nothing is
-  run -- resuming is for the turn that was interrupted, never for the next;
-- forgetting what is not there: nothing. Deleting is idempotent.
-
-**What is not here.** The table of engines and the choice of storage,
-which are the composition root's; cutting a session back in place, which is
-a turn continued from an earlier checkpoint and needs nothing more of the
-port; and a turn that suspends on a tool call and resumes, which stands on
-the per-step state this port leaves to the engine and changes the promise
-above for one run state when it comes.
-
-The contract suite every engine is held to is to be
-``backend/tests/contracts/agent_engines.py``, and the order it holds them to
-is ``robinauts.core.check_backend_events``.
-"""
+"""The agent engine port. The contract is ``docs/specs/agent-engines.md``; here are its types."""
 
 from __future__ import annotations
 
@@ -215,156 +16,57 @@ from robinauts.domain import AgentDefinition, Event, ModelsConfig, ProviderKind
 
 
 class ProviderKeyLookup(ABC):
-    """Where an engine asks for a model provider's API key, and the one question it may ask.
-
-    A base class and not the carrier itself (``adapters.config_file.ProviderKeys``
-    is one), so that this port names nothing of the adapters and a carrier
-    keeps its promises -- it prints nothing, holds a copy, and is not
-    iterable -- wherever it is built. A test's lookup answers the same
-    question from a dict.
-    """
-
     __slots__ = ()
 
     @abstractmethod
     def key_for(self, provider_id: str) -> str:
-        """The key of that provider; ``ConfigError`` if this process has none."""
+        """``ConfigError`` for a provider this process has no key for."""
         raise NotImplementedError
 
 
 class ToolSecretLookup(ABC):
-    """Where an engine asks for a tool server's secret: ``ProviderKeyLookup`` for the servers."""
-
     __slots__ = ()
 
     @abstractmethod
     def secret_for(self, server_id: str) -> str:
-        """The secret of that server; ``ConfigError`` if this process has none."""
+        """``ConfigError`` for a server this process has no secret for."""
         raise NotImplementedError
 
 
 @dataclass(frozen=True, slots=True)
 class EngineSettings:
-    """What every engine is built with: the models and tool servers, and how to reach them.
-
-    ``models`` is the deployment's configuration of models, providers and
-    tool servers, which the engine looks a run's model up in and builds the
-    vendor's client from; ``keys`` and ``tool_secrets`` are where it asks for
-    what it may not be handed in the open. The same record for every engine,
-    because it is the platform's configuration and not a framework's.
-    """
-
     models: ModelsConfig
     keys: ProviderKeyLookup
     tool_secrets: ToolSecretLookup
 
 
 class StorageKind(Enum):
-    """Where an engine keeps its sessions; what each kind needs is on ``StorageConfig``."""
-
-    POSTGRES = "postgres"
-    """Tables of the engine's own under a connection pool: ``{"pool": <the pool>}``."""
-    LOCAL = "local"
-    """Files of the engine's own under a folder: ``{"path": <the folder>}``."""
-    IN_MEMORY = "in-memory"
-    """Nothing outlives the process; for the tests. No options."""
+    POSTGRES = "postgres"  # options: {"pool": <the connection pool>}
+    LOCAL = "local"  # options: {"path": <the folder>}
+    IN_MEMORY = "in-memory"  # no options
 
 
 @dataclass(frozen=True, slots=True)
 class StorageConfig:
-    """A storage an engine is built on: a kind, and what that kind needs.
-
-    Plain data, as the examples' is: the port types none of the options,
-    which is what keeps a driver's pool and a folder's path out of the
-    contract. The engine reads the option its kind names and refuses a kind
-    it does not support, as the examples' backends do.
-    """
-
     kind: StorageKind
     options: Mapping[str, Any]
 
 
 class AgentEngine(ABC):
-    """One agent framework as the platform sees it: runs the agents, keeps the sessions."""
-
     def kinds(self) -> frozenset[ProviderKind]:
-        """The model provider kinds this engine has a client for.
-
-        **Not every model exists under every engine** (``docs/specs/agents.md``),
-        and not every provider's client passes the dependency policy at a
-        given version (``DEPENDENCIES.md``). So an engine says what it can
-        reach, and the composition root asks it rather than knowing: the
-        configuration is then refused at start-up, naming the provider,
-        instead of a person waiting for an answer from a client that was
-        never built. Asked of the engine the factory handed back, which
-        holds nothing yet, so building first costs nothing.
-
-        Empty by default, which is a test double's honest answer: a scripted
-        engine reaches no provider at all.
-        """
         return frozenset()
 
     @abstractmethod
     async def setup(self) -> None:
-        """Make the storage this engine was built on ready for it.
-
-        The tables under the pool, the folder on the disk, whatever the
-        engine's own persistence needs before the first session: the engine
-        makes it with its own driver, as the examples' LangChain backend
-        sets up its checkpointer's database. **Idempotent**, so that it can
-        be called at every start-up and by a command alike, and a storage
-        that is already ready is left as it is. Nothing of the platform's is
-        touched: an engine's tables are named so that two engines never
-        collide in one database, and none of them references a table of the
-        platform's.
-
-        Called by whoever built the engine, before anything else of this
-        port, once the storage exists: the composition root after it opened
-        the pool, a standalone process after it opened its own, a test after
-        it chose memory, for which there is nothing to do. When it is called
-        -- at start-up, or by an operator's command and never by a server --
-        is the deployment's rule and not the engine's.
-        """
         raise NotImplementedError
 
     @abstractmethod
     async def create(self, session_id: uuid.UUID) -> None:
-        """Make that session exist in this engine, with no memory yet.
-
-        The one way a session comes to exist here. Called by the application
-        when it creates the platform's conversation, after that record is
-        stored, so that an engine never holds a session the platform does
-        not; the engine knows nothing of that record and checks nothing
-        about it. If this call fails after the record was stored, the
-        platform holds a conversation this engine has no session for, which
-        ``exists`` says and the application mends by calling this again
-        before the first turn; nothing is answered into it meanwhile.
-
-        Also what the application calls when an agent has been moved to this
-        engine and a conversation of it arrives with a transcript and no
-        session here (``docs/specs/agents.md``, "A conversation stays with
-        its engine"): said in the log, then created, then begun from
-        nothing. The engine is not asked to know the difference.
-
-        A session already created here is a bug in the caller, not something
-        to start over: ``InvalidValueError``, and the memory stays as it
-        was. What "exists with no memory" is in the engine's own terms -- a
-        row, an empty history, a thread with nothing in it -- is the
-        engine's.
-        """
+        """``InvalidValueError`` for a session that already exists."""
         raise NotImplementedError
 
     @abstractmethod
     async def exists(self, session_id: uuid.UUID) -> bool:
-        """Whether this engine has that session.
-
-        True from ``create`` or ``fork`` until ``forget``, whether or not a
-        turn has run; false for one never created here, which is what a
-        conversation moved to this engine from another looks like, and what
-        a create that failed half way leaves. Asked and answered on its own,
-        not inside ``stream``, so that the application can say in the log
-        that a memory is missing before it answers without one.
-        """
         raise NotImplementedError
 
     @abstractmethod
@@ -376,180 +78,29 @@ class AgentEngine(ABC):
         *,
         model: str,
         checkpoint_id: str | None,
+        timeout: float,
         resume: bool = False,
     ) -> AsyncGenerator[Event, None]:
-        """Send ``prompt`` as the next turn of that session and yield the turn's events.
+        """Not a coroutine: everything, the refusals included, happens inside the generator.
 
-        ``session_id`` names a session ``create`` or ``fork`` made. **A turn
-        creates nothing**: one the engine does not have is
-        ``ConversationNotFoundError``, raised where the stream is iterated,
-        and nothing is written for it.
-
-        ``checkpoint_id`` is where the turn continues from: the id the
-        engine handed back with the session's last stored answer, as the
-        platform has it on that answer, or ``None`` for a session with no
-        answer yet -- its first turn, or one moved to this engine from
-        another. The turn runs on the memory as it was at that checkpoint
-        and on nothing the engine may hold past it: a turn the engine
-        finished and the platform never recorded, or one that was
-        interrupted, is partial progress the platform never had, and a turn
-        that does not ``resume`` lets the engine discard it, on this call or
-        later, as it likes. An id this engine does not hold for the session
-        is ``CheckpointNotFoundError``, raised where the stream is iterated,
-        and nothing is written. The engine is not asked to remember what the
-        last checkpoint was: the platform tells it, every turn.
-
-        ``resume`` asks for the opposite: **take up the turn that was
-        interrupted after that checkpoint**, from where the engine's own
-        state left it, instead of starting it again. For the caller it is
-        the same call as the one that was interrupted -- the same session,
-        the same prompt, the same checkpoint -- made again; the engine does
-        the rest. What it yields is what happens from the point resumed, not
-        what was streamed before the interruption, which the caller already
-        had; ``Done`` ends it as any turn, with a new checkpoint. Three
-        cases, all of them a turn that runs to its end:
-
-        - partial work of that turn is there: it is continued. A framework
-          with a checkpoint per step goes on from the last one, its calls
-          already answered not made again;
-        - none is there -- the turn never began, or the engine keeps nothing
-          of a turn before its end, or it was discarded by a turn that did
-          not resume: the turn starts from the checkpoint, as without
-          ``resume``. A caller may therefore always ask to resume when
-          re-running an interrupted turn, and never has to know whether
-          anything was kept;
-        - the partial work there was answering another prompt:
-          ``InvalidValueError``, and nothing is run. Resuming is for the
-          turn that was interrupted; the next question of a session starts
-          from the checkpoint, and a caller that passed ``resume`` with it
-          has a bug the engine refuses to run.
-
-        Partial work is kept until a turn from the same checkpoint runs
-        without ``resume``, or until ``forget``; how an engine keeps it is
-        its own. ``False`` by default: a caller that gives it no thought gets
-        the chat's behaviour, which discards.
-
-        ``agent`` is the definition as the operator has it now: its system
-        prompt is sent with every request and never enters the memory, so
-        editing an agent takes effect at the next turn of its existing
-        sessions; its ``tools`` name the servers the framework connects to
-        for the turn (``docs/specs/agents.md``, "Tools").
-
-        ``model`` is the id of the model the **run** records
-        (``domain.Run.model``), never ``agent.model``: that is the agent's
-        default, and a conversation may run on another. An id the engine's
-        configuration does not have is a failure of the turn
-        (``domain.UnknownModelError``), raised where the stream is iterated,
-        like any other.
-
-        The turn ends with ``Done``, whose ``checkpoint_id`` is the engine's
-        id for the memory as it now is -- after the question, the loop and
-        the answer -- written before ``Done`` is yielded. The platform stores
-        it on the answer and will hand it back here, as ``checkpoint_id``,
-        for the next turn, and to ``fork``. It is never the one that was
-        given: a turn that ran made a new checkpoint. ``None`` only from an
-        engine that keeps no memory, which the platform then continues with
-        ``None`` as well.
-
-        Not a coroutine: it hands back the stream, which is then iterated.
-        Nothing is done here -- building the model, listing the tools,
-        reading the memory, opening the stream -- all of it happens inside
-        the generator, so that a provider that refuses a key and a database
-        that is away are failures of the turn, reported by raising where the
-        caller is iterating, and not exceptions thrown at whoever asked for
-        the stream.
-
-        **An async generator, and that is part of the port.** What it hands
-        back must have ``aclose()``, because closing the stream is how the
-        application releases what the engine holds -- when the turn ends,
-        when it fails, and above all when the task running it is cancelled,
-        which is how a run is cancelled. An implementation is therefore an
-        ``async def`` with ``yield``s in it, whose ``finally`` releases what
-        the turn opened; the contract suite asks the object for ``aclose``
-        and asks the engine what it still holds afterwards.
-
-        The close is **bounded** by the application: an engine that takes too
-        long to let go is abandoned rather than allowed to hold up the run
-        that has already ended.
-
-        **Two turns of one session never overlap**: the platform allows a
-        conversation one active run, so an engine may assume that no other
-        turn is writing the same memory while this one runs. Turns of
-        different sessions run side by side, through the one engine.
+        ``timeout`` is in seconds; past it the engine ends the turn by raising ``TimeoutError``.
+        Raised where iterated: ``ConversationNotFoundError`` for a session not created,
+        ``CheckpointNotFoundError`` for a checkpoint not held for it, ``UnknownModelError`` for
+        a model the settings do not have, ``InvalidValueError`` for a resume of another prompt.
         """
         raise NotImplementedError
 
     @abstractmethod
-    async def fork(self, source_id: uuid.UUID, target_id: uuid.UUID, *, checkpoint_id: str) -> None:
-        """Make session ``target_id`` exist with ``source_id``'s memory as of that checkpoint.
-
-        ``create`` and a copy in one: afterwards ``exists(target_id)`` is
-        true, its memory is what the source's was at ``checkpoint_id`` -- the
-        answer that checkpoint ended on included, nothing of any later turn
-        -- and the two are independent: a turn of either writes nothing the
-        other reads, and forgetting either leaves the other whole. The source
-        is not changed.
-
-        ``checkpoint_id`` is the id on the answer the person forked from
-        (``domain.Provenance``), handed back by this engine when that turn
-        finished. Not held here for the source -- another session's, a turn
-        that did not finish, since forgotten: ``CheckpointNotFoundError``,
-        and nothing is made.
-
-        **The source's checkpoints up to that one are valid in the target
-        afterwards, under the same ids.** The platform copies the transcript
-        up to the answer into the target's conversation, the ids on its
-        answers included, and a fork is then a session like any other: its
-        first turn continues from ``checkpoint_id``, and it can be forked,
-        or continued from an earlier answer, at any id a copied answer
-        carries. The engine copies what those ids name along with the memory
-        forked at; what it holds for the source past the checkpoint is not
-        copied.
-
-        Called after the platform's record of the target is stored, as
-        ``create`` is, and with the source's turn over: a fork taken while
-        the source has a turn running copies a memory that is still being
-        written, so the application refuses the request until the run has
-        ended. ``source_id`` not created here, or forgotten:
-        ``ConversationNotFoundError``. ``target_id`` already created here:
-        ``InvalidValueError``, and its memory stays as it was.
-        """
+    async def fork(
+        self, source_id: uuid.UUID, target_id: uuid.UUID, *, checkpoint_id: str
+    ) -> None:
+        """``ConversationNotFoundError`` for the source, ``CheckpointNotFoundError`` for the
+        checkpoint, ``InvalidValueError`` for a target that already exists."""
         raise NotImplementedError
 
     @abstractmethod
     async def forget(self, session_id: uuid.UUID) -> None:
-        """Delete whatever this engine keeps for that session.
-
-        **The one way a session leaves an engine.** Nothing cascades into an
-        engine's storage from the platform's, so a purge or a retention run
-        that deletes the platform's conversation without calling this leaves
-        the memory behind; the application calls it for every way a
-        conversation goes. Called when the conversation is deleted, before
-        the platform's own record goes (``docs/specs/privacy.md``): if this
-        fails, nothing is deleted and the person is told; if the record's
-        deletion then fails, a conversation this engine has no session for
-        is left, which ``exists`` says and no turn can run into, and nothing
-        is left behind unowned. Called again for a session that is already
-        gone, or was never here, it does nothing and raises nothing:
-        deleting is idempotent, as a retry needs it to be.
-
-        A fork of the session is untouched: what was copied into it is its
-        own.
-
-        Must not be called while a turn of the session is running; the
-        application ends the run first, as it does before deleting the
-        record.
-        """
         raise NotImplementedError
 
 
 EngineFactory = Callable[[EngineSettings, StorageConfig], Awaitable[AgentEngine]]
-"""Builds an engine from the settings and a storage: what each adapter exports as its ``init_*``.
-
-The examples' ``BackendFactory``, with their per-conversation arguments gone
-to ``stream`` and their store become the storage. Awaitable, because
-building may open what the storage needs -- a file under the folder, a
-check of the pool -- before the engine exists; ``setup`` is still the
-caller's to run on what comes back. The composition root's table maps each
-engine name to one of these, and a standalone process calls one directly.
-"""

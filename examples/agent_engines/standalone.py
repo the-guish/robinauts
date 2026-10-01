@@ -28,7 +28,15 @@ import os
 import uuid
 from collections.abc import AsyncIterator, Callable
 
-from robinauts.domain import AgentDefinition, Done, Engine, Event, TextDelta, ToolCall, ToolResult
+from robinauts.domain import (
+    AgentDefinition,
+    Done,
+    Engine,
+    Event,
+    TextDelta,
+    ToolCall,
+    ToolResult,
+)
 from robinauts.ports.agent_engine import AgentEngine
 
 # Filled in the day an adapter implements the port:
@@ -37,6 +45,7 @@ from robinauts.ports.agent_engine import AgentEngine
 ENGINES: dict[str, Callable[[], AgentEngine]] = {}
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5")
+TURN_SECONDS = 120.0
 
 AGENT = AgentDefinition(
     id="weather",
@@ -73,6 +82,7 @@ async def converse(engine: AgentEngine) -> None:
             "What's the warmer city righ now of Tampa, Madrid, Montevideo? Answer in one word",
             model=MODEL,
             checkpoint_id=None,
+            timeout=TURN_SECONDS,
         )
     )
     # The platform stores the answer with `first` on it. That is all it keeps of the memory,
@@ -86,6 +96,7 @@ async def converse(engine: AgentEngine) -> None:
             "What's the coolest? One word",
             model=MODEL,
             checkpoint_id=first,
+            timeout=TURN_SECONDS,
         )
     )
 
