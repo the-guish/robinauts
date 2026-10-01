@@ -1,11 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""Builds a controller: the store for the storage asked, and the application over it."""
+"""Loads a configuration file, and builds a controller: the store for the storage asked, and the
+application over it."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from pathlib import Path
+
+from robinauts.controller.adapters.config_file import read_config
 from robinauts.controller.adapters.memory import MemoryStore
+from robinauts.controller.application.config import parse_config
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.application.engines import SecretLookup
 from robinauts.controller.contract.domain import Config, StorageConfig, StorageKind
@@ -16,3 +22,7 @@ def build(config: Config, *, storage: StorageConfig, secret_for: SecretLookup) -
     if storage.kind is not StorageKind.IN_MEMORY:
         raise NotImplementedError(f"{storage.kind} storage")
     return RobinautsController(config, store=MemoryStore(), storage=storage, secret_for=secret_for)
+
+
+def load(path: Path, environ: Mapping[str, str]) -> tuple[Config, SecretLookup]:
+    return parse_config(read_config(path)), environ.get
