@@ -5,11 +5,16 @@
 
 Subclass ``EngineMemoryContract`` and override ``new_engine``, which returns an engine set up
 and ready, whose ``MODEL`` answers without reaching anything.
+
+Subclass ``EngineTurnContract`` and override ``new_engine(script)``, which returns an engine set
+up and ready whose ``MODEL`` behaves as the ``Script`` says and is handed ``add`` as its tool.
 """
 
 from __future__ import annotations
 
+import asyncio
 import uuid
+from enum import Enum
 
 import pytest
 
@@ -18,8 +23,12 @@ from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
     CheckpointNotFoundError,
     Done,
+    Event,
     SessionExistsError,
     SessionNotFoundError,
+    TextDelta,
+    ToolCall,
+    ToolResult,
 )
 from robinauts.agent_engines.contract.ports import AgentEngine
 
@@ -94,3 +103,81 @@ class EngineMemoryContract:
         assert not await engine.exists(session)
         with pytest.raises(SessionNotFoundError):
             await turn(engine, session, self.MODEL)
+
+
+ANSWER = "Two and three make five."
+CALL_ID = "call-1"
+ARGUMENTS = {"a": 2, "b": 3}
+
+
+def add(a: int, b: int) -> int:
+    """Add two integers."""
+    return a + b
+
+
+class ModelFailure(Exception):
+    pass
+
+
+class Script(Enum):
+    ANSWER = "streams ANSWER in more than one piece"
+    TOOL_ROUND = "calls add(**ARGUMENTS) as CALL_ID, then, given its result, streams ANSWER"
+    FAIL = "raises ModelFailure"
+    HANG = "never answers"
+
+
+class EngineTurnContract:
+    MODEL = "m"
+
+    async def new_engine(self, script: Script) -> AgentEngine:
+        raise NotImplementedError("an EngineTurnContract subclass overrides `new_engine`")
+
+    async def turn(self, script: Script, timeout_seconds: float = 10.0) -> list[Event]:
+        engine = await self.new_engine(script)
+        session = uuid.uuid4()
+        await engine.create(session)
+        stream = engine.stream(
+            session,
+            AGENT,
+            "What are two and three?",
+            model=self.MODEL,
+            checkpoint_id=None,
+            timeout_seconds=timeout_seconds,
+        )
+        return [event async for event in stream]
+
+    @asyncio_test
+    async def test_a_streamed_answer_is_its_pieces_and_done_once_last(self) -> None:
+        events = await self.turn(Script.ANSWER)
+        pieces = [event.text for event in events if isinstance(event, TextDelta)]
+        assert len(pieces) > 1
+        assert [type(event) for event in events].count(Done) == 1
+        assert events[-1] == Done(text=ANSWER, checkpoint_id=events[-1].checkpoint_id)
+        assert "".join(pieces) == ANSWER
+
+    @asyncio_test
+    async def test_a_tool_round_is_the_call_then_its_result_before_done(self) -> None:
+        events = await self.turn(Script.TOOL_ROUND)
+        call = events.index(ToolCall(CALL_ID, "add", ARGUMENTS))
+        result = events.index(ToolResult(CALL_ID, "add", "5"))
+        assert call < result < len(events) - 1
+        assert isinstance(events[-1], Done)
+        assert events[-1].text == ANSWER
+
+    @asyncio_test
+    async def test_a_failure_of_the_model_is_raised(self) -> None:
+        with pytest.raises(ModelFailure):
+            await self.turn(Script.FAIL)
+
+    @asyncio_test
+    async def test_a_cancellation_is_let_through(self) -> None:
+        running = asyncio.create_task(self.turn(Script.HANG))
+        await asyncio.sleep(0.2)
+        running.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await running
+
+    @asyncio_test
+    async def test_a_turn_past_its_timeout_ends_with_timeout_error(self) -> None:
+        with pytest.raises(TimeoutError):
+            await self.turn(Script.HANG, timeout_seconds=0.2)

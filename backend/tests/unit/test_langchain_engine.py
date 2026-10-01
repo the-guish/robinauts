@@ -5,15 +5,33 @@
 
 from __future__ import annotations
 
+import asyncio
 import itertools
+import json
+import re
+from collections.abc import AsyncIterator
+from typing import Any
 
 import langsmith.utils
 import pytest
 from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessageChunk, BaseMessage, ToolMessage
+from langchain_core.messages.tool import tool_call_chunk
+from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_openai import ChatOpenAI
 
-from contracts.engine import EngineMemoryContract
+from contracts.engine import (
+    ANSWER,
+    ARGUMENTS,
+    CALL_ID,
+    EngineMemoryContract,
+    EngineTurnContract,
+    ModelFailure,
+    Script,
+    add,
+)
 from robinauts.agent_engines.contract.domain import (
     ModelConfig,
     ModelProviderConfig,
@@ -116,6 +134,53 @@ class TestLangChainEngineMemory(EngineMemoryContract):
         monkeypatch.setattr(engine_module, "chat_model", lambda *_: model)
 
     async def new_engine(self) -> AgentEngine:
+        engine = LangChainEngine(
+            settings_for(ProviderKind.ANTHROPIC), StorageConfig(StorageKind.IN_MEMORY, {})
+        )
+        await engine.setup()
+        return engine
+
+
+class ScriptedChatModel(BaseChatModel):
+    script: Script
+
+    @property
+    def _llm_type(self) -> str:
+        return "scripted"
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> ScriptedChatModel:
+        return self
+
+    def _generate(self, *args: Any, **kwargs: Any) -> ChatResult:
+        raise NotImplementedError("the engine streams")
+
+    async def _astream(
+        self, messages: list[BaseMessage], *args: Any, **kwargs: Any
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        if self.script is Script.FAIL:
+            raise ModelFailure()
+        if self.script is Script.HANG:
+            await asyncio.sleep(3600)
+        if self.script is Script.TOOL_ROUND and not isinstance(messages[-1], ToolMessage):
+            call = tool_call_chunk(name="add", args=json.dumps(ARGUMENTS), id=CALL_ID, index=0)
+            yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_call_chunks=[call]))
+            return
+        for piece in re.split(r"(\s)", ANSWER):
+            yield ChatGenerationChunk(message=AIMessageChunk(content=piece))
+
+
+class TestLangChainEngineTurn(EngineTurnContract):
+    @pytest.fixture(autouse=True)
+    def plain_tool(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        async def tools_for(*_: object) -> list[Any]:
+            return [add]
+
+        monkeypatch.setattr(engine_module, "tools_for", tools_for)
+        self.monkeypatch = monkeypatch
+
+    async def new_engine(self, script: Script) -> AgentEngine:
+        model = ScriptedChatModel(script=script)
+        self.monkeypatch.setattr(engine_module, "chat_model", lambda *_: model)
         engine = LangChainEngine(
             settings_for(ProviderKind.ANTHROPIC), StorageConfig(StorageKind.IN_MEMORY, {})
         )
