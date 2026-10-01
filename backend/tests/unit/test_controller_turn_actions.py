@@ -36,16 +36,16 @@ class SlowEngine(EchoEngine):
 async def test_send_message_runs_a_turn_under_the_answer() -> None:
     controller = await opened()
     user = await controller.ensure_user(Identity("local", "me"))
-    started = await controller.start_conversation(user, agent="echo", model="echo", text="one")
-    cid = started.conversation_id
-    await controller._turns[cid]
-    first_answer = (await controller.open_conversation(user, cid)).messages[-1]
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    await controller._turns[sid]
+    first_answer = (await controller.open_session(user, sid)).messages[-1]
     sent = await controller.send_message(
-        user, cid, parent_id=first_answer.id, model="echo", text="two"
+        user, sid, parent_id=first_answer.id, model="echo", text="two"
     )
     assert sent.question.parent_id == first_answer.id
-    await controller._turns[cid]
-    thread = (await controller.open_conversation(user, cid)).messages
+    await controller._turns[sid]
+    thread = (await controller.open_session(user, sid)).messages
     assert len(thread) == 4
     assert thread[:3] == (started.question, first_answer, sent.question)
     assert thread[3].role is Role.ASSISTANT
@@ -58,20 +58,20 @@ async def test_send_message_runs_a_turn_under_the_answer() -> None:
 async def test_regenerate_answer_runs_a_new_answer_under_the_question() -> None:
     controller = await opened()
     user = await controller.ensure_user(Identity("local", "me"))
-    started = await controller.start_conversation(user, agent="echo", model="echo", text="one")
-    cid = started.conversation_id
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
     question = started.question
-    await controller._turns[cid]
-    first_answer = (await controller.open_conversation(user, cid)).messages[-1]
+    await controller._turns[sid]
+    first_answer = (await controller.open_session(user, sid)).messages[-1]
     regenerated = await controller.regenerate_answer(
-        user, cid, question_id=question.id, model="echo"
+        user, sid, question_id=question.id, model="echo"
     )
     assert regenerated.question == question
-    await controller._turns[cid]
-    first_event = (await controller._store.events_after(cid, 0))[0].event
+    await controller._turns[sid]
+    first_event = (await controller._store.events_after(sid, 0))[0].event
     assert isinstance(first_event, MessageStarted)
     assert first_event.parent_id == question.id
-    thread = (await controller.open_conversation(user, cid)).messages
+    thread = (await controller.open_session(user, sid)).messages
     assert thread[0] == question
     assert thread[1].id == first_event.message_id
     assert thread[1].id != first_answer.id
@@ -84,13 +84,13 @@ async def test_cancel_turn_ends_the_turn_cancelled() -> None:
     controller = await opened()
     controller._engines["echo"] = SlowEngine()
     user = await controller.ensure_user(Identity("local", "me"))
-    started = await controller.start_conversation(user, agent="echo", model="echo", text="one")
-    cid = started.conversation_id
-    await controller._store.wait_for_events(cid, 0)
-    await controller.cancel_turn(user, cid)
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    await controller._store.wait_for_events(sid, 0)
+    await controller.cancel_turn(user, sid)
     with pytest.raises(asyncio.CancelledError):
-        await controller._turns[cid]
-    events = await controller._store.events_after(cid, 0)
+        await controller._turns[sid]
+    events = await controller._store.events_after(sid, 0)
     assert events[-1].event == TurnEnded(TurnState.CANCELLED)
-    assert await controller._store.active_turn(cid) is None
+    assert await controller._store.active_turn(sid) is None
     await controller.close()
