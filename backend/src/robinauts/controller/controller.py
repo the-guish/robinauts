@@ -70,10 +70,12 @@ class RobinautsController(Controller):
         return user
 
     async def list_agents(self) -> tuple[AgentListing, ...]:
-        raise NotImplementedError("list_agents")
+        return tuple(
+            AgentListing(a.id, a.title, default_model=a.model) for a in self._config.agents.values()
+        )
 
     async def list_models(self) -> tuple[ModelListing, ...]:
-        raise NotImplementedError("list_models")
+        return tuple(ModelListing(m.id, m.title or m.id) for m in self._config.models.values())
 
     async def list_conversations(
         self, user: User, *, limit: int, cursor: str | None = None
