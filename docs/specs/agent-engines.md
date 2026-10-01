@@ -12,14 +12,12 @@ way. Adding a third means writing one more engine that keeps the contract.
 
 An engine is standalone. The Robinauts backend uses it, but so can a
 scheduled job, a command line script, or anything else that follows the
-contract. The shape of the contract follows the one reached in
-[agent-framework-examples](https://github.com/the-guish/agent-framework-examples):
-one engine, many sessions, each session kept by the engine itself.
+contract. 
 
 ## Words
 
 - **Session**: the engine's memory of one conversation, under an id the
-  caller chose. For Robinauts that id is the conversation's id.
+  caller chose.
 - **Turn**: one question and everything the agent does to answer it: model
   calls, tool calls, and the final answer.
 - **Checkpoint**: the memory as it was at the end of a finished turn. The
@@ -63,7 +61,7 @@ one engine, many sessions, each session kept by the engine itself.
 
 - The transcript people read, exports, retention, who owns a conversation,
   sign-in and access control. All of that belongs to the caller.
-- Deciding when a turn runs, running it in the background, timing it out,
+- Deciding when a turn runs, running it in the background, 
   retrying it, or scheduling it. The engine runs a turn when asked and does
   nothing on its own.
 - Storing anything but the memory. No conversation records, no run records,
