@@ -8,6 +8,9 @@ model that follows them, and the AWS layout it would run on. It decides nothing 
 `data-model-context.md` leaves to the session. It adds constraints and argues for one
 answer.
 
+This note is the reference for serverless hosting. `gcp-serverless.md` and
+`azure-serverless.md` list only what differs on those clouds.
+
 "Paid by consumption" means no charge while nobody is using it: requests,
 GB-seconds, read and write units, bytes stored. Storage at rest costs pennies and
 can't be avoided. Anything billed by the hour or the month whether or not it is used
@@ -153,6 +156,8 @@ suggestions.
 - `request_cancel(turn_id, at)`, `renew_lease(turn_id, until) -> bool` (`True` when a
   cancel was requested).
 - `wait_for_events(turn_id, after, timeout)`.
+- Session operations take the owner's id as well as the session's. Cosmos DB needs it
+  for a point read (`azure-serverless.md`). Here it is a check, and it costs nothing.
 
 And one new controller port, the **turn dispatcher**: `dispatch(session_id, turn_id)`.
 The in-process implementation creates an asyncio task, as today. The Lambda
