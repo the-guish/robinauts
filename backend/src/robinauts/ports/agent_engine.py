@@ -4,7 +4,7 @@
 """An agent engine: the seam between the platform and an agent framework, conversations included.
 
 The port that is to replace ``robinauts.ports.agents.Agent``, which stays as it
-is until this one is settled (``docs/working-notes/adapter-persistence-plan.md``).
+is until this one is settled.
 What changes is who keeps the conversation. Under the old port the framework
 hands its memory back as bytes at the end of every turn and is handed them
 again at the next; under this one **the engine keeps its conversations
