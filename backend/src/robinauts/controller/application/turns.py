@@ -40,7 +40,7 @@ from robinauts.controller.contract.domain import (
     TurnEnded,
     TurnState,
 )
-from robinauts.controller.store import Store
+from robinauts.controller.ports.store import Store
 
 
 async def run_turn(

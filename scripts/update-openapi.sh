@@ -26,7 +26,7 @@ import json
 from pathlib import Path
 
 from robinauts.controller.contract.domain import Config, StorageConfig, StorageKind
-from robinauts.controller.controller import RobinautsController
+from robinauts.controller.application.controller import RobinautsController
 from robinauts.web.app import create_app
 
 controller = RobinautsController(

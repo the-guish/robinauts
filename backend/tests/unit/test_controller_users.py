@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 from aio import asyncio_test
+from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.contract.domain import Config, Identity, StorageConfig, StorageKind
-from robinauts.controller.controller import RobinautsController
 
 
 @asyncio_test

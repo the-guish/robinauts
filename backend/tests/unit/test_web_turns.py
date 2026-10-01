@@ -14,8 +14,8 @@ import httpx
 from test_controller_turns import CONFIG
 
 from aio import asyncio_test
+from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.contract.domain import StorageConfig, StorageKind
-from robinauts.controller.controller import RobinautsController
 from robinauts.web.app import create_app
 
 

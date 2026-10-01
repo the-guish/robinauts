@@ -14,6 +14,7 @@ from pathlib import Path
 
 import uvicorn
 
+from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.contract.domain import (
     AgentConfig,
     Config,
@@ -23,7 +24,6 @@ from robinauts.controller.contract.domain import (
     StorageConfig,
     StorageKind,
 )
-from robinauts.controller.controller import RobinautsController
 from robinauts.web.app import create_app
 
 REPO = Path(__file__).resolve().parents[4]
