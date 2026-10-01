@@ -6,7 +6,7 @@
 No sign-in yet: every request runs as one local user, named after the operating
 system's. A controller operation that is not implemented answers 501. The shapes are the
 ones the frontend reads (``docs/specs/wire.md``); a turn's stream is AG-UI over SSE, and
-its run id is the conversation id.
+its run id is the session's id.
 """
 
 from __future__ import annotations
@@ -26,17 +26,17 @@ from pydantic import BaseModel
 
 from robinauts.controller.contract.domain import (
     ControllerError,
-    Conversation,
-    ConversationNotFoundError,
     Identity,
     InvalidValueError,
     Message,
     MessageNotFoundError,
     NoActiveTurnError,
     NumberedEvent,
-    OpenedConversation,
+    OpenedSession,
     ReasoningPart,
     Role,
+    Session,
+    SessionNotFoundError,
     TextPart,
     ToolCallPart,
     ToolResultPart,
@@ -52,7 +52,7 @@ DEFAULT_PAGE = 30
 
 STATUS_OF: dict[type[ControllerError], int] = {
     InvalidValueError: 422,
-    ConversationNotFoundError: 404,
+    SessionNotFoundError: 404,
     MessageNotFoundError: 404,
     UnknownAgentError: 404,
     UnknownModelError: 422,
@@ -87,7 +87,7 @@ class UserSummary(BaseModel):
     provider: str
 
 
-class SessionResponse(BaseModel):
+class UserSessionResponse(BaseModel):
     sign_in: bool
     local_development: bool = False
     public_url: str | None = None
@@ -208,14 +208,14 @@ class TurnRequest(BaseModel):
     model_id: str | None = None
 
 
-def summary(conversation: Conversation, model: str) -> ConversationSummary:
+def summary(session: Session, model: str) -> ConversationSummary:
     return ConversationSummary(
-        id=conversation.id,
-        title=conversation.title,
-        agent=conversation.agent,
+        id=session.id,
+        title=session.title,
+        agent=session.agent,
         model=model,
-        created_at=conversation.created_at,
-        updated_at=conversation.updated_at,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
     )
 
 
@@ -231,14 +231,14 @@ def content(part: TextPart | ToolCallPart | ToolResultPart) -> BaseModel:
     return TextContent(kind="text", text=part.text)
 
 
-def message_view(message: Message, conversation: Conversation) -> MessageView:
+def message_view(message: Message, session: Session) -> MessageView:
     provenance = None
     if message.role is Role.ASSISTANT:
         provenance = ProvenanceView(
-            agent=message.agent or conversation.agent,
+            agent=message.agent or session.agent,
             engine="",
             model=message.model or "",
-            run_id=conversation.id,
+            run_id=session.id,
         )
     return MessageView(
         id=message.id,
@@ -250,29 +250,27 @@ def message_view(message: Message, conversation: Conversation) -> MessageView:
     )
 
 
-def model_of(opened: OpenedConversation, default: str) -> str:
-    """A conversation's model is its last message's; the agent's default before any."""
+def model_of(opened: OpenedSession, default: str) -> str:
+    """A session's model is its last message's; the agent's default before any."""
     return next((m.model for m in reversed(opened.messages) if m.model), default)
 
 
-def opened_view(opened: OpenedConversation, default: str) -> OpenedConversationResponse:
-    conversation = opened.conversation
+def opened_view(opened: OpenedSession, default: str) -> OpenedConversationResponse:
+    session = opened.session
     # The turn stores its one answer when it ends, so a watcher that has the thread
     # attaches at the start of the turn's events.
     active = opened.active
     return OpenedConversationResponse(
-        conversation=summary(conversation, model_of(opened, default)),
-        messages=[message_view(m, conversation) for m in opened.messages],
-        run_id=None if active is None else conversation.id,
+        conversation=summary(session, model_of(opened, default)),
+        messages=[message_view(m, session) for m in opened.messages],
+        run_id=None if active is None else session.id,
         resume=None if active is None else ResumeView(after=0, follows=active.follows),
         ended_badly=None,
     )
 
 
-def event_stream(
-    conversation_id: uuid.UUID, events: AsyncIterator[NumberedEvent]
-) -> StreamingResponse:
-    run_id = str(conversation_id)
+def event_stream(session_id: uuid.UUID, events: AsyncIterator[NumberedEvent]) -> StreamingResponse:
+    run_id = str(session_id)
     return StreamingResponse(
         agui.stream(run_id, events),
         media_type="text/event-stream",
@@ -314,8 +312,8 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
     async def default_model(agent: str) -> str:
         return next(a.default_model for a in await controller.list_agents() if a.id == agent)
 
-    async def watched(conversation_id: uuid.UUID, after: int) -> StreamingResponse:
-        events = controller.watch_turn(app.state.user, conversation_id, after=after)
+    async def watched(session_id: uuid.UUID, after: int) -> StreamingResponse:
+        events = controller.watch_turn(app.state.user, session_id, after=after)
         # The refusals happen inside the generator: ask for the first event here, so that
         # they answer with a status rather than a broken stream.
         first = await anext(events, None)
@@ -327,14 +325,14 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
             async for event in events:
                 yield event
 
-        return event_stream(conversation_id, chained())
+        return event_stream(session_id, chained())
 
     # --- sign-in: none yet ----------------------------------------------------
 
     @app.get("/auth/session")
-    async def current_session() -> SessionResponse:
+    async def current_user_session() -> UserSessionResponse:
         user = app.state.user
-        return SessionResponse(
+        return UserSessionResponse(
             sign_in=False,
             local_development=True,
             user=UserSummary(id=user.id, name=user.name, email=user.email, provider=user.provider),
@@ -361,49 +359,47 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
         models = await controller.list_models()
         return ModelListResponse(items=[ModelSummary(id=m.id, title=m.title) for m in models])
 
-    # --- conversations ---------------------------------------------------------
+    # --- sessions --------------------------------------------------------------
 
     @app.get("/api/conversations")
-    async def list_conversations(
+    async def list_sessions(
         limit: int = DEFAULT_PAGE, cursor: str | None = None
     ) -> ConversationListResponse:
-        page = await controller.list_conversations(app.state.user, limit=limit, cursor=cursor)
+        page = await controller.list_sessions(app.state.user, limit=limit, cursor=cursor)
         defaults = {a.id: a.default_model for a in await controller.list_agents()}
         return ConversationListResponse(
-            items=[summary(c, defaults[c.agent]) for c in page.conversations],
+            items=[summary(c, defaults[c.agent]) for c in page.sessions],
             next_cursor=page.cursor,
         )
 
     @app.get("/api/conversations/{conversation_id}")
-    async def open_conversation(conversation_id: uuid.UUID) -> OpenedConversationResponse:
-        opened = await controller.open_conversation(app.state.user, conversation_id)
-        return opened_view(opened, await default_model(opened.conversation.agent))
+    async def open_session(conversation_id: uuid.UUID) -> OpenedConversationResponse:
+        opened = await controller.open_session(app.state.user, conversation_id)
+        return opened_view(opened, await default_model(opened.session.agent))
 
     @app.patch("/api/conversations/{conversation_id}")
-    async def rename_conversation(
+    async def rename_session(
         conversation_id: uuid.UUID, body: RenameRequest
     ) -> ConversationSummary:
-        renamed = await controller.rename_conversation(app.state.user, conversation_id, body.title)
+        renamed = await controller.rename_session(app.state.user, conversation_id, body.title)
         return summary(renamed, await default_model(renamed.agent))
 
     @app.delete("/api/conversations/{conversation_id}", status_code=204)
-    async def delete_conversation(conversation_id: uuid.UUID) -> None:
-        await controller.delete_conversation(app.state.user, conversation_id)
+    async def delete_session(conversation_id: uuid.UUID) -> None:
+        await controller.delete_session(app.state.user, conversation_id)
 
     @app.put("/api/conversations/{conversation_id}/model")
     async def set_model(conversation_id: uuid.UUID, body: SetModelRequest) -> ConversationSummary:
         # The model goes with each turn now: this stores nothing, and answers the
         # conversation as the picker will send its next turn.
-        opened = await controller.open_conversation(app.state.user, conversation_id)
-        moved = summary(opened.conversation, body.model_id)
+        opened = await controller.open_session(app.state.user, conversation_id)
+        moved = summary(opened.session, body.model_id)
         moved.updated_at = datetime.now(UTC)
         return moved
 
     @app.post("/api/conversations/{conversation_id}/fork", status_code=201)
-    async def fork_conversation(
-        conversation_id: uuid.UUID, body: ForkRequest
-    ) -> ConversationSummary:
-        forked = await controller.fork_conversation(
+    async def fork_session(conversation_id: uuid.UUID, body: ForkRequest) -> ConversationSummary:
+        forked = await controller.fork_session(
             app.state.user, conversation_id, at_message=body.at_message
         )
         return summary(forked, await default_model(forked.agent))
@@ -411,17 +407,17 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
     # --- turns: AG-UI over SSE, outside the OpenAPI document -------------------
 
     @app.post("/api/turns", include_in_schema=False)
-    async def start_conversation(body: NewChatRequest) -> StreamingResponse:
+    async def start_session(body: NewChatRequest) -> StreamingResponse:
         model = body.model_id or await default_model(body.agent_id)
-        started = await controller.start_conversation(
+        started = await controller.start_session(
             app.state.user, agent=body.agent_id, model=model, text=body.text
         )
-        return await watched(started.conversation_id, 0)
+        return await watched(started.session_id, 0)
 
     @app.post("/api/conversations/{conversation_id}/turns", include_in_schema=False)
     async def send_message(conversation_id: uuid.UUID, body: TurnRequest) -> StreamingResponse:
-        opened = await controller.open_conversation(app.state.user, conversation_id)
-        model = body.model_id or model_of(opened, await default_model(opened.conversation.agent))
+        opened = await controller.open_session(app.state.user, conversation_id)
+        model = body.model_id or model_of(opened, await default_model(opened.session.agent))
         if body.regenerate is not None:
             # The frontend names the answer to produce again; the controller, its question.
             at = next(i for i, m in enumerate(opened.messages) if m.id == body.regenerate)

@@ -3,7 +3,7 @@
 
 """The controller's turn events as AG-UI events over server-sent events (``docs/specs/wire.md``).
 
-The run id is the conversation id: a conversation has one active turn at a time.
+The run id is the session's id: a session has one active turn at a time.
 """
 
 from __future__ import annotations

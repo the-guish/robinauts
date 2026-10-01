@@ -23,8 +23,8 @@ class InvalidValueError(ControllerError, ValueError):
     pass
 
 
-class ConversationNotFoundError(ControllerError):
-    """Also for a conversation that exists and is not the user's."""
+class SessionNotFoundError(ControllerError):
+    """Also for a session that exists and is not the user's."""
 
 
 class MessageNotFoundError(ControllerError):
@@ -56,7 +56,7 @@ class ConfigError(ControllerError):
 
 
 class TurnActiveError(ControllerError):
-    """A turn asked for while the conversation already has one running."""
+    """A turn asked for while the session already has one running."""
 
 
 class NoActiveTurnError(ControllerError):
@@ -180,7 +180,7 @@ class ModelListing:
     title: str
 
 
-# --- conversations ------------------------------------------------------------
+# --- sessions -----------------------------------------------------------------
 
 
 class Role(StrEnum):
@@ -219,7 +219,7 @@ MessagePart = TextPart | ReasoningPart | ToolCallPart | ToolResultPart
 @dataclass(frozen=True, slots=True)
 class Message:
     id: uuid.UUID
-    conversation_id: uuid.UUID
+    session_id: uuid.UUID
     parent_id: uuid.UUID | None
     role: Role
     parts: tuple[MessagePart, ...]
@@ -230,7 +230,7 @@ class Message:
 
 
 @dataclass(frozen=True, slots=True)
-class Conversation:
+class Session:
     id: uuid.UUID
     owner_id: uuid.UUID
     agent: str
@@ -240,8 +240,8 @@ class Conversation:
 
 
 @dataclass(frozen=True, slots=True)
-class ConversationPage:
-    conversations: tuple[Conversation, ...]
+class SessionPage:
+    sessions: tuple[Session, ...]
     cursor: str | None = None
 
 
@@ -255,17 +255,17 @@ class TurnState(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ActiveTurn:
-    """The turn a conversation is in the middle of: what it answers, and where its events are."""
+    """The turn a session is in the middle of: what it answers, and where its events are."""
 
     follows: uuid.UUID
     position: int
 
 
 @dataclass(frozen=True, slots=True)
-class OpenedConversation:
-    """One moment of a conversation: its record, the thread it shows, oldest first, and its turn."""
+class OpenedSession:
+    """One moment of a session: its record, the thread it shows, oldest first, and its turn."""
 
-    conversation: Conversation
+    session: Session
     messages: tuple[Message, ...]
     active: ActiveTurn | None = None
 
@@ -275,7 +275,7 @@ class OpenedConversation:
 
 @dataclass(frozen=True, slots=True)
 class TurnStarted:
-    conversation_id: uuid.UUID
+    session_id: uuid.UUID
     question: Message
 
 

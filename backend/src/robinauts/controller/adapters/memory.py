@@ -10,9 +10,9 @@ import uuid
 
 from robinauts.controller.contract.domain import (
     ActiveTurn,
-    Conversation,
     Message,
     NumberedEvent,
+    Session,
     TurnEvent,
     User,
 )
@@ -22,7 +22,7 @@ from robinauts.controller.ports.store import Store
 class MemoryStore(Store):
     def __init__(self) -> None:
         self._users: dict[tuple[str, str], User] = {}
-        self._conversations: dict[uuid.UUID, Conversation] = {}
+        self._sessions: dict[uuid.UUID, Session] = {}
         self._messages: dict[uuid.UUID, list[Message]] = {}
         self._events: dict[uuid.UUID, list[NumberedEvent]] = {}
         self._follows: dict[uuid.UUID, uuid.UUID] = {}
@@ -34,62 +34,61 @@ class MemoryStore(Store):
     async def add_user(self, user: User) -> None:
         self._users[(user.provider, user.subject)] = user
 
-    async def add_conversation(self, conversation: Conversation) -> None:
-        self._conversations[conversation.id] = conversation
-        self._messages[conversation.id] = []
-        self._events[conversation.id] = []
+    async def add_session(self, session: Session) -> None:
+        self._sessions[session.id] = session
+        self._messages[session.id] = []
+        self._events[session.id] = []
 
-    async def get_conversation(self, conversation_id: uuid.UUID) -> Conversation | None:
-        return self._conversations.get(conversation_id)
+    async def get_session(self, session_id: uuid.UUID) -> Session | None:
+        return self._sessions.get(session_id)
 
-    async def update_conversation(self, conversation: Conversation) -> None:
-        self._conversations[conversation.id] = conversation
+    async def update_session(self, session: Session) -> None:
+        self._sessions[session.id] = session
 
-    async def delete_conversation(self, conversation_id: uuid.UUID) -> None:
-        del self._conversations[conversation_id]
-        del self._messages[conversation_id]
-        del self._events[conversation_id]
-        self._follows.pop(conversation_id, None)
+    async def delete_session(self, session_id: uuid.UUID) -> None:
+        del self._sessions[session_id]
+        del self._messages[session_id]
+        del self._events[session_id]
+        self._follows.pop(session_id, None)
 
-    async def conversations_of(self, owner_id: uuid.UUID) -> list[Conversation]:
-        owned = [c for c in self._conversations.values() if c.owner_id == owner_id]
+    async def sessions_of(self, owner_id: uuid.UUID) -> list[Session]:
+        owned = [c for c in self._sessions.values() if c.owner_id == owner_id]
         return sorted(owned, key=lambda c: c.updated_at, reverse=True)
 
     async def add_message(self, message: Message) -> None:
-        self._messages[message.conversation_id].append(message)
+        self._messages[message.session_id].append(message)
 
-    async def messages_of(self, conversation_id: uuid.UUID) -> list[Message]:
-        return list(self._messages[conversation_id])
+    async def messages_of(self, session_id: uuid.UUID) -> list[Message]:
+        return list(self._messages[session_id])
 
-    async def start_turn(self, conversation_id: uuid.UUID, follows: uuid.UUID) -> None:
-        self._follows[conversation_id] = follows
-        self._events[conversation_id] = []
+    async def start_turn(self, session_id: uuid.UUID, follows: uuid.UUID) -> None:
+        self._follows[session_id] = follows
+        self._events[session_id] = []
 
-    async def append_event(self, conversation_id: uuid.UUID, event: TurnEvent) -> NumberedEvent:
-        events = self._events[conversation_id]
+    async def append_event(self, session_id: uuid.UUID, event: TurnEvent) -> NumberedEvent:
+        events = self._events[session_id]
         numbered = NumberedEvent(len(events) + 1, event)
         events.append(numbered)
         async with self._changed:
             self._changed.notify_all()
         return numbered
 
-    async def events_after(self, conversation_id: uuid.UUID, position: int) -> list[NumberedEvent]:
-        return self._events[conversation_id][position:]
+    async def events_after(self, session_id: uuid.UUID, position: int) -> list[NumberedEvent]:
+        return self._events[session_id][position:]
 
-    async def end_turn(self, conversation_id: uuid.UUID) -> None:
-        del self._follows[conversation_id]
+    async def end_turn(self, session_id: uuid.UUID) -> None:
+        del self._follows[session_id]
         async with self._changed:
             self._changed.notify_all()
 
-    async def active_turn(self, conversation_id: uuid.UUID) -> ActiveTurn | None:
-        follows = self._follows.get(conversation_id)
+    async def active_turn(self, session_id: uuid.UUID) -> ActiveTurn | None:
+        follows = self._follows.get(session_id)
         if follows is None:
             return None
-        return ActiveTurn(follows, len(self._events[conversation_id]))
+        return ActiveTurn(follows, len(self._events[session_id]))
 
-    async def wait_for_events(self, conversation_id: uuid.UUID, after: int) -> None:
+    async def wait_for_events(self, session_id: uuid.UUID, after: int) -> None:
         async with self._changed:
             await self._changed.wait_for(
-                lambda: len(self._events[conversation_id]) > after
-                or conversation_id not in self._follows
+                lambda: len(self._events[session_id]) > after or session_id not in self._follows
             )

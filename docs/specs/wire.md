@@ -5,7 +5,9 @@ The wire is one of the seams: the backend is not shaped by the UI library
 another UI — or no UI — can drive it. It is the one API that every
 delivery channel uses ([channels.md](legacy/channels.md)). It is served by
 the web shell over the controller ([architecture/web.md](../architecture/web.md),
-[architecture/controller.md](../architecture/controller.md)).
+[architecture/controller.md](../architecture/controller.md)). What the wire
+calls a conversation is the controller's session: the wire keeps the word
+until the frontend is revisited.
 
 ## A chat turn
 

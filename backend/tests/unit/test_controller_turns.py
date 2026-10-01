@@ -46,19 +46,19 @@ async def opened() -> Controller:
 
 
 @asyncio_test
-async def test_start_conversation_stores_the_conversation_and_the_question() -> None:
+async def test_start_session_stores_the_session_and_the_question() -> None:
     controller = await opened()
     user = await controller.ensure_user(Identity("local", "me"))
-    started = await controller.start_conversation(user, agent="echo", model="echo", text="hello")
+    started = await controller.start_session(user, agent="echo", model="echo", text="hello")
     question = started.question
     assert question.parts == (TextPart("hello"),)
     assert question.role is Role.USER
     assert question.parent_id is None
-    conversation = await controller._store.get_conversation(started.conversation_id)
-    assert conversation is not None
-    assert conversation.owner_id == user.id
-    assert await controller._store.messages_of(started.conversation_id) == [question]
-    await controller._turns[started.conversation_id]
+    session = await controller._store.get_session(started.session_id)
+    assert session is not None
+    assert session.owner_id == user.id
+    assert await controller._store.messages_of(started.session_id) == [question]
+    await controller._turns[started.session_id]
     await controller.close()
 
 
@@ -66,10 +66,10 @@ async def test_start_conversation_stores_the_conversation_and_the_question() -> 
 async def test_the_turn_stores_its_events_and_the_answer() -> None:
     controller = await opened()
     user = await controller.ensure_user(Identity("local", "me"))
-    started = await controller.start_conversation(user, agent="echo", model="echo", text="hello")
-    cid = started.conversation_id
-    await controller._turns[cid]
-    numbered = await controller._store.events_after(cid, 0)
+    started = await controller.start_session(user, agent="echo", model="echo", text="hello")
+    sid = started.session_id
+    await controller._turns[sid]
+    numbered = await controller._store.events_after(sid, 0)
     assert [n.position for n in numbered] == list(range(1, 10))
     events = [n.event for n in numbered]
     assert [type(e) for e in events] == [
@@ -90,8 +90,8 @@ async def test_the_turn_stores_its_events_and_the_answer() -> None:
     assert answer.parts[-1] == TextPart("The tool said: hello")
     assert answer.parent_id == started.question.id
     assert answer.checkpoint_id is not None
-    assert await controller._store.messages_of(cid) == [started.question, answer]
-    assert await controller._store.active_turn(cid) is None
+    assert await controller._store.messages_of(sid) == [started.question, answer]
+    assert await controller._store.active_turn(sid) is None
     await controller.close()
 
 
@@ -99,11 +99,11 @@ async def test_the_turn_stores_its_events_and_the_answer() -> None:
 async def test_watch_turn_follows_the_turn_to_its_end() -> None:
     controller = await opened()
     user = await controller.ensure_user(Identity("local", "me"))
-    started = await controller.start_conversation(user, agent="echo", model="echo", text="hello")
-    cid = started.conversation_id
-    watched = [e async for e in controller.watch_turn(user, cid)]
+    started = await controller.start_session(user, agent="echo", model="echo", text="hello")
+    sid = started.session_id
+    watched = [e async for e in controller.watch_turn(user, sid)]
     assert [n.position for n in watched] == list(range(1, len(watched) + 1))
     assert watched[-1].event == TurnEnded(TurnState.FINISHED)
-    again = [e async for e in controller.watch_turn(user, cid, after=len(watched) - 1)]
+    again = [e async for e in controller.watch_turn(user, sid, after=len(watched) - 1)]
     assert again == [watched[-1]]
     await controller.close()
