@@ -51,6 +51,10 @@ class MissingSecretError(ControllerError):
     """A key or a secret the environment does not hold."""
 
 
+class ConfigError(ControllerError):
+    """A configuration that cannot be used; the message lists every problem found."""
+
+
 class TurnActiveError(ControllerError):
     """A turn asked for while the conversation already has one running."""
 
