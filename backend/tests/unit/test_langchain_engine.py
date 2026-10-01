@@ -6,10 +6,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import itertools
 import json
 import re
 from collections.abc import AsyncIterator
+from datetime import timedelta
 from typing import Any
 
 import langsmith.utils
@@ -22,6 +24,7 @@ from langchain_core.messages.tool import tool_call_chunk
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_openai import ChatOpenAI
 
+from aio import asyncio_test
 from contracts.engine import (
     ANSWER,
     ARGUMENTS,
@@ -33,10 +36,13 @@ from contracts.engine import (
     add,
 )
 from robinauts.agent_engines.contract.domain import (
+    AgentDefinition,
     ModelConfig,
     ModelProviderConfig,
     ModelsConfig,
     ProviderKind,
+    ToolServerAuth,
+    ToolServerConfig,
     UnknownModelError,
 )
 from robinauts.agent_engines.contract.ports import (
@@ -50,6 +56,7 @@ from robinauts.agent_engines.contract.ports import (
 from robinauts.agent_engines.langchain_engine import engine as engine_module
 from robinauts.agent_engines.langchain_engine.clients import chat_model
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
+from robinauts.agent_engines.langchain_engine.tools import connection_for, tools_for
 
 
 class Keys(ProviderKeyLookup):
@@ -125,6 +132,58 @@ def test_the_engine_answers_the_four_kinds_and_turns_hosted_tracing_off(
     )
     assert engine.kinds() == frozenset(ProviderKind)
     assert not langsmith.utils.tracing_is_enabled()
+
+
+class FixedSecret(ToolSecretLookup):
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    def secret_for(self, server_id: str) -> str:
+        self.asked.append(server_id)
+        return "s3cret"
+
+
+def tool_settings(secrets: ToolSecretLookup) -> EngineSettings:
+    return EngineSettings(models=ModelsConfig(), keys=Keys(), tool_secrets=secrets)
+
+
+def test_a_bearer_server_is_reached_with_its_secret_as_a_bearer_token() -> None:
+    secrets = FixedSecret()
+    server = ToolServerConfig(id="gh", url="https://mcp.example/gh", timeout_seconds=9.0)
+    assert connection_for(server, tool_settings(secrets)) == {
+        "transport": "streamable_http",
+        "url": "https://mcp.example/gh",
+        "headers": {"Authorization": "Bearer s3cret"},
+        "timeout": timedelta(seconds=9),
+        "sse_read_timeout": timedelta(seconds=9),
+    }
+    assert secrets.asked == ["gh"]
+
+
+def test_a_basic_server_is_reached_with_its_user_and_secret() -> None:
+    secrets = FixedSecret()
+    server = ToolServerConfig(
+        id="wiki", url="https://mcp.example/wiki", auth=ToolServerAuth.BASIC, user="ana"
+    )
+    connection = connection_for(server, tool_settings(secrets))
+    pair = base64.b64encode(b"ana:s3cret").decode("ascii")
+    assert connection["headers"] == {"Authorization": f"Basic {pair}"}
+    assert (connection["transport"], connection["url"]) == (
+        "streamable_http",
+        "https://mcp.example/wiki",
+    )
+    assert connection["timeout"] == timedelta(seconds=60)
+    assert secrets.asked == ["wiki"]
+
+
+def test_a_public_server_carries_no_credential_and_asks_for_none() -> None:
+    server = ToolServerConfig(id="docs", url="https://mcp.example/docs", auth=ToolServerAuth.NONE)
+    assert connection_for(server, tool_settings(NoSecrets()))["headers"] == {}
+
+
+@asyncio_test
+async def test_an_agent_without_tools_has_none() -> None:
+    assert await tools_for(AgentDefinition("be brief"), tool_settings(NoSecrets())) == []
 
 
 class TestLangChainEngineMemory(EngineMemoryContract):

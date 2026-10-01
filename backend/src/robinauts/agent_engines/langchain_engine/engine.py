@@ -35,10 +35,7 @@ from robinauts.agent_engines.contract.ports import (
     StorageConfig,
 )
 from robinauts.agent_engines.langchain_engine.clients import chat_model, force_tracing_off
-
-
-async def tools_for(agent: AgentDefinition, settings: EngineSettings) -> list[Any]:
-    return []
+from robinauts.agent_engines.langchain_engine.tools import tools_for
 
 
 class LangChainEngine(AgentEngine):
