@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -16,11 +17,14 @@ from robinauts.controller.contract.domain import (
     Conversation,
     ConversationPage,
     Identity,
+    Message,
     ModelListing,
     NumberedEvent,
     OpenedConversation,
+    Role,
     StorageConfig,
     StorageKind,
+    TextPart,
     TurnStarted,
     User,
 )
@@ -42,6 +46,7 @@ class RobinautsController(Controller):
         self._secret_for = secret_for
         self._engines: dict[str, AgentEngine] = {}
         self._store: Store
+        self._turns: dict[uuid.UUID, asyncio.Task[None]] = {}
 
     async def open(self) -> None:
         if self._storage.kind is not StorageKind.IN_MEMORY:
@@ -101,7 +106,30 @@ class RobinautsController(Controller):
     async def start_conversation(
         self, user: User, *, agent: str, model: str, text: str
     ) -> TurnStarted:
-        raise NotImplementedError("start_conversation")
+        agent_config = self._config.agents[agent]
+        now = datetime.now(UTC)
+        conversation = Conversation(
+            uuid.uuid4(), owner_id=user.id, agent=agent, created_at=now, updated_at=now
+        )
+        question = Message(
+            uuid.uuid4(),
+            conversation.id,
+            parent_id=None,
+            role=Role.USER,
+            parts=(TextPart(text),),
+            created_at=now,
+            agent=agent,
+            model=model,
+        )
+        await self._store.add_conversation(conversation)
+        await self._store.add_message(question)
+        await self._engines[agent_config.engine].create(conversation.id)
+        await self._store.start_turn(conversation.id, follows=question.id)
+        self._turns[conversation.id] = asyncio.create_task(self._run_turn(conversation.id))
+        return TurnStarted(conversation.id, question)
+
+    async def _run_turn(self, conversation_id: uuid.UUID) -> None:
+        await self._store.end_turn(conversation_id)
 
     async def send_message(
         self,
