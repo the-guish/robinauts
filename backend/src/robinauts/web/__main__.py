@@ -4,7 +4,7 @@
 """Start the web shell locally: ``python -m robinauts.web``, on 127.0.0.1:8000, no sign-in.
 
 The interface is ``frontend/dist`` of this checkout when it is built, or the directory
-``ROBINAUTS_UI_DIR`` names. The controller is the stub until there is one.
+``ROBINAUTS_UI_DIR`` names. The controller is the one there is, implemented as far as it is.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import uvicorn
 
-from robinauts.controller.stub import StubController
+from robinauts.controller.controller import RobinautsController
 from robinauts.web.app import create_app
 
 REPO = Path(__file__).resolve().parents[4]
@@ -23,7 +23,7 @@ REPO = Path(__file__).resolve().parents[4]
 def main() -> None:
     named = os.environ.get("ROBINAUTS_UI_DIR")
     ui_dir = Path(named) if named else REPO / "frontend" / "dist"
-    uvicorn.run(create_app(StubController(), ui_dir=ui_dir), host="127.0.0.1", port=8000)
+    uvicorn.run(create_app(RobinautsController(), ui_dir=ui_dir), host="127.0.0.1", port=8000)
 
 
 if __name__ == "__main__":

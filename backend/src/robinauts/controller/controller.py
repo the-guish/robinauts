@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""A controller with no implementation: every operation raises ``NotImplementedError``."""
+"""The controller. An operation not yet implemented raises ``NotImplementedError``."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from robinauts.controller.contract.domain import (
 from robinauts.controller.contract.ports import Controller
 
 
-class StubController(Controller):
+class RobinautsController(Controller):
     async def open(self) -> None:
         pass
 
