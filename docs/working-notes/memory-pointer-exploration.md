@@ -1,6 +1,10 @@
 # Exploration: the model's memory as a pointer, not a blob
 
-Written 2026-10-01 on `claude/nifty-cray-fa9ooe`. The question: can the
+Written 2026-10-01 on `claude/nifty-cray-fa9ooe`. **Followed the same day by
+[adapter-persistence-plan.md](adapter-persistence-plan.md)**, after the owner
+decided that the blob on the run is not acceptable and that forks may go: the
+plan takes the examples' second branch as the contract, which this note had
+weighed as a shape only. The question: can the
 platform stop storing the framework's state as bytes on the run
 (`runs.engine_state`) and keep only an id that points at persistence the
 agent adapter owns -- the way the caller in
