@@ -22,6 +22,7 @@ snapshots, and passes the shared suite.
   test.
 - `resume` runs the turn again from the checkpoint; nothing is kept between attempts.
 - Context management is stage two: no history processor in this block.
+- Fork is stage two: `fork` raises `NotImplementedError`.
 
 ## Steps
 
@@ -29,10 +30,9 @@ snapshots, and passes the shared suite.
    above, with the timeout and `max_output_tokens` from `ModelConfig` in the model
    settings; tracing off. `kinds()` answers the four. Test: a model is built for each
    kind without any request leaving.
-2. Sessions. `create`, `exists`, `forget`, `fork` over the snapshot dict: fork copies the
-   source's checkpoints up to the one asked, so the source's ids stay valid in the
-   target. `stream` refuses an unknown session and a checkpoint the session does not
-   hold. Test: the whole memory half of the shared suite.
+2. Sessions. `create`, `exists`, `forget` over the snapshot dict. `stream` refuses an
+   unknown session and a checkpoint the session does not hold. Test: the memory half of
+   the shared suite.
 3. The turn. `Agent(model, instructions=system_prompt, toolsets=...)` run with
    `message_history` from the checkpoint, iterated so that text parts become
    `TextDelta`, thinking parts `ReasoningDelta`, a complete tool call `ToolCall`, a

@@ -33,7 +33,8 @@ path, minimal code.
 Planned in detail by stage one's step 8. The blocks known today:
 
 1. **Controller hardening.** The refusals, one active turn, the timeout, the bounded
-   cancel, the sweep at start, the edit of a first question, titles, fork.
+   cancel, the sweep at start, the edit of a first question, titles, and fork in the
+   controller and in both engines.
 2. **Web protection and the rest of the wire.** CSRF and origin checks, the body bound,
    the security headers and CSP, hashed asset caching, the error mapping with its
    exhaustive test, log redaction, and the wire's "not yet served" list.

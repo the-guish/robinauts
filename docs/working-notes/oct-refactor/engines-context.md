@@ -123,8 +123,8 @@ of `DEPENDENCIES.md` (`langgraph-checkpoint-postgres` does not: psycopg is LGPL)
 reconciled at merge: a suite over the new port that a test file subclasses with a
 `new_engine()` and a scripted model. Two halves. The memory half runs over every engine,
 echo included: create twice refuses, a turn on an unknown session refuses, a checkpoint
-of another session refuses, the next turn continues from a handed-out id, fork carries
-the ids up to the one asked, forget is safe to repeat. The turn half runs over the two
+of another session refuses, the next turn continues from a handed-out id, forget is safe to repeat. Fork is
+stage two and not in the suite. The turn half runs over the two
 framework engines with a script: a streamed answer, a tool round the framework runs
 with a plain function tool, a failure raised from the model, a cancellation let
 through, a timeout ending the turn with `TimeoutError`.
