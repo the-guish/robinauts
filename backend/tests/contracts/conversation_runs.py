@@ -55,7 +55,7 @@ from conversations import (
     question,
     run,
 )
-from robinauts.core import (
+from robinauts.legacy.core import (
     check_event_order,
     message_from_data,
     message_to_data,
@@ -63,7 +63,7 @@ from robinauts.core import (
     run_event_to_data,
     transition,
 )
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     FIRST_POSITION,
     ConversationNotFoundError,
     IllegalTransitionError,
@@ -87,7 +87,7 @@ from robinauts.domain import (
     ToolCallPart,
     ToolResultPart,
 )
-from robinauts.ports import MAX_PAGE, MAX_SWEPT, ConversationStore, Document, Snapshot
+from robinauts.legacy.ports import MAX_PAGE, MAX_SWEPT, ConversationStore, Document, Snapshot
 
 OTHER_RUN = uuid.UUID("66666666-6666-4666-8666-666666666666")
 """A second run, for the conversation beside the one under test."""

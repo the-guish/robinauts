@@ -54,12 +54,12 @@ import openai
 import pytest
 
 from aio import asyncio_test
-from robinauts.adapters import ProviderKeys
-from robinauts.adapters.agents.langgraph import LangGraphAgent
-from robinauts.adapters.agents.langgraph import chat_model as langgraph_chat_model
-from robinauts.adapters.agents.pydantic_ai import PydanticAIAgent
-from robinauts.adapters.agents.pydantic_ai import chat_model as pydantic_ai_chat_model
-from robinauts.domain import (
+from robinauts.legacy.adapters import ProviderKeys
+from robinauts.legacy.adapters.agents.langgraph import LangGraphAgent
+from robinauts.legacy.adapters.agents.langgraph import chat_model as langgraph_chat_model
+from robinauts.legacy.adapters.agents.pydantic_ai import PydanticAIAgent
+from robinauts.legacy.adapters.agents.pydantic_ai import chat_model as pydantic_ai_chat_model
+from robinauts.legacy.domain import (
     AgentDefinition,
     Engine,
     ModelConfig,
@@ -67,7 +67,7 @@ from robinauts.domain import (
     ModelsConfig,
     ProviderKind,
 )
-from robinauts.ports import Agent
+from robinauts.legacy.ports import Agent
 
 pytestmark = pytest.mark.io
 
@@ -175,7 +175,7 @@ ENGINES: dict[Engine, Wiring] = {
 }
 """Both engines, which reach each compatible kind by different routes through
 the same SDK. Written out here rather than imported
-from ``robinauts.app``: this is a test of the two adapters, and the table the
+from ``robinauts.legacy.app``: this is a test of the two adapters, and the table the
 composition root keeps is a claim of its own.
 """
 

@@ -51,9 +51,9 @@ from fakes import (
     ScriptedIdentityProvider,
     says,
 )
-from robinauts import app as app_module
-from robinauts.adapters import HttpIdentityProvider, SecretLookup
-from robinauts.app import (
+from robinauts.legacy import app as app_module
+from robinauts.legacy.adapters import HttpIdentityProvider, SecretLookup
+from robinauts.legacy.app import (
     AUTH_CONFIG_VARIABLE,
     BUILDABLE_KINDS,
     CONFIG_VARIABLE,
@@ -63,9 +63,9 @@ from robinauts.app import (
     Deployment,
     create_app,
 )
-from robinauts.application import DEFAULT_TURN_SECONDS, ENDING_BUDGET_SECONDS, TIMED_OUT
-from robinauts.core import message_to_data
-from robinauts.domain import (
+from robinauts.legacy.application import DEFAULT_TURN_SECONDS, ENDING_BUDGET_SECONDS, TIMED_OUT
+from robinauts.legacy.core import message_to_data
+from robinauts.legacy.domain import (
     ACTIVE_RUN_STATES,
     ConfigError,
     Engine,

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 
-from robinauts.ports import IdSource
+from robinauts.legacy.ports import IdSource
 
 
 class CountingIdSource(IdSource):

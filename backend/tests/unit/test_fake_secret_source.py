@@ -9,8 +9,8 @@ import pytest
 
 from contracts.secrets import SecretSourceContract
 from fakes import CountingSecretSource, StuntedSecretSource
-from robinauts.core import MAX_SECRET_CHARS
-from robinauts.ports import SecretSource
+from robinauts.legacy.core import MAX_SECRET_CHARS
+from robinauts.legacy.ports import SecretSource
 
 
 class TestCountingSecretSource(SecretSourceContract):

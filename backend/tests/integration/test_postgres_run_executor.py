@@ -29,12 +29,12 @@ from aio import asyncio_test
 from conversations import AGENT, agent_definition, at, offered
 from fakes import CountingIdSource, FakeClock, Gate, ScriptedAgent, calls, results, says
 from postgres import requires_postgres, temporary_schema
-from robinauts.adapters import AsyncioRunExecutor, MemoryRunSignals
-from robinauts.application import Conversations, Turns, Watch
-from robinauts.core import check_event_order, message_from_stored, run_event_from_stored
-from robinauts.datastore import PostgresConversationStore, PostgresCredentialStore
-from robinauts.domain import Role, RunEnded, RunEvent, RunState, User
-from robinauts.ports import ConversationStore
+from robinauts.legacy.adapters import AsyncioRunExecutor, MemoryRunSignals
+from robinauts.legacy.application import Conversations, Turns, Watch
+from robinauts.legacy.core import check_event_order, message_from_stored, run_event_from_stored
+from robinauts.legacy.datastore import PostgresConversationStore, PostgresCredentialStore
+from robinauts.legacy.domain import Role, RunEnded, RunEvent, RunState, User
+from robinauts.legacy.ports import ConversationStore
 
 pytestmark = requires_postgres
 

@@ -69,8 +69,8 @@ from aio import asyncio_test
 from conftest import VENDOR_LOGGERS
 from contracts.agents import PROMPT, SEARCH, AgentContract, Ending, Script
 from conversations import agent_definition
-from robinauts.adapters import ProviderKeys, ToolServerSecrets
-from robinauts.adapters.agents.langgraph import (
+from robinauts.legacy.adapters import ProviderKeys, ToolServerSecrets
+from robinauts.legacy.adapters.agents.langgraph import (
     ANTHROPIC_ENDPOINT,
     ANTHROPIC_KEY_HEADER,
     CEILING_FIELDS,
@@ -95,8 +95,8 @@ from robinauts.adapters.agents.langgraph import (
     signed_blocks_only,
     write_state,
 )
-from robinauts.core import check_backend_events
-from robinauts.domain import (
+from robinauts.legacy.core import check_backend_events
+from robinauts.legacy.domain import (
     MAX_PART_CHARS,
     AgentDefinition,
     Done,
@@ -115,7 +115,7 @@ from robinauts.domain import (
     ToolServerConfig,
     UnknownModelError,
 )
-from robinauts.ports import Agent
+from robinauts.legacy.ports import Agent
 
 PROVIDER = "anthropic"
 MODEL = "sonnet"
@@ -1229,9 +1229,9 @@ LEAK_KEY = "sk-the-key-nobody-should-log"
 
 REQUEST = """
 import anthropic
-from robinauts.adapters import ProviderKeys
-from robinauts.adapters.agents.langgraph import chat_model
-from robinauts.domain import ModelConfig, ModelProviderConfig, ModelsConfig, ProviderKind
+from robinauts.legacy.adapters import ProviderKeys
+from robinauts.legacy.adapters.agents.langgraph import chat_model
+from robinauts.legacy.domain import ModelConfig, ModelProviderConfig, ModelsConfig, ProviderKind
 
 {built}
 
@@ -1256,7 +1256,7 @@ own ``__init__`` and puts its logger at ``DEBUG`` for the life of the process.
 """
 
 BUILT = (
-    "from robinauts.adapters.agents.langgraph import LangGraphAgent\n"
+    "from robinauts.legacy.adapters.agents.langgraph import LangGraphAgent\n"
     "LangGraphAgent(ModelsConfig(), ProviderKeys({}))"
 )
 """The one line under test: building the engine is what silences the SDK."""

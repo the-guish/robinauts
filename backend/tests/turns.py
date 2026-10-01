@@ -40,11 +40,11 @@ from fakes import (
     ScriptedAgent,
     Step,
 )
-from robinauts.adapters import AsyncioRunExecutor, MemoryRunSignals
-from robinauts.application import Conversations, Turns, Watch
-from robinauts.core import check_event_order, message_from_stored, run_event_from_stored
-from robinauts.domain import AgentDefinition, Message, ModelConfig, Run, RunEvent, User
-from robinauts.ports import ConversationStore
+from robinauts.legacy.adapters import AsyncioRunExecutor, MemoryRunSignals
+from robinauts.legacy.application import Conversations, Turns, Watch
+from robinauts.legacy.core import check_event_order, message_from_stored, run_event_from_stored
+from robinauts.legacy.domain import AgentDefinition, Message, ModelConfig, Run, RunEvent, User
+from robinauts.legacy.ports import ConversationStore
 
 NOW = at(100)
 """What the clock says while a test runs, unless the test moves it."""

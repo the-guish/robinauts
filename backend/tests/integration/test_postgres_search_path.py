@@ -31,7 +31,7 @@ import pytest
 
 from aio import asyncio_test
 from postgres import DATABASE_URL, requires_postgres, temporary_schema
-from robinauts.datastore import (
+from robinauts.legacy.datastore import (
     SCHEMA_TABLES,
     SCHEMA_VERSION,
     PostgresCredentialStore,
@@ -39,7 +39,7 @@ from robinauts.datastore import (
     create_schema,
     schema_version,
 )
-from robinauts.domain import SchemaError
+from robinauts.legacy.domain import SchemaError
 
 pytestmark = requires_postgres
 

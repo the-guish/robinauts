@@ -26,8 +26,8 @@ from aio import asyncio_test
 from contracts.agents import AgentContract, Ending, Script
 from conversations import MODEL, agent_definition
 from fakes import Gate, Raise, ScriptedAgent, Step, calls, results, says
-from robinauts.domain import Done, InvalidValueError, TextDelta
-from robinauts.ports import Agent
+from robinauts.legacy.domain import Done, InvalidValueError, TextDelta
+from robinauts.legacy.ports import Agent
 
 
 def steps_for(script: Script) -> list[Step]:

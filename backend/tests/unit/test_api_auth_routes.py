@@ -24,8 +24,8 @@ import pytest
 
 from aio import asyncio_test
 from fakes import MemoryCredentialStore
-from robinauts.api import SIGN_IN_PAGE, login_cookie, session_cookie
-from robinauts.domain import ProviderUnavailableError, SignInErrorCode
+from robinauts.legacy.api import SIGN_IN_PAGE, login_cookie, session_cookie
+from robinauts.legacy.domain import ProviderUnavailableError, SignInErrorCode
 from standin import unsigned_jwt
 from webapp import (
     GOOGLE,
@@ -494,7 +494,7 @@ async def test_a_provider_id_that_is_not_one_is_refused_without_being_repeated(
     """A path parameter is whatever the link said, so it goes nowhere unescaped.
 
     Not into the body, where it would be reflected back at whoever wrote the
-    link; and into a log line only through ``robinauts.api.logs.shown``, since
+    link; and into a log line only through ``robinauts.legacy.api.logs.shown``, since
     a newline of theirs written out as it came would be a line of ours.
     """
     deployment = wired()

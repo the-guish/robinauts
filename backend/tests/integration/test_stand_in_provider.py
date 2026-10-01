@@ -43,7 +43,7 @@ async def asking(stand_in: StandInProvider, path: str, timeout: float = 5.0) -> 
 
 async def code_for(stand_in: StandInProvider) -> str:
     """Mint a code the way the browser does."""
-    from robinauts.core import pkce_challenge
+    from robinauts.legacy.core import pkce_challenge
 
     location = await redirect_from(
         f"{stand_in.issuer}/authorize?response_type=code"

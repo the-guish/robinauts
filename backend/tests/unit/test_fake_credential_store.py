@@ -21,8 +21,8 @@ import pytest
 
 from contracts.credential_store import CredentialStoreContract
 from fakes import MemoryCredentialStore
-from robinauts.domain import PendingLogin, User
-from robinauts.ports import CredentialStore
+from robinauts.legacy.domain import PendingLogin, User
+from robinauts.legacy.ports import CredentialStore
 
 
 class MemoryStoreContract(CredentialStoreContract):

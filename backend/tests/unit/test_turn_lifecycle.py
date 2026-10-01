@@ -39,15 +39,15 @@ from fakes import (
     results,
     says,
 )
-from robinauts.adapters import AsyncioRunExecutor, MemoryRunSignals
-from robinauts.application import NO_CONTENT, Conversations, Turns, Watch
-from robinauts.application.turns import _Pump
-from robinauts.core import (
+from robinauts.legacy.adapters import AsyncioRunExecutor, MemoryRunSignals
+from robinauts.legacy.application import NO_CONTENT, Conversations, Turns, Watch
+from robinauts.legacy.application.turns import _Pump
+from robinauts.legacy.core import (
     check_event_order,
     run_event_to_data,
     transition,
 )
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     ACTIVE_RUN_STATES,
     ENDED_RUN_STATES,
     FIRST_POSITION,
@@ -77,7 +77,7 @@ from robinauts.domain import (
     ToolCallPart,
     ToolResultPart,
 )
-from robinauts.ports import MAX_SWEPT, Agent
+from robinauts.legacy.ports import MAX_SWEPT, Agent
 from turns import (
     AUTHOR,
     NOW,
@@ -272,7 +272,7 @@ async def test_a_character_that_arrives_in_two_halves_is_published_whole() -> No
 async def test_an_answer_longer_than_one_part_is_stored_in_several(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("robinauts.domain.conversation.MAX_PART_CHARS", 4)
+    monkeypatch.setattr("robinauts.legacy.domain.conversation.MAX_PART_CHARS", 4)
     wiring = wired(*says("abcdefghij"))
     run = await begun(wiring)
 
@@ -1578,7 +1578,7 @@ async def test_a_cancelled_run_is_ended_although_its_engine_will_not_let_go(
     # the task that reads the engine, not in the one that is ending the run,
     # so the run is over long before the engine is -- and the engine is then
     # abandoned rather than waited for.
-    monkeypatch.setattr("robinauts.application.turns.CLOSING_SECONDS", 0.05)
+    monkeypatch.setattr("robinauts.legacy.application.turns.CLOSING_SECONDS", 0.05)
     engine = NeverLetsGo()
     wiring = over(engine)
     run = await begun(wiring)
@@ -1611,7 +1611,7 @@ async def test_a_cancelled_run_is_ended_although_its_engine_will_not_let_go(
 async def test_a_turn_that_timed_out_ends_although_its_engine_will_not_let_go(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("robinauts.application.turns.CLOSING_SECONDS", 0.05)
+    monkeypatch.setattr("robinauts.legacy.application.turns.CLOSING_SECONDS", 0.05)
     engine = NeverLetsGo()
     wiring = over(engine)
     wiring.turns._turn_seconds = 0.1  # noqa: SLF001 - the limit under test
@@ -1919,7 +1919,7 @@ async def test_an_ending_that_is_never_answered_is_given_up_on(
     # A store that refuses is one thing; one that never answers would hold the
     # task for ever, where nothing could even cancel it -- the executor could
     # never reap it and shutdown would never finish.
-    monkeypatch.setattr("robinauts.application.turns.ENDING_SECONDS", 0.05)
+    monkeypatch.setattr("robinauts.legacy.application.turns.ENDING_SECONDS", 0.05)
     wiring = wired(*says(ANSWER), store=NeverAnswers())
     run = await begun(wiring)
 
@@ -2003,7 +2003,7 @@ async def test_a_second_cancellation_during_the_release_leaves_nothing_behind(
     # another cancellation. It must not walk out of `execute` with the run
     # still registered as executing here: this process would then refuse to
     # execute it ever again and hide it from its own start-up sweep.
-    monkeypatch.setattr("robinauts.application.turns.CLOSING_SECONDS", BOUND)
+    monkeypatch.setattr("robinauts.legacy.application.turns.CLOSING_SECONDS", BOUND)
     unretrieved: list[object] = []
     asyncio.get_running_loop().set_exception_handler(
         lambda loop, context: unretrieved.append(context)

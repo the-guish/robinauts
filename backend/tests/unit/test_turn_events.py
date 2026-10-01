@@ -9,7 +9,7 @@ import uuid
 import pytest
 
 from conversations import CONVERSATION, RUN, answer, question
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     ACTIVE_RUN_STATES,
     ENDED_RUN_STATES,
     FIRST_POSITION,

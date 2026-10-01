@@ -3,7 +3,7 @@
 
 """The credential store in dictionaries: what the real one must behave like.
 
-It is the ``CredentialStore`` of ``robinauts.ports``, and it passes the same
+It is the ``CredentialStore`` of ``robinauts.legacy.ports``, and it passes the same
 contract suite (``tests/contracts/credential_store.py``) that the PostgreSQL
 store will. Everything is under one lock, which is how a single operation of
 the port stays atomic when two sign-ins overlap.
@@ -30,11 +30,11 @@ import re
 import uuid
 from datetime import datetime
 
-from robinauts.domain import InvalidValueError, PendingLogin, Session, User
-from robinauts.ports import CredentialStore
+from robinauts.legacy.domain import InvalidValueError, PendingLogin, Session, User
+from robinauts.legacy.ports import CredentialStore
 
 HASH = re.compile(r"^[0-9a-f]{64}\Z")
-"""What ``robinauts.core.secret_hash`` writes, and the only key stored.
+"""What ``robinauts.legacy.core.secret_hash`` writes, and the only key stored.
 
 The same shape the PostgreSQL schema puts a CHECK on. ``\\Z`` rather than
 ``$``: ``$`` would let a trailing newline through, and a key with a newline

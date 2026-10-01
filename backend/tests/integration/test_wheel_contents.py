@@ -33,8 +33,8 @@ from pathlib import Path
 
 import pytest
 
-from robinauts.api import ASSETS, HASHED, INDEX, UI_DIRECTORY
-from robinauts.datastore import schema_sql
+from robinauts.legacy.api import ASSETS, HASHED, INDEX, UI_DIRECTORY
+from robinauts.legacy.datastore import schema_sql
 
 pytestmark = pytest.mark.io
 
@@ -42,7 +42,7 @@ BACKEND = Path(__file__).resolve().parents[2]
 REPOSITORY = BACKEND.parent
 FRONTEND_BUILD = REPOSITORY / "frontend" / "dist"
 
-SHIPPED = "robinauts/datastore/schema.sql"
+SHIPPED = "robinauts/legacy/datastore/schema.sql"
 PACKAGED_UI = f"robinauts/{UI_DIRECTORY}"
 NOTICES = "THIRD_PARTY_LICENSES.txt"
 LICENCE_FILES = ("LICENSE", "NOTICE", NOTICES)
@@ -175,7 +175,7 @@ def test_the_wheel_carries_every_licence_file_and_says_so(wheel: Path) -> None:
 
 
 def test_every_asset_in_the_wheel_carries_a_hash_of_its_contents(wheel: Path) -> None:
-    """What makes a year of ``immutable`` honest (``robinauts.api.ui.HASHED``).
+    """What makes a year of ``immutable`` honest (``robinauts.legacy.api.ui.HASHED``).
 
     Asked of a **real** build rather than of the configuration that produced
     it: the rule the server applies is about file names, and this is where the
@@ -189,14 +189,14 @@ def test_every_asset_in_the_wheel_carries_a_hash_of_its_contents(wheel: Path) ->
     assert unhashed == [], (
         f"{unhashed} would be served with a year of `immutable` if it were hashed and"
         f" is revalidated instead; if the build stopped hashing what it emits, the"
-        f" caching rule in robinauts.api.ui is what has to change"
+        f" caching rule in robinauts.legacy.api.ui is what has to change"
     )
 
 
 def test_nothing_hidden_is_packaged(wheel: Path) -> None:
     # A directory a build writes into is one other things write into too, and
     # a `.env` beside the bundle is a deployment's database url. It is not
-    # served (robinauts.api.ui.hidden) and it is not shipped either.
+    # served (robinauts.legacy.api.ui.hidden) and it is not shipped either.
     with zipfile.ZipFile(wheel) as built:
         carried = inside(built, PACKAGED_UI)
 

@@ -23,7 +23,7 @@ from conversations import (
     question,
     run,
 )
-from robinauts.core import (
+from robinauts.legacy.core import (
     RUN_TRANSITIONS,
     TRUNCATED,
     UNSAID_ERROR,
@@ -41,7 +41,7 @@ from robinauts.core import (
     run_error,
     transition,
 )
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     ACTIVE_RUN_STATES,
     ENDED_RUN_STATES,
     FIRST_POSITION,

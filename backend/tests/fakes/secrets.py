@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from robinauts.ports import SecretSource
+from robinauts.legacy.ports import SecretSource
 
 LENGTH = 43
 """As long as 256 random bits written as URL-safe text, which is the least the

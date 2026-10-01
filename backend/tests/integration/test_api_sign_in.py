@@ -28,11 +28,11 @@ import pytest
 
 from aio import asyncio_test
 from fakes import MemoryCredentialStore
-from robinauts.adapters import HttpIdentityProvider, OsSecretSource, SystemClock
-from robinauts.api import SIGN_IN_PAGE, create_api
-from robinauts.application import SignIn
-from robinauts.core import secret_hash
-from robinauts.domain import (
+from robinauts.legacy.adapters import HttpIdentityProvider, OsSecretSource, SystemClock
+from robinauts.legacy.api import SIGN_IN_PAGE, create_api
+from robinauts.legacy.application import SignIn
+from robinauts.legacy.core import secret_hash
+from robinauts.legacy.domain import (
     AllowEntry,
     Matcher,
     ProviderConfig,

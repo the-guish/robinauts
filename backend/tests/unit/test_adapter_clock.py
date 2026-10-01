@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from robinauts.adapters import SystemClock
-from robinauts.ports import Clock
+from robinauts.legacy.adapters import SystemClock
+from robinauts.legacy.ports import Clock
 
 
 def test_it_is_a_clock() -> None:

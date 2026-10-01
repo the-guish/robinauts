@@ -13,7 +13,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     AgentDefinition,
     Channel,
     Conversation,

@@ -66,8 +66,8 @@ from conversations import (
     conversation,
     question,
 )
-from robinauts.core import message_from_data, message_to_data
-from robinauts.domain import (
+from robinauts.legacy.core import message_from_data, message_to_data
+from robinauts.legacy.domain import (
     MAX_TITLE_CHARS,
     Conversation,
     ConversationNotFoundError,
@@ -79,7 +79,7 @@ from robinauts.domain import (
     ToolCallPart,
     ToolResultPart,
 )
-from robinauts.ports import MAX_PAGE, ConversationStore
+from robinauts.legacy.ports import MAX_PAGE, ConversationStore
 
 SOMEBODY_ELSE = uuid.UUID("55555555-5555-4555-8555-555555555555")
 """Another person, whose conversations are never in this one's listing."""

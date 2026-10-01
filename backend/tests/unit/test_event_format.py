@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from conversations import CONVERSATION, RUN, answer, question
-from robinauts.core import (
+from robinauts.legacy.core import (
     EXTRAS,
     event_from_data,
     event_to_data,
@@ -17,8 +17,8 @@ from robinauts.core import (
     run_event_from_stored,
     run_event_to_data,
 )
-from robinauts.core import conversation_format as format_module
-from robinauts.domain import (
+from robinauts.legacy.core import conversation_format as format_module
+from robinauts.legacy.domain import (
     FIRST_POSITION,
     FORMAT_VERSION,
     ArgumentsPiece,

@@ -37,7 +37,7 @@ from ag_ui.core import EventType
 from aio import asyncio_test
 from conversations import AGENT, MODEL, OTHER_MODEL, conversation
 from fakes import Gate, MemoryConversationStore, Step, calls, results, says
-from robinauts.api import (
+from robinauts.legacy.api import (
     CONVERSATION_ID_HEADER,
     GENERIC_DETAIL,
     GONE_CODE,
@@ -66,8 +66,8 @@ from robinauts.api import (
     openapi_document,
     session_cookie,
 )
-from robinauts.application import StartedTurn
-from robinauts.domain import (
+from robinauts.legacy.application import StartedTurn
+from robinauts.legacy.domain import (
     MAX_CONFIG_ID_CHARS,
     MAX_MESSAGE_CHARS,
     Done,
@@ -592,7 +592,7 @@ async def test_a_stream_that_could_not_be_seeded_ends_as_an_error_and_is_logged(
     async with served(*says(ANSWER)) as it:
         started = await it.begun()
         await settled(it.wiring, started.run)
-        monkeypatch.setattr("robinauts.api.agui.AguiMapper.of", raising)
+        monkeypatch.setattr("robinauts.legacy.api.agui.AguiMapper.of", raising)
 
         with caplog.at_level(logging.ERROR):
             broken = await it.client.get(f"/api/runs/{started.run.id}/events", params={"after": 2})
@@ -1398,7 +1398,7 @@ async def test_a_quiet_run_is_told_about_rather_than_waited_on_for_ever() -> Non
 @asyncio_test
 async def test_a_quiet_stream_says_it_is_still_there(monkeypatch: pytest.MonkeyPatch) -> None:
     """A comment line, so that nothing in front of the deployment closes it."""
-    monkeypatch.setattr("robinauts.api.stream_routes.HEARTBEAT_SECONDS", BEAT)
+    monkeypatch.setattr("robinauts.legacy.api.stream_routes.HEARTBEAT_SECONDS", BEAT)
     gate = Gate()
     async with served(gate, *says(ANSWER)) as it:
         async with streaming(
@@ -1499,7 +1499,7 @@ async def test_a_stream_asked_for_before_start_up_says_nothing_about_it(
     """A deployment always has these services, so having none is a bug of ours.
 
     The same answer the conversation routes give
-    (``robinauts.api.access.NOT_WIRED``): the generic body, and the whole of it
+    (``robinauts.legacy.api.access.NOT_WIRED``): the generic body, and the whole of it
     in the log. **The turn is not begun first** -- both services are taken
     before anything is written -- so a POST that meets this creates no run.
     """

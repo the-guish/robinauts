@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import uuid
 
-from robinauts.ports import IdSource
+from robinauts.legacy.ports import IdSource
 
 DRAWS = 1_000
 """How many ids a test takes. Enough for a counter that wrapped, a source that

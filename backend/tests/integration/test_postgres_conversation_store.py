@@ -78,9 +78,9 @@ from conversations import (
 )
 from fakes import CountingIdSource, FakeClock, ScriptedAgent, says
 from postgres import DATABASE_URL, TemporarySchema, requires_postgres, temporary_schema
-from robinauts.adapters import AsyncioRunExecutor, MemoryRunSignals
-from robinauts.application import Turns
-from robinauts.core import (
+from robinauts.legacy.adapters import AsyncioRunExecutor, MemoryRunSignals
+from robinauts.legacy.application import Turns
+from robinauts.legacy.core import (
     check_event_order,
     message_from_stored,
     message_to_data,
@@ -89,17 +89,17 @@ from robinauts.core import (
     transition,
     tree_of_stored,
 )
-from robinauts.datastore import (
+from robinauts.legacy.datastore import (
     PostgresConversationStore,
     PostgresCredentialStore,
     create_schema,
 )
-from robinauts.datastore.conversations import (
+from robinauts.legacy.datastore.conversations import (
     CONVERSATION_REFUSALS,
     RETRIED,
     RUN_ENDED_KIND,
 )
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     FIRST_POSITION,
     Engine,
     InvalidValueError,
@@ -112,7 +112,7 @@ from robinauts.domain import (
     RunState,
     TextPart,
 )
-from robinauts.ports import ConversationStore, Document
+from robinauts.legacy.ports import ConversationStore, Document
 
 pytestmark = requires_postgres
 
@@ -531,7 +531,7 @@ async def test_six_methods_at_once_on_one_conversation_never_deadlock(
     # retries a deadlock and a retry is exactly how a lock order somebody got
     # wrong stays invisible.
     rounds = 40
-    caplog.set_level(logging.WARNING, logger="robinauts.datastore.conversations")
+    caplog.set_level(logging.WARNING, logger="robinauts.legacy.datastore.conversations")
     async with temporary_schema() as schema:
         await seeded(schema.pool)
         store = PostgresConversationStore(schema.pool)
@@ -849,7 +849,7 @@ async def test_a_real_deadlock_is_retried_once_and_then_succeeds(
     # holding the conversation and wanting the run is one half of a cycle.
     # PostgreSQL picks a victim; when it picks ours, the store must try the
     # whole transaction again, say so once, and get it right.
-    caplog.set_level(logging.WARNING, logger="robinauts.datastore.conversations")
+    caplog.set_level(logging.WARNING, logger="robinauts.legacy.datastore.conversations")
     async with temporary_schema() as schema:
         await seeded(schema.pool)
         store = PostgresConversationStore(schema.pool)

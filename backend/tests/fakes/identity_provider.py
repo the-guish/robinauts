@@ -18,8 +18,8 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any
 
-from robinauts.domain import ProviderConfig, ProviderUnavailableError
-from robinauts.ports import IdentityProvider
+from robinauts.legacy.domain import ProviderConfig, ProviderUnavailableError
+from robinauts.legacy.ports import IdentityProvider
 
 Answer = Mapping[str, Any] | BaseException
 """What a test puts in ``documents`` or ``tokens``: an answer, or a failure to raise."""

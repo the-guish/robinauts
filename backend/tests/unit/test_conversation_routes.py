@@ -48,7 +48,7 @@ from conversations import (
     question,
 )
 from fakes import Gate, MemoryConversationStore, Step, says
-from robinauts.api import (
+from robinauts.legacy.api import (
     BODY_TOO_DEEP,
     BODY_TWICE,
     GENERIC_DETAIL,
@@ -69,10 +69,10 @@ from robinauts.api import (
     session_cookie,
     status_of,
 )
-from robinauts.api.conversation_routes import PAGING
-from robinauts.application import DEFAULT_PAGE, MAX_PAGE
-from robinauts.core import message_to_data
-from robinauts.domain import (
+from robinauts.legacy.api.conversation_routes import PAGING
+from robinauts.legacy.application import DEFAULT_PAGE, MAX_PAGE
+from robinauts.legacy.core import message_to_data
+from robinauts.legacy.domain import (
     FAULTED_RUN_STATES,
     SUPPORTED_PART_KINDS,
     SUPPORTED_ROLES,
@@ -89,7 +89,7 @@ from robinauts.domain import (
     ToolResultPart,
     User,
 )
-from robinauts.ports import Snapshot
+from robinauts.legacy.ports import Snapshot
 from turns import SOMEBODY_ELSE, Wiring, settled, submitted
 from turns import wired as wired_services
 from turns import written as stream_reached
@@ -1457,7 +1457,7 @@ async def test_a_write_from_another_site_never_reaches_the_service() -> None:
     """The request protection, in front of every write here.
 
     It runs as middleware, so the refusal happens before a body is read and
-    before a route is solved (``robinauts.api.protection``).
+    before a route is solved (``robinauts.legacy.api.protection``).
     """
     async with served() as it:
         # Nothing is answering in it, so every one of these writes would
@@ -1523,7 +1523,7 @@ async def test_a_route_asked_for_before_start_up_says_nothing_about_it(
     Not a 503 and not an empty list: the lifespan has not run, which is an
     application being served before it was started. It answers like every
     other mistake of ours -- the generic body -- and the whole of it goes to
-    the log (``robinauts.api.access.NOT_WIRED``).
+    the log (``robinauts.legacy.api.access.NOT_WIRED``).
     """
     deployment = wired()
     secret, _ = await open_session(deployment)

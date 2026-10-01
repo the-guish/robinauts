@@ -28,7 +28,7 @@ from contextlib import asynccontextmanager
 import asyncpg
 import pytest
 
-from robinauts.datastore import create_schema, open_pool
+from robinauts.legacy.datastore import create_schema, open_pool
 
 DATABASE_URL = os.environ.get("ROBINAUTS_TEST_DATABASE_URL")
 """The PostgreSQL these tests are given, or ``None`` if they were given none."""

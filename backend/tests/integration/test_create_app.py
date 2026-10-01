@@ -40,15 +40,15 @@ from aio import asyncio_test
 from conversations import agent_definition, offered
 from fakes import ScriptedAgent, says
 from postgres import DATABASE_URL, TemporarySchema, requires_postgres
-from robinauts.api import CONVERSATION_ID_HEADER, SSE_MEDIA_TYPE
-from robinauts.app import create_app
-from robinauts.core import message_to_data
-from robinauts.datastore import (
+from robinauts.legacy.api import CONVERSATION_ID_HEADER, SSE_MEDIA_TYPE
+from robinauts.legacy.app import create_app
+from robinauts.legacy.core import message_to_data
+from robinauts.legacy.datastore import (
     SCHEMA_VERSION,
     PostgresConversationStore,
     create_schema,
 )
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     DB_INIT_COMMAND,
     LOCAL_PROVIDER,
     LOCAL_SUBJECT,

@@ -35,9 +35,9 @@ from conversations import (
     run,
 )
 from fakes import FakeClock, MemoryConversationStore
-from robinauts.application import Conversations
-from robinauts.core import message_to_data, run_event_to_data, transition
-from robinauts.domain import (
+from robinauts.legacy.application import Conversations
+from robinauts.legacy.core import message_to_data, run_event_to_data, transition
+from robinauts.legacy.domain import (
     FIRST_POSITION,
     Conversation,
     ConversationNotFoundError,

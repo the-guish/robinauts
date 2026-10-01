@@ -32,9 +32,9 @@ from conversations import (
     offered,
 )
 from fakes import CountingIdSource, FakeClock, MemoryConversationStore, ScriptedAgent, says
-from robinauts.adapters import AsyncioRunExecutor, MemoryRunSignals
-from robinauts.application import Turns
-from robinauts.domain import (
+from robinauts.legacy.adapters import AsyncioRunExecutor, MemoryRunSignals
+from robinauts.legacy.application import Turns
+from robinauts.legacy.domain import (
     ACTIVE_RUN_STATES,
     ConversationNotFoundError,
     Engine,
@@ -185,7 +185,7 @@ async def test_a_message_longer_than_one_part_is_carried_in_the_next(
 ) -> None:
     # The bound made small, so that a test about splitting is not a test about
     # a megabyte of text.
-    monkeypatch.setattr("robinauts.domain.conversation.MAX_PART_CHARS", 4)
+    monkeypatch.setattr("robinauts.legacy.domain.conversation.MAX_PART_CHARS", 4)
     wiring = wired()
 
     begun_turn = await wiring.turns.start(AUTHOR, agent_id=AGENT, text="abcdefghij")

@@ -34,10 +34,10 @@ from postgres import (
     schema_exists,
     temporary_schema,
 )
-from robinauts.core import secret_hash
-from robinauts.datastore import PostgresCredentialStore, create_schema
-from robinauts.domain import DatabaseUnreachableError
-from robinauts.ports import CredentialStore
+from robinauts.legacy.core import secret_hash
+from robinauts.legacy.datastore import PostgresCredentialStore, create_schema
+from robinauts.legacy.domain import DatabaseUnreachableError
+from robinauts.legacy.ports import CredentialStore
 
 pytestmark = requires_postgres
 

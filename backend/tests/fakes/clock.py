@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from robinauts.ports import Clock
+from robinauts.legacy.ports import Clock
 
 START = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 """Where a fake clock stands until a test moves it."""

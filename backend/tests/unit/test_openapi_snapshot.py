@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import get_args, get_origin
 
-from robinauts.api import (
+from robinauts.legacy.api import (
     ANYTHING_ELSE,
     NewChatRequest,
     RenameRequest,
@@ -105,10 +105,10 @@ def test_the_document_says_how_every_refusal_is_shaped() -> None:
 
     FastAPI describes the 422 of a route with parameters in a shape of its
     own (``HTTPValidationError``), and this project answers every refusal in
-    one shape of its own (``robinauts.api.errors``). A client generated from a
+    one shape of its own (``robinauts.legacy.api.errors``). A client generated from a
     document that said otherwise would fail to read the body it really gets,
     so every route names the statuses it can refuse with
-    (``robinauts.api.conversation_routes.refusals``).
+    (``robinauts.legacy.api.conversation_routes.refusals``).
     """
     document = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
 
@@ -132,7 +132,7 @@ def test_every_route_of_the_api_describes_the_refusals_it_cannot_list() -> None:
 
     Any route can be asked with the wrong method and any can meet a bug, so
     they are the document's ``default`` answer rather than two more rows on
-    every route (``robinauts.api.refusals.ANYTHING_ELSE``).
+    every route (``robinauts.legacy.api.refusals.ANYTHING_ELSE``).
     """
     document = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
 

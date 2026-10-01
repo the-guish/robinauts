@@ -29,7 +29,7 @@ from fastapi import FastAPI, Request
 from pydantic import BaseModel
 
 from aio import asyncio_test
-from robinauts.api import (
+from robinauts.legacy.api import (
     CROSS_SITE_DETAIL,
     MAX_BODY_BYTES,
     MEDIA_TYPE_DETAIL,

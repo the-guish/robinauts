@@ -36,10 +36,10 @@ import pytest
 from aio import asyncio_test
 from postgres import DATABASE_URL, TemporarySchema
 from postgres import requires_postgres as requires_postgres_marks
-from robinauts import cli
-from robinauts.app import DATABASE_URL_VARIABLE
-from robinauts.datastore import SCHEMA_VERSION, check_schema, schema_version
-from robinauts.domain import DB_INIT_COMMAND
+from robinauts.legacy import cli
+from robinauts.legacy.app import DATABASE_URL_VARIABLE
+from robinauts.legacy.datastore import SCHEMA_VERSION, check_schema, schema_version
+from robinauts.legacy.domain import DB_INIT_COMMAND
 
 pytestmark = requires_postgres_marks
 

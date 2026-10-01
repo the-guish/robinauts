@@ -9,7 +9,7 @@ import unicodedata
 import pytest
 
 from conversations import answer, conversation, question
-from robinauts.core import (
+from robinauts.legacy.core import (
     ELLIPSIS,
     MAX_TITLE_LINES,
     MAX_TITLE_REACH,
@@ -18,7 +18,7 @@ from robinauts.core import (
     first_question,
     title_from_text,
 )
-from robinauts.domain import MAX_TITLE_CHARS, ReasoningPart, TextPart, text_parts
+from robinauts.legacy.domain import MAX_TITLE_CHARS, ReasoningPart, TextPart, text_parts
 
 
 @pytest.mark.parametrize(

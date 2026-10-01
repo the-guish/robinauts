@@ -28,9 +28,9 @@ import asyncpg
 import pytest
 
 from aio import asyncio_test
-from robinauts.datastore import open_pool
-from robinauts.datastore.pool import OPENING_FAILURES
-from robinauts.domain import REDACTED, DatabaseUnreachableError, without_secrets
+from robinauts.legacy.datastore import open_pool
+from robinauts.legacy.datastore.pool import OPENING_FAILURES
+from robinauts.legacy.domain import REDACTED, DatabaseUnreachableError, without_secrets
 
 DSN = "postgresql://robinauts:hunter2@db.example.com:5432/robinauts"
 """A connection string with a password in it, as a deployment's really is."""

@@ -5,9 +5,9 @@
 
 import pytest
 
-from robinauts.core import is_allowed, matches, verified_email
-from robinauts.core.allow import ascii_lower
-from robinauts.domain import AllowEntry, Identity, InvalidValueError, Matcher
+from robinauts.legacy.core import is_allowed, matches, verified_email
+from robinauts.legacy.core.allow import ascii_lower
+from robinauts.legacy.domain import AllowEntry, Identity, InvalidValueError, Matcher
 
 
 def identity(**changes: object) -> Identity:

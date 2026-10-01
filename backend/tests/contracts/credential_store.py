@@ -57,9 +57,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from aio import asyncio_test
-from robinauts.core import secret_hash
-from robinauts.domain import InvalidValueError, PendingLogin
-from robinauts.ports import CredentialStore
+from robinauts.legacy.core import secret_hash
+from robinauts.legacy.domain import InvalidValueError, PendingLogin
+from robinauts.legacy.ports import CredentialStore
 
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 LATER = NOW + timedelta(hours=1)

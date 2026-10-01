@@ -19,14 +19,14 @@ import re
 
 import pytest
 
-from robinauts.datastore import SCHEMA_SHA256, SCHEMA_TABLES, SCHEMA_VERSION, schema_sql
-from robinauts.datastore.conversations import (
+from robinauts.legacy.datastore import SCHEMA_SHA256, SCHEMA_TABLES, SCHEMA_VERSION, schema_sql
+from robinauts.legacy.datastore.conversations import (
     ACTIVE_STATES,
     CONVERSATION_REFUSALS,
     RUN_ENDED_KIND,
 )
-from robinauts.datastore.credentials import SESSION_REFUSALS
-from robinauts.domain import DB_INIT_COMMAND, Engine, Role, RunState, SchemaError
+from robinauts.legacy.datastore.credentials import SESSION_REFUSALS
+from robinauts.legacy.domain import DB_INIT_COMMAND, Engine, Role, RunState, SchemaError
 
 SQL = schema_sql()
 

@@ -31,10 +31,10 @@ import pytest
 from aio import asyncio_test
 from conversations import AGENT
 from fakes import Gate, MemoryConversationStore, calls, results, says
-from robinauts.adapters import MemoryRunSignals
-from robinauts.application import Watch
-from robinauts.core import check_event_order
-from robinauts.domain import (
+from robinauts.legacy.adapters import MemoryRunSignals
+from robinauts.legacy.application import Watch
+from robinauts.legacy.core import check_event_order
+from robinauts.legacy.domain import (
     ACTIVE_RUN_STATES,
     Done,
     InvalidValueError,
@@ -49,7 +49,7 @@ from robinauts.domain import (
     TextDelta,
     User,
 )
-from robinauts.ports import Document
+from robinauts.legacy.ports import Document
 from turns import (
     AUTHOR,
     SOMEBODY_ELSE,

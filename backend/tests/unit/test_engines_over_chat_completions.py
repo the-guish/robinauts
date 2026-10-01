@@ -40,8 +40,8 @@ from langchain_core.tools import StructuredTool
 from pydantic_ai.toolsets import FunctionToolset
 
 import chat_completions
-import robinauts.adapters.agents.langgraph as langgraph_adapter
-import robinauts.adapters.agents.pydantic_ai as pydantic_ai_adapter
+import robinauts.legacy.adapters.agents.langgraph as langgraph_adapter
+import robinauts.legacy.adapters.agents.pydantic_ai as pydantic_ai_adapter
 from aio import asyncio_test
 from chat_completions import (
     GATEWAY_ENDPOINT,
@@ -52,11 +52,11 @@ from chat_completions import (
     SYSTEM_PROMPT,
 )
 from contracts.agents import PROMPT, SEARCH
-from robinauts.adapters import ProviderKeys
-from robinauts.adapters.agents.langgraph import LangGraphAgent
-from robinauts.adapters.agents.pydantic_ai import PydanticAIAgent
-from robinauts.core import check_backend_events
-from robinauts.domain import (
+from robinauts.legacy.adapters import ProviderKeys
+from robinauts.legacy.adapters.agents.langgraph import LangGraphAgent
+from robinauts.legacy.adapters.agents.pydantic_ai import PydanticAIAgent
+from robinauts.legacy.core import check_backend_events
+from robinauts.legacy.domain import (
     ConfigError,
     Done,
     Engine,
@@ -68,7 +68,7 @@ from robinauts.domain import (
     ToolCall,
     ToolResult,
 )
-from robinauts.ports import Agent
+from robinauts.legacy.ports import Agent
 
 OPENAI_ENDPOINT = "https://api.openai.com/v1"
 """OpenAI's own endpoint, which both engines pin (each adapter's ``OPENAI_ENDPOINT``)."""

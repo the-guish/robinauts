@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     DEFAULT_SESSION_HOURS,
     GOOGLE_ISSUER,
     MAX_SESSION_HOURS,

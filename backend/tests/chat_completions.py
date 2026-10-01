@@ -33,7 +33,7 @@ import httpx2
 import openai
 
 from conversations import AGENT, agent_definition
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     AgentDefinition,
     Engine,
     ModelConfig,

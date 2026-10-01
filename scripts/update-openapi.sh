@@ -25,7 +25,7 @@ uv run --locked python - <<'PY'
 import json
 from pathlib import Path
 
-from robinauts.api import openapi_document
+from robinauts.legacy.api import openapi_document
 
 snapshot = Path("openapi.json")
 snapshot.write_text(json.dumps(openapi_document(), indent=2, sort_keys=True) + "\n")

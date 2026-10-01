@@ -41,8 +41,8 @@ import pytest
 
 import live_turns
 from aio import asyncio_test
-from robinauts.adapters.agents.pydantic_ai import PydanticAIAgent
-from robinauts.domain import Engine
+from robinauts.legacy.adapters.agents.pydantic_ai import PydanticAIAgent
+from robinauts.legacy.domain import Engine
 
 pytestmark = [pytest.mark.io, pytest.mark.live]
 

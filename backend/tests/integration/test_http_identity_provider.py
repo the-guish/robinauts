@@ -34,7 +34,7 @@ import httpx
 import pytest
 
 from aio import asyncio_test
-from robinauts.adapters import (
+from robinauts.legacy.adapters import (
     DISCOVERY_PATH,
     RETRYABLE_STATUSES,
     USER_AGENT,
@@ -43,8 +43,8 @@ from robinauts.adapters import (
     open_client,
     ssl_context,
 )
-from robinauts.core import pkce_challenge
-from robinauts.domain import (
+from robinauts.legacy.core import pkce_challenge
+from robinauts.legacy.domain import (
     ProviderConfig,
     ProviderUnavailableError,
     SignInError,

@@ -8,7 +8,7 @@ console script an installation gets does: a command that failed must not leave
 a shell believing it worked.
 """
 
-from robinauts.cli import run
+from robinauts.legacy.cli import run
 
 if __name__ == "__main__":
     raise SystemExit(run())

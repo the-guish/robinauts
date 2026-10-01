@@ -24,15 +24,15 @@ from fakes import (
     StuntedSecretSource,
     discovery_for,
 )
-from robinauts.application import (
+from robinauts.legacy.application import (
     PENDING_LOGIN_LIFE,
     SWEEP_SECONDS,
     BegunSignIn,
     OpenedSession,
     SignIn,
 )
-from robinauts.core import MAX_CODE_CHARS, MAX_SECRET_CHARS, pkce_challenge, secret_hash
-from robinauts.domain import (
+from robinauts.legacy.core import MAX_CODE_CHARS, MAX_SECRET_CHARS, pkce_challenge, secret_hash
+from robinauts.legacy.domain import (
     AllowEntry,
     InvalidValueError,
     Matcher,

@@ -3,7 +3,7 @@
 
 """``MemoryRunSignals``: waking watchers, and what it remembers afterwards.
 
-The port carries no data (``robinauts.ports.RunSignals``), so what there is to
+The port carries no data (``robinauts.legacy.ports.RunSignals``), so what there is to
 test is exactly four things: that an announcement wakes what is waiting; that
 a position already passed is an answer rather than a wait -- **the end
 included**, because a watcher attaching to a run that finished a moment ago
@@ -25,8 +25,8 @@ import uuid
 import pytest
 
 from aio import asyncio_test
-from robinauts.adapters import REMEMBERED_RUNS, MemoryRunSignals
-from robinauts.domain import InvalidValueError
+from robinauts.legacy.adapters import REMEMBERED_RUNS, MemoryRunSignals
+from robinauts.legacy.domain import InvalidValueError
 
 RUN = uuid.UUID("44444444-4444-4444-8444-444444444444")
 OTHER = uuid.UUID("55555555-5555-4555-8555-555555555555")

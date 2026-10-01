@@ -126,7 +126,7 @@
         "type": "object"
       },
       "EndedBadlyView": {
-        "description": "The last run of the conversation, when it failed, was cancelled or was interrupted.\n\nSo that a reload after an answer went wrong says so, instead of showing a\nturn that simply stops (``docs/specs/runs.md``).\n\n``state`` is the whole of the reason, and it is the only one the platform\nrecords as a **kind**: what else a run holds is ``error``, free text made\nout of whatever a provider or a traceback said, written for an operator.\nIt stays on the record and in the log, like the detail of every other\nrefusal (``robinauts.api.errors``).",
+        "description": "The last run of the conversation, when it failed, was cancelled or was interrupted.\n\nSo that a reload after an answer went wrong says so, instead of showing a\nturn that simply stops (``docs/specs/runs.md``).\n\n``state`` is the whole of the reason, and it is the only one the platform\nrecords as a **kind**: what else a run holds is ``error``, free text made\nout of whatever a provider or a traceback said, written for an operator.\nIt stays on the record and in the log, like the detail of every other\nrefusal (``robinauts.legacy.api.errors``).",
         "properties": {
           "ended_at": {
             "format": "date-time",
@@ -166,7 +166,7 @@
         "type": "string"
       },
       "ErrorResponse": {
-        "description": "Every refusal, in one shape (``robinauts.api.errors``).",
+        "description": "Every refusal, in one shape (``robinauts.legacy.api.errors``).",
         "properties": {
           "detail": {
             "title": "Detail",

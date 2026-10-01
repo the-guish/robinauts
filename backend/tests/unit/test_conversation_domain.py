@@ -22,7 +22,7 @@ from conversations import (
     provenance,
     question,
 )
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     EARLIEST_YEAR,
     LATEST_YEAR,
     MAX_CALL_ID_CHARS,

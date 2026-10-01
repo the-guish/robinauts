@@ -13,14 +13,14 @@ test passes these; a stub returning ``"secret"`` does not.
 
 from __future__ import annotations
 
-from robinauts.core import (
+from robinauts.legacy.core import (
     MAX_PKCE_CHARS,
     MAX_SECRET_CHARS,
     MIN_SECRET_CHARS,
     UNRESERVED,
     URL_SAFE,
 )
-from robinauts.ports import SecretSource
+from robinauts.legacy.ports import SecretSource
 
 DRAWS = 200
 """How many of each are taken when looking for a repeat."""

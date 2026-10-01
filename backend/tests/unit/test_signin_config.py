@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from robinauts.core import parse_sign_in_config
-from robinauts.domain import (
+from robinauts.legacy.core import parse_sign_in_config
+from robinauts.legacy.domain import (
     DEFAULT_SCOPES,
     DEFAULT_SESSION_HOURS,
     MAX_SESSION_HOURS,

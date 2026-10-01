@@ -21,7 +21,7 @@ import pytest
 
 from contracts.conversation_runs import ConversationRunsContract
 from fakes import MemoryConversationStore
-from robinauts.ports import ConversationStore
+from robinauts.legacy.ports import ConversationStore
 
 
 class MemoryStoreContract(ConversationRunsContract):

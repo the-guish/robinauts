@@ -22,9 +22,9 @@ import os
 import pytest
 
 from conversations import agent_definition
-from robinauts.adapters import ProviderKeys
-from robinauts.core import check_backend_events
-from robinauts.domain import (
+from robinauts.legacy.adapters import ProviderKeys
+from robinauts.legacy.core import check_backend_events
+from robinauts.legacy.domain import (
     Done,
     Engine,
     Event,
@@ -34,7 +34,7 @@ from robinauts.domain import (
     ProviderKind,
     TextDelta,
 )
-from robinauts.ports import Agent
+from robinauts.legacy.ports import Agent
 
 ANTHROPIC_KEY_VARIABLE = "ROBINAUTS_LIVE_ANTHROPIC_KEY"
 """The Anthropic key the live tests spend, and nothing else in the repository reads."""

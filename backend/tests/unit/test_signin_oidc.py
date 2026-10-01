@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from robinauts.core import (
+from robinauts.legacy.core import (
     AUTHORIZATION_PARAMETERS,
     MAX_CODE_CHARS,
     TOKEN_PARAMETERS,
@@ -17,7 +17,7 @@ from robinauts.core import (
     parameters_taken,
     pkce_challenge,
 )
-from robinauts.domain import ProviderConfig
+from robinauts.legacy.domain import ProviderConfig
 
 GOOGLE = ProviderConfig(
     id="google",

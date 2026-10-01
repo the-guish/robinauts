@@ -9,7 +9,7 @@ from datetime import datetime
 import pytest
 
 from conversations import AGENT, CONVERSATION, MODEL, RUN, at, ended, provenance, run
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     ACTIVE_RUN_STATES,
     ENDED_RUN_STATES,
     MAX_RUN_ERROR_CHARS,

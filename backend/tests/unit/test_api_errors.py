@@ -21,7 +21,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 
 from aio import asyncio_test
-from robinauts.api import (
+from robinauts.legacy.api import (
     GENERIC_DETAIL,
     INTERNAL_ERROR,
     MAX_DETAIL_CHARS,
@@ -39,7 +39,7 @@ from robinauts.api import (
     status_of,
     unreadable_detail,
 )
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     AuthenticationError,
     ConfigError,
     ConversationNotFoundError,

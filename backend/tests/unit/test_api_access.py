@@ -7,7 +7,7 @@ The last one is the point of this module. A route that declares no permission
 is a route nobody guarded, and that does not happen through a bad decision but
 through a forgotten line in a file written six months from now -- or through a
 kind of route the check was never written for. So the walk
-(``robinauts.api.undeclared``) fails **closed**: it recurses into included
+(``robinauts.legacy.api.undeclared``) fails **closed**: it recurses into included
 routers and mounted applications, and it names anything it does not recognise
 as a declared ``APIRoute`` or as a framework route allowed by hand.
 
@@ -17,7 +17,7 @@ Starlette route, a websocket handler, and a frontend added with ``frontend()``
 -- which a router keeps in a **second** list, not in ``routes``.
 
 The one thing that **is** allowed is the interface: a directory of built files
-mounted at ``/ui`` (``robinauts.api.ui``), named in ``FRAMEWORK_PATHS`` with
+mounted at ``/ui`` (``robinauts.legacy.api.ui``), named in ``FRAMEWORK_PATHS`` with
 ``/openapi.json``. So the fixtures here put their extra directories somewhere
 else, ``/pages``, where the escape hatch does not reach them.
 
@@ -47,7 +47,7 @@ from starlette.routing import BaseRoute
 from starlette.staticfiles import StaticFiles
 
 from aio import asyncio_test
-from robinauts.api import (
+from robinauts.legacy.api import (
     FRAMEWORK_PATHS,
     NOT_SIGNED_IN,
     ROUTE_LISTS,
@@ -61,7 +61,7 @@ from robinauts.api import (
     undeclared,
     unknown_route_lists,
 )
-from robinauts.domain import ConfigError, Permission, User
+from robinauts.legacy.domain import ConfigError, Permission, User
 from webapp import (
     LOOPBACK_URL,
     PUBLIC_URL,
@@ -101,7 +101,7 @@ Written out rather than derived: a route whose declaration changes, or a route
 added at all, is then a change to this file and something a reviewer reads.
 
 ``/`` and ``/ui`` are the two navigations that land in the interface
-(``robinauts.api.ui``), each answering ``GET`` and ``HEAD``; the files
+(``robinauts.legacy.api.ui``), each answering ``GET`` and ``HEAD``; the files
 themselves are the mount below, which is not an ``APIRoute`` and is allowed by
 name.
 """
@@ -430,7 +430,7 @@ def test_the_walk_knows_every_route_list_fastapi_keeps(tmp_path: Any) -> None:
 
     assert kept <= set(ROUTE_LISTS), (
         f"FastAPI {fastapi.__version__} keeps routes in {sorted(kept - set(ROUTE_LISTS))},"
-        f" which robinauts.api.access.ROUTE_LISTS does not name"
+        f" which robinauts.legacy.api.access.ROUTE_LISTS does not name"
     )
     assert all(unknown_route_lists(one) == [] for one in routers)
     assert fastapi.__version__.startswith(READ_FASTAPI), (

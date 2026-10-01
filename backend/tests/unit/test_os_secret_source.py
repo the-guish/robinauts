@@ -11,9 +11,9 @@ and the one the tests rely on are held to the same promises.
 from __future__ import annotations
 
 from contracts.secrets import SecretSourceContract
-from robinauts.adapters import SECRET_BYTES, OsSecretSource
-from robinauts.core import MIN_SECRET_CHARS
-from robinauts.ports import SECRET_BITS, SecretSource
+from robinauts.legacy.adapters import SECRET_BYTES, OsSecretSource
+from robinauts.legacy.core import MIN_SECRET_CHARS
+from robinauts.legacy.ports import SECRET_BITS, SecretSource
 
 
 class TestOsSecretSource(SecretSourceContract):

@@ -11,7 +11,7 @@ from dataclasses import FrozenInstanceError, replace
 import pytest
 
 from conversations import CONVERSATION, OTHER_CONVERSATION, answer, at, question
-from robinauts.core import (
+from robinauts.legacy.core import (
     ConversationTree,
     check_answers_calls,
     check_parent,
@@ -20,7 +20,7 @@ from robinauts.core import (
     tree_of,
     tree_of_stored,
 )
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     Channel,
     InvalidMessageTreeError,
     InvalidValueError,

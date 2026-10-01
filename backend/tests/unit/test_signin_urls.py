@@ -5,7 +5,7 @@
 
 import pytest
 
-from robinauts.core import (
+from robinauts.legacy.core import (
     DEFAULT_RETURN_TO,
     MAX_RETURN_TO,
     is_loopback,
@@ -14,7 +14,7 @@ from robinauts.core import (
     normalise_origin,
     safe_return_to,
 )
-from robinauts.domain import InvalidValueError
+from robinauts.legacy.domain import InvalidValueError
 
 
 @pytest.mark.parametrize(

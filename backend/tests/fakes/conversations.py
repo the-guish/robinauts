@@ -3,7 +3,7 @@
 
 """The conversation store in dictionaries: what the real one must behave like.
 
-It is the ``ConversationStore`` of ``robinauts.ports`` -- conversations,
+It is the ``ConversationStore`` of ``robinauts.legacy.ports`` -- conversations,
 messages, runs and their events, since those are one database and some of the
 work over them is one transaction -- and it passes the same contract suite the
 PostgreSQL store will.
@@ -47,7 +47,7 @@ from contextlib import asynccontextmanager
 from dataclasses import fields, replace
 from datetime import datetime
 
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     ENDED_RUN_STATES,
     FIRST_POSITION,
     MAX_TITLE_CHARS,
@@ -71,7 +71,7 @@ from robinauts.domain import (
     checked_line,
     describe,
 )
-from robinauts.ports import (
+from robinauts.legacy.ports import (
     MAX_PAGE,
     MAX_SWEPT,
     ConversationPage,

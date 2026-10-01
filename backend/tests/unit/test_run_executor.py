@@ -24,8 +24,8 @@ import uuid
 import pytest
 
 from aio import asyncio_test
-from robinauts.adapters import CLOSED, AsyncioRunExecutor
-from robinauts.domain import InvalidValueError, RunAlreadyActiveError
+from robinauts.legacy.adapters import CLOSED, AsyncioRunExecutor
+from robinauts.legacy.domain import InvalidValueError, RunAlreadyActiveError
 
 RUN = uuid.UUID("44444444-4444-4444-8444-444444444444")
 OTHER = uuid.UUID("55555555-5555-4555-8555-555555555555")
@@ -101,7 +101,7 @@ class Shielding:
 
     What such a report writes is a run's ending, and it is written under
     ``asyncio.shield`` so that the cancellation a shutdown arrives with cannot
-    leave the run ``running`` for ever (``robinauts.application.turns``).
+    leave the run ``running`` for ever (``robinauts.legacy.application.turns``).
     Nothing outside can stop it, then -- a close can only be told to stop
     waiting -- which is what makes the close's own deadline the only bound
     there is. ``minds_the_deadline`` is the difference between the

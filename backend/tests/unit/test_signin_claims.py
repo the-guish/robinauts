@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from robinauts.core import (
+from robinauts.legacy.core import (
     CLOCK_SKEW_SECONDS,
     MAX_ID_TOKEN_CHARS,
     accepted_issuers,
@@ -20,7 +20,7 @@ from robinauts.core import (
     identity_from_claims,
     identity_from_id_token,
 )
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     InvalidIdTokenError,
     InvalidValueError,
     ProviderConfig,

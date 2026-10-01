@@ -20,8 +20,8 @@ from typing import Any
 
 import pytest
 
-from robinauts.core import parse_models_config
-from robinauts.domain import (
+from robinauts.legacy.core import parse_models_config
+from robinauts.legacy.domain import (
     DEFAULT_MODEL_TIMEOUT_SECONDS,
     DEFAULT_TOOL_TIMEOUT_SECONDS,
     KINDS_WITH_BASE_URL,

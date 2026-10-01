@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from conversations import CONVERSATION, RUN, answer, question
-from robinauts.core import (
+from robinauts.legacy.core import (
     EXTRAS,
     MAX_EXTRAS_BYTES,
     MAX_EXTRAS_DEPTH,
@@ -23,8 +23,8 @@ from robinauts.core import (
     part_to_data,
     provenance_to_data,
 )
-from robinauts.core import conversation_format as format_module
-from robinauts.domain import (
+from robinauts.legacy.core import conversation_format as format_module
+from robinauts.legacy.domain import (
     EARLIEST_YEAR,
     FORMAT_VERSION,
     LATEST_YEAR,

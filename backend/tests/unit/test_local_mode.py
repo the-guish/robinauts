@@ -40,7 +40,7 @@ from fastapi import FastAPI
 
 from aio import asyncio_test
 from fakes import FakeClock, MemoryConversationStore, MemoryCredentialStore
-from robinauts.api import (
+from robinauts.legacy.api import (
     BOTH_WAYS,
     CROSS_SITE_DETAIL,
     LOOPBACK_DETAIL,
@@ -49,16 +49,16 @@ from robinauts.api import (
     public,
     signed_in,
 )
-from robinauts.app import (
+from robinauts.legacy.app import (
     AUTH_CONFIG_VARIABLE,
     CONFIG_VARIABLE,
     DATABASE_URL_VARIABLE,
     Deployment,
     create_app,
 )
-from robinauts.application import SignIn
-from robinauts.core import parse_sign_in_config, secret_hash
-from robinauts.domain import (
+from robinauts.legacy.application import SignIn
+from robinauts.legacy.core import parse_sign_in_config, secret_hash
+from robinauts.legacy.domain import (
     LOCAL_PROVIDER,
     LOCAL_SUBJECT,
     LOCAL_USER_NAME,
@@ -693,7 +693,7 @@ async def test_start_up_warns_once_that_sign_in_is_off(caplog: Any) -> None:
         clock=FakeClock(),
     )
 
-    with caplog.at_level(logging.WARNING, logger="robinauts.app"):
+    with caplog.at_level(logging.WARNING, logger="robinauts.legacy.app"):
         async with running(app):
             async with browser(app) as client:
                 await client.get("/auth/session")

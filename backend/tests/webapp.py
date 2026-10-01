@@ -6,7 +6,7 @@
 The routes are exercised over the real ASGI application through
 ``httpx.ASGITransport`` -- no socket, no server -- with the in-memory
 credential store, the settable clock and the counting secret source standing
-in for a deployment's own. ``httpx`` is confined to ``robinauts.adapters`` in
+in for a deployment's own. ``httpx`` is confined to ``robinauts.legacy.adapters`` in
 the package; a test is free to import it.
 
 ``base_url`` is the deployment's ``public_url``, so that the client stores the
@@ -31,10 +31,10 @@ from fakes import (
     MemoryCredentialStore,
     ScriptedIdentityProvider,
 )
-from robinauts.api import create_api
-from robinauts.application import Conversations, LocalAccess, SignIn, Turns, Watch
-from robinauts.core import secret_hash
-from robinauts.domain import (
+from robinauts.legacy.api import create_api
+from robinauts.legacy.application import Conversations, LocalAccess, SignIn, Turns, Watch
+from robinauts.legacy.core import secret_hash
+from robinauts.legacy.domain import (
     MAX_PENDING_LOGINS,
     AllowEntry,
     LocalMode,
@@ -55,7 +55,7 @@ LOCAL_URL = "http://127.0.0.1:8000"
 
 A client on this ``base_url`` sends ``Host: 127.0.0.1:8000`` and, through
 ``ASGITransport``, answers on the same address -- which is what the mode's own
-check reads (``robinauts.api.protection``).
+check reads (``robinauts.legacy.api.protection``).
 """
 
 SECRET_VARIABLE = "ROBINAUTS_TEST_SECRET"

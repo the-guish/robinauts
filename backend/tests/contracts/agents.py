@@ -64,9 +64,9 @@ import pytest
 
 from aio import asyncio_test
 from conversations import agent_definition
-from robinauts.core import check_backend_events
-from robinauts.domain import AgentDefinition, Done, Event, TextDelta, ToolCall, ToolResult
-from robinauts.ports import Agent
+from robinauts.legacy.core import check_backend_events
+from robinauts.legacy.domain import AgentDefinition, Done, Event, TextDelta, ToolCall, ToolResult
+from robinauts.legacy.ports import Agent
 
 RELEASE_SECONDS = 5.0
 """How long a cancelled turn has to let the cancellation through.
@@ -171,7 +171,7 @@ class AgentContract:
         """The model it is told to run on: the agent's default, unless overridden.
 
         A keyword of its own and not read off the agent, because the model is
-        the run's (``robinauts.ports.agents``); an adapter's own suite is where
+        the run's (``robinauts.legacy.ports.agents``); an adapter's own suite is where
         a turn on a model other than the agent's default is looked at.
         """
         return self.definition().model

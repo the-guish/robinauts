@@ -3,8 +3,8 @@
 
 """An engine a test writes the script for, step by step.
 
-It is the ``Agent`` of ``robinauts.ports`` -- one method, streaming the
-adapter's events (``robinauts.domain.events``) -- and what makes it useful is
+It is the ``Agent`` of ``robinauts.legacy.ports`` -- one method, streaming the
+adapter's events (``robinauts.legacy.domain.events``) -- and what makes it useful is
 that **the test decides when each step happens**. A script is a list of
 steps, and a step is one of three things:
 
@@ -40,7 +40,7 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     AgentDefinition,
     Done,
     Event,
@@ -49,7 +49,7 @@ from robinauts.domain import (
     ToolCall,
     ToolResult,
 )
-from robinauts.ports import Agent
+from robinauts.legacy.ports import Agent
 
 
 class Gate:

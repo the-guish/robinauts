@@ -16,8 +16,8 @@ import uuid
 
 from contracts.ids import IdSourceContract
 from fakes import CountingIdSource
-from robinauts.adapters import OsIdSource
-from robinauts.ports import IdSource
+from robinauts.legacy.adapters import OsIdSource
+from robinauts.legacy.ports import IdSource
 
 
 class TestOsIdSource(IdSourceContract):

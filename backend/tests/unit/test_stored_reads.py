@@ -9,8 +9,8 @@ from datetime import datetime
 import pytest
 
 from conversations import AGENT, CONVERSATION, MODEL, OWNER, RUN, answer, at, question
-from robinauts.core import message_from_stored, message_to_data
-from robinauts.domain import (
+from robinauts.legacy.core import message_from_stored, message_to_data
+from robinauts.legacy.domain import (
     Conversation,
     InvalidValueError,
     MessageNotFoundError,

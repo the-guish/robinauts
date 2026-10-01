@@ -8,7 +8,7 @@ import hashlib
 
 import pytest
 
-from robinauts.core import (
+from robinauts.legacy.core import (
     MAX_PKCE_CHARS,
     MAX_SECRET_CHARS,
     MIN_SECRET_CHARS,
@@ -19,7 +19,7 @@ from robinauts.core import (
     same_secret,
     secret_hash,
 )
-from robinauts.domain import InvalidValueError
+from robinauts.legacy.domain import InvalidValueError
 
 
 def test_a_secret_is_kept_as_its_sha256_in_hex() -> None:

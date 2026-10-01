@@ -26,7 +26,7 @@ from ag_ui.core import EventType, TextMessageStartEvent
 from ag_ui.encoder import EventEncoder
 
 from conversations import CONVERSATION, RUN, answer, at, ended
-from robinauts.api import (
+from robinauts.legacy.api import (
     ENDED_BADLY,
     ERROR_FLAG,
     REASONING_SUFFIX,
@@ -39,7 +39,7 @@ from robinauts.api import (
     sent_role,
     sse,
 )
-from robinauts.domain import (
+from robinauts.legacy.domain import (
     ENDED_RUN_STATES,
     FAULTED_RUN_STATES,
     ArgumentsPiece,

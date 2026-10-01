@@ -36,15 +36,15 @@ from typing import Any
 import pytest
 from asyncpg import InvalidPasswordError
 
-from robinauts import cli
-from robinauts.app import (
+from robinauts.legacy import cli
+from robinauts.legacy.app import (
     CONFIG_VARIABLE,
     DATABASE_URL_VARIABLE,
     NO_DATABASE,
     OFF_LOOPBACK,
 )
-from robinauts.datastore import SCHEMA_SHA256, SCHEMA_VERSION
-from robinauts.domain import DatabaseUnreachableError
+from robinauts.legacy.datastore import SCHEMA_SHA256, SCHEMA_VERSION
+from robinauts.legacy.domain import DatabaseUnreachableError
 
 DATABASE_URL = "postgresql://robinauts@127.0.0.1:5432/robinauts"
 """Never connected to: every test here stops before a loop is running."""
@@ -260,7 +260,7 @@ def test_the_handlers_are_ours_while_it_serves_and_are_put_back_after(
 
 HOLDING = """
 import signal, sys, time
-from robinauts import cli
+from robinauts.legacy import cli
 
 if len(sys.argv) > 2:
     # As if this had been started by something that ignores the signal, which

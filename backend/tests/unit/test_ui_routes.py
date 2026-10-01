@@ -30,7 +30,7 @@ import httpx
 import pytest
 
 from aio import asyncio_test
-from robinauts.api import (
+from robinauts.legacy.api import (
     ASSET_CACHE_CONTROL,
     ASSETS,
     CONTENT_SECURITY_POLICY,
@@ -301,7 +301,7 @@ async def test_a_write_to_a_file_is_the_method_it_has_not_got(built: Path, metho
     that is not JSON before a byte of it is read, which is right for a route
     that reads bodies and wrong here: these paths are files. It lets the
     interface's own paths past the write checks
-    (``robinauts.api.ui.serves_files_only``) so that the mount answers what is
+    (``robinauts.legacy.api.ui.serves_files_only``) so that the mount answers what is
     really the matter.
     """
     async with showing(built) as client:

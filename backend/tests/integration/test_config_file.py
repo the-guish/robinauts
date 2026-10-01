@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from robinauts.adapters import (
+from robinauts.legacy.adapters import (
     ProviderKeys,
     check_api_keys,
     check_client_secrets,
@@ -35,9 +35,9 @@ from robinauts.adapters import (
     environment,
     read_toml,
 )
-from robinauts.app import BUILDABLE_KINDS, SIGN_IN_TABLES, WIRED_ENGINES
-from robinauts.core import parse_models_config, parse_sign_in_config
-from robinauts.domain import (
+from robinauts.legacy.app import BUILDABLE_KINDS, SIGN_IN_TABLES, WIRED_ENGINES
+from robinauts.legacy.core import parse_models_config, parse_sign_in_config
+from robinauts.legacy.domain import (
     ConfigError,
     Engine,
     Matcher,

@@ -46,8 +46,8 @@ import pytest
 
 import live_turns
 from aio import asyncio_test
-from robinauts.adapters.agents.langgraph import LangGraphAgent
-from robinauts.domain import Engine
+from robinauts.legacy.adapters.agents.langgraph import LangGraphAgent
+from robinauts.legacy.domain import Engine
 
 pytestmark = [pytest.mark.io, pytest.mark.live]
 

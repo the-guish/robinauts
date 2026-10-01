@@ -76,8 +76,8 @@ from aio import asyncio_test
 from conftest import VENDOR_LOGGERS
 from contracts.agents import PROMPT, SEARCH, AgentContract, Ending, Script
 from conversations import agent_definition
-from robinauts.adapters import ProviderKeys, ToolServerSecrets
-from robinauts.adapters.agents.pydantic_ai import (
+from robinauts.legacy.adapters import ProviderKeys, ToolServerSecrets
+from robinauts.legacy.adapters.agents.pydantic_ai import (
     ANTHROPIC_ENDPOINT,
     ANTHROPIC_KEY_HEADER,
     CLIENT_VARIABLES_REMOVED,
@@ -100,8 +100,8 @@ from robinauts.adapters.agents.pydantic_ai import (
     within,
     write_state,
 )
-from robinauts.core import check_backend_events
-from robinauts.domain import (
+from robinauts.legacy.core import check_backend_events
+from robinauts.legacy.domain import (
     MAX_PART_CHARS,
     AgentDefinition,
     Done,
@@ -120,7 +120,7 @@ from robinauts.domain import (
     ToolServerConfig,
     UnknownModelError,
 )
-from robinauts.ports import Agent
+from robinauts.legacy.ports import Agent
 
 PROVIDER = "anthropic"
 MODEL = "sonnet"
@@ -1286,9 +1286,9 @@ LEAK_KEY = "sk-the-key-nobody-should-log"
 
 REQUEST = """
 import anthropic
-from robinauts.adapters import ProviderKeys
-from robinauts.adapters.agents.pydantic_ai import chat_model
-from robinauts.domain import ModelConfig, ModelProviderConfig, ModelsConfig, ProviderKind
+from robinauts.legacy.adapters import ProviderKeys
+from robinauts.legacy.adapters.agents.pydantic_ai import chat_model
+from robinauts.legacy.domain import ModelConfig, ModelProviderConfig, ModelsConfig, ProviderKind
 
 {built}
 
@@ -1339,7 +1339,10 @@ def test_a_request_is_never_written_to_a_log_however_the_sdk_was_asked_to() -> N
     """
     quiet = in_a_fresh_process(
         REQUEST.format(
-            built=f"from robinauts.adapters.agents.pydantic_ai import PydanticAIAgent\n{BUILT}",
+            built=(
+                "from robinauts.legacy.adapters.agents.pydantic_ai import PydanticAIAgent\n"
+                f"{BUILT}"
+            ),
             key=LEAK_KEY,
             secret=LEAK_SECRET,
         )
