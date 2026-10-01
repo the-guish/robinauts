@@ -6,15 +6,13 @@
 from __future__ import annotations
 
 from aio import asyncio_test
-from robinauts.controller.application.controller import RobinautsController
+from robinauts.controller.composition import build
 from robinauts.controller.contract.domain import Config, Identity, StorageConfig, StorageKind
 
 
 @asyncio_test
 async def test_ensure_user_creates_once_and_finds_after() -> None:
-    controller = RobinautsController(
-        Config(), storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get
-    )
+    controller = build(Config(), storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
     await controller.open()
     identity = Identity("local", "me", name="Me", email="me@example.com")
     first = await controller.ensure_user(identity)

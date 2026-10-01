@@ -14,7 +14,7 @@ from pathlib import Path
 
 import uvicorn
 
-from robinauts.controller.application.controller import RobinautsController
+from robinauts.controller.composition import build
 from robinauts.controller.contract.domain import (
     AgentConfig,
     Config,
@@ -41,7 +41,7 @@ CONFIG = Config(
 def main() -> None:
     named = os.environ.get("ROBINAUTS_UI_DIR")
     ui_dir = Path(named) if named else REPO / "frontend" / "dist"
-    controller = RobinautsController(
+    controller = build(
         CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for=os.environ.get
     )
     uvicorn.run(create_app(controller, ui_dir=ui_dir), host="127.0.0.1", port=8000)

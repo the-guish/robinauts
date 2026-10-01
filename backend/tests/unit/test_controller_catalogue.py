@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from aio import asyncio_test
-from robinauts.controller.application.controller import RobinautsController
+from robinauts.controller.composition import build
 from robinauts.controller.contract.domain import (
     AgentConfig,
     AgentListing,
@@ -30,9 +30,7 @@ async def test_lists_the_configured_agents_and_models() -> None:
             "b": AgentConfig("b", title="B", system_prompt="", model="slow", engine="echo"),
         },
     )
-    controller = RobinautsController(
-        config, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get
-    )
+    controller = build(config, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
     assert await controller.list_agents() == (
         AgentListing("a", "A", default_model="fast"),
         AgentListing("b", "B", default_model="slow"),
