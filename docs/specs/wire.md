@@ -3,20 +3,20 @@
 The wire is one of the seams: the backend is not shaped by the UI library
 ([ADR 0001](../adr/0001-chat-ui-assistant-ui-with-tailwind.md)), and
 another UI — or no UI — can drive it. It is the one API that every
-delivery channel uses ([channels.md](channels.md)).
+delivery channel uses ([channels.md](legacy/channels.md)).
 
 ## A chat turn
 
 - Streamed as [AG-UI](https://docs.ag-ui.com) events over **server-sent
   events**, on the same origin. The UI starts a turn with a POST; the
   response is the event stream of the run it created.
-- **The stream is a view of the run, not the run** ([runs.md](runs.md)).
+- **The stream is a view of the run, not the run** ([runs.md](legacy/runs.md)).
   Closing it changes nothing. The UI re-attaches to an active run by its
   id, giving the last event it saw, and receives what it missed and then
   the rest.
 - Loading a conversation returns its messages and, when a run is active,
   that run's id and the position to attach after (`resume_point`,
-  [runs.md](runs.md)) — so a UI that has just loaded every complete message
+  [runs.md](legacy/runs.md)) — so a UI that has just loaded every complete message
   attaches without being shown any of them twice. With a run active, the
   messages end at `resume.follows`, which is what the run's next message
   hangs under: a UI appends what streams in to the end of the list.
@@ -27,7 +27,7 @@ delivery channel uses ([channels.md](channels.md)).
   message being replaced for an edit — **or** the assistant message whose
   turn is to be produced again, and then there is no new user message: a
   regeneration answers the question that turn already had
-  ([conversations.md](conversations.md)). **The server loads the history
+  ([conversations.md](legacy/conversations.md)). **The server loads the history
   from its own store**; it does not accept a history from the browser. This
   makes our wire a profile of AG-UI, not its stock run input, and it is
   documented with the API.
@@ -35,14 +35,14 @@ delivery channel uses ([channels.md](channels.md)).
   platform's own turn events; `api` maps them to AG-UI. One mapping,
   shared by both engines. The events have a written form of their own —
   versioned like a message, and the same one the events table keeps
-  ([runs.md](runs.md)) — so what is stored and what is sent cannot drift
+  ([runs.md](legacy/runs.md)) — so what is stored and what is sent cannot drift
   apart.
 - **The frameworks' AG-UI bridges are not used** — neither
   `ag-ui-langgraph` nor Pydantic AI's `ag-ui` extra. Every turn goes
   through the agent port, the controller and the platform's persistence,
   and the wire is the same whatever the engine.
 - **Tool calls are AG-UI's tool events.** A call the model makes is part of
-  the assistant message that made it ([conversations.md](conversations.md)),
+  the assistant message that made it ([conversations.md](legacy/conversations.md)),
   and is sent as `TOOL_CALL_START` (the call's id, the tool's name, the
   assistant message it belongs to), `TOOL_CALL_ARGS` (its arguments as JSON
   text — in one piece, since the framework hands them over whole once it is
@@ -50,7 +50,7 @@ delivery channel uses ([channels.md](channels.md)).
   piece as it reads several) and `TOOL_CALL_END`; each result of the tool message
   that answers the batch is sent as `TOOL_CALL_RESULT` as it lands, naming
   the call it answers. The call's id is the one stored on the part — the
-  vendor's, carried by the adapter as data ([agents.md](agents.md)) — so
+  vendor's, carried by the adapter as data ([agents.md](legacy/agents.md)) — so
   that a result, a re-attach and the conversation loaded afterwards all
   name one call one way. A result that is an error says so as
   `metadata: {"isError": true}` on its `TOOL_CALL_RESULT` — AG-UI 1.0 has no
@@ -66,7 +66,7 @@ delivery channel uses ([channels.md](channels.md)).
 ## The endpoints
 
 The profile above, as it is served. These three are **outside the OpenAPI
-document** ([backend.md](backend.md)) — a streaming endpoint described in it
+document** ([backend.md](legacy/backend.md)) — a streaming endpoint described in it
 would have a generated client believe it could read the response as JSON — so
 they are documented here, which is what "documented with the API" means for
 them. All three need a session; the two writes are held to the same origin
@@ -84,7 +84,7 @@ checks as every other write.
   message being replaced for an edit.
 - `model_id` is the model a new conversation runs on, one of those
   `GET /api/models` lists; left out or `null`, it is the agent's default
-  ([agents.md](agents.md)). An agent the deployment has not got is 404, and
+  ([agents.md](legacy/agents.md)). An agent the deployment has not got is 404, and
   is looked for first; a model it does not offer is 422, `UnknownModelError`.
   A turn in a conversation that exists names no model — it runs on the
   conversation's, which `PUT /api/conversations/{id}/model` changes — so a
@@ -120,7 +120,7 @@ checks as every other write.
 - The events are AG-UI's: `RUN_STARTED`, `TEXT_MESSAGE_START` /
   `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_END`, the `REASONING_MESSAGE_*`
   events for thinking — under an id derived from the answer's, and never
-  stored ([conversations.md](conversations.md)) — the `TOOL_CALL_*` events
+  stored ([conversations.md](legacy/conversations.md)) — the `TOOL_CALL_*` events
   above, and `RUN_FINISHED` or `RUN_ERROR`. A completed message is a bare
   `TEXT_MESSAGE_END`: the client built it from the deltas, and one that did
   not receive every delta reloads the conversation, which is what the store
@@ -143,13 +143,13 @@ checks as every other write.
   repeated and none is lost.
 - **A position a run that is still going has not reached is refused** (422):
   there is nothing after it, and a stream that waited would give up on a run
-  that is answering perfectly well ([runs.md](runs.md)). A run that has
+  that is answering perfectly well ([runs.md](legacy/runs.md)). A run that has
   **ended** is not refused past its end — there is nothing to wait for, and
   how it ended is the answer.
 - **Every stream ends with an event saying the run is over**, because a
   stream that merely closed is one an `EventSource` would open again.
   Re-attaching at or past the last position of a run that has ended sends
-  nothing — there is nothing after `after` ([runs.md](runs.md)) — and is
+  nothing — there is nothing after `after` ([runs.md](legacy/runs.md)) — and is
   answered with **how that run really ended**, read from its record: the same
   `RUN_FINISHED` or `RUN_ERROR` a client would have been sent had it been
   watching. A finished answer is never reported as an error.
@@ -160,7 +160,7 @@ checks as every other write.
 - `RUN_ERROR` carries a `code`: the run's state where it ended in an error
   (`failed`, or `interrupted` — the deployment stopped with the run in it,
   which is not AG-UI's *interrupt* outcome), `quiet` where watching a run that
-  stored nothing was given up on ([runs.md](runs.md)), `gone` where the run is
+  stored nothing was given up on ([runs.md](legacy/runs.md)), `gone` where the run is
   **no longer there at all** — its conversation deleted under the watcher —
   and `internal` for a fault of ours. Its message is **a fixed sentence** —
   never the run's stored error, which is written for an operator.
@@ -171,12 +171,12 @@ checks as every other write.
   *request*, not on a record:
   the conversation format holds a message far longer, and a turn that needs
   more than a mebibyte is a file, which is a channel this version has not got
-  ([channels.md](channels.md)).
+  ([channels.md](legacy/channels.md)).
 
 ## Without streaming
 
 - A client that cannot stream starts a run and obtains the result once the
-  run has finished. Planned ([channels.md](channels.md)).
+  run has finished. Planned ([channels.md](legacy/channels.md)).
 
 ## Everything else
 

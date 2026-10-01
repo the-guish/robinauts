@@ -4,9 +4,9 @@ Written 2026-09-28, replacing the notes of 2026-09-27 that closed the POC
 session. Progress against it is in [mcp-progress.md](mcp-progress.md). Not a
 spec: the decisions that are settled, the one deferred,
 what the work costs across the codebase, and the order to build it in. The
-wanted behaviour is in [specs/runs.md](../specs/runs.md),
-[specs/agents.md](../specs/agents.md) and
-[specs/conversations.md](../specs/conversations.md) ("Tools", planned); the
+wanted behaviour is in [specs/legacy/runs.md](../specs/legacy/runs.md),
+[specs/legacy/agents.md](../specs/legacy/agents.md) and
+[specs/legacy/conversations.md](../specs/legacy/conversations.md) ("Tools", planned); the
 spec sentences this plan changes are listed at the end.
 
 ## What is wanted
@@ -123,7 +123,7 @@ changes (listed at the end).
    the results go back. By decision 1 the next engine call is built from the
    stored history, so the blocks have to be in it. They go in the reserved
    `extras` of the assistant message under the vendor's key
-   (`extras.anthropic`), which is exactly what `docs/specs/conversations.md`
+   (`extras.anthropic`), which is exactly what `docs/specs/legacy/conversations.md`
    reserved that key for: the engine returns them with `AnswerCompleted`,
    the application stores them unread and bounded (the 64 KiB rule), and the
    adapter that reaches that vendor replays them; the other adapter, and
@@ -142,7 +142,7 @@ changes (listed at the end).
    a message" is not a promise the platform can make. What it promises is
    that the blocks are **never read as reasoning** -- stored unread, never
    rendered, in no Markdown export, sent to no other vendor -- and a JSON
-   export writes the document whole (`specs/conversations.md`).
+   export writes the document whole (`specs/legacy/conversations.md`).
 
 9. **Four defaults**, settled 2026-09-28 with the above, each small enough
    to change later without a decision on paper.
@@ -567,7 +567,7 @@ for it.
 
 ## Spec sentences to change
 
-- [specs/agents.md](../specs/agents.md): "The agent port" -- the history is
+- [specs/legacy/agents.md](../specs/legacy/agents.md): "The agent port" -- the history is
   the full visible path, **not** trimmed, and the port is handed the tools;
   "A turn" -- step 2 loses "trimmed", and "Anything that must behave the same
   under both engines lives above the port. Fitting a long history into a
@@ -577,12 +577,12 @@ for it.
   platform's loop, one identity per deployment, every tool running without
   approval in this iteration; "Details likely to change"
   -- the configuration sketch gains a server table.
-- [specs/runs.md](../specs/runs.md): "Tools" -- from planned to behaviour;
+- [specs/legacy/runs.md](../specs/legacy/runs.md): "Tools" -- from planned to behaviour;
   "A tool declares whether it is safe to execute again" becomes the MCP
   annotations and what the platform does with them after an interruption;
   "In the layout" -- the order of a run's events gains the tool-call and
   tool messages.
-- [specs/conversations.md](../specs/conversations.md): the content table's
+- [specs/legacy/conversations.md](../specs/legacy/conversations.md): the content table's
   tool row; "A turn is a chain" gains that the results of one call batch
   are one tool message (decision 7); "Details
   likely to change" loses "Fitting a long history into a model's context is

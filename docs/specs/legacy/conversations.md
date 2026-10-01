@@ -37,7 +37,7 @@
   message that began it, beside the answer that was produced before, not
   under whatever the old answer happened to follow.
 - A conversation belongs to one user, optionally inside a project, and is
-  bound to an agent ([privacy.md](privacy.md), [agents.md](agents.md)).
+  bound to an agent ([privacy.md](../privacy.md), [agents.md](agents.md)).
 - **It has a model**: its agent's default at the moment it started, unless
   its author picked another of the configured models, and changeable by its
   author at any point. A change applies from the next turn; a run keeps the
@@ -57,14 +57,14 @@
 ## The format
 
 The format is the platform's own
-([ADR 0002](../adr/0002-conversation-persistence.md)): not that of an
+([ADR 0002](../../adr/0002-conversation-persistence.md)): not that of an
 agent framework, not that of a model vendor. It is the **transcript** of
 the conversation — what the people reading it see, what the exports carry,
 what analytics reads — written from what the adapter streamed, and the
 model is never fed from it. What the model is fed is its **memory**: the
 framework's own history of the conversation, in the framework's own format,
 stored by the platform on the run that produced it and never read
-([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md),
+([ADR 0005](../../adr/0005-the-framework-owns-the-loop-and-the-memory.md),
 [agents.md](agents.md)).
 
 **What a message can contain**
@@ -315,7 +315,7 @@ stored by the platform on the run that produced it and never read
   passed to the model where the model accepts them.
 - Search the conversations they can see.
 - Export a conversation, as Markdown or JSON.
-- Share it, or put it in a project ([privacy.md](privacy.md)).
+- Share it, or put it in a project ([privacy.md](../privacy.md)).
 
 ## Deletion
 
@@ -328,19 +328,19 @@ stored by the platform on the run that produced it and never read
   behalf would hide a running answer behind a button that says "delete".
 - After 30 days it is removed for good, with its messages, attachments and
   share links.
-- Retention and purge are in [privacy.md](privacy.md).
+- Retention and purge are in [privacy.md](../privacy.md).
 
 ## Details likely to change
 
 - Search is PostgreSQL full-text search, so that no other service is
   needed.
 - Attachments are stored as `bytea`. The maximum size is an operator limit
-  ([operations.md](operations.md)). An object store could later sit behind
+  ([operations.md](../operations.md)). An object store could later sit behind
   the same port.
 - Fitting a long history into a model's context is the framework's, with
   the framework's own means — summarising on one engine, dropping the
   oldest exchanges on the other — over the framework's own memory
-  ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md),
+  ([ADR 0005](../../adr/0005-the-framework-owns-the-loop-and-the-memory.md),
   [agents.md](agents.md)). Neither ever cuts the turn it is answering.
 
 ## Open

@@ -184,7 +184,7 @@ No package that starts a PostgreSQL is a dependency of this project;
 `backend/src/robinauts/datastore/schema.sql` is the whole schema, and until
 the first release it is **one definition edited in place**: there are no
 migrations, and a database made from an older definition is recreated rather
-than upgraded ([docs/specs/backend.md](docs/specs/backend.md)). So
+than upgraded ([docs/specs/legacy/backend.md](docs/specs/legacy/backend.md)). So
 `robinauts db init` applies the file to an **empty** database, does nothing
 to one already at this version, and refuses every other database there is.
 Every edit to that file updates the `SCHEMA_SHA256` pinned in

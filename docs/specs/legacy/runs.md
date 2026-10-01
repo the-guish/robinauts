@@ -146,7 +146,7 @@ them.
   each result as it lands, writes the tool message when the last one is in,
   and the answer after them under it — in one execution, as many rounds as
   the turn needs up to the adapter's own bound
-  ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
+  ([ADR 0005](../../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
   **The run stays `running` through the loop**; the `waiting` state below
   is a run that holds no process. Every call has its own timeout; the
   turn's timeout holds over the whole turn.
@@ -272,7 +272,7 @@ them.
   says so, if the run stores nothing at all for long enough (known limits). A
   signal that is lost is a stream that arrives a wait later; a store that is not read is a
   stream that is wrong. `api` only watches and maps events to the wire
-  ([wire.md](wire.md)).
+  ([wire.md](../wire.md)).
 - **Signals remember what they said, for a bounded while.** A watcher does not
   ask to be woken; it asks whether there is anything past the position it
   holds, and for everything already announced — the end included — that
@@ -398,7 +398,7 @@ them.
   write still going when the bound passes is **left to land** rather than
   killed, with a line in the log saying so. Letting runs finish what they were
   doing is the draining described above, and it is outside this version
-  ([poc-scope.md](../working-notes/poc-scope.md)).
+  ([poc-scope.md](../../working-notes/poc-scope.md)).
 - **A run's events are kept until its conversation is deleted.** They exist to
   be re-attached to, and removing them once a run has been over for a while is
   the housekeeping described above; until it exists, what a run published —
@@ -425,4 +425,4 @@ them.
   at the end of the turn, and nothing is stored for a turn that did not
   end. A state per step of the loop is the remedy if a cancelled turn's
   calls and results turning out to be forgotten by the model matters
-  ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
+  ([ADR 0005](../../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).

@@ -23,7 +23,7 @@
 - The engine is a property of the agent. Both engines run side by side in
   one deployment. **A conversation stays with its engine**: its memory is
   one framework's, in that framework's own format, and the other cannot
-  read it ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
+  read it ([ADR 0005](../../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
   Changing an agent's engine in the configuration therefore reaches its
   existing conversations as a **loss of memory**, once: the next turn finds
   a memory written by another engine, does not read it, and begins from
@@ -113,7 +113,7 @@ framework defines.
   - **Pydantic AI.**
 - Each is confined to its own adapter sub-package, and that is enforced:
   no other code imports the framework, and the two do not import each
-  other ([layout.md](../layout.md)). **The discard test:** three places name
+  other ([layout.md](../../layout.md)). **The discard test:** three places name
   an adapter, and deleting it and its dependencies breaks those and nothing
   else — the import in the composition root and its one entry in the table
   of engines, the import contracts' exceptions for the sub-package, and the
@@ -142,7 +142,7 @@ controller runs every turn the same way:
    ([conversations.md](conversations.md)).
 2. Call the agent port with the agent, the run's model, the question's text
    and that memory; publish the events, which the UI watches
-   ([wire.md](wire.md)).
+   ([wire.md](../wire.md)).
 3. Turn the events into the platform's messages as they complete — an
    answer with the calls it made, the one tool message of a batch once its
    last result is in, the answer after the results — and append each to
@@ -252,9 +252,9 @@ An agent can use tools served by **remote MCP servers** the operator
 configured. A model asks for a tool, the framework calls it, the result goes
 back to the model, and the model answers — as many times as the turn needs.
 The decisions behind this are in
-[working-notes/framework-loop-plan.md](../working-notes/framework-loop-plan.md);
+[working-notes/framework-loop-plan.md](../../working-notes/framework-loop-plan.md);
 the configuration's shape came with
-[working-notes/mcp-plan.md](../working-notes/mcp-plan.md).
+[working-notes/mcp-plan.md](../../working-notes/mcp-plan.md).
 
 - **Servers are remote, over Streamable HTTP, and nothing else.** No stdio,
   no sidecars, and the platform runs no MCP server of its own. A server is
@@ -309,14 +309,14 @@ the configuration's shape came with
   configuration means every user's turns act as that principal, and the
   server's audit log names the service account and not the person. Per-user
   credentials (OAuth) are a later iteration
-  ([operations.md](operations.md)).
+  ([operations.md](../operations.md)).
 - **Every tool the agent's servers offer runs without asking.** Approval
   before a tool runs is deferred: in this iteration the operator's control
   over what an agent may do is the credential's scopes and the server's own
   admin gates ([runs.md](runs.md)).
 - Tool arguments and results are attacker-influenced text going to a model
   and to a browser: bounded on the way in like every part, stored as data,
-  rendered as data ([wire.md](wire.md)).
+  rendered as data ([wire.md](../wire.md)).
 
 ## Details likely to change
 
@@ -332,11 +332,11 @@ the configuration's shape came with
     two spellings of one.
 - Every one of these packages passes the licence and vulnerability gates
   at its pinned version, with its transitive tree
-  ([open-source.md](open-source.md)) — or is adopted pending the decision
+  ([open-source.md](../open-source.md)) — or is adopted pending the decision
   the "Known findings" below record. A provider whose client fails is not
   offered by that engine until it passes.
 - A sketch of the configuration. It is written in the **same file** as
-  sign-in ([sign-in.md](sign-in.md)), which is why the model providers are
+  sign-in ([sign-in.md](../sign-in.md)), which is why the model providers are
   `[model_providers.*]` and not `[providers.*]`: that name is already the
   identity providers people sign in with, and one file cannot have a table
   that means one of them here and the other there. `timeout_seconds` (per
@@ -498,18 +498,18 @@ tools = ["github", "jira", "learn"]
   SDK, and its tree was known to fail the licence gate on two packages.
   `pyjwt[crypto]` brings `cryptography`, which brings `cffi`, whose
   metadata states `MIT-0`; the identifier joined the allowed list of
-  [DEPENDENCIES.md](../../DEPENDENCIES.md) by the owner's decision.
+  [DEPENDENCIES.md](../../../DEPENDENCIES.md) by the owner's decision.
   `pywin32`, which `mcp` needs on Windows alone, states a licence family
   and no licence, and the wheel read for an exception carries an LGPL-2.1
   package (`adodbapi`), which no exception may cover; the lock is resolved
   for Linux and macOS only since, and Windows is not a target. Both are
   recorded there ("Known exclusions"; checked at `mcp` 1.30.0). The client of our own that stood
   in for the SDK is gone with the loop it served
-  ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
+  ([ADR 0005](../../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
 - `langgraph-checkpoint-postgres` depends on `psycopg`, which is
   LGPL-3.0-only. It cannot be adopted as it is, and it is not needed: the
   memory is a column of the platform's own schema, not a checkpointer's
-  tables ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
+  tables ([ADR 0005](../../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
 - `langchain-openai` requires `tiktoken`, which states its licence as the
   licence *text* and no identifier, and which in turn requires `regex`,
   `Apache-2.0 AND CNRI-Python`. Neither resolved under the policy. Both are
@@ -562,7 +562,7 @@ tools = ["github", "jira", "learn"]
 - **The two engines do not send one request for one conversation**, and are
   not held to: each keeps a memory of its own, in its own format, and writes
   the request from it as its framework does
-  ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
+  ([ADR 0005](../../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
   What is held alike, by one test run under both engines over OpenAI's
   protocol, is where a request goes, what signs it, what of the
   configuration it carries — the model, the timeout, the ceiling in the
@@ -621,7 +621,7 @@ tools = ["github", "jira", "learn"]
 - `logfire-api` arrives with `pydantic-graph`, and `opentelemetry-api` with
   `pydantic-ai-slim`. Neither is imported anywhere in the platform, and both
   are named in the import rule all the same
-  ([layout.md](../layout.md)). Pydantic AI has **no environment switch** for
+  ([layout.md](../../layout.md)). Pydantic AI has **no environment switch** for
   tracing — it instruments a run only when an agent's `instrument` says so,
   which `logfire.instrument_pydantic_ai()` sets process-wide — so the adapter
   turns it off per agent, where the answer beats the process-wide one, and

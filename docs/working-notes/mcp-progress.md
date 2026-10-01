@@ -690,7 +690,7 @@ lists (`ListedTool`s under the server's own names) and what a tool answers
 credential the implementation's (built with `ToolServerSecrets`), a tool's
 error, a timeout and an unknown tool all results, and only a server that
 cannot be reached or will not list a `ToolServerError` naming it
-(`docs/specs/runs.md`, "Tools"). Naming lives in core, pure: the full name
+(`docs/specs/legacy/runs.md`, "Tools"). Naming lives in core, pure: the full name
 `<prefix>__<name>`; a tool left out, named with the reason, when its full
 name is not one the vendors take, when its schema is not a JSON Schema
 object at the top (the vendors' rule, and the top-level `anyOf` that

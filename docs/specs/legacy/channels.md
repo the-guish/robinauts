@@ -16,7 +16,7 @@ one.
   can be continued from a mobile application, and the reverse. The
   conversation records the channel each message came from.
 - Privacy, roles, limits and audit apply identically whatever the channel
-  ([privacy.md](privacy.md), [operations.md](operations.md)).
+  ([privacy.md](../privacy.md), [operations.md](../operations.md)).
 
 ## Channels
 
@@ -37,7 +37,7 @@ one.
 
 ## Clients that cannot stream
 
-- The web UI watches a run as a live stream ([wire.md](wire.md)). Some
+- The web UI watches a run as a live stream ([wire.md](../wire.md)). Some
   clients cannot hold a stream, or have no use for one — a Slack message
   is posted whole.
 - Because a run is persisted and independent of the request that started
@@ -53,7 +53,7 @@ one.
   a stream.
 - Channels other than the browser need a credential that is not a session
   cookie. That arrives with API tokens, which are planned
-  ([sign-in.md](sign-in.md)).
+  ([sign-in.md](../sign-in.md)).
 - Message content is the platform's own format
   ([conversations.md](conversations.md)), not markup for one renderer: each
   channel renders it its own way.

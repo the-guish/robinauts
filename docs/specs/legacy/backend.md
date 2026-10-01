@@ -1,7 +1,7 @@
 # Backend
 
 Python. The layers, what goes where, and the enforced dependency rules are
-in [layout.md](../layout.md). This document holds the component choices.
+in [layout.md](../../layout.md). This document holds the component choices.
 
 ## Web
 
@@ -11,13 +11,13 @@ in [layout.md](../layout.md). This document holds the component choices.
 - The OpenAPI document is committed as a snapshot, `backend/openapi.json`,
   rewritten by `scripts/update-openapi.sh`; a test keeps it in step with the
   code. The streaming endpoints are outside it — the two that start a turn and
-  the one that re-attaches to a run, listed in [wire.md](wire.md) — and so are
+  the one that re-attaches to a run, listed in [wire.md](../wire.md) — and so are
   the sign-in redirects, which are browser navigations rather than calls.
 - Swagger and ReDoc are not served: both load their JavaScript from a content
   delivery network, and nothing here is served from a third-party origin
-  ([frontend.md](frontend.md)). `/openapi.json` is.
+  ([frontend.md](../frontend.md)). `/openapi.json` is.
 - The backend also serves the built frontend
-  ([frontend.md](frontend.md)).
+  ([frontend.md](../frontend.md)).
 
 ## Background work
 
@@ -39,11 +39,11 @@ in [layout.md](../layout.md). This document holds the component choices.
   every deadline from the clock port and gives the stores absolute times,
   and tells them what "now" is. The stores keep no clock of their own.
 - The schema is entirely the platform's. No framework creates or migrates
-  tables in it ([ADR 0002](../adr/0002-conversation-persistence.md)). The
+  tables in it ([ADR 0002](../../adr/0002-conversation-persistence.md)). The
   model's memory of a conversation — the agent framework's own history, in
   its own format — is a column of the run that produced it, stored as bytes
   the platform never reads
-  ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)):
+  ([ADR 0005](../../adr/0005-the-framework-owns-the-loop-and-the-memory.md)):
   the frameworks keep no tables of their own.
 
 ## Schema
@@ -65,7 +65,7 @@ in [layout.md](../layout.md). This document holds the component choices.
 
 - The driver is `asyncpg` (Apache-2.0), imported only in `datastore`.
   `psycopg` is LGPL-3.0-only and is excluded
-  ([open-source.md](open-source.md)).
+  ([open-source.md](../open-source.md)).
 - The schema definition is a SQL file shipped in the package, applied by
   `robinauts db init`. It records a schema version, which is what the
   server checks at start-up.
