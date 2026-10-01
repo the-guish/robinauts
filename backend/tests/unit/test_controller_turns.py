@@ -8,15 +8,24 @@ from __future__ import annotations
 from aio import asyncio_test
 from robinauts.controller.contract.domain import (
     AgentConfig,
+    ArgumentsPiece,
+    CallCompleted,
+    CallStarted,
     Config,
     Identity,
+    MessageCompleted,
+    MessageStarted,
     ModelConfig,
     ProviderConfig,
     ProviderKind,
+    ResultLanded,
     Role,
     StorageConfig,
     StorageKind,
     TextPart,
+    TextPiece,
+    TurnEnded,
+    TurnState,
 )
 from robinauts.controller.controller import RobinautsController
 
@@ -51,4 +60,37 @@ async def test_start_conversation_stores_the_conversation_and_the_question() -> 
     assert conversation.owner_id == user.id
     assert await controller._store.messages_of(started.conversation_id) == [question]
     await controller._turns[started.conversation_id]
+    await controller.close()
+
+
+@asyncio_test
+async def test_the_turn_stores_its_events_and_the_answer() -> None:
+    controller = await opened()
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_conversation(user, agent="echo", model="echo", text="hello")
+    cid = started.conversation_id
+    await controller._turns[cid]
+    numbered = await controller._store.events_after(cid, 0)
+    assert [n.position for n in numbered] == list(range(1, 10))
+    events = [n.event for n in numbered]
+    assert [type(e) for e in events] == [
+        MessageStarted,
+        CallStarted,
+        ArgumentsPiece,
+        CallCompleted,
+        ResultLanded,
+        TextPiece,
+        TextPiece,
+        MessageCompleted,
+        TurnEnded,
+    ]
+    assert events[-1] == TurnEnded(TurnState.FINISHED)
+    completed = events[-2]
+    assert isinstance(completed, MessageCompleted)
+    answer = completed.message
+    assert answer.parts[-1] == TextPart("The tool said: hello")
+    assert answer.parent_id == started.question.id
+    assert answer.checkpoint_id is not None
+    assert await controller._store.messages_of(cid) == [started.question, answer]
+    assert await controller._store.active_turn(cid) is None
     await controller.close()

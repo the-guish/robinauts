@@ -222,6 +222,7 @@ class Message:
     created_at: datetime
     agent: str | None = None
     model: str | None = None
+    checkpoint_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

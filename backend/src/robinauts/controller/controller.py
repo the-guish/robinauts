@@ -37,6 +37,7 @@ from robinauts.controller.engines import (
 )
 from robinauts.controller.memory import MemoryStore
 from robinauts.controller.store import Store
+from robinauts.controller.turns import run_turn
 
 
 class RobinautsController(Controller):
@@ -123,13 +124,13 @@ class RobinautsController(Controller):
         )
         await self._store.add_conversation(conversation)
         await self._store.add_message(question)
-        await self._engines[agent_config.engine].create(conversation.id)
+        engine = self._engines[agent_config.engine]
+        await engine.create(conversation.id)
         await self._store.start_turn(conversation.id, follows=question.id)
-        self._turns[conversation.id] = asyncio.create_task(self._run_turn(conversation.id))
+        self._turns[conversation.id] = asyncio.create_task(
+            run_turn(self._store, engine, conversation, question, agent_config, model, None)
+        )
         return TurnStarted(conversation.id, question)
-
-    async def _run_turn(self, conversation_id: uuid.UUID) -> None:
-        await self._store.end_turn(conversation_id)
 
     async def send_message(
         self,
