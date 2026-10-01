@@ -19,8 +19,9 @@ conversation id -- and nothing of the state.
 **An engine is more than an agent.** It runs the operator's agents, one turn
 at a time; it keeps every conversation those turns build, in its framework's
 own format, in tables of its own in the deployment's one database, from the
-moment the platform creates one until the platform deletes it; it reaches the
-model providers its framework has a client for; and it releases what a turn
+moment the platform creates one until the platform deletes it; it copies one
+into another at the end of a turn, which is a fork; it reaches the model
+providers its framework has a client for; and it releases what a turn
 opened. An ``AgentDefinition`` -- the system prompt and the tool servers --
 is what it is handed to run a turn *with*; the engine is what runs it.
 
@@ -46,10 +47,13 @@ as the old port's was.
 **What crosses.** In: the **conversation** by its id; the **agent** as the
 operator has it now, read afresh every turn; the **prompt**, the text of the
 question being answered; the **model**, by the platform's id for it, which is
-the run's and not the agent's. Out: ``domain.events`` -- more text, more
-thinking, a tool call, its result, and ``Done`` with the final answer -- which
-carry no ids of the platform's, no times and no provenance. **No memory
-crosses**, in either direction.
+the run's and not the agent's; and the **run** by its id, which the engine
+writes on what the turn leaves so that a fork can name the turn. Out:
+``domain.events`` -- more text, more thinking, a tool call, its result, and
+``Done`` with the final answer -- which carry no ids of the platform's, no
+times and no provenance. **No memory crosses**, in either direction. Ids
+cross one way, in, as keys: the engine keeps things under them and hands
+nothing back by them.
 
 **The framework owns the loop, the context and the memory** (ADR 0005). The
 model asks for a tool, the framework calls it, the result goes back and the
@@ -66,6 +70,16 @@ step, or the history after the run. Deleted with the conversation
 transcript is the durable record, the memory is the framework's cache of it,
 and an engine that cannot read what it once wrote reports a failed turn rather
 than reading it as nothing.
+
+**Forking is copying the memory as it was at the end of a turn** (``fork``;
+``docs/specs/conversations.md``, "Forking"). The platform names the turn by
+its run, which every answer of the transcript records, and the engine makes
+the new conversation exist with that memory and nothing after it. So an
+engine keeps, for every turn it finished, enough to give that memory back
+-- the checkpoint the turn ended on, a snapshot of the history -- and for
+how long is the engine's, until a retention rule is written. A turn that did
+not end is not a turn a fork can name: the platform knows no finished run
+for it, and the engine kept nothing a fork could use.
 
 **How a turn ends.**
 
@@ -92,15 +106,19 @@ for the same mistakes (``robinauts.ports.conversations``):
   stored is -- a bug in the caller, not something to overwrite;
 - a turn of a conversation that was not created, or was forgotten:
   ``ConversationNotFoundError``, raised where the stream is iterated;
+- a fork from a conversation that was not created, or forgotten:
+  ``ConversationNotFoundError``; onto one already created:
+  ``InvalidValueError``; after a run this engine finished no turn for:
+  ``RunNotFoundError``;
 - forgetting what is not there: nothing. Deleting is idempotent.
 
 **What is not here.** How an engine is built (the composition root's
 business: the pool, the models, the keys, the servers and their secrets, and a
-storage kind for the tests); cutting a conversation back to an earlier message
-(rewind) and copying one to a new id (fork), which come with the features that
-need them; and a turn that suspends on a tool call and resumes, which stands
-on the per-step memory this port allows and changes the promise above for one
-run state when it comes.
+storage kind for the tests); cutting a conversation back to an earlier turn in
+place (rewind), which is a fork onto the same id and comes with the feature
+that needs it; and a turn that suspends on a tool call and resumes, which
+stands on the per-step memory this port allows and changes the promise above
+for one run state when it comes.
 
 The contract suite every engine is held to is to be
 ``backend/tests/contracts/agent_engines.py``, and the order it holds them to
@@ -204,6 +222,7 @@ class AgentEngine(ABC):
         prompt: str,
         *,
         model: str,
+        run_id: uuid.UUID,
     ) -> AsyncGenerator[Event, None]:
         """Send ``prompt`` as the next turn of that conversation and yield the turn's events.
 
@@ -224,6 +243,14 @@ class AgentEngine(ABC):
         configuration does not have is a failure of the turn
         (``domain.UnknownModelError``), raised where the stream is iterated,
         like any other.
+
+        ``run_id`` is the platform's id for this turn (``domain.Run.id``).
+        The engine writes it on whatever the turn leaves in the memory --
+        the checkpoints it wrote, the snapshot it took at the end -- and
+        that is all it does with it: it is the name ``fork`` will know the
+        turn by, and the one id of the platform's an engine ever keeps. Two
+        turns of one conversation never share a run id; the platform makes
+        sure of it.
 
         Not a coroutine: it hands back the stream, which is then iterated.
         Nothing is done here -- building the model, listing the tools,
@@ -269,5 +296,39 @@ class AgentEngine(ABC):
         Must not be called while a turn of the conversation is running; the
         application ends the run first, as it does before deleting the
         record.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def fork(
+        self, source_id: uuid.UUID, target_id: uuid.UUID, *, after_run_id: uuid.UUID
+    ) -> None:
+        """Make ``target_id`` exist here with ``source_id``'s memory as it was after that run.
+
+        ``create`` and a copy in one: afterwards ``exists(target_id)`` is
+        true, its memory is what the source's was when the turn of
+        ``after_run_id`` finished -- that turn's answer included, nothing of
+        any later turn -- and the two are independent: a turn of either
+        writes nothing the other reads, and forgetting either leaves the
+        other whole. The source is not changed.
+
+        ``after_run_id`` is the run of the turn to copy up to, as the
+        platform recorded it on the answer the person forked from
+        (``domain.Provenance.run_id``); the engine knows it from the
+        ``run_id`` that turn's ``stream`` was given. Only a finished turn can
+        be named: a run this engine finished no turn for -- it never ran
+        here, it raised, it was cancelled -- is ``RunNotFoundError``, and
+        nothing is made. Forking at the latest turn is this with the latest
+        finished run; there is no "as of now", because what the engine holds
+        past the last run the platform recorded is nothing the platform can
+        name.
+
+        Called after the platform's record of the target is stored, as
+        ``create`` is, and with the source's turn over: a fork taken while
+        the source has a turn running copies a memory that is still being
+        written, so the application refuses the request until the run has
+        ended. ``source_id`` not created here, or forgotten:
+        ``ConversationNotFoundError``. ``target_id`` already created here:
+        ``InvalidValueError``, and its memory stays as it was.
         """
         raise NotImplementedError
