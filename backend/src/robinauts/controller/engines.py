@@ -3,7 +3,7 @@
 
 """How the controller builds the engines its agents name, from the ones this build has.
 
-The controller names no engine: ``robinauts.agent_engines.installed`` says which there
+The controller names no engine: ``installed`` in the engines' contract says which there
 are, and the configuration says which to build.
 """
 
@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 
-from robinauts.agent_engines import installed
 from robinauts.agent_engines.contract import domain as engine_domain
 from robinauts.agent_engines.contract.ports import (
     AgentEngine,
@@ -21,6 +20,7 @@ from robinauts.agent_engines.contract.ports import (
     StorageConfig,
     StorageKind,
     ToolSecretLookup,
+    installed,
 )
 from robinauts.controller.contract import domain
 
