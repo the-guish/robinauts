@@ -9,9 +9,11 @@ Named apart from ``test_pydantic_ai_engine.py``, which tests legacy's engine.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import re
 from collections.abc import AsyncIterator
+from datetime import timedelta
 from typing import Any
 
 import pydantic_ai
@@ -19,6 +21,7 @@ import pytest
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 from pydantic_ai import Agent
+from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
@@ -26,6 +29,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.toolsets import FunctionToolset
 
+from aio import asyncio_test
 from contracts.engine import (
     ANSWER,
     ARGUMENTS,
@@ -37,10 +41,13 @@ from contracts.engine import (
     add,
 )
 from robinauts.agent_engines.contract.domain import (
+    AgentDefinition,
     ModelConfig,
     ModelProviderConfig,
     ModelsConfig,
     ProviderKind,
+    ToolServerAuth,
+    ToolServerConfig,
     UnknownModelError,
 )
 from robinauts.agent_engines.contract.ports import (
@@ -54,6 +61,7 @@ from robinauts.agent_engines.contract.ports import (
 from robinauts.agent_engines.pydantic_ai_engine import engine as engine_module
 from robinauts.agent_engines.pydantic_ai_engine.clients import chat_model
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
+from robinauts.agent_engines.pydantic_ai_engine.tools import toolset_for, toolsets_for
 
 
 class Keys(ProviderKeyLookup):
@@ -123,6 +131,66 @@ def test_an_openai_model_is_built_from_the_settings(
 def test_a_model_not_in_the_settings_is_refused() -> None:
     with pytest.raises(UnknownModelError):
         chat_model("other", settings_for(ProviderKind.ANTHROPIC))
+
+
+class FixedSecret(ToolSecretLookup):
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    def secret_for(self, server_id: str) -> str:
+        self.asked.append(server_id)
+        return "s3cret"
+
+
+def tool_settings(secrets: ToolSecretLookup, *servers: ToolServerConfig) -> EngineSettings:
+    return EngineSettings(
+        models=ModelsConfig(tool_servers={server.id: server for server in servers}),
+        keys=Keys(),
+        tool_secrets=secrets,
+    )
+
+
+# The toolsets are never entered: these read what the client would send, and nothing connects.
+def test_a_bearer_server_is_reached_with_its_secret_as_a_bearer_token() -> None:
+    secrets = FixedSecret()
+    server = ToolServerConfig(id="gh", url="https://mcp.example/gh", timeout_seconds=9.0)
+    client = toolset_for(server, tool_settings(secrets)).client
+    assert client.transport.url == "https://mcp.example/gh"
+    assert client.transport.headers == {"Authorization": "Bearer s3cret"}
+    assert client._init_timeout == 9.0
+    assert client._session_kwargs["read_timeout_seconds"] == timedelta(seconds=9)
+    assert secrets.asked == ["gh"]
+
+
+def test_a_basic_server_is_reached_with_its_user_and_secret() -> None:
+    secrets = FixedSecret()
+    server = ToolServerConfig(
+        id="wiki", url="https://mcp.example/wiki", auth=ToolServerAuth.BASIC, user="ana"
+    )
+    transport = toolset_for(server, tool_settings(secrets)).client.transport
+    pair = base64.b64encode(b"ana:s3cret").decode("ascii")
+    assert transport.headers == {"Authorization": f"Basic {pair}"}
+    assert secrets.asked == ["wiki"]
+
+
+def test_a_public_server_carries_no_credential_and_asks_for_none() -> None:
+    server = ToolServerConfig(id="docs", url="https://mcp.example/docs", auth=ToolServerAuth.NONE)
+    assert toolset_for(server, tool_settings(NoSecrets())).client.transport.headers == {}
+
+
+@asyncio_test
+async def test_an_agent_without_tools_has_none() -> None:
+    assert await toolsets_for(AgentDefinition("be brief"), tool_settings(NoSecrets())) == []
+
+
+@asyncio_test
+async def test_an_agent_has_a_toolset_per_server_it_names() -> None:
+    server = ToolServerConfig(id="docs", url="https://mcp.example/docs", auth=ToolServerAuth.NONE)
+    other = ToolServerConfig(id="gh", url="https://mcp.example/gh")
+    settings = tool_settings(NoSecrets(), server, other)
+    [toolset] = await toolsets_for(AgentDefinition("be brief", tools=("docs",)), settings)
+    assert isinstance(toolset, MCPToolset)
+    assert toolset.client.transport.url == "https://mcp.example/docs"
 
 
 def test_the_engine_answers_the_four_kinds_and_turns_tracing_off(
