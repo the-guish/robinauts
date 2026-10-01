@@ -23,7 +23,7 @@ import { ApiError, onUnauthorized, request } from "../api/client";
 import type { components } from "../api/schema";
 
 /** What `GET /auth/session` answers. */
-export type Session = components["schemas"]["SessionResponse"];
+export type Session = components["schemas"]["UserSessionResponse"];
 /** One provider to offer a button for. */
 export type Provider = components["schemas"]["ProviderSummary"];
 /** Who is signed in, as the profile block shows them. */

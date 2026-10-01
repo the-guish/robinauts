@@ -416,53 +416,6 @@
         "title": "ResumeView",
         "type": "object"
       },
-      "SessionResponse": {
-        "properties": {
-          "local_development": {
-            "default": false,
-            "title": "Local Development",
-            "type": "boolean"
-          },
-          "providers": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/ProviderSummary"
-            },
-            "title": "Providers",
-            "type": "array"
-          },
-          "public_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Public Url"
-          },
-          "sign_in": {
-            "title": "Sign In",
-            "type": "boolean"
-          },
-          "user": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/UserSummary"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "sign_in"
-        ],
-        "title": "SessionResponse",
-        "type": "object"
-      },
       "SetModelRequest": {
         "properties": {
           "model_id": {
@@ -554,6 +507,53 @@
         "title": "ToolResultContent",
         "type": "object"
       },
+      "UserSessionResponse": {
+        "properties": {
+          "local_development": {
+            "default": false,
+            "title": "Local Development",
+            "type": "boolean"
+          },
+          "providers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ProviderSummary"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "public_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Url"
+          },
+          "sign_in": {
+            "title": "Sign In",
+            "type": "boolean"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "sign_in"
+        ],
+        "title": "UserSessionResponse",
+        "type": "object"
+      },
       "UserSummary": {
         "properties": {
           "email": {
@@ -633,7 +633,7 @@
     },
     "/api/conversations": {
       "get": {
-        "operationId": "list_conversations_api_conversations_get",
+        "operationId": "list_sessions_api_conversations_get",
         "parameters": [
           {
             "in": "query",
@@ -684,12 +684,12 @@
             "description": "A refusal"
           }
         },
-        "summary": "List Conversations"
+        "summary": "List Sessions"
       }
     },
     "/api/conversations/{conversation_id}": {
       "delete": {
-        "operationId": "delete_conversation_api_conversations__conversation_id__delete",
+        "operationId": "delete_session_api_conversations__conversation_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -717,10 +717,10 @@
             "description": "A refusal"
           }
         },
-        "summary": "Delete Conversation"
+        "summary": "Delete Session"
       },
       "get": {
-        "operationId": "open_conversation_api_conversations__conversation_id__get",
+        "operationId": "open_session_api_conversations__conversation_id__get",
         "parameters": [
           {
             "in": "path",
@@ -755,10 +755,10 @@
             "description": "A refusal"
           }
         },
-        "summary": "Open Conversation"
+        "summary": "Open Session"
       },
       "patch": {
-        "operationId": "rename_conversation_api_conversations__conversation_id__patch",
+        "operationId": "rename_session_api_conversations__conversation_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -803,12 +803,12 @@
             "description": "A refusal"
           }
         },
-        "summary": "Rename Conversation"
+        "summary": "Rename Session"
       }
     },
     "/api/conversations/{conversation_id}/fork": {
       "post": {
-        "operationId": "fork_conversation_api_conversations__conversation_id__fork_post",
+        "operationId": "fork_session_api_conversations__conversation_id__fork_post",
         "parameters": [
           {
             "in": "path",
@@ -853,7 +853,7 @@
             "description": "A refusal"
           }
         },
-        "summary": "Fork Conversation"
+        "summary": "Fork Session"
       }
     },
     "/api/conversations/{conversation_id}/model": {
@@ -1000,13 +1000,13 @@
     },
     "/auth/session": {
       "get": {
-        "operationId": "current_session_auth_session_get",
+        "operationId": "current_user_session_auth_session_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionResponse"
+                  "$ref": "#/components/schemas/UserSessionResponse"
                 }
               }
             },
@@ -1023,7 +1023,7 @@
             "description": "A refusal"
           }
         },
-        "summary": "Current Session"
+        "summary": "Current User Session"
       }
     }
   }
