@@ -25,6 +25,7 @@ from robinauts.controller.contract.domain import (
     StorageConfig,
     StorageKind,
     TextPart,
+    TurnEnded,
     TurnStarted,
     User,
 )
@@ -154,8 +155,18 @@ class RobinautsController(Controller):
     async def watch_turn(
         self, user: User, conversation_id: uuid.UUID, *, after: int = 0
     ) -> AsyncGenerator[NumberedEvent, None]:
-        raise NotImplementedError("watch_turn")
-        yield  # makes this the generator the port declares
+        while True:
+            for numbered in await self._store.events_after(conversation_id, after):
+                yield numbered
+                after = numbered.position
+                if isinstance(numbered.event, TurnEnded):
+                    return
+            await self._store.wait_for_events(conversation_id, after)
+            if (
+                not await self._store.events_after(conversation_id, after)
+                and await self._store.active_turn(conversation_id) is None
+            ):
+                return
 
     async def sweep(self) -> None:
         raise NotImplementedError("sweep")

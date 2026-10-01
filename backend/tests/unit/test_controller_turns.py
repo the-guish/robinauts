@@ -94,3 +94,17 @@ async def test_the_turn_stores_its_events_and_the_answer() -> None:
     assert await controller._store.messages_of(cid) == [started.question, answer]
     assert await controller._store.active_turn(cid) is None
     await controller.close()
+
+
+@asyncio_test
+async def test_watch_turn_follows_the_turn_to_its_end() -> None:
+    controller = await opened()
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_conversation(user, agent="echo", model="echo", text="hello")
+    cid = started.conversation_id
+    watched = [e async for e in controller.watch_turn(user, cid)]
+    assert [n.position for n in watched] == list(range(1, len(watched) + 1))
+    assert watched[-1].event == TurnEnded(TurnState.FINISHED)
+    again = [e async for e in controller.watch_turn(user, cid, after=len(watched) - 1)]
+    assert again == [watched[-1]]
+    await controller.close()
