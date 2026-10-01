@@ -90,7 +90,14 @@ class RobinautsController(Controller):
         raise NotImplementedError("list_conversations")
 
     async def open_conversation(self, user: User, conversation_id: uuid.UUID) -> OpenedConversation:
-        raise NotImplementedError("open_conversation")
+        conversation = await self._store.conversation(conversation_id)
+        messages = await self._store.messages_of(conversation_id)
+        by_id = {m.id: m for m in messages}
+        thread = [messages[-1]]
+        while thread[-1].parent_id is not None:
+            thread.append(by_id[thread[-1].parent_id])
+        active = await self._store.active_turn(conversation_id)
+        return OpenedConversation(conversation, tuple(reversed(thread)), active)
 
     async def rename_conversation(
         self, user: User, conversation_id: uuid.UUID, title: str
