@@ -53,6 +53,18 @@ given, and whatever it holds past it is partial progress the platform never
 had, which the engine may discard. The transcript is the authority on where
 a conversation stands; the engine never assumes "the latest".
 
+**Unless the platform asks to resume.** A turn that was interrupted -- the
+process died, the task was cancelled, the engine raised -- may have left
+partial work past the checkpoint: a loop half way through its tool calls, as
+the framework's own per-step state holds it. For a chat that work is not
+worth keeping, and the next turn starts from the checkpoint. For a task that
+had run for two hours unattended it is, so a caller re-running the same turn
+may ask for it with ``resume``, and the engine takes the turn up from where
+its own state left it rather than from the checkpoint. What is resumed is
+the engine's to keep: a framework with a checkpoint per step resumes from
+the last one; one that keeps nothing of a turn before its end starts the
+turn again, which is still correct, only longer.
+
 **A conversation is created on purpose, and never by a turn.** ``create``
 is the one call that makes a conversation exist in the engine; ``stream``
 refuses one that was not created, as the examples' runner refuses to resume
@@ -121,7 +133,7 @@ exactly as the source could. The two are independent from then on.
   was in flight uncompleted. An engine yields nothing after an error, and
   **what the turn said is not in the memory the next turn runs with**: the
   next turn continues from the checkpoint it is given, which is the one the
-  platform had.
+  platform had -- unless it asks to ``resume`` this very turn.
 - by **cancellation**: the application cancels the task the iteration runs in,
   and closes the stream. An engine must not swallow ``CancelledError``; it
   lets it through, and what it holds -- the framework's run, the HTTP
@@ -142,6 +154,9 @@ for the same mistakes (``robinauts.ports.conversations``):
   conversation's, a turn that did not finish, another engine's, since
   forgotten: ``CheckpointNotFoundError``, raised where the stream is iterated
   for a turn, and nothing is done with it;
+- a ``resume`` whose prompt is not the one the partial work was answering:
+  ``InvalidValueError``, raised where the stream is iterated, and nothing is
+  run -- resuming is for the turn that was interrupted, never for the next;
 - forgetting what is not there: nothing. Deleting is idempotent.
 
 **What is not here.** How an engine is built (the composition root's
@@ -255,6 +270,7 @@ class AgentEngine(ABC):
         *,
         model: str,
         checkpoint_id: str | None,
+        resume: bool = False,
     ) -> AsyncGenerator[Event, None]:
         """Send ``prompt`` as the next turn of that conversation and yield the turn's events.
 
@@ -269,13 +285,44 @@ class AgentEngine(ABC):
         with no answer yet -- its first turn, or one moved to this engine
         from another. The turn runs on the memory as it was at that
         checkpoint and on nothing the engine may hold past it: a turn the
-        engine finished and the platform never recorded is partial progress
-        the platform never had, and the engine may discard it on this call
-        or later, as it likes. An id this engine does not hold for the
+        engine finished and the platform never recorded, or one that was
+        interrupted, is partial progress the platform never had, and a turn
+        that does not ``resume`` lets the engine discard it, on this call or
+        later, as it likes. An id this engine does not hold for the
         conversation is ``CheckpointNotFoundError``, raised where the stream
         is iterated, and nothing is written. The engine is not asked to
         remember what the last checkpoint was: the platform tells it, every
         turn.
+
+        ``resume`` asks for the opposite: **take up the turn that was
+        interrupted after that checkpoint**, from where the engine's own
+        state left it, instead of starting it again. For the caller it is
+        the same call as the one that was interrupted -- the same
+        conversation, the same prompt, the same checkpoint -- made again;
+        the engine does the rest. What it yields is what happens from the
+        point resumed, not what was streamed before the interruption, which
+        the caller already had; ``Done`` ends it as any turn, with a new
+        checkpoint. Three cases, all of them a turn that runs to its end:
+
+        - partial work of that turn is there: it is continued. A framework
+          with a checkpoint per step goes on from the last one, its calls
+          already answered not made again;
+        - none is there -- the turn never began, or the engine keeps nothing
+          of a turn before its end, or it was discarded by a turn that did
+          not resume: the turn starts from the checkpoint, as without
+          ``resume``. A caller may therefore always ask to resume when
+          re-running an interrupted turn, and never has to know whether
+          anything was kept;
+        - the partial work there was answering another prompt:
+          ``InvalidValueError``, and nothing is run. Resuming is for the
+          turn that was interrupted; the next question of a conversation
+          starts from the checkpoint, and a caller that passed ``resume``
+          with it has a bug the engine refuses to run.
+
+        Partial work is kept until a turn from the same checkpoint runs
+        without ``resume``, or until ``forget``; how an engine keeps it is
+        its own. ``False`` by default: a caller that gives it no thought gets
+        the chat's behaviour, which discards.
 
         ``agent`` is the definition as the operator has it now: its system
         prompt is sent with every request and never enters the memory, so
@@ -328,9 +375,7 @@ class AgentEngine(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def fork(
-        self, source_id: uuid.UUID, target_id: uuid.UUID, *, checkpoint_id: str
-    ) -> None:
+    async def fork(self, source_id: uuid.UUID, target_id: uuid.UUID, *, checkpoint_id: str) -> None:
         """Make ``target_id`` exist here with ``source_id``'s memory as it was at that checkpoint.
 
         ``create`` and a copy in one: afterwards ``exists(target_id)`` is
