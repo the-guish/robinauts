@@ -45,7 +45,7 @@ async def test_conversations_and_messages_read_back() -> None:
     await store.add_conversation(newer)
     question = Message(uuid.uuid4(), older.id, None, Role.USER, (TextPart("hi"),), NOW)
     await store.add_message(question)
-    assert await store.conversation(older.id) == older
+    assert await store.get_conversation(older.id) == older
     assert await store.conversations_of(owner) == [newer, older]
     assert await store.messages_of(older.id) == [question]
 

@@ -39,7 +39,7 @@ class MemoryStore(Store):
         self._messages[conversation.id] = []
         self._events[conversation.id] = []
 
-    async def conversation(self, conversation_id: uuid.UUID) -> Conversation | None:
+    async def get_conversation(self, conversation_id: uuid.UUID) -> Conversation | None:
         return self._conversations.get(conversation_id)
 
     async def update_conversation(self, conversation: Conversation) -> None:

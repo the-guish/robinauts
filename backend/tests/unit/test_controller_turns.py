@@ -55,7 +55,7 @@ async def test_start_conversation_stores_the_conversation_and_the_question() -> 
     assert question.parts == (TextPart("hello"),)
     assert question.role is Role.USER
     assert question.parent_id is None
-    conversation = await controller._store.conversation(started.conversation_id)
+    conversation = await controller._store.get_conversation(started.conversation_id)
     assert conversation is not None
     assert conversation.owner_id == user.id
     assert await controller._store.messages_of(started.conversation_id) == [question]

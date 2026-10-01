@@ -92,7 +92,7 @@ class RobinautsController(Controller):
         return ConversationPage(tuple(conversations[:limit]), cursor=None)
 
     async def open_conversation(self, user: User, conversation_id: uuid.UUID) -> OpenedConversation:
-        conversation = await self._store.conversation(conversation_id)
+        conversation = await self._store.get_conversation(conversation_id)
         messages = await self._store.messages_of(conversation_id)
         by_id = {m.id: m for m in messages}
         thread = [messages[-1]]
@@ -104,13 +104,13 @@ class RobinautsController(Controller):
     async def rename_conversation(
         self, user: User, conversation_id: uuid.UUID, title: str
     ) -> Conversation:
-        conversation = await self._store.conversation(conversation_id)
+        conversation = await self._store.get_conversation(conversation_id)
         renamed = dataclasses.replace(conversation, title=title, updated_at=datetime.now(UTC))
         await self._store.update_conversation(renamed)
         return renamed
 
     async def delete_conversation(self, user: User, conversation_id: uuid.UUID) -> None:
-        conversation = await self._store.conversation(conversation_id)
+        conversation = await self._store.get_conversation(conversation_id)
         engine = self._engines[self._config.agents[conversation.agent].engine]
         await engine.forget(conversation_id)
         await self._store.delete_conversation(conversation_id)
@@ -153,7 +153,7 @@ class RobinautsController(Controller):
         model: str,
         text: str,
     ) -> TurnStarted:
-        conversation = await self._store.conversation(conversation_id)
+        conversation = await self._store.get_conversation(conversation_id)
         messages = await self._store.messages_of(conversation_id)
         parent = next(m for m in messages if m.id == parent_id)
         question = Message(
@@ -173,7 +173,7 @@ class RobinautsController(Controller):
     async def regenerate_answer(
         self, user: User, conversation_id: uuid.UUID, *, question_id: uuid.UUID, model: str
     ) -> TurnStarted:
-        conversation = await self._store.conversation(conversation_id)
+        conversation = await self._store.get_conversation(conversation_id)
         by_id = {m.id: m for m in await self._store.messages_of(conversation_id)}
         question = by_id[question_id]
         checkpoint_id = None

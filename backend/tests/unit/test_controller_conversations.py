@@ -19,7 +19,7 @@ async def test_open_conversation_shows_the_thread_after_the_turn() -> None:
     cid = started.conversation_id
     await controller._turns[cid]
     opened_conversation = await controller.open_conversation(user, cid)
-    assert opened_conversation.conversation == await controller._store.conversation(cid)
+    assert opened_conversation.conversation == await controller._store.get_conversation(cid)
     question, answer = opened_conversation.messages
     assert question == started.question
     assert answer.role is Role.ASSISTANT
