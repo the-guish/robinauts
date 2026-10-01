@@ -39,12 +39,102 @@ class UnknownModelError(ControllerError):
     pass
 
 
+class UnknownEngineError(ControllerError):
+    """An agent configured on an engine this build does not have."""
+
+
+class UnreachableProviderError(ControllerError):
+    """A model on a provider kind its agent's engine cannot reach."""
+
+
+class MissingSecretError(ControllerError):
+    """A key or a secret the environment does not hold."""
+
+
 class TurnActiveError(ControllerError):
     """A turn asked for while the conversation already has one running."""
 
 
 class NoActiveTurnError(ControllerError):
     pass
+
+
+# --- configuration ------------------------------------------------------------
+
+
+class ProviderKind(StrEnum):
+    ANTHROPIC = "anthropic"
+    ANTHROPIC_COMPATIBLE = "anthropic-compatible"
+    OPENAI = "openai"
+    OPENAI_COMPATIBLE = "openai-compatible"
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderConfig:
+    id: str
+    kind: ProviderKind
+    api_key_env: str
+    base_url: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ModelConfig:
+    id: str
+    provider: str
+    name: str
+    timeout_seconds: float = 120.0
+    max_output_tokens: int | None = None
+    context_window: int | None = None
+    title: str = ""
+
+
+class ToolServerAuth(StrEnum):
+    BEARER = "bearer"
+    BASIC = "basic"
+    NONE = "none"
+
+
+@dataclass(frozen=True, slots=True)
+class ToolServerConfig:
+    id: str
+    url: str
+    secret_env: str = ""
+    auth: ToolServerAuth = ToolServerAuth.BEARER
+    user: str = ""
+    timeout_seconds: float = 60.0
+
+
+@dataclass(frozen=True, slots=True)
+class AgentConfig:
+    id: str
+    title: str
+    system_prompt: str
+    model: str
+    engine: str
+    tools: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class Config:
+    providers: Mapping[str, ProviderConfig] = field(default_factory=dict)
+    models: Mapping[str, ModelConfig] = field(default_factory=dict)
+    tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
+    agents: Mapping[str, AgentConfig] = field(default_factory=dict)
+
+
+class StorageKind(StrEnum):
+    POSTGRES = "postgres"
+    LOCAL = "local"
+    IN_MEMORY = "in-memory"
+
+
+@dataclass(frozen=True, slots=True)
+class StorageConfig:
+    """A database URL, a folder, or nothing, for a test or a local start."""
+
+    kind: StorageKind
+    url: str | None = None
+    path: str | None = None
 
 
 # --- users --------------------------------------------------------------------

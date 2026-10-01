@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
+from importlib import import_module
 from typing import Any
 
 from robinauts.agent_engines.contract.domain import (
@@ -107,3 +108,24 @@ class AgentEngine(ABC):
 
 
 EngineFactory = Callable[[EngineSettings, StorageConfig], Awaitable[AgentEngine]]
+
+
+_SHIPPED: Mapping[str, tuple[str, str]] = {
+    "langchain": ("robinauts.agent_engines.langchain_engine", "init_langchain"),
+    "pydantic-ai": ("robinauts.agent_engines.pydantic_ai_engine", "init_pydantic_ai"),
+}
+"""Every engine the package ships: its name, and where its init function is."""
+
+
+def installed() -> Mapping[str, EngineFactory]:
+    """The engines this build can run, by the name a configuration uses.
+
+    An engine whose package cannot be imported, because its extra is not installed, is left out.
+    """
+    found: dict[str, EngineFactory] = {}
+    for name, (module, function) in _SHIPPED.items():
+        try:
+            found[name] = getattr(import_module(module), function)
+        except ImportError:
+            continue
+    return found
