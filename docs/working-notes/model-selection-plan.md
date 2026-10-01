@@ -11,7 +11,7 @@ in. The spec sentences to change are listed at the end.
 
 - An agent stays what it is: a name, a system prompt, an engine and a
   **default** model, pinned to a conversation when it starts
-  ([specs/legacy/agents.md](../specs/legacy/agents.md)).
+  ([specs/legacy/agents-engines-models.md](../specs/legacy/agents-engines-models.md)).
 - The user can pick the **model** from the ones the operator configured
   (`[models.*]`), at the start of a conversation and again at any point
   during it. The choice sits next to the agent picker on the empty chat and
@@ -35,7 +35,7 @@ in. The spec sentences to change are listed at the end.
    reader never has to know what the agent's default was at some earlier
    time. The cost is a guarantee: changing an agent's model in the
    configuration no longer reaches its existing conversations, only new
-   ones. [specs/legacy/agents.md](../specs/legacy/agents.md) says it does and changes
+   ones. [specs/legacy/agents-engines-models.md](../specs/legacy/agents-engines-models.md) says it does and changes
    (listed at the end). The picker has no "Default" option: it is the list
    of models, with the agent's default selected on a new chat.
 
@@ -60,7 +60,7 @@ in. The spec sentences to change are listed at the end.
 5. **GPT and Gemini reach the platform through OpenRouter**, as the demo
    already does for Claude: the `openai` and `openai-compatible` kinds are
    still excluded by the dependency policy
-   ([specs/legacy/agents.md](../specs/legacy/agents.md), "Known findings"). Model
+   ([specs/legacy/agents-engines-models.md](../specs/legacy/agents-engines-models.md), "Known findings"). Model
    selection needs no new provider client. The demo configuration should
    declare two or three models so the picker has something to switch to.
 
@@ -191,7 +191,7 @@ every check green.
 
 ## Spec sentences to change
 
-- [specs/legacy/agents.md](../specs/legacy/agents.md), "Agents": the agent's model is its
+- [specs/legacy/agents-engines-models.md](../specs/legacy/agents-engines-models.md), "Agents": the agent's model is its
   **default**; a conversation may name another of the operator's models and
   may change it at any point; the change takes effect at the next turn;
   a model the deployment no longer offers refuses the turn. The sentence

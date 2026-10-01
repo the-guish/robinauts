@@ -60,7 +60,7 @@ depend on the request that started it.
   conversation that has an active run attaches to it.
 - A run can be **cancelled** by the conversation's author. Cancelling is the
   application cancelling the engine's task; the engine lets the cancellation
-  through and releases what it holds ([agents.md](agents.md)). What was
+  through and releases what it holds ([agents-engines-models.md](agents-engines-models.md)). What was
   produced before it stays: a message that was complete is in the
   conversation, and the one in flight is not.
 - **Cancelling reaches a run two ways, and the database is the one that
@@ -75,7 +75,7 @@ depend on the request that started it.
   description of what was raised recorded on it — made storable and cut to
   fit — the answer that was in flight is left uncompleted, and no memory is
   stored: the next turn resumes from the memory the conversation had
-  ([agents.md](agents.md)).
+  ([agents-engines-models.md](agents-engines-models.md)).
 - **A turn that ends without an answer is a failed run**, never a finished
   one: the run records that the engine produced no answer. A `finished` run
   has at least one message in the conversation. So is a turn that **announced
@@ -89,7 +89,7 @@ depend on the request that started it.
   broken by a framework that rewrites the final message.
 - **A finished run stores the memory the adapter handed back**, in the same
   transaction as its ending, and a run that ended any other way stores
-  none ([agents.md](agents.md)).
+  none ([agents-engines-models.md](agents-engines-models.md)).
 
 ## States
 
@@ -129,11 +129,11 @@ engine and the model it used, its state, its times, its error if any, and —
 once it has finished — the model's memory as its engine left it. The model
 is the conversation's at the moment the run is begun, and it is what the
 adapter is handed, so a run keeps it however the conversation's changes
-([agents.md](agents.md)).
+([agents-engines-models.md](agents-engines-models.md)).
 
 ## Tools
 
-Tools are in [agents.md](agents.md) ("Tools"); runs were designed for
+Tools are in [agents-engines-models.md](agents-engines-models.md) ("Tools"); runs were designed for
 them.
 
 - A tool call is part of the assistant message that made it, and its result
@@ -225,7 +225,7 @@ them.
   events.** An adapter says more of the answer's text, more of its thinking,
   a tool is being called, here is what it answered, and the turn is done:
   it has no ids, no clock and no rows, so it can neither name a message nor
-  say that one is stored ([agents.md](agents.md)). The application is what
+  say that one is stored ([agents-engines-models.md](agents-engines-models.md)). The application is what
   gives an answer its id, its parent and its provenance, writes it down, and
   only then publishes it as a message. What it publishes are the platform's
   own turn events, in this order:
@@ -339,7 +339,7 @@ them.
   - **a run begins active and answers a question**: it is created in one of
     the active states, the message it names is a user message of its
     conversation, and its agent is its conversation's agent — a conversation
-    is bound to one ([agents.md](agents.md)). A run stored already ended, with
+    is bound to one ([agents-engines-models.md](agents-engines-models.md)). A run stored already ended, with
     no events under it, could never be made whole.
 - **Deleting a conversation deletes its runs and their events in the same
   transaction**, and is refused while a run is active — which is decided

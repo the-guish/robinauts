@@ -50,7 +50,7 @@ delivery channel uses ([channels.md](legacy/channels.md)).
   piece as it reads several) and `TOOL_CALL_END`; each result of the tool message
   that answers the batch is sent as `TOOL_CALL_RESULT` as it lands, naming
   the call it answers. The call's id is the one stored on the part — the
-  vendor's, carried by the adapter as data ([agents.md](legacy/agents.md)) — so
+  vendor's, carried by the adapter as data ([agents-engines-models.md](legacy/agents-engines-models.md)) — so
   that a result, a re-attach and the conversation loaded afterwards all
   name one call one way. A result that is an error says so as
   `metadata: {"isError": true}` on its `TOOL_CALL_RESULT` — AG-UI 1.0 has no
@@ -84,7 +84,7 @@ checks as every other write.
   message being replaced for an edit.
 - `model_id` is the model a new conversation runs on, one of those
   `GET /api/models` lists; left out or `null`, it is the agent's default
-  ([agents.md](legacy/agents.md)). An agent the deployment has not got is 404, and
+  ([agents-engines-models.md](legacy/agents-engines-models.md)). An agent the deployment has not got is 404, and
   is looked for first; a model it does not offer is 422, `UnknownModelError`.
   A turn in a conversation that exists names no model — it runs on the
   conversation's, which `PUT /api/conversations/{id}/model` changes — so a

@@ -107,7 +107,7 @@ names the command that fixes it.
 
 One TOML file describes the deployment: the sign-in half and the model
 half ([specs/sign-in.md](specs/sign-in.md),
-[specs/legacy/agents.md](specs/legacy/agents.md)). `ROBINAUTS_CONFIG` names it. It holds
+[specs/legacy/agents-engines-models.md](specs/legacy/agents-engines-models.md)). `ROBINAUTS_CONFIG` names it. It holds
 **no secret**: a secret is always the *name* of an environment variable.
 Unknown keys are errors and every problem is reported at once.
 
@@ -229,7 +229,7 @@ Notes on what is and is not there:
   Anthropic's protocol, which requires a ceiling, and no ceiling at all over
   OpenAI's; one that is set is sent to `openai` as `max_completion_tokens`
   and to `openai-compatible` as `max_tokens`, the field OpenRouter and older
-  servers know ([specs/legacy/agents.md](specs/legacy/agents.md)).
+  servers know ([specs/legacy/agents-engines-models.md](specs/legacy/agents-engines-models.md)).
 - **What the engines take out of the environment.** The vendors' clients
   would otherwise read settings from variables nobody wrote in this file, so
   the engines pass everything as arguments and, when they are built at
@@ -250,7 +250,7 @@ Notes on what is and is not there:
   only. Removing a model that conversations are using refuses their next
   turn, saying the conversation's model is no longer offered, rather than
   answering with another model; the log names the model
-  ([specs/legacy/agents.md](specs/legacy/agents.md)).
+  ([specs/legacy/agents-engines-models.md](specs/legacy/agents-engines-models.md)).
 - A file with no `[agents]` table is a deployment with no agents: it
   starts, the picker is empty, and the log says so.
 
@@ -663,8 +663,8 @@ engine = "pydantic-ai"
 | `model_providers.<id>.kind: this build cannot reach '…' providers; it was built with …` | a build whose engines do not offer that kind; this one offers all four, so it is a build of something else | use one of the kinds the message lists |
 | every turn on an `openai-compatible` provider fails, most often with a `404` | `base_url` is missing the API's version: OpenAI's client appends `/chat/completions` alone | end `base_url` where the endpoint's own documentation puts `/chat/completions` after it, usually at `/v1` |
 | every turn on an `openai-compatible` provider fails with a `400` naming `max_tokens` | the endpoint knows only the newer `max_completion_tokens`, and a compatible endpoint is sent the older field every server has known | leave `max_output_tokens` out for that model |
-| every turn on one OpenAI model fails, and the vendor's message says the model is not supported on this endpoint, or to use the Responses API | OpenAI serves some models (several `-pro` and agentic ones) only over the Responses API, and this build speaks Chat Completions for both OpenAI kinds | pick a model whose page on OpenAI's site lists `v1/chat/completions` ([specs/legacy/agents.md](specs/legacy/agents.md)) |
-| a turn with tools on GPT-6 Sol, GPT-6 Luna or GPT-5.6 Sol is refused by OpenAI (for GPT-5.6 Sol, "Function tools with reasoning_effort are not supported … in /v1/chat/completions"), and the same model answers without tools | OpenAI documents function calling over Chat Completions on GPT-6 Sol and Luna only with reasoning off, OpenAI Support reported the GPT-5.6 Sol refusal (2026-09-07), and the other GPT-5.6 models reason by default and are untried; the engines do not turn reasoning off (not yet seen in a live turn here) | use another model for an agent with tools ([specs/legacy/agents.md](specs/legacy/agents.md), "Known findings") |
+| every turn on one OpenAI model fails, and the vendor's message says the model is not supported on this endpoint, or to use the Responses API | OpenAI serves some models (several `-pro` and agentic ones) only over the Responses API, and this build speaks Chat Completions for both OpenAI kinds | pick a model whose page on OpenAI's site lists `v1/chat/completions` ([specs/legacy/agents-engines-models.md](specs/legacy/agents-engines-models.md)) |
+| a turn with tools on GPT-6 Sol, GPT-6 Luna or GPT-5.6 Sol is refused by OpenAI (for GPT-5.6 Sol, "Function tools with reasoning_effort are not supported … in /v1/chat/completions"), and the same model answers without tools | OpenAI documents function calling over Chat Completions on GPT-6 Sol and Luna only with reasoning off, OpenAI Support reported the GPT-5.6 Sol refusal (2026-09-07), and the other GPT-5.6 models reason by default and are untried; the engines do not turn reasoning off (not yet seen in a live turn here) | use another model for an agent with tools ([specs/legacy/agents-engines-models.md](specs/legacy/agents-engines-models.md), "Known findings") |
 | `agents.<id>.engine: one of langgraph, pydantic-ai, not '…'` | a misspelt engine | `langgraph` or `pydantic-ai`; both are wired in this build |
 | `admin: roles are not in this release …` | an `[[admin]]` table | remove it; roles are deferred |
 | `allow: no entry, so nobody could sign in` | providers configured, allow list empty | add at least one `[[allow]]` |

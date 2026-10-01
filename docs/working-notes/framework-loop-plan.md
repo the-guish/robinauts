@@ -292,7 +292,7 @@ Postgres suite is run where a database is to hand.
   framework-neutral" becomes "The transcript is the platform's, the memory
   is the framework's"; the one-page "Tools" and "A turn" bullets; the seams
   list names the MCP clients as the frameworks'.
-- [specs/legacy/agents.md](../specs/legacy/agents.md): rewritten -- the port, a turn, the
+- [specs/legacy/agents-engines-models.md](../specs/legacy/agents-engines-models.md): rewritten -- the port, a turn, the
   frameworks' share of tools and context, the configuration sketch without
   `prefix` and with `context_window`, the known findings.
 - [specs/legacy/runs.md](../specs/legacy/runs.md): "Tools" -- the framework runs the loop

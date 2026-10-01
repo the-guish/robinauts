@@ -15,7 +15,7 @@ the code that shapes a turn may live: "anything that must behave identically
 under both frameworks lives above the agent port, not inside an adapter", with
 "trimming or summarising a long history to fit a context window" named as the
 first example. The specs repeated it
-([agents.md](../specs/legacy/agents.md), "A turn";
+([agents-engines-models.md](../specs/legacy/agents-engines-models.md), "A turn";
 [conversations.md](../specs/legacy/conversations.md), "Details likely to change";
 [operations.md](../specs/operations.md), "Limits"), and the code followed it:
 `core.trim_history` counted characters, dropped whole turns from the front of

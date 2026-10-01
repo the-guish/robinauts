@@ -5,7 +5,7 @@ session. Progress against it is in [mcp-progress.md](mcp-progress.md). Not a
 spec: the decisions that are settled, the one deferred,
 what the work costs across the codebase, and the order to build it in. The
 wanted behaviour is in [specs/legacy/runs.md](../specs/legacy/runs.md),
-[specs/legacy/agents.md](../specs/legacy/agents.md) and
+[specs/legacy/agents-engines-models.md](../specs/legacy/agents-engines-models.md) and
 [specs/legacy/conversations.md](../specs/legacy/conversations.md) ("Tools", planned); the
 spec sentences this plan changes are listed at the end.
 
@@ -567,7 +567,7 @@ for it.
 
 ## Spec sentences to change
 
-- [specs/legacy/agents.md](../specs/legacy/agents.md): "The agent port" -- the history is
+- [specs/legacy/agents-engines-models.md](../specs/legacy/agents-engines-models.md): "The agent port" -- the history is
   the full visible path, **not** trimmed, and the port is handed the tools;
   "A turn" -- step 2 loses "trimmed", and "Anything that must behave the same
   under both engines lives above the port. Fitting a long history into a

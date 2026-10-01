@@ -37,11 +37,11 @@
   message that began it, beside the answer that was produced before, not
   under whatever the old answer happened to follow.
 - A conversation belongs to one user, optionally inside a project, and is
-  bound to an agent ([privacy.md](../privacy.md), [agents.md](agents.md)).
+  bound to an agent ([privacy.md](../privacy.md), [agents-engines-models.md](agents-engines-models.md)).
 - **It has a model**: its agent's default at the moment it started, unless
   its author picked another of the configured models, and changeable by its
   author at any point. A change applies from the next turn; a run keeps the
-  model it started with ([agents.md](agents.md)). The conversation always
+  model it started with ([agents-engines-models.md](agents-engines-models.md)). The conversation always
   names one — never "whatever the agent says" — so a later change to the
   agent's default does not reach it.
 - Asking for a conversation that is not there and asking for one that
@@ -65,7 +65,7 @@ model is never fed from it. What the model is fed is its **memory**: the
 framework's own history of the conversation, in the framework's own format,
 stored by the platform on the run that produced it and never read
 ([ADR 0005](../../adr/0005-the-framework-owns-the-loop-and-the-memory.md),
-[agents.md](agents.md)).
+[agents-engines-models.md](agents-engines-models.md)).
 
 **What a message can contain**
 
@@ -181,7 +181,7 @@ stored by the platform on the run that produced it and never read
 - A conversation stays with its engine. Its memory is one framework's, and
   the other cannot read it: a turn that finds a memory written by another
   engine begins from nothing, with the transcript intact and a line in the
-  log ([agents.md](agents.md)). There is no intention to swap engines in
+  log ([agents-engines-models.md](agents-engines-models.md)). There is no intention to swap engines in
   the middle of a conversation.
 - A change of model keeps the memory — it is the framework's history, not
   the vendor's — and what a vendor makes of another vendor's blocks in it is
@@ -341,7 +341,7 @@ stored by the platform on the run that produced it and never read
   the framework's own means — summarising on one engine, dropping the
   oldest exchanges on the other — over the framework's own memory
   ([ADR 0005](../../adr/0005-the-framework-owns-the-loop-and-the-memory.md),
-  [agents.md](agents.md)). Neither ever cuts the turn it is answering.
+  [agents-engines-models.md](agents-engines-models.md)). Neither ever cuts the turn it is answering.
 
 ## Open
 

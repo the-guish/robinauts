@@ -42,7 +42,7 @@ request, and a deployment that is one wheel plus one PostgreSQL.
 - List in the panel, open, rename, delete. The title is the beginning of
   the first message.
 
-**Agents and models** ([agents.md](../specs/legacy/agents.md))
+**Agents and models** ([agents-engines-models.md](../specs/legacy/agents-engines-models.md))
 
 - Agents defined in the configuration; a picker on the empty chat when
   there is more than one.

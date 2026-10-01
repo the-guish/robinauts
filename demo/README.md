@@ -68,7 +68,7 @@ the server.** `demo/.env` is read rather than sourced — a `.env` that could ru
 commands would be the demo executing whatever was pasted into it — and the
 configuration the demo generates holds the *name* of the variable and nothing
 else, which is the rule the platform keeps everywhere
-([../docs/specs/legacy/agents.md](../docs/specs/legacy/agents.md)). `start.sh` also takes all
+([../docs/specs/legacy/agents-engines-models.md](../docs/specs/legacy/agents-engines-models.md)). `start.sh` also takes all
 three variables **out of its own environment** as the first thing it does,
 before it runs anything, and puts the one that is used back on the server's
 invocation alone: nvm and the node it may run, uv, PostgreSQL, and npm and
@@ -88,7 +88,7 @@ Completions too, and a configuration of your own may reach it as an
 `openai-compatible` provider at `https://openrouter.ai/api/v1` instead; the
 demo does not, so the OpenRouter models below are the ones it has always had.
 **OpenAI is reached with the OpenAI client**, at `https://api.openai.com/v1`,
-which both engines pin ([../docs/specs/legacy/agents.md](../docs/specs/legacy/agents.md)).
+which both engines pin ([../docs/specs/legacy/agents-engines-models.md](../docs/specs/legacy/agents-engines-models.md)).
 
 ## What you get
 
@@ -102,7 +102,7 @@ An agent is chosen when a conversation is started and stays with it, so
 and then look at the two conversations in the panel. The same configuration,
 the same model, the same stored format; two frameworks underneath. That is the
 seam the project exists to prove
-([../docs/specs/legacy/agents.md](../docs/specs/legacy/agents.md)).
+([../docs/specs/legacy/agents-engines-models.md](../docs/specs/legacy/agents-engines-models.md)).
 
 And three models, in the picker beside the agent's. Which three depends on
 the key:
@@ -196,7 +196,7 @@ The configuration the demo writes can hold two MCP tool servers and a `tools`
 line under each agent ([robinauts.toml.in](robinauts.toml.in)); an agent whose
 `tools` names a server can call what that server offers, and the chat shows each call behind a
 tool-call toggle above the answer -- the tool's name, its arguments and what
-came back, as text ([../docs/specs/legacy/agents.md](../docs/specs/legacy/agents.md),
+came back, as text ([../docs/specs/legacy/agents-engines-models.md](../docs/specs/legacy/agents-engines-models.md),
 "Tools").
 
 **GitHub's server is on whenever a GitHub token is exported** in the shell

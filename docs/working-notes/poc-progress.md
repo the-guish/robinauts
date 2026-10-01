@@ -1309,7 +1309,7 @@ For a reader with no memory of it. Kept short; rewritten as the steps land.
   Tests: `tests/unit/test_models_config.py`, `tests/unit/test_langgraph_engine.py`
   (the contract, the messages the model is given, thinking, the client's
   fields, tracing), the key checks in `tests/integration/test_config_file.py`
-  (which also parses the example in `docs/specs/legacy/agents.md`), the wiring in
+  (which also parses the example in `docs/specs/legacy/agents-engines-models.md`), the wiring in
   `tests/unit/test_app_composition.py` and `tests/integration/test_create_app.py`.
   `tests/live/test_langgraph_live.py` runs one real turn against Anthropic
   when `ROBINAUTS_LIVE_ANTHROPIC_KEY` is set; `tests/live` is in
@@ -1971,7 +1971,7 @@ For a reader with no memory of it. Kept short; rewritten as the steps land.
   the refusal reads *"this build cannot reach 'openai' providers; it was built
   with anthropic, anthropic-compatible"*. What the licence exclusion still
   costs is a vendor reachable over OpenAI's protocol alone, which OpenRouter is
-  not (`DEPENDENCIES.md`, `docs/specs/legacy/agents.md`, `docs/deployment.md`).
+  not (`DEPENDENCIES.md`, `docs/specs/legacy/agents-engines-models.md`, `docs/deployment.md`).
   `backend/tests/live/test_vendor_routing.py` proves where a turn's request
   really goes: one turn per engine at OpenRouter with a **bogus, key-shaped
   key**, asserting that it arrived at `https://openrouter.ai/api/v1/messages`

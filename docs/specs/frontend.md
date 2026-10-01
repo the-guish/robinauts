@@ -17,7 +17,7 @@
   browser, as the agent is.
 - An open conversation names the agent it is with, under its title: once
   the conversation exists the agent is a fact about it and not a choice
-  ([agents.md](legacy/agents.md)), so it is shown as a line, not a control. The
+  ([agents-engines-models.md](legacy/agents-engines-models.md)), so it is shown as a line, not a control. The
   model stays a choice, so the model picker sits on that line, showing the
   conversation's model; changing it applies from the next turn, a run in
   flight included. A model the deployment no longer offers is shown as
