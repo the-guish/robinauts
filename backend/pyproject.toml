@@ -99,7 +99,7 @@ environments = [
 ]
 
 [project.scripts]
-robinauts = "robinauts.legacy.cli:run"
+robinauts = "robinauts.web.cli:run"
 
 [build-system]
 requires = ["hatchling"]

@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+
+# The echo engine reads no key: the provider is there because a model names one.
+[model_providers.echo]
+kind = "anthropic"
+api_key_env = "ECHO_API_KEY"
+
+[models.echo]
+provider = "echo"
+name = "echo"
+title = "Echo"
+
+[agents.echo]
+title = "Echo"
+system_prompt = ""
+model = "echo"
+engine = "echo"
