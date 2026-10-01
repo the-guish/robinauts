@@ -12,7 +12,12 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from robinauts.legacy.domain import AgentDefinition, Event, ModelsConfig, ProviderKind
+from robinauts.agent_engines.contract.domain import (
+    AgentDefinition,
+    Event,
+    ModelsConfig,
+    ProviderKind,
+)
 
 
 class ProviderKeyLookup(ABC):
@@ -20,7 +25,7 @@ class ProviderKeyLookup(ABC):
 
     @abstractmethod
     def key_for(self, provider_id: str) -> str:
-        """``ConfigError`` for a provider this process has no key for."""
+        """``MissingSecretError`` for a provider this process has no key for."""
         raise NotImplementedError
 
 
@@ -29,7 +34,7 @@ class ToolSecretLookup(ABC):
 
     @abstractmethod
     def secret_for(self, server_id: str) -> str:
-        """``ConfigError`` for a server this process has no secret for."""
+        """``MissingSecretError`` for a server this process has no secret for."""
         raise NotImplementedError
 
 
@@ -62,7 +67,7 @@ class AgentEngine(ABC):
 
     @abstractmethod
     async def create(self, session_id: uuid.UUID) -> None:
-        """``InvalidValueError`` for a session that already exists."""
+        """``SessionExistsError`` for a session that already exists."""
         raise NotImplementedError
 
     @abstractmethod
@@ -84,16 +89,16 @@ class AgentEngine(ABC):
         """Not a coroutine: everything, the refusals included, happens inside the generator.
 
         Past ``timeout_seconds`` the engine ends the turn by raising ``TimeoutError``.
-        Raised where iterated: ``ConversationNotFoundError`` for a session not created,
+        Raised where iterated: ``SessionNotFoundError`` for a session not created,
         ``CheckpointNotFoundError`` for a checkpoint not held for it, ``UnknownModelError`` for
-        a model the settings do not have, ``InvalidValueError`` for a resume of another prompt.
+        a model the settings do not have, ``ResumeMismatchError`` for a resume of another prompt.
         """
         raise NotImplementedError
 
     @abstractmethod
     async def fork(self, source_id: uuid.UUID, target_id: uuid.UUID, *, checkpoint_id: str) -> None:
-        """``ConversationNotFoundError`` for the source, ``CheckpointNotFoundError`` for the
-        checkpoint, ``InvalidValueError`` for a target that already exists."""
+        """``SessionNotFoundError`` for the source, ``CheckpointNotFoundError`` for the
+        checkpoint, ``SessionExistsError`` for a target that already exists."""
         raise NotImplementedError
 
     @abstractmethod
