@@ -5,6 +5,12 @@ the logical model, the turn dispatcher, leases, cancel through the store, the
 documents, and why. This note lists only what differs on Azure. Anything not
 mentioned here applies unchanged.
 
+As with AWS, **nothing in `open-shipyards/robinauts` depends on Azure**. No Azure
+library is in this repository, and none will be. Everything Azure-specific named below
+belongs to an integration in a repository of its own, built on the extension points
+the reference describes. The one exception is not a library: the owner's id on
+session operations is a change to this repository's port, and it is vendor-neutral.
+
 ## The products
 
 | the AWS reference | on Azure |
@@ -70,13 +76,13 @@ Users go in a second container partitioned by `/id`.
 - **The purge** queries the partition `[owner, session]` and deletes what it finds.
   Cosmos can delete a whole logical partition by key, but that was in preview when
   this was written; check whether it is available for serverless containers.
-- **The driver** is `azure-cosmos` (MIT), which has an async client, under the same
-  import-linter rule as the other drivers. Tests use the Cosmos DB emulator, a
-  development tool that is never shipped.
-- **Engine memory.** The Pydantic AI engine writes its message list as items in its
-  own container. For LangGraph, community Cosmos savers exist; check the licence and
-  the maintenance, or write one against `BaseCheckpointSaver`. The engines' contract
-  gets a `COSMOS` `StorageKind`.
+- **The driver** would be `azure-cosmos` (MIT), which has an async client, in the
+  external package. Its tests would use the Cosmos DB emulator and run the store's
+  contract suite imported from this repository.
+- **Engine memory.** The Pydantic AI engine's message list would be stored as items in
+  its own container. For LangGraph, community Cosmos savers exist; check the licence
+  and the maintenance, or write one against `BaseCheckpointSaver`. Both are handed to
+  the engines through the supplied-storage kind.
 
 ## Compute
 

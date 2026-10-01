@@ -11,6 +11,32 @@ answer.
 This note is the reference for serverless hosting. `gcp-serverless.md` and
 `azure-serverless.md` list only what differs on those clouds.
 
+## What this repository ships
+
+**Nothing in `open-shipyards/robinauts` depends on AWS, Azure or Google Cloud.** No
+SDK, driver, checkpoint saver, store adapter, container image or infrastructure code
+for any of them is in this repository, and none will be. Examples and integrations
+for a cloud may be contributed in repositories of their own.
+
+This repository ships the ports, the in-memory and PostgreSQL implementations, and
+the vendor-neutral rules in this note. Those rules are what let a package outside
+the repository implement the ports for a cloud. Every adapter, driver and saver named
+in these three notes belongs to such a package.
+
+Three things follow for this repository:
+
+- **The extension points are reachable from outside.** An installed package must be
+  able to supply the store, the turn dispatcher and an engine's storage without this
+  repository naming it. Composition should take them from a registry such as Python
+  entry points, not from a list here.
+- **The engines' contract gets no cloud's name.** Instead of `DYNAMODB`, `COSMOS` or
+  `FIRESTORE` members, `StorageKind` needs one kind for storage the caller supplies.
+  Its options would carry what each engine documents that it accepts: a
+  `BaseCheckpointSaver` for LangGraph, and an object implementing the engine's memory
+  interface for Pydantic AI.
+- **The store's contract tests can be imported.** An external adapter proves itself
+  against the same suite as the PostgreSQL one.
+
 "Paid by consumption" means no charge while nobody is using it: requests,
 GB-seconds, read and write units, bytes stored. Storage at rest costs pennies and
 can't be avoided. Anything billed by the hour or the month whether or not it is used
@@ -218,12 +244,11 @@ TTL deletes expired items at no cost, and Streams can drive the purge.
   The LangGraph engine could use `langgraph-checkpoint-aws`'s `DynamoDBSaver`, which
   offloads to S3 too. Its licence and dependency tree still need checking against
   `DEPENDENCIES.md`. The Pydantic AI engine writes its `ModelMessage` list as JSON
-  items. In the engines' contract, that means a new `StorageKind`, `DYNAMODB`, with a
-  table name and a client in its options.
-- **The driver** would be `aiobotocore` (Apache-2.0), allowed only under
-  `controller.adapters` and the two framework engines by an import-linter rule like
-  the one for `asyncpg`. Tests would run against `moto` (Apache-2.0) or DynamoDB
-  Local, which is a development tool and is never shipped.
+  items. Both reach the engine through the supplied-storage kind, not through a
+  `DYNAMODB` member of the contract.
+- **The driver** would be `aiobotocore` (Apache-2.0), in the external package. Its
+  tests would run against `moto` (Apache-2.0) or DynamoDB Local, and they would also
+  run the store's contract suite imported from this repository.
 
 ### Or Aurora DSQL, to keep SQL
 
@@ -342,14 +367,15 @@ Beyond `data-model-context.md`'s list:
   ids.
 - The memory store follows all of it, so the contract tests prove the rules before
   any durable store exists. Those tests should be a suite that every store must pass,
-  as the engines have, so that the PostgreSQL adapter (block 6) and a DynamoDB adapter
-  later are run against the same tests.
+  as the engines have, and one that a package outside this repository can import.
 - The encoder writes fixed-width times and JSON text, as above.
 
-Not in block 5: the DynamoDB adapter, the engines' DynamoDB storage, the image, the
-infrastructure code (CDK, SAM or Terraform: not chosen), and the deployment
-documentation. Those make a block of their own, after PostgreSQL. It should be added
-to `master-plan.md` once this direction is agreed.
+Not in this repository at all: the DynamoDB adapter, the engines' DynamoDB storage,
+the image, the infrastructure code, and the deployment documentation for AWS. They
+belong to an external integration. What this repository owes them is the extension
+points above: the store, the dispatcher and the engines' storage, supplied from
+outside, and an importable contract suite. Those could be a step of block 6 or a
+block after it, to be added to `master-plan.md` once this direction is agreed.
 
 ## Sources checked
 

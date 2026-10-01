@@ -5,6 +5,11 @@ the logical model, the turn dispatcher, leases, cancel through the store, the
 documents, and why. This note lists only what differs on Google Cloud. Anything not
 mentioned here applies unchanged.
 
+As with AWS, **nothing in `open-shipyards/robinauts` depends on Google Cloud**. No
+Google library is in this repository, and none will be. Everything Google-specific
+named below belongs to an integration in a repository of its own, built on the
+extension points the reference describes.
+
 ## The products
 
 | the AWS reference | on Google Cloud |
@@ -68,14 +73,14 @@ The logical model maps onto paths instead of `PK`/`SK`:
   synchronous client's listener runs its callback on a thread, which would hand
   events to the loop with `call_soon_threadsafe`. Start by polling, as on AWS. The
   listener is an optimisation inside `wait_for_events`, invisible to the port.
-- **The driver** is `google-cloud-firestore` (Apache-2.0), under the same import-linter
-  rule as the other drivers. Tests use the Firestore emulator, a development tool that
-  is never shipped.
-- **Engine memory.** The Pydantic AI engine writes its message list as documents in
-  its own collection. For LangGraph there is no first-party Firestore saver; community
-  ones exist, or one can be written against `BaseCheckpointSaver`. Either way, check
-  the licence and the maintenance. The engines' contract gets a `FIRESTORE`
-  `StorageKind`.
+- **The driver** would be `google-cloud-firestore` (Apache-2.0), in the external
+  package. Its tests would use the Firestore emulator and run the store's contract
+  suite imported from this repository.
+- **Engine memory.** The Pydantic AI engine's message list would be stored as
+  documents in its own collection. For LangGraph there is no first-party Firestore
+  saver; community ones exist, or one can be written against `BaseCheckpointSaver`.
+  Either way, check the licence and the maintenance. Both are handed to the engines
+  through the supplied-storage kind.
 
 ## Compute
 
