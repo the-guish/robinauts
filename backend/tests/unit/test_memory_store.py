@@ -9,6 +9,7 @@ import uuid
 from datetime import UTC, datetime
 
 from aio import asyncio_test
+from robinauts.controller.adapters.memory import MemoryStore
 from robinauts.controller.contract.domain import (
     ActiveTurn,
     Conversation,
@@ -21,7 +22,6 @@ from robinauts.controller.contract.domain import (
     TurnState,
     User,
 )
-from robinauts.controller.memory import MemoryStore
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 

@@ -16,7 +16,7 @@ from robinauts.controller.contract.domain import (
     TurnEvent,
     User,
 )
-from robinauts.controller.store import Store
+from robinauts.controller.ports.store import Store
 
 
 class MemoryStore(Store):

@@ -18,8 +18,8 @@ from robinauts.agent_engines.contract.ports import (
     StorageConfig,
     StorageKind,
 )
+from robinauts.controller.application.engines import build_engines, engine_settings, engine_storage
 from robinauts.controller.contract import domain
-from robinauts.controller.engines import build_engines, engine_settings, engine_storage
 
 
 class FakeEngine(AgentEngine):

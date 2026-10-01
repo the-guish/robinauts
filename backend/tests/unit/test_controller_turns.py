@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from aio import asyncio_test
+from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.contract.domain import (
     AgentConfig,
     ArgumentsPiece,
@@ -27,7 +28,6 @@ from robinauts.controller.contract.domain import (
     TurnEnded,
     TurnState,
 )
-from robinauts.controller.controller import RobinautsController
 
 CONFIG = Config(
     providers={"echo": ProviderConfig("echo", ProviderKind.ANTHROPIC, "ECHO_API_KEY")},
