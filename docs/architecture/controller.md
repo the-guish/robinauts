@@ -5,6 +5,11 @@ The operations the controller offers its shells: the web and a terminal.
 Sign-in is not here. A shell decides who is asking and names the user; every
 operation below is asked for a user, and answers only what that user owns.
 
+A session is one conversation of a user with an agent. To the controller it is the record,
+its messages and its turns, owned by one user. To an engine it is the memory it keeps under
+the session's id, and nothing more. To web it is what the wire calls a conversation; who is
+signed in is web's own concern, the user session.
+
 ## Lifecycle
 
 - `open`: build the stores on the given storage, build the engines the configuration names, run
@@ -21,22 +26,22 @@ operation below is asked for a user, and answers only what that user owns.
 - `list_agents`
 - `list_models`
 
-## Conversations
+## Sessions
 
-- `list_conversations`: most recently updated first, a page at a time.
-- `open_conversation`: one moment of a conversation, its messages and its active turn if any.
-- `rename_conversation`
-- `delete_conversation`: the records, and the engine's memory with them.
-- `fork_conversation`: a new conversation from a message of another, independent from then on.
+- `list_sessions`: most recently updated first, a page at a time.
+- `open_session`: one moment of a session, its messages and its active turn if any.
+- `rename_session`
+- `delete_session`: the records, and the engine's memory with them.
+- `fork_session`: a new session from a message of another, independent from then on.
 
 ## Turns
 
-- `start_conversation`: the first message, with the agent and the model; mints the conversation.
+- `start_session`: the first message, with the agent and the model; mints the session.
 - `send_message`: a message under a chosen parent, with the model. An edit is this under an
   earlier parent.
 - `regenerate_answer`: the answer to a question again, under the same question.
-- `cancel_turn`: stop the conversation's active turn.
-- `watch_turn`: the events of the conversation's active turn, from a position, as they happen.
+- `cancel_turn`: stop the session's active turn.
+- `watch_turn`: the events of the session's active turn, from a position, as they happen.
 
 ## Housekeeping
 
