@@ -147,15 +147,18 @@ async def test_a_provider_kind_the_engine_cannot_reach_is_refused() -> None:
 
 
 @asyncio_test
-async def test_the_real_table_names_the_two_engines_and_neither_is_written_yet() -> None:
+async def test_the_real_table_builds_an_instance_of_each_engine() -> None:
+    from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
+    from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
     from robinauts.controller.engines import ENGINES
 
     assert set(ENGINES) == {"langchain", "pydantic-ai"}
-    for engine in ENGINES:
-        settings = engine_settings(config(engine=engine), ENV.get)
+    storage = engine_storage(domain.StorageConfig(domain.StorageKind.IN_MEMORY), None)
+    expected = {"langchain": LangChainEngine, "pydantic-ai": PydanticAIEngine}
+    for name, cls in expected.items():
+        settings = engine_settings(config(engine=name), ENV.get)
+        engines = await build_engines(config(engine=name), settings, storage)
+        assert isinstance(engines[name], cls)
+        assert ProviderKind.OPENAI in engines[name].kinds()
         with pytest.raises(NotImplementedError):
-            await build_engines(
-                config(engine=engine),
-                settings,
-                engine_storage(domain.StorageConfig(domain.StorageKind.IN_MEMORY), None),
-            )
+            await engines[name].create(uuid.uuid4())
