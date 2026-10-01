@@ -1021,7 +1021,9 @@ function folded(
   const thread: ChatMessage[] = [];
   for (const message of messages) {
     if (message.role !== "tool") {
-      thread.push(held(message));
+      // The controller stores an answer with its results in it.
+      const own = message.parts.some((part) => part.kind === "tool_result");
+      thread.push(own ? answered(held(message), message) : held(message));
       continue;
     }
     const answer = thread.at(-1);

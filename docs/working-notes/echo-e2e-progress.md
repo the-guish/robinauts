@@ -1,0 +1,7 @@
+- Step 13, in Chromium with Playwright over python -m robinauts.web (echo, in-memory store, frontend/dist).
+- Sent "hello echo": the thread shows the question, "Used tool: echo" with {"text":"hello echo"} and the result "hello echo", then "The tool said: hello echo".
+- Found: once the turn ended, the conversation read again drew the call as cancelled with no result. The controller stores one answer with its calls, results and text; the frontend only folded results from a separate tool message.
+- Fixed in the frontend (state.ts, folded): an answer that holds its own results has them put on its calls. A test in runtime.test.tsx covers it.
+- Reload on the open conversation: the question, the call with its result and the answer are all still there.
+- Reload mid-turn: echo ends a turn at once, so the re-attach was shown over the wire instead: GET /api/runs/{id}/events?after=0 after a finished turn replays RUN_STARTED through RUN_FINISHED, positions 1 to 9; Last-Event-ID: 6 replays from 7.
+- Browser noise, not fixed: a 404 for /favicon.ico, and the POST /api/turns stream reported as aborted because the client stops reading at RUN_FINISHED.

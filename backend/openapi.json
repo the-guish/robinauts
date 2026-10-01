@@ -2,7 +2,6 @@
   "components": {
     "schemas": {
       "AgentListResponse": {
-        "description": "Every agent this deployment is configured with, in configuration order.",
         "properties": {
           "items": {
             "items": {
@@ -19,10 +18,10 @@
         "type": "object"
       },
       "AgentSummary": {
-        "description": "One agent, as the picker on an empty chat offers it.\n\nFour fields, and deliberately no more: **no system prompt** -- it is the\noperator's, it is not a message and it never leaves the process\n(``docs/specs/conversations.md``) -- and no vendor, endpoint or key.\n\n``model`` is the agent's **default**: the platform's id of the model a new\nconversation with it starts on unless its author picks another\n(``ModelSummary``). It was once left out, as the operator's choice and\nnothing to pick by; now that a person picks the model, the picker has to\nknow which one to select when the agent is chosen.",
         "properties": {
           "engine": {
-            "$ref": "#/components/schemas/Engine"
+            "title": "Engine",
+            "type": "string"
           },
           "id": {
             "title": "Id",
@@ -46,16 +45,7 @@
         "title": "AgentSummary",
         "type": "object"
       },
-      "Channel": {
-        "description": "Where a message came from (``docs/specs/channels.md``).\n\nA conversation is not tied to one: each message records its own, so a\nconversation begun in the web UI and continued from somewhere else says\nwhich was which. Other channels join this enum with the bridge that\nserves them; a stored ``web`` never changes meaning.",
-        "enum": [
-          "web"
-        ],
-        "title": "Channel",
-        "type": "string"
-      },
       "ConversationListResponse": {
-        "description": "One page of the caller's conversations, and how to ask for the next.\n\n``next_cursor`` is ``null`` on the last page. It is opaque: a position\ninside this person's own listing, written by the store and read by it, and\nnothing a client should take apart (``docs/specs/conversations.md``).",
         "properties": {
           "items": {
             "items": {
@@ -84,7 +74,6 @@
         "type": "object"
       },
       "ConversationSummary": {
-        "description": "A conversation as the panel lists it and as a write answers with it.\n\nNo owner: it is the person asking, on every route there is\n(``docs/specs/privacy.md``).\n\n``model`` is the id of the model its next turn runs on -- the one its\nauthor picked, or its agent's default when it began -- and may be one the\ndeployment no longer offers, which is what a picker shows so that it can\nbe changed (``docs/specs/agents.md``). What produced an answer already\ngiven is on the answer (``ProvenanceView``).",
         "properties": {
           "agent": {
             "title": "Agent",
@@ -126,7 +115,6 @@
         "type": "object"
       },
       "EndedBadlyView": {
-        "description": "The last run of the conversation, when it failed, was cancelled or was interrupted.\n\nSo that a reload after an answer went wrong says so, instead of showing a\nturn that simply stops (``docs/specs/runs.md``).\n\n``state`` is the whole of the reason, and it is the only one the platform\nrecords as a **kind**: what else a run holds is ``error``, free text made\nout of whatever a provider or a traceback said, written for an operator.\nIt stays on the record and in the log, like the detail of every other\nrefusal (``robinauts.legacy.api.errors``).",
         "properties": {
           "ended_at": {
             "format": "date-time",
@@ -156,17 +144,7 @@
         "title": "EndedBadlyView",
         "type": "object"
       },
-      "Engine": {
-        "description": "The agent frameworks a turn can be run by (``docs/specs/agents.md``).\n\nA property of the agent, recorded on every message, so that a conversation\nsays which engine produced which answer after the agent has been changed.\nThe values are the ones the configuration is written with.",
-        "enum": [
-          "langgraph",
-          "pydantic-ai"
-        ],
-        "title": "Engine",
-        "type": "string"
-      },
       "ErrorResponse": {
-        "description": "Every refusal, in one shape (``robinauts.legacy.api.errors``).",
         "properties": {
           "detail": {
             "title": "Detail",
@@ -184,25 +162,26 @@
         "title": "ErrorResponse",
         "type": "object"
       },
-      "HealthResponse": {
-        "description": "What ``GET /health`` answers. It holds no data and says nothing else.",
+      "ForkRequest": {
         "properties": {
-          "status": {
-            "title": "Status",
+          "at_message": {
+            "format": "uuid",
+            "title": "At Message",
             "type": "string"
           }
         },
         "required": [
-          "status"
+          "at_message"
         ],
-        "title": "HealthResponse",
+        "title": "ForkRequest",
         "type": "object"
       },
       "MessageView": {
-        "description": "One message of the thread a conversation shows.\n\nNo ``parent_id``: what is sent is one path, in order, and where each\nmessage hangs is the message before it. **Reasoning is not here**: see\n``of``.",
         "properties": {
           "channel": {
-            "$ref": "#/components/schemas/Channel"
+            "const": "web",
+            "title": "Channel",
+            "type": "string"
           },
           "created_at": {
             "format": "date-time",
@@ -216,15 +195,7 @@
           },
           "parts": {
             "items": {
-              "discriminator": {
-                "mapping": {
-                  "text": "#/components/schemas/TextContent",
-                  "tool_call": "#/components/schemas/ToolCallContent",
-                  "tool_result": "#/components/schemas/ToolResultContent"
-                },
-                "propertyName": "kind"
-              },
-              "oneOf": [
+              "anyOf": [
                 {
                   "$ref": "#/components/schemas/TextContent"
                 },
@@ -271,7 +242,6 @@
         "type": "object"
       },
       "ModelListResponse": {
-        "description": "Every model a conversation of this deployment may run on, in configuration order.",
         "properties": {
           "items": {
             "items": {
@@ -288,7 +258,6 @@
         "type": "object"
       },
       "ModelSummary": {
-        "description": "One model, as the picker offers it: the id to ask for, and what to call it.\n\nTwo fields, and deliberately no more: the provider it is reached through\nand the vendor's name for it are the operator's, and so is how long a call\nto it may take (``domain.ModelConfig``). The id is the platform's own,\nthe one a conversation and an answer's provenance carry.",
         "properties": {
           "id": {
             "title": "Id",
@@ -307,7 +276,6 @@
         "type": "object"
       },
       "OpenedConversationResponse": {
-        "description": "A conversation opened: one moment of it, with everything drawing it needs.\n\n``messages`` is **the one thread the conversation shows**, oldest first:\nthe path from its root to its newest message, and nothing an edit or a\nregeneration put aside (``docs/specs/conversations.md``). A client draws\nit as a list; there is no other branch to switch to. With a run in\nflight it ends at ``resume.follows``, the message the run's next one\nhangs under, so what streams in is appended to it -- a regeneration\nthat has completed nothing yet has put the old answer aside already.\n\n``run_id`` and ``resume`` are there when a run is in flight, and\n``ended_badly`` instead when the last one ended badly. Never both: what\nmatters about a run that is going is the run.",
         "properties": {
           "conversation": {
             "$ref": "#/components/schemas/ConversationSummary"
@@ -363,14 +331,14 @@
         "type": "object"
       },
       "ProvenanceView": {
-        "description": "What an answer records: the agent, the engine, the model and the run.\n\nOn an assistant message and on no other (``domain.Message``). The model is\nthe platform's own id for it -- what the configuration calls it -- and no\nvendor, endpoint or key is anywhere near the wire.",
         "properties": {
           "agent": {
             "title": "Agent",
             "type": "string"
           },
           "engine": {
-            "$ref": "#/components/schemas/Engine"
+            "title": "Engine",
+            "type": "string"
           },
           "model": {
             "title": "Model",
@@ -392,7 +360,6 @@
         "type": "object"
       },
       "ProviderSummary": {
-        "description": "One provider to offer a sign-in button for. No secret, no endpoint.",
         "properties": {
           "id": {
             "title": "Id",
@@ -411,12 +378,8 @@
         "type": "object"
       },
       "RenameRequest": {
-        "additionalProperties": false,
-        "description": "A new title for a conversation. A renamed title is never overwritten.\n\nThe bound is the record's own (``domain.MAX_TITLE_CHARS``), said here so\nthat it is **in the document**: a client that knows how long a title may\nbe can say so in its own form, instead of finding out by being refused.\nWhat the length cannot say -- one line, printable, and something other\nthan spaces -- is the application's, and is refused there\n(``application.Conversations.rename``).",
         "properties": {
           "title": {
-            "maxLength": 120,
-            "minLength": 1,
             "title": "Title",
             "type": "string"
           }
@@ -428,7 +391,6 @@
         "type": "object"
       },
       "ResumeView": {
-        "description": "Where to attach to the run in flight, and what its next message follows.\n\n``after`` is the position to carry on from and ``follows`` is the id the\nnext message announced after it will hang under -- the two things a\nwatcher of that stream is checked with, handed over together so that\nneither is guessed (``docs/specs/runs.md``).",
         "properties": {
           "after": {
             "title": "After",
@@ -454,66 +416,7 @@
         "title": "ResumeView",
         "type": "object"
       },
-      "RunState": {
-        "description": "Where a run is (``docs/specs/runs.md``).",
-        "enum": [
-          "running",
-          "waiting",
-          "finished",
-          "failed",
-          "cancelled",
-          "interrupted"
-        ],
-        "title": "RunState",
-        "type": "string"
-      },
-      "RunView": {
-        "description": "A run as a client sees it: where it got to, and when.\n\n``ended_at`` is what the record calls ``finished_at``: a run that failed,\nwas cancelled or was interrupted did not finish, and every ended run has\none. ``started_at`` is ``null`` until a process took the run up, and\n``ended_at`` until it ended. What went wrong is not here, for the reason\ngiven on ``EndedBadlyView``.",
-        "properties": {
-          "ended_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ended At"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
-          },
-          "state": {
-            "$ref": "#/components/schemas/RunState"
-          }
-        },
-        "required": [
-          "id",
-          "state",
-          "started_at",
-          "ended_at"
-        ],
-        "title": "RunView",
-        "type": "object"
-      },
       "SessionResponse": {
-        "description": "What ``GET /auth/session`` answers, signed in or not.\n\n``sign_in`` is whether this deployment has a sign-in configuration at all;\nwithout one there are no providers and nobody to be.\n\n``local_development`` is the exception to that last part: the local\ndevelopment mode has no sign-in and no providers, and yet somebody *is*\nsigned in -- the one local user everything runs as. It is what the\ninterface shows its permanent banner for (``docs/specs/frontend.md``), and\nit is why the two are separate fields rather than one: \"nothing is\nconfigured\" and \"sign-in is deliberately off\" are different things to say\nto a person, and only the second one has a user with it.",
         "properties": {
           "local_development": {
             "default": false,
@@ -561,12 +464,8 @@
         "type": "object"
       },
       "SetModelRequest": {
-        "additionalProperties": false,
-        "description": "The model a conversation's next turn is to run on.\n\nIts id, as ``GET /api/models`` lists it. The bound is a configured id's\n(``domain.MAX_CONFIG_ID_CHARS``), said here so that it is in the document;\nwhether the deployment offers that model is the application's to say\n(``application.Turns.set_model``).",
         "properties": {
           "model_id": {
-            "maxLength": 40,
-            "minLength": 1,
             "title": "Model Id",
             "type": "string"
           }
@@ -578,7 +477,6 @@
         "type": "object"
       },
       "TextContent": {
-        "description": "A piece of text: what a person wrote, or what a model answered.",
         "properties": {
           "kind": {
             "const": "text",
@@ -598,7 +496,6 @@
         "type": "object"
       },
       "ToolCallContent": {
-        "description": "A tool the model asked for, in the answer that asked (``ToolCallPart``).\n\n**Rendered as data** by a client (``docs/specs/wire.md``): the name and the\narguments are the model's, and the arguments are whatever it wrote.",
         "properties": {
           "arguments": {
             "additionalProperties": true,
@@ -629,7 +526,6 @@
         "type": "object"
       },
       "ToolResultContent": {
-        "description": "What a tool answered for one call, in the tool message that holds the\nbatch (``ToolResultPart``). Text, and whether the call went wrong.",
         "properties": {
           "call_id": {
             "title": "Call Id",
@@ -659,7 +555,6 @@
         "type": "object"
       },
       "UserSummary": {
-        "description": "Who is signed in, as the interface shows them in the profile block.",
         "properties": {
           "email": {
             "anyOf": [
@@ -703,7 +598,6 @@
     }
   },
   "info": {
-    "summary": "Conversational agents that play fair.",
     "title": "Robinauts",
     "version": "0"
   },
@@ -711,7 +605,6 @@
   "paths": {
     "/api/agents": {
       "get": {
-        "description": "The agents this deployment is configured with, for the picker.\n\nThe id to start a conversation with, the title to show, the engine it\nruns on and the model a conversation with it starts on unless another is\npicked. **Not the system prompt**, which is the operator's and is not a\nmessage, and nothing about a vendor or a key (``docs/specs/agents.md``).\n\nDeclared rather than injected: the list is the deployment's and is the\nsame for everybody signed in, so the route needs the declaration and not\nthe person.\n\nThey are fixed at start-up in this version: the configuration is read once\nby the composition root, so an agent added or removed shows here after a\nrestart.",
         "operationId": "list_agents_api_agents_get",
         "responses": {
           "200": {
@@ -724,26 +617,6 @@
             },
             "description": "Successful Response"
           },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
           "default": {
             "content": {
               "application/json": {
@@ -752,18 +625,14 @@
                 }
               }
             },
-            "description": "any other refusal, in the same shape: 400, 405, 500"
+            "description": "A refusal"
           }
         },
-        "summary": "List Agents",
-        "tags": [
-          "agents"
-        ]
+        "summary": "List Agents"
       }
     },
     "/api/conversations": {
       "get": {
-        "description": "The caller's conversations, most recently updated first, one page at a time.\n\n``limit`` is how many are wanted, and its bound is **in the document**:\nbetween 1 and ``application.MAX_PAGE``, which is what a store will page.\nA client can therefore hold itself to it instead of finding out by being\nrefused, and one outside it -- or not a whole number at all, an empty\n``?limit=`` included -- is refused naming the field and the rule and never\nthe number.\n\n``cursor`` is what the page before this one handed back as\n``next_cursor``, and is left out for the first page; an **empty** one is\nread as left out, since a client that sends no cursor and one that sends\nnothing in it are asking the same thing. One that does not parse is\nrefused as a value, naming the field.\n\nEither parameter **given twice** is refused rather than quietly read once\n(``given_once``).\n\nThe order is total: ties on ``updated_at`` are broken by id, so two\nconversations written in the same millisecond cannot swap places between\ntwo pages. What that does and does not promise is in this module's\ndocstring.",
         "operationId": "list_conversations_api_conversations_get",
         "parameters": [
           {
@@ -772,8 +641,6 @@
             "required": false,
             "schema": {
               "default": 30,
-              "maximum": 100,
-              "minimum": 1,
               "title": "Limit",
               "type": "integer"
             }
@@ -806,36 +673,6 @@
             },
             "description": "Successful Response"
           },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
           "default": {
             "content": {
               "application/json": {
@@ -844,18 +681,14 @@
                 }
               }
             },
-            "description": "any other refusal, in the same shape: 400, 405, 500"
+            "description": "A refusal"
           }
         },
-        "summary": "List Conversations",
-        "tags": [
-          "conversations"
-        ]
+        "summary": "List Conversations"
       }
     },
     "/api/conversations/{conversation_id}": {
       "delete": {
-        "description": "Delete a conversation for good, with its messages, its runs and their events.\n\nThere is no trash in this version\n(``docs/working-notes/poc-scope.md``).\n\n**Not idempotent.** A conversation that is not there -- never was, already\ndeleted, or somebody else's -- is 404, like everything else that is not\nthere, because the application finds the conversation and checks who is\nasking before it deletes anything. So deleting twice is 204 and then 404,\nand a client that means \"make sure this is gone\" reads both as success.\n\n**A conversation with a run going is not deleted**: it is refused with 409\n(``RunAlreadyActiveError``), and its author cancels the run first. The\nstore decides that in the transaction that would have deleted, so there is\nno window for a run to begin in (``docs/specs/conversations.md``).",
         "operationId": "delete_conversation_api_conversations__conversation_id__delete",
         "parameters": [
           {
@@ -873,76 +706,6 @@
           "204": {
             "description": "Successful Response"
           },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "413": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Request Entity Too Large"
-          },
-          "415": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unsupported Media Type"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
           "default": {
             "content": {
               "application/json": {
@@ -951,16 +714,12 @@
                 }
               }
             },
-            "description": "any other refusal, in the same shape: 400, 405, 500"
+            "description": "A refusal"
           }
         },
-        "summary": "Delete Conversation",
-        "tags": [
-          "conversations"
-        ]
+        "summary": "Delete Conversation"
       },
       "get": {
-        "description": "One conversation, read at **one moment**: its thread and its run.\n\n``messages`` is the one thread the conversation shows, oldest first: the\npath to its newest message, and nothing an edit or a regeneration put\naside (``docs/specs/conversations.md``). What was put aside is kept in\nthe store and never sent.\n\nWhen a run is in flight, ``run_id`` and ``resume`` say which run and where\nto attach to its stream, so that a client which has just loaded every\ncomplete message is replayed exactly the message still being produced and\nnone it already has (``docs/specs/runs.md``). When no run is in flight and\nthe last one failed, was cancelled or was interrupted, ``ended_badly``\nsays so, so that a reload after an answer went wrong is told rather than\nshown a turn that stops in the middle.\n\nThe three come from one read of the store, because two reads would\ndisagree with each other and the gap between them is exactly where an\nanswer is.",
         "operationId": "open_conversation_api_conversations__conversation_id__get",
         "parameters": [
           {
@@ -985,46 +744,6 @@
             },
             "description": "Successful Response"
           },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
           "default": {
             "content": {
               "application/json": {
@@ -1033,16 +752,12 @@
                 }
               }
             },
-            "description": "any other refusal, in the same shape: 400, 405, 500"
+            "description": "A refusal"
           }
         },
-        "summary": "Open Conversation",
-        "tags": [
-          "conversations"
-        ]
+        "summary": "Open Conversation"
       },
       "patch": {
-        "description": "Give a conversation a new title; the conversation as it then is.\n\nA renamed title is never overwritten afterwards\n(``docs/specs/conversations.md``). How long a title may be is in the\ndocument (``schemas.RenameRequest``); what a length cannot say -- one\nline, printable, and something other than spaces -- is the application's,\nand what it says is the rule. Which field it is about is this route's to\nname, since the title is the one value it passes.",
         "operationId": "rename_conversation_api_conversations__conversation_id__patch",
         "parameters": [
           {
@@ -1077,7 +792,7 @@
             },
             "description": "Successful Response"
           },
-          "401": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
@@ -1085,57 +800,47 @@
                 }
               }
             },
-            "description": "Unauthorized"
+            "description": "A refusal"
+          }
+        },
+        "summary": "Rename Conversation"
+      }
+    },
+    "/api/conversations/{conversation_id}/fork": {
+      "post": {
+        "operationId": "fork_conversation_api_conversations__conversation_id__fork_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForkRequest"
+              }
+            }
           },
-          "403": {
+          "required": true
+        },
+        "responses": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ConversationSummary"
                 }
               }
             },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "413": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Request Entity Too Large"
-          },
-          "415": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unsupported Media Type"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
+            "description": "Successful Response"
           },
           "default": {
             "content": {
@@ -1145,18 +850,14 @@
                 }
               }
             },
-            "description": "any other refusal, in the same shape: 400, 405, 500"
+            "description": "A refusal"
           }
         },
-        "summary": "Rename Conversation",
-        "tags": [
-          "conversations"
-        ]
+        "summary": "Fork Conversation"
       }
     },
     "/api/conversations/{conversation_id}/model": {
       "put": {
-        "description": "Move a conversation to another model; the conversation as it then is.\n\nIts next turn runs on that model, and so does every one after it until it\nis moved again (``docs/specs/agents.md``). **A run in flight is no reason\nto refuse**: it keeps the model it started with, which is what its answer\nrecords, and the change is what the next turn runs on.\n\nA ``PUT``, because the body is the whole of the conversation's model\nrather than a change to it.\n\n**A model the deployment does not offer is 422** (``UnknownModelError``,\nwith a fixed sentence naming the field), as it is for a new chat: the\nmodel is the one value this route takes, and a 404 at a path that names\na conversation would read as the conversation not being there.\n\n**The model is checked first**, before the conversation is looked up, as\na rename checks its title: nothing is read for a value that is refused\nanyway. So a model the deployment does not offer is 422 whatever the\nconversation -- one that is not there and one that is somebody else's\nincluded -- which says nothing about the conversation, because the answer\ndoes not depend on it. With a model that is offered, a conversation that\nis not there, or not this person's, is the 404 every route here answers.",
         "operationId": "set_model_api_conversations__conversation_id__model_put",
         "parameters": [
           {
@@ -1191,66 +892,6 @@
             },
             "description": "Successful Response"
           },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "413": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Request Entity Too Large"
-          },
-          "415": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unsupported Media Type"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
           "default": {
             "content": {
               "application/json": {
@@ -1259,19 +900,15 @@
                 }
               }
             },
-            "description": "any other refusal, in the same shape: 400, 405, 500"
+            "description": "A refusal"
           }
         },
-        "summary": "Set Model",
-        "tags": [
-          "conversations"
-        ]
+        "summary": "Set Model"
       }
     },
     "/api/conversations/{conversation_id}/runs/{run_id}/cancel": {
       "post": {
-        "description": "Stop the run answering in that conversation; the run as it then is.\n\n**Asking is not the same as having happened.** A run this process is\nexecuting is cancelled by cancelling its work, and the end is written a\nmoment later under a shield, so what comes back may still say ``running``;\na client learns that it ended from the run's own stream, or by opening the\nconversation again. A run no process here is executing -- after a restart\n-- is ended in the store instead, and comes back ``cancelled``. A run that\nhas already ended is not an error (``docs/specs/runs.md``).\n\nThe URL names both the conversation and the run, and the application\nchecks that the run is that conversation's: a run of another conversation\nanswers exactly like a run that does not exist, as one of somebody else's\ndoes.",
-        "operationId": "cancel_run_api_conversations__conversation_id__runs__run_id__cancel_post",
+        "operationId": "cancel_turn_api_conversations__conversation_id__runs__run_id__cancel_post",
         "parameters": [
           {
             "in": "path",
@@ -1295,75 +932,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RunView"
-                }
-              }
-            },
+          "204": {
             "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "413": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Request Entity Too Large"
-          },
-          "415": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unsupported Media Type"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
           },
           "default": {
             "content": {
@@ -1373,19 +943,14 @@
                 }
               }
             },
-            "description": "any other refusal, in the same shape: 400, 405, 500"
+            "description": "A refusal"
           }
         },
-        "summary": "Cancel Run",
-        "tags": [
-          "conversations",
-          "runs"
-        ]
+        "summary": "Cancel Turn"
       }
     },
     "/api/models": {
       "get": {
-        "description": "The models a conversation of this deployment may run on, for the picker.\n\nThe id to pick one by and the title to show. Nothing about the provider\nit is reached through or the vendor's name for it, which are the\noperator's (``docs/specs/agents.md``). Every agent's default is among\nthem, because a deployment that configured it otherwise does not start\n(``application.Turns``).\n\n**In configuration order**, as the agents are: the operator wrote the\nlist, so the order they wrote it in is the one thing about its order that\nmeans something -- and it is the same on every request, so a picker does\nnot reshuffle. A client that wants them sorted by title sorts them.\n\nDeclared rather than injected, and fixed at start-up, for the reasons\n``list_agents`` gives.",
         "operationId": "list_models_api_models_get",
         "responses": {
           "200": {
@@ -1398,26 +963,6 @@
             },
             "description": "Successful Response"
           },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
           "default": {
             "content": {
               "application/json": {
@@ -1426,53 +971,19 @@
                 }
               }
             },
-            "description": "any other refusal, in the same shape: 400, 405, 500"
+            "description": "A refusal"
           }
         },
-        "summary": "List Models",
-        "tags": [
-          "models"
-        ]
+        "summary": "List Models"
       }
     },
     "/auth/logout": {
       "post": {
-        "description": "End the session, if there is one, and clear its cookie.\n\nIdempotent: signing out twice, or without ever having signed in, is 204\nboth times. The cookie is cleared either way, so a browser holding one\nthat no longer names a session stops sending it.",
         "operationId": "sign_out_auth_logout_post",
         "responses": {
           "204": {
             "description": "Successful Response"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "413": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Request Entity Too Large"
-          },
-          "415": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Unsupported Media Type"
-          },
           "default": {
             "content": {
               "application/json": {
@@ -1481,19 +992,15 @@
                 }
               }
             },
-            "description": "any other refusal, in the same shape: 400, 405, 500"
+            "description": "A refusal"
           }
         },
-        "summary": "Sign Out",
-        "tags": [
-          "auth"
-        ]
+        "summary": "Sign Out"
       }
     },
     "/auth/session": {
       "get": {
-        "description": "Whether sign-in is configured, the providers, and who is signed in.\n\nThe interface asks this first and on every reload. It answers 200 to\neverybody: an expired cookie and no cookie at all are both ``user: null``.",
-        "operationId": "read_session_auth_session_get",
+        "operationId": "current_session_auth_session_get",
         "responses": {
           "200": {
             "content": {
@@ -1504,34 +1011,19 @@
               }
             },
             "description": "Successful Response"
-          }
-        },
-        "summary": "Read Session",
-        "tags": [
-          "auth"
-        ]
-      }
-    },
-    "/health": {
-      "get": {
-        "description": "Liveness, for a load balancer or a deployment script.\n\nPublic, and deliberately empty of everything else: it says that this\nprocess is answering, and nothing about the database, the providers or\nanybody signed in. A health endpoint that read the database would be a\nway to ask about the database without signing in.",
-        "operationId": "health_health_get",
-        "responses": {
-          "200": {
+          },
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "A refusal"
           }
         },
-        "summary": "Health",
-        "tags": [
-          "health"
-        ]
+        "summary": "Current Session"
       }
     }
   }

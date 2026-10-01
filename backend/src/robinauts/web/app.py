@@ -4,38 +4,48 @@
 """The web shell: the routes of ``docs/architecture/web.md`` over a controller, and the UI.
 
 No sign-in yet: every request runs as one local user, named after the operating
-system's. A controller operation that is not implemented answers 501.
+system's. A controller operation that is not implemented answers 501. The shapes are the
+ones the frontend reads (``docs/specs/wire.md``); a turn's stream is AG-UI over SSE, and
+its run id is the conversation id.
 """
 
 from __future__ import annotations
 
-import dataclasses
 import getpass
-import json
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Literal
 
-from fastapi import FastAPI, Request
-from fastapi.encoders import jsonable_encoder
+from fastapi import FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from robinauts.controller.contract.domain import (
     ControllerError,
+    Conversation,
     ConversationNotFoundError,
     Identity,
     InvalidValueError,
+    Message,
     MessageNotFoundError,
     NoActiveTurnError,
+    NumberedEvent,
+    OpenedConversation,
+    ReasoningPart,
+    Role,
+    TextPart,
+    ToolCallPart,
+    ToolResultPart,
     TurnActiveError,
     UnknownAgentError,
     UnknownModelError,
-    User,
 )
 from robinauts.controller.contract.ports import Controller
+from robinauts.web import agui
 
 LOCAL_PROVIDER = "local"
 DEFAULT_PAGE = 30
@@ -51,48 +61,246 @@ STATUS_OF: dict[type[ControllerError], int] = {
 }
 
 
-def local_user() -> User:
-    """The one user of a local start: the operating system's, under a stable id."""
-    identity = Identity(provider=LOCAL_PROVIDER, subject=getpass.getuser())
-    return User(
-        id=uuid.uuid5(uuid.NAMESPACE_URL, f"robinauts:{identity.provider}:{identity.subject}"),
-        provider=identity.provider,
-        subject=identity.subject,
-        name=identity.subject,
-    )
+def local_identity() -> Identity:
+    """The one user of a local start: the operating system's."""
+    subject = getpass.getuser()
+    return Identity(provider=LOCAL_PROVIDER, subject=subject, name=subject)
 
 
-def as_data(value: Any) -> Any:
-    """A record of the contract as the JSON the frontend reads."""
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        value = dataclasses.asdict(value)
-    return jsonable_encoder(value)
+# --- what the frontend reads ---------------------------------------------------
+
+
+class ErrorResponse(BaseModel):
+    error: str
+    detail: str
+
+
+class ProviderSummary(BaseModel):
+    id: str
+    title: str
+
+
+class UserSummary(BaseModel):
+    id: uuid.UUID
+    name: str | None = None
+    email: str | None = None
+    provider: str
+
+
+class SessionResponse(BaseModel):
+    sign_in: bool
+    local_development: bool = False
+    public_url: str | None = None
+    providers: list[ProviderSummary] = []
+    user: UserSummary | None = None
+
+
+class AgentSummary(BaseModel):
+    id: str
+    title: str
+    engine: str
+    model: str
+
+
+class AgentListResponse(BaseModel):
+    items: list[AgentSummary]
+
+
+class ModelSummary(BaseModel):
+    id: str
+    title: str
+
+
+class ModelListResponse(BaseModel):
+    items: list[ModelSummary]
+
+
+class ConversationSummary(BaseModel):
+    id: uuid.UUID
+    title: str
+    agent: str
+    model: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationListResponse(BaseModel):
+    items: list[ConversationSummary]
+    next_cursor: str | None
+
+
+class TextContent(BaseModel):
+    kind: Literal["text"]
+    text: str
+
+
+class ToolCallContent(BaseModel):
+    kind: Literal["tool_call"]
+    call_id: str
+    name: str
+    arguments: dict[str, object]
+
+
+class ToolResultContent(BaseModel):
+    kind: Literal["tool_result"]
+    call_id: str
+    text: str
+    is_error: bool
+
+
+class ProvenanceView(BaseModel):
+    agent: str
+    engine: str
+    model: str
+    run_id: uuid.UUID
+
+
+class MessageView(BaseModel):
+    id: uuid.UUID
+    role: Literal["assistant", "user", "tool"]
+    channel: Literal["web"]
+    created_at: datetime
+    parts: list[TextContent | ToolCallContent | ToolResultContent]
+    provenance: ProvenanceView | None
+
+
+class ResumeView(BaseModel):
+    after: int
+    follows: uuid.UUID | None
+
+
+class EndedBadlyView(BaseModel):
+    run_id: uuid.UUID
+    state: Literal["cancelled", "failed", "interrupted"]
+    ended_at: datetime
+
+
+class OpenedConversationResponse(BaseModel):
+    conversation: ConversationSummary
+    messages: list[MessageView]
+    run_id: uuid.UUID | None
+    resume: ResumeView | None
+    ended_badly: EndedBadlyView | None
 
 
 class RenameRequest(BaseModel):
     title: str
 
 
+class SetModelRequest(BaseModel):
+    model_id: str
+
+
 class ForkRequest(BaseModel):
     at_message: uuid.UUID
 
 
-class StartRequest(BaseModel):
-    agent: str
-    model: str
+class NewChatRequest(BaseModel):
+    agent_id: str
+    model_id: str | None = None
     text: str
 
 
 class TurnRequest(BaseModel):
-    model: str
     text: str | None = None
     parent_id: uuid.UUID | None = None
     regenerate: uuid.UUID | None = None
+    model_id: str | None = None
+
+
+def summary(conversation: Conversation, model: str) -> ConversationSummary:
+    return ConversationSummary(
+        id=conversation.id,
+        title=conversation.title,
+        agent=conversation.agent,
+        model=model,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+    )
+
+
+def content(part: TextPart | ToolCallPart | ToolResultPart) -> BaseModel:
+    if isinstance(part, ToolCallPart):
+        return ToolCallContent(
+            kind="tool_call", call_id=part.call_id, name=part.name, arguments=dict(part.arguments)
+        )
+    if isinstance(part, ToolResultPart):
+        return ToolResultContent(
+            kind="tool_result", call_id=part.call_id, text=part.text, is_error=part.is_error
+        )
+    return TextContent(kind="text", text=part.text)
+
+
+def message_view(message: Message, conversation: Conversation) -> MessageView:
+    provenance = None
+    if message.role is Role.ASSISTANT:
+        provenance = ProvenanceView(
+            agent=message.agent or conversation.agent,
+            engine="",
+            model=message.model or "",
+            run_id=conversation.id,
+        )
+    return MessageView(
+        id=message.id,
+        role=message.role.value,
+        channel="web",
+        created_at=message.created_at,
+        parts=[content(p) for p in message.parts if not isinstance(p, ReasoningPart)],
+        provenance=provenance,
+    )
+
+
+def model_of(opened: OpenedConversation, default: str) -> str:
+    """A conversation's model is its last message's; the agent's default before any."""
+    return next((m.model for m in reversed(opened.messages) if m.model), default)
+
+
+def opened_view(opened: OpenedConversation, default: str) -> OpenedConversationResponse:
+    conversation = opened.conversation
+    # The turn stores its one answer when it ends, so a watcher that has the thread
+    # attaches at the start of the turn's events.
+    active = opened.active
+    return OpenedConversationResponse(
+        conversation=summary(conversation, model_of(opened, default)),
+        messages=[message_view(m, conversation) for m in opened.messages],
+        run_id=None if active is None else conversation.id,
+        resume=None if active is None else ResumeView(after=0, follows=active.follows),
+        ended_badly=None,
+    )
+
+
+def event_stream(
+    conversation_id: uuid.UUID, events: AsyncIterator[NumberedEvent]
+) -> StreamingResponse:
+    run_id = str(conversation_id)
+    return StreamingResponse(
+        agui.stream(run_id, events),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+            "X-Robinauts-Run-Id": run_id,
+            "X-Robinauts-Conversation-Id": run_id,
+        },
+    )
 
 
 def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI:
-    app = FastAPI(title="Robinauts", docs_url=None, redoc_url=None)
-    user = local_user()
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        await controller.open()
+        app.state.user = await controller.ensure_user(local_identity())
+        yield
+        await controller.close()
+
+    app = FastAPI(
+        lifespan=lifespan,
+        title="Robinauts",
+        version="0",
+        docs_url=None,
+        redoc_url=None,
+        responses={"default": {"model": ErrorResponse, "description": "A refusal"}},
+    )
 
     @app.exception_handler(NotImplementedError)
     async def not_implemented(request: Request, exc: NotImplementedError) -> JSONResponse:
@@ -103,25 +311,34 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
         status = next((s for cls, s in STATUS_OF.items() if isinstance(exc, cls)), 500)
         return JSONResponse({"error": type(exc).__name__, "detail": str(exc)}, status_code=status)
 
-    @app.on_event("startup")
-    async def opened() -> None:
-        await controller.open()
+    async def default_model(agent: str) -> str:
+        return next(a.default_model for a in await controller.list_agents() if a.id == agent)
 
-    @app.on_event("shutdown")
-    async def closed() -> None:
-        await controller.close()
+    async def watched(conversation_id: uuid.UUID, after: int) -> StreamingResponse:
+        events = controller.watch_turn(app.state.user, conversation_id, after=after)
+        # The refusals happen inside the generator: ask for the first event here, so that
+        # they answer with a status rather than a broken stream.
+        first = await anext(events, None)
+
+        async def chained() -> AsyncIterator[NumberedEvent]:
+            if first is None:
+                return
+            yield first
+            async for event in events:
+                yield event
+
+        return event_stream(conversation_id, chained())
 
     # --- sign-in: none yet ----------------------------------------------------
 
     @app.get("/auth/session")
-    async def current_session() -> dict[str, Any]:
-        return {
-            "sign_in": False,
-            "local_development": True,
-            "public_url": None,
-            "providers": [],
-            "user": as_data(user),
-        }
+    async def current_session() -> SessionResponse:
+        user = app.state.user
+        return SessionResponse(
+            sign_in=False,
+            local_development=True,
+            user=UserSummary(id=user.id, name=user.name, email=user.email, provider=user.provider),
+        )
 
     @app.post("/auth/logout", status_code=204)
     async def sign_out() -> None:
@@ -130,81 +347,109 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
     # --- catalogue -------------------------------------------------------------
 
     @app.get("/api/agents")
-    async def list_agents() -> dict[str, Any]:
-        return {"items": as_data(await controller.list_agents())}
+    async def list_agents() -> AgentListResponse:
+        agents = await controller.list_agents()
+        return AgentListResponse(
+            items=[
+                AgentSummary(id=a.id, title=a.title, engine="", model=a.default_model)
+                for a in agents
+            ]
+        )
 
     @app.get("/api/models")
-    async def list_models() -> dict[str, Any]:
-        return {"items": as_data(await controller.list_models())}
+    async def list_models() -> ModelListResponse:
+        models = await controller.list_models()
+        return ModelListResponse(items=[ModelSummary(id=m.id, title=m.title) for m in models])
 
     # --- conversations ---------------------------------------------------------
 
     @app.get("/api/conversations")
-    async def list_conversations(limit: int = DEFAULT_PAGE, cursor: str | None = None) -> Any:
-        page = await controller.list_conversations(user, limit=limit, cursor=cursor)
-        return {"items": as_data(page.conversations), "next_cursor": page.cursor}
+    async def list_conversations(
+        limit: int = DEFAULT_PAGE, cursor: str | None = None
+    ) -> ConversationListResponse:
+        page = await controller.list_conversations(app.state.user, limit=limit, cursor=cursor)
+        defaults = {a.id: a.default_model for a in await controller.list_agents()}
+        return ConversationListResponse(
+            items=[summary(c, defaults[c.agent]) for c in page.conversations],
+            next_cursor=page.cursor,
+        )
 
     @app.get("/api/conversations/{conversation_id}")
-    async def open_conversation(conversation_id: uuid.UUID) -> Any:
-        return as_data(await controller.open_conversation(user, conversation_id))
+    async def open_conversation(conversation_id: uuid.UUID) -> OpenedConversationResponse:
+        opened = await controller.open_conversation(app.state.user, conversation_id)
+        return opened_view(opened, await default_model(opened.conversation.agent))
 
     @app.patch("/api/conversations/{conversation_id}")
-    async def rename_conversation(conversation_id: uuid.UUID, body: RenameRequest) -> Any:
-        return as_data(await controller.rename_conversation(user, conversation_id, body.title))
+    async def rename_conversation(
+        conversation_id: uuid.UUID, body: RenameRequest
+    ) -> ConversationSummary:
+        renamed = await controller.rename_conversation(app.state.user, conversation_id, body.title)
+        return summary(renamed, await default_model(renamed.agent))
 
     @app.delete("/api/conversations/{conversation_id}", status_code=204)
     async def delete_conversation(conversation_id: uuid.UUID) -> None:
-        await controller.delete_conversation(user, conversation_id)
+        await controller.delete_conversation(app.state.user, conversation_id)
+
+    @app.put("/api/conversations/{conversation_id}/model")
+    async def set_model(conversation_id: uuid.UUID, body: SetModelRequest) -> ConversationSummary:
+        # The model goes with each turn now: this stores nothing, and answers the
+        # conversation as the picker will send its next turn.
+        opened = await controller.open_conversation(app.state.user, conversation_id)
+        moved = summary(opened.conversation, body.model_id)
+        moved.updated_at = datetime.now(UTC)
+        return moved
 
     @app.post("/api/conversations/{conversation_id}/fork", status_code=201)
-    async def fork_conversation(conversation_id: uuid.UUID, body: ForkRequest) -> Any:
+    async def fork_conversation(
+        conversation_id: uuid.UUID, body: ForkRequest
+    ) -> ConversationSummary:
         forked = await controller.fork_conversation(
-            user, conversation_id, at_message=body.at_message
+            app.state.user, conversation_id, at_message=body.at_message
         )
-        return as_data(forked)
+        return summary(forked, await default_model(forked.agent))
 
-    # --- turns -----------------------------------------------------------------
+    # --- turns: AG-UI over SSE, outside the OpenAPI document -------------------
 
-    @app.post("/api/turns", status_code=201)
-    async def start_conversation(body: StartRequest) -> Any:
+    @app.post("/api/turns", include_in_schema=False)
+    async def start_conversation(body: NewChatRequest) -> StreamingResponse:
+        model = body.model_id or await default_model(body.agent_id)
         started = await controller.start_conversation(
-            user, agent=body.agent, model=body.model, text=body.text
+            app.state.user, agent=body.agent_id, model=model, text=body.text
         )
-        return as_data(started)
+        return await watched(started.conversation_id, 0)
 
-    @app.post("/api/conversations/{conversation_id}/turns", status_code=201)
-    async def send_message(conversation_id: uuid.UUID, body: TurnRequest) -> Any:
+    @app.post("/api/conversations/{conversation_id}/turns", include_in_schema=False)
+    async def send_message(conversation_id: uuid.UUID, body: TurnRequest) -> StreamingResponse:
+        opened = await controller.open_conversation(app.state.user, conversation_id)
+        model = body.model_id or model_of(opened, await default_model(opened.conversation.agent))
         if body.regenerate is not None:
-            started = await controller.regenerate_answer(
-                user, conversation_id, question_id=body.regenerate, model=body.model
-            )
-        elif body.text is not None and body.parent_id is not None:
-            started = await controller.send_message(
-                user, conversation_id, parent_id=body.parent_id, model=body.model, text=body.text
+            # The frontend names the answer to produce again; the controller, its question.
+            at = next(i for i, m in enumerate(opened.messages) if m.id == body.regenerate)
+            question = next(m for m in reversed(opened.messages[: at + 1]) if m.role is Role.USER)
+            await controller.regenerate_answer(
+                app.state.user, conversation_id, question_id=question.id, model=model
             )
         else:
-            raise InvalidValueError("a turn is text under a parent, or a regeneration")
-        return as_data(started)
+            await controller.send_message(
+                app.state.user,
+                conversation_id,
+                parent_id=body.parent_id,
+                model=model,
+                text=body.text,
+            )
+        return await watched(conversation_id, 0)
 
-    @app.post("/api/conversations/{conversation_id}/cancel", status_code=204)
-    async def cancel_turn(conversation_id: uuid.UUID) -> None:
-        await controller.cancel_turn(user, conversation_id)
+    @app.get("/api/runs/{run_id}/events", include_in_schema=False)
+    async def watch_turn(
+        run_id: uuid.UUID,
+        after: int | None = None,
+        last_event_id: str | None = Header(default=None),
+    ) -> StreamingResponse:
+        return await watched(run_id, after if after is not None else int(last_event_id or 0))
 
-    @app.get("/api/conversations/{conversation_id}/events")
-    async def watch_turn(conversation_id: uuid.UUID, after: int = 0) -> StreamingResponse:
-        events = controller.watch_turn(user, conversation_id, after=after)
-        # The refusals happen inside the generator: ask for the first event here, so that
-        # they answer with a status rather than a broken stream.
-        first = await anext(events, None)
-
-        async def lines() -> AsyncIterator[bytes]:
-            if first is None:
-                return
-            yield json.dumps(as_data(first)).encode() + b"\n"
-            async for event in events:
-                yield json.dumps(as_data(event)).encode() + b"\n"
-
-        return StreamingResponse(lines(), media_type="application/x-ndjson")
+    @app.post("/api/conversations/{conversation_id}/runs/{run_id}/cancel", status_code=204)
+    async def cancel_turn(conversation_id: uuid.UUID, run_id: uuid.UUID) -> None:
+        await controller.cancel_turn(app.state.user, conversation_id)
 
     # --- the interface ---------------------------------------------------------
 

@@ -403,7 +403,9 @@ export function Shell({
             key={chat}
             conversationId={current}
             agentId={agentId}
-            modelId={modelId}
+            // The model goes with every turn: an open conversation's is the
+            // one its line's picker shows.
+            modelId={current === null ? modelId : conversationModel}
             // A first message refused for its model: this browser forgets
             // it, whether or not the list has come, and asks for the list
             // again, so the next one goes to a model still offered.
