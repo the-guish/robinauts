@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 
 from robinauts.agent_engines.contract.ports import AgentEngine, installed
 from robinauts.controller.contract.domain import (
@@ -55,7 +56,18 @@ class RobinautsController(Controller):
         self._engines = {}
 
     async def ensure_user(self, identity: Identity) -> User:
-        raise NotImplementedError("ensure_user")
+        user = await self._store.user_by_identity(identity.provider, identity.subject)
+        if user is None:
+            user = User(
+                id=uuid.uuid4(),
+                provider=identity.provider,
+                subject=identity.subject,
+                name=identity.name,
+                email=identity.email,
+                created_at=datetime.now(UTC),
+            )
+            await self._store.add_user(user)
+        return user
 
     async def list_agents(self) -> tuple[AgentListing, ...]:
         raise NotImplementedError("list_agents")

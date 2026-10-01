@@ -33,7 +33,6 @@ from robinauts.controller.contract.domain import (
     TurnActiveError,
     UnknownAgentError,
     UnknownModelError,
-    User,
 )
 from robinauts.controller.contract.ports import Controller
 
@@ -51,15 +50,10 @@ STATUS_OF: dict[type[ControllerError], int] = {
 }
 
 
-def local_user() -> User:
-    """The one user of a local start: the operating system's, under a stable id."""
-    identity = Identity(provider=LOCAL_PROVIDER, subject=getpass.getuser())
-    return User(
-        id=uuid.uuid5(uuid.NAMESPACE_URL, f"robinauts:{identity.provider}:{identity.subject}"),
-        provider=identity.provider,
-        subject=identity.subject,
-        name=identity.subject,
-    )
+def local_identity() -> Identity:
+    """The one user of a local start: the operating system's."""
+    subject = getpass.getuser()
+    return Identity(provider=LOCAL_PROVIDER, subject=subject, name=subject)
 
 
 def as_data(value: Any) -> Any:
@@ -92,7 +86,6 @@ class TurnRequest(BaseModel):
 
 def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title="Robinauts", docs_url=None, redoc_url=None)
-    user = local_user()
 
     @app.exception_handler(NotImplementedError)
     async def not_implemented(request: Request, exc: NotImplementedError) -> JSONResponse:
@@ -106,6 +99,7 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
     @app.on_event("startup")
     async def opened() -> None:
         await controller.open()
+        app.state.user = await controller.ensure_user(local_identity())
 
     @app.on_event("shutdown")
     async def closed() -> None:
@@ -120,7 +114,7 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
             "local_development": True,
             "public_url": None,
             "providers": [],
-            "user": as_data(user),
+            "user": as_data(app.state.user),
         }
 
     @app.post("/auth/logout", status_code=204)
@@ -141,25 +135,27 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
 
     @app.get("/api/conversations")
     async def list_conversations(limit: int = DEFAULT_PAGE, cursor: str | None = None) -> Any:
-        page = await controller.list_conversations(user, limit=limit, cursor=cursor)
+        page = await controller.list_conversations(app.state.user, limit=limit, cursor=cursor)
         return {"items": as_data(page.conversations), "next_cursor": page.cursor}
 
     @app.get("/api/conversations/{conversation_id}")
     async def open_conversation(conversation_id: uuid.UUID) -> Any:
-        return as_data(await controller.open_conversation(user, conversation_id))
+        return as_data(await controller.open_conversation(app.state.user, conversation_id))
 
     @app.patch("/api/conversations/{conversation_id}")
     async def rename_conversation(conversation_id: uuid.UUID, body: RenameRequest) -> Any:
-        return as_data(await controller.rename_conversation(user, conversation_id, body.title))
+        return as_data(
+            await controller.rename_conversation(app.state.user, conversation_id, body.title)
+        )
 
     @app.delete("/api/conversations/{conversation_id}", status_code=204)
     async def delete_conversation(conversation_id: uuid.UUID) -> None:
-        await controller.delete_conversation(user, conversation_id)
+        await controller.delete_conversation(app.state.user, conversation_id)
 
     @app.post("/api/conversations/{conversation_id}/fork", status_code=201)
     async def fork_conversation(conversation_id: uuid.UUID, body: ForkRequest) -> Any:
         forked = await controller.fork_conversation(
-            user, conversation_id, at_message=body.at_message
+            app.state.user, conversation_id, at_message=body.at_message
         )
         return as_data(forked)
 
@@ -168,7 +164,7 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
     @app.post("/api/turns", status_code=201)
     async def start_conversation(body: StartRequest) -> Any:
         started = await controller.start_conversation(
-            user, agent=body.agent, model=body.model, text=body.text
+            app.state.user, agent=body.agent, model=body.model, text=body.text
         )
         return as_data(started)
 
@@ -176,11 +172,15 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
     async def send_message(conversation_id: uuid.UUID, body: TurnRequest) -> Any:
         if body.regenerate is not None:
             started = await controller.regenerate_answer(
-                user, conversation_id, question_id=body.regenerate, model=body.model
+                app.state.user, conversation_id, question_id=body.regenerate, model=body.model
             )
         elif body.text is not None and body.parent_id is not None:
             started = await controller.send_message(
-                user, conversation_id, parent_id=body.parent_id, model=body.model, text=body.text
+                app.state.user,
+                conversation_id,
+                parent_id=body.parent_id,
+                model=body.model,
+                text=body.text,
             )
         else:
             raise InvalidValueError("a turn is text under a parent, or a regeneration")
@@ -188,11 +188,11 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
 
     @app.post("/api/conversations/{conversation_id}/cancel", status_code=204)
     async def cancel_turn(conversation_id: uuid.UUID) -> None:
-        await controller.cancel_turn(user, conversation_id)
+        await controller.cancel_turn(app.state.user, conversation_id)
 
     @app.get("/api/conversations/{conversation_id}/events")
     async def watch_turn(conversation_id: uuid.UUID, after: int = 0) -> StreamingResponse:
-        events = controller.watch_turn(user, conversation_id, after=after)
+        events = controller.watch_turn(app.state.user, conversation_id, after=after)
         # The refusals happen inside the generator: ask for the first event here, so that
         # they answer with a status rather than a broken stream.
         first = await anext(events, None)
