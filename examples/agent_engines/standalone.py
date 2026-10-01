@@ -5,7 +5,7 @@
 
 The ``main.py`` of `agent-framework-examples
 <https://github.com/the-guish/agent-framework-examples>`_, as the platform
-would write it against ``robinauts.legacy.ports.agent_engine.AgentEngine``: the
+would write it against ``robinauts.agent_engines.contract.ports.AgentEngine``: the
 same two questions -- the warmer of three cities, then the coolest, which
 only the memory can answer -- through each engine in turn.
 
@@ -28,31 +28,26 @@ import os
 import uuid
 from collections.abc import AsyncIterator, Callable
 
-from robinauts.legacy.domain import (
+from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
     Done,
-    Engine,
     Event,
     TextDelta,
     ToolCall,
     ToolResult,
 )
-from robinauts.legacy.ports.agent_engine import AgentEngine
+from robinauts.agent_engines.contract.ports import AgentEngine
 
-# Filled in the day an adapter implements the port:
-#   "langgraph": LangGraphEngine (robinauts.legacy.adapters.agents.langgraph),
-#   "pydantic-ai": PydanticAIEngine (robinauts.legacy.adapters.agents.pydantic_ai).
+# Filled in the day an engine implements the port:
+#   "langchain": init_langchain (robinauts.agent_engines.langchain_engine),
+#   "pydantic-ai": init_pydantic_ai (robinauts.agent_engines.pydantic_ai_engine).
 ENGINES: dict[str, Callable[[], AgentEngine]] = {}
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5")
 TURN_SECONDS = 120.0
 
 AGENT = AgentDefinition(
-    id="weather",
-    title="Weather",
     system_prompt="",
-    model=MODEL,
-    engine=Engine.LANGGRAPH,
     # The weather tool of the examples would be an MCP server named here.
     tools=(),
 )
