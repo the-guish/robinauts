@@ -37,7 +37,17 @@ from typing import Any
 from robinauts.domain.conversation import MAX_PART_CHARS
 from robinauts.domain.errors import InvalidValueError
 from robinauts.domain.tools import checked_call_id, checked_tool_name
-from robinauts.domain.values import checked_data, checked_fragment, describe
+from robinauts.domain.values import checked_data, checked_fragment, checked_line, describe
+
+MAX_CHECKPOINT_ID_CHARS = 256
+"""How long the id of a checkpoint an engine hands back may be.
+
+Opaque to the platform, which stores it on the answer that ended the turn
+and hands it back to the same engine, and bounded because it is written
+into a message's document (``robinauts.ports.agent_engine``). Generous for
+what the engines use -- a LangGraph checkpoint id is a 36-character UUID, a
+Pydantic AI snapshot id is one the adapter mints -- and a bound all the same.
+"""
 
 MAX_ENGINE_STATE_BYTES = 64 * 1024 * 1024
 """How big the state a framework hands back may be.
@@ -127,21 +137,36 @@ class ToolResult:
 
 @dataclass(frozen=True, slots=True)
 class Done:
-    """The turn is over. ``text`` is the final answer; ``state`` is the memory.
+    """The turn is over. ``text`` is the final answer; the rest names the memory after it.
 
     ``text`` is what ``ask`` returns in the examples, and what the transcript
     stores of the last answer when nothing of it was streamed (``docs/specs/agents.md``).
-    ``state`` is the conversation as the framework keeps it after this turn,
-    serialised by the framework's own means; ``None`` for an adapter that
-    keeps nothing, which is a conversation with no memory. The platform
-    stores it on the run and never reads it.
+
+    ``checkpoint_id`` is for the ``AgentEngine`` port
+    (``robinauts.ports.agent_engine``): the engine's own id for the memory as
+    it is at the end of this turn, which the platform stores on the answer,
+    never reads, and hands back to the same engine to continue after or to
+    fork at. ``None`` for an engine that keeps no memory.
+
+    ``state`` is for the ``Agent`` port it replaces (``robinauts.ports.agents``):
+    the conversation as the framework keeps it after this turn, serialised by
+    the framework's own means, which the platform stores on the run and
+    never reads; ``None`` for an adapter that keeps nothing. It goes with
+    that port.
     """
 
     text: str
     state: bytes | None = None
+    checkpoint_id: str | None = None
 
     def __post_init__(self) -> None:
         checked_fragment(self.text, "an answer's text", MAX_PART_CHARS)
+        if self.checkpoint_id is not None:
+            if not isinstance(self.checkpoint_id, str) or not self.checkpoint_id:
+                raise InvalidValueError(
+                    f"a checkpoint id is non-empty text, not {describe(self.checkpoint_id)}"
+                )
+            checked_line(self.checkpoint_id, "a checkpoint id", MAX_CHECKPOINT_ID_CHARS)
         if self.state is not None:
             if not isinstance(self.state, bytes):
                 raise InvalidValueError(f"a framework's state is bytes, not {describe(self.state)}")

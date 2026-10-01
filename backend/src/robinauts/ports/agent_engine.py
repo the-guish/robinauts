@@ -8,22 +8,50 @@ is until this one is settled (``docs/working-notes/adapter-persistence-plan.md``
 What changes is who keeps the conversation. Under the old port the framework
 hands its memory back as bytes at the end of every turn and is handed them
 again at the next; under this one **the engine keeps its conversations
-itself**, in storage of its own, and the platform knows a conversation by its
-id and nothing else. That is the contract `agent-framework-examples
+itself**, in storage of its own, and the platform keeps of the memory one
+thing: the id of a checkpoint, an opaque token the engine hands back when a
+turn finishes, stored on the answer that ended the turn. That is the contract
+`agent-framework-examples
 <https://github.com/the-guish/agent-framework-examples>`_ reached on
-``feature/event-streaming-b``: an ``AgentBackend`` is one conversation in one
-framework, its framework keeps the state between turns in storage the backend
-owns, and the caller's record names the backend, the model and the
-conversation id -- and nothing of the state.
+``feature/event-streaming-b`` -- an ``AgentBackend`` is one conversation in
+one framework, its framework keeps the state between turns in storage the
+backend owns, and the caller's record names the backend, the model and the
+conversation id -- with one addition, so that a conversation can be forked
+and a turn can be continued from where the platform knows it stands.
 
 **An engine is more than an agent.** It runs the operator's agents, one turn
 at a time; it keeps every conversation those turns build, in its framework's
 own format, in tables of its own in the deployment's one database, from the
 moment the platform creates one until the platform deletes it; it copies one
-into another at the end of a turn, which is a fork; it reaches the model
+into another at a checkpoint, which is a fork; it reaches the model
 providers its framework has a client for; and it releases what a turn
 opened. An ``AgentDefinition`` -- the system prompt and the tool servers --
 is what it is handed to run a turn *with*; the engine is what runs it.
+
+**A checkpoint is the memory at the end of a finished turn, and nothing
+else.** A turn makes whatever intermediate state its framework makes -- a
+LangGraph checkpoint per step, a history after each model call -- and none of
+it is the platform's business: none of it is stored by the platform, named by
+the platform, or kept by the engine past the turn on the platform's account.
+The one point the platform knows is the end of a turn, which the engine names
+in ``Done.checkpoint_id``. What the id is, is the engine's: LangGraph's own
+checkpoint id for the checkpoint the turn ended on, as it is; an id the
+Pydantic AI adapter mints for the snapshot of the history it wrote. The
+platform stores it as bounded text (``domain.MAX_CHECKPOINT_ID_CHARS``),
+never parses it, and hands it back to the engine that produced it and to no
+other. An engine keeps, for every checkpoint id it handed back, enough to
+give that memory back, for as long as the conversation exists or a retention
+rule says otherwise.
+
+**The platform says where a turn continues from.** ``stream`` is handed the
+checkpoint of the conversation's last stored answer, and the turn continues
+from that memory, whatever else the engine holds for the conversation. So
+when the engine finished a turn and the platform never received it -- a
+crash between the engine's write and the platform's -- the next turn does not
+continue from the orphan: the engine continues from the checkpoint it was
+given, and whatever it holds past it is partial progress the platform never
+had, which the engine may discard. The transcript is the authority on where
+a conversation stands; the engine never assumes "the latest".
 
 **A conversation is created on purpose, and never by a turn.** ``create``
 is the one call that makes a conversation exist in the engine; ``stream``
@@ -44,16 +72,16 @@ it, ``stream``, whose generator releases on its way out. One object per
 engine, built once by the composition root and shared by every conversation,
 as the old port's was.
 
-**What crosses.** In: the **conversation** by its id; the **agent** as the
-operator has it now, read afresh every turn; the **prompt**, the text of the
-question being answered; the **model**, by the platform's id for it, which is
-the run's and not the agent's; and the **run** by its id, which the engine
-writes on what the turn leaves so that a fork can name the turn. Out:
-``domain.events`` -- more text, more thinking, a tool call, its result, and
-``Done`` with the final answer -- which carry no ids of the platform's, no
-times and no provenance. **No memory crosses**, in either direction. Ids
-cross one way, in, as keys: the engine keeps things under them and hands
-nothing back by them.
+**What crosses.** In: the **conversation** by its id; the **checkpoint** to
+continue from, by its id, or none for a conversation's first turn; the
+**agent** as the operator has it now, read afresh every turn; the **prompt**,
+the text of the question being answered; the **model**, by the platform's id
+for it, which is the run's and not the agent's. Out: ``domain.events`` --
+more text, more thinking, a tool call, its result, and ``Done`` with the
+final answer and the new checkpoint's id -- which carry no ids of the
+platform's, no times and no provenance. **No memory crosses**, in either
+direction: a checkpoint id is a name for one, handed out by the engine and
+handed back as it was.
 
 **The framework owns the loop, the context and the memory** (ADR 0005). The
 model asks for a tool, the framework calls it, the result goes back and the
@@ -64,34 +92,36 @@ framework's own history. The platform keeps a transcript for people and never
 feeds the model from it; the engine never reads the transcript.
 
 **The memory is the engine's, where the engine keeps it.** Written as the
-turn goes, by the framework's own means or the engine's: a checkpoint per
-step, or the history after the run. Deleted with the conversation
-(``forget``). Never inspected, exported or migrated by the platform: the
-transcript is the durable record, the memory is the framework's cache of it,
-and an engine that cannot read what it once wrote reports a failed turn rather
-than reading it as nothing.
+turn goes, by the framework's own means or the engine's. Deleted with the
+conversation (``forget``). Never inspected, exported or migrated by the
+platform: the transcript is the durable record, the memory is the framework's
+cache of it, and an engine that cannot read what it once wrote reports a
+failed turn rather than reading it as nothing.
 
-**Forking is copying the memory as it was at the end of a turn** (``fork``;
-``docs/specs/conversations.md``, "Forking"). The platform names the turn by
-its run, which every answer of the transcript records, and the engine makes
-the new conversation exist with that memory and nothing after it. So an
-engine keeps, for every turn it finished, enough to give that memory back
--- the checkpoint the turn ended on, a snapshot of the history -- and for
-how long is the engine's, until a retention rule is written. A turn that did
-not end is not a turn a fork can name: the platform knows no finished run
-for it, and the engine kept nothing a fork could use.
+**Forking is copying the memory as it was at a checkpoint** (``fork``;
+``docs/specs/conversations.md``, "Forking"). The platform names the
+checkpoint from the answer the person forked from, and the engine makes the
+new conversation exist with that memory and nothing after it. **The
+source's earlier checkpoints stay valid in the fork**: the platform copies
+the transcript up to the answer, checkpoint ids and all, so the engine copies
+the memories those ids name along with the one forked at, under the same
+ids, and the fork can then be continued, forked or cut back at any of them
+exactly as the source could. The two are independent from then on.
 
 **How a turn ends.**
 
 - normally: the last event is ``Done``, once, with every call the turn
-  announced answered. What the turn said is in the memory before ``Done`` is
-  yielded, so a conversation whose turn finished is remembered whatever the
-  platform then does with the transcript.
+  announced answered and the id of the checkpoint the turn ended on. The
+  checkpoint is written before ``Done`` is yielded, so a conversation whose
+  turn finished is remembered whatever the platform then does with the
+  transcript -- and if the platform does nothing with it, the id is never
+  stored, and the next turn is told to continue from the one before.
 - by **raising**: any exception ends the turn. The application records the run
   ``failed`` with a description of what was raised and leaves the message that
   was in flight uncompleted. An engine yields nothing after an error, and
   **what the turn said is not in the memory the next turn runs with**: the
-  conversation resumes from the memory it had.
+  next turn continues from the checkpoint it is given, which is the one the
+  platform had.
 - by **cancellation**: the application cancels the task the iteration runs in,
   and closes the stream. An engine must not swallow ``CancelledError``; it
   lets it through, and what it holds -- the framework's run, the HTTP
@@ -99,26 +129,28 @@ for it, and the engine kept nothing a fork could use.
   ``finally`` of the generator, which closing runs. The same promise about the
   memory holds as for a turn that raised.
 
-**Every refusal, and its error**, the same two the conversation store uses
+**Every refusal, and its error**, the same ones the conversation store uses
 for the same mistakes (``robinauts.ports.conversations``):
 
-- a conversation created twice: ``InvalidValueError``, as an id already
-  stored is -- a bug in the caller, not something to overwrite;
-- a turn of a conversation that was not created, or was forgotten:
-  ``ConversationNotFoundError``, raised where the stream is iterated;
-- a fork from a conversation that was not created, or forgotten:
-  ``ConversationNotFoundError``; onto one already created:
-  ``InvalidValueError``; after a run this engine finished no turn for:
-  ``RunNotFoundError``;
+- a conversation created twice, or forked onto one already created:
+  ``InvalidValueError``, as an id already stored is -- a bug in the caller,
+  not something to overwrite;
+- a turn of, or a fork from, a conversation that was not created or was
+  forgotten: ``ConversationNotFoundError``, raised where the stream is
+  iterated for a turn;
+- a checkpoint id the engine does not hold for that conversation -- another
+  conversation's, a turn that did not finish, another engine's, since
+  forgotten: ``CheckpointNotFoundError``, raised where the stream is iterated
+  for a turn, and nothing is done with it;
 - forgetting what is not there: nothing. Deleting is idempotent.
 
 **What is not here.** How an engine is built (the composition root's
 business: the pool, the models, the keys, the servers and their secrets, and a
-storage kind for the tests); cutting a conversation back to an earlier turn in
-place (rewind), which is a fork onto the same id and comes with the feature
-that needs it; and a turn that suspends on a tool call and resumes, which
-stands on the per-step memory this port allows and changes the promise above
-for one run state when it comes.
+storage kind for the tests); cutting a conversation back in place, which is
+a turn continued from an earlier checkpoint and needs nothing more of the
+port; and a turn that suspends on a tool call and resumes, which stands on
+the per-step state this port leaves to the engine and changes the promise
+above for one run state when it comes.
 
 The contract suite every engine is held to is to be
 ``backend/tests/contracts/agent_engines.py``, and the order it holds them to
@@ -205,12 +237,12 @@ class AgentEngine(ABC):
     async def exists(self, conversation_id: uuid.UUID) -> bool:
         """Whether this engine has that conversation.
 
-        True from ``create`` until ``forget``, whether or not a turn has run;
-        false for one never created here, which is what a conversation moved
-        to this engine from another looks like, and what a create that failed
-        half way leaves. Asked and answered on its own, not inside ``stream``,
-        so that the application can say in the log that a memory is missing
-        before it answers without one.
+        True from ``create`` or ``fork`` until ``forget``, whether or not a
+        turn has run; false for one never created here, which is what a
+        conversation moved to this engine from another looks like, and what
+        a create that failed half way leaves. Asked and answered on its own,
+        not inside ``stream``, so that the application can say in the log
+        that a memory is missing before it answers without one.
         """
         raise NotImplementedError
 
@@ -222,14 +254,28 @@ class AgentEngine(ABC):
         prompt: str,
         *,
         model: str,
-        run_id: uuid.UUID,
+        checkpoint_id: str | None,
     ) -> AsyncGenerator[Event, None]:
         """Send ``prompt`` as the next turn of that conversation and yield the turn's events.
 
-        ``conversation_id`` names a conversation ``create`` made, whose
-        memory the turn continues and extends. **A turn creates nothing**:
-        one the engine does not have is ``ConversationNotFoundError``, raised
-        where the stream is iterated, and nothing is written for it.
+        ``conversation_id`` names a conversation ``create`` or ``fork`` made.
+        **A turn creates nothing**: one the engine does not have is
+        ``ConversationNotFoundError``, raised where the stream is iterated,
+        and nothing is written for it.
+
+        ``checkpoint_id`` is where the turn continues from: the id the
+        engine handed back with the conversation's last stored answer, as
+        the platform has it on that answer, or ``None`` for a conversation
+        with no answer yet -- its first turn, or one moved to this engine
+        from another. The turn runs on the memory as it was at that
+        checkpoint and on nothing the engine may hold past it: a turn the
+        engine finished and the platform never recorded is partial progress
+        the platform never had, and the engine may discard it on this call
+        or later, as it likes. An id this engine does not hold for the
+        conversation is ``CheckpointNotFoundError``, raised where the stream
+        is iterated, and nothing is written. The engine is not asked to
+        remember what the last checkpoint was: the platform tells it, every
+        turn.
 
         ``agent`` is the definition as the operator has it now: its system
         prompt is sent with every request and never enters the memory, so
@@ -244,13 +290,14 @@ class AgentEngine(ABC):
         (``domain.UnknownModelError``), raised where the stream is iterated,
         like any other.
 
-        ``run_id`` is the platform's id for this turn (``domain.Run.id``).
-        The engine writes it on whatever the turn leaves in the memory --
-        the checkpoints it wrote, the snapshot it took at the end -- and
-        that is all it does with it: it is the name ``fork`` will know the
-        turn by, and the one id of the platform's an engine ever keeps. Two
-        turns of one conversation never share a run id; the platform makes
-        sure of it.
+        The turn ends with ``Done``, whose ``checkpoint_id`` is the engine's
+        id for the memory as it now is -- after the question, the loop and
+        the answer -- written before ``Done`` is yielded. The platform stores
+        it on the answer and will hand it back here, as ``checkpoint_id``,
+        for the next turn, and to ``fork``. It is never the one that was
+        given: a turn that ran made a new checkpoint. ``None`` only from an
+        engine that keeps no memory, which the platform then continues with
+        ``None`` as well.
 
         Not a coroutine: it hands back the stream, which is then iterated.
         Nothing is done here -- building the model, listing the tools,
@@ -281,6 +328,44 @@ class AgentEngine(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def fork(
+        self, source_id: uuid.UUID, target_id: uuid.UUID, *, checkpoint_id: str
+    ) -> None:
+        """Make ``target_id`` exist here with ``source_id``'s memory as it was at that checkpoint.
+
+        ``create`` and a copy in one: afterwards ``exists(target_id)`` is
+        true, its memory is what the source's was at ``checkpoint_id`` -- the
+        answer that checkpoint ended on included, nothing of any later turn
+        -- and the two are independent: a turn of either writes nothing the
+        other reads, and forgetting either leaves the other whole. The source
+        is not changed.
+
+        ``checkpoint_id`` is the id on the answer the person forked from
+        (``domain.Provenance``), handed back by this engine when that turn
+        finished. Not held here for the source -- another conversation's, a
+        turn that did not finish, since forgotten: ``CheckpointNotFoundError``,
+        and nothing is made.
+
+        **The source's checkpoints up to that one are valid in the target
+        afterwards, under the same ids.** The platform copies the transcript
+        up to the answer into the target, the ids on its answers included,
+        and a fork is then a conversation like any other: its first turn
+        continues from ``checkpoint_id``, and it can be forked, or continued
+        from an earlier answer, at any id a copied answer carries. The engine
+        copies what those ids name along with the memory forked at; what it
+        holds for the source past the checkpoint is not copied.
+
+        Called after the platform's record of the target is stored, as
+        ``create`` is, and with the source's turn over: a fork taken while
+        the source has a turn running copies a memory that is still being
+        written, so the application refuses the request until the run has
+        ended. ``source_id`` not created here, or forgotten:
+        ``ConversationNotFoundError``. ``target_id`` already created here:
+        ``InvalidValueError``, and its memory stays as it was.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     async def forget(self, conversation_id: uuid.UUID) -> None:
         """Delete whatever this engine keeps for that conversation.
 
@@ -293,42 +378,11 @@ class AgentEngine(ABC):
         here, it does nothing and raises nothing: deleting is idempotent, as a
         retry needs it to be.
 
+        A fork of the conversation is untouched: what was copied into it is
+        its own.
+
         Must not be called while a turn of the conversation is running; the
         application ends the run first, as it does before deleting the
         record.
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    async def fork(
-        self, source_id: uuid.UUID, target_id: uuid.UUID, *, after_run_id: uuid.UUID
-    ) -> None:
-        """Make ``target_id`` exist here with ``source_id``'s memory as it was after that run.
-
-        ``create`` and a copy in one: afterwards ``exists(target_id)`` is
-        true, its memory is what the source's was when the turn of
-        ``after_run_id`` finished -- that turn's answer included, nothing of
-        any later turn -- and the two are independent: a turn of either
-        writes nothing the other reads, and forgetting either leaves the
-        other whole. The source is not changed.
-
-        ``after_run_id`` is the run of the turn to copy up to, as the
-        platform recorded it on the answer the person forked from
-        (``domain.Provenance.run_id``); the engine knows it from the
-        ``run_id`` that turn's ``stream`` was given. Only a finished turn can
-        be named: a run this engine finished no turn for -- it never ran
-        here, it raised, it was cancelled -- is ``RunNotFoundError``, and
-        nothing is made. Forking at the latest turn is this with the latest
-        finished run; there is no "as of now", because what the engine holds
-        past the last run the platform recorded is nothing the platform can
-        name.
-
-        Called after the platform's record of the target is stored, as
-        ``create`` is, and with the source's turn over: a fork taken while
-        the source has a turn running copies a memory that is still being
-        written, so the application refuses the request until the run has
-        ended. ``source_id`` not created here, or forgotten:
-        ``ConversationNotFoundError``. ``target_id`` already created here:
-        ``InvalidValueError``, and its memory stays as it was.
         """
         raise NotImplementedError

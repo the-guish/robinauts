@@ -101,6 +101,17 @@ class RunNotFoundError(NotFoundError):
     """No run of that id, or none in this person's conversation."""
 
 
+class CheckpointNotFoundError(NotFoundError):
+    """No checkpoint of that id in that conversation, for the engine asked.
+
+    A checkpoint id is the engine's own, handed back at the end of a turn
+    and stored on the answer (``robinauts.ports.agent_engine``). One the
+    engine does not hold for the conversation -- another conversation's, a
+    turn that did not finish, another engine's, or one since forgotten -- is
+    this, and nothing is done with it.
+    """
+
+
 class UnknownAgentError(NotFoundError):
     """No agent of that id is configured in this deployment.
 

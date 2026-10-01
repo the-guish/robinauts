@@ -75,6 +75,7 @@ from robinauts.api.logs import shown
 from robinauts.domain import (
     MAX_LOGGED,
     AuthenticationError,
+    CheckpointNotFoundError,
     ConfigError,
     ConversationNotFoundError,
     CrossSiteRequestError,
@@ -270,6 +271,7 @@ STATUS_OF: dict[type[RobinautsError], int] = {
     # same body, not merely the same status (see `error_body`), so that an id
     # cannot be probed for existence.
     NotFoundError: 404,
+    CheckpointNotFoundError: 404,
     ConversationNotFoundError: 404,
     MessageNotFoundError: 404,
     RunNotFoundError: 404,

@@ -69,6 +69,7 @@ from robinauts.domain.errors import (
     DB_INIT_COMMAND,
     REDACTED,
     AuthenticationError,
+    CheckpointNotFoundError,
     ConfigError,
     ConversationNotFoundError,
     CrossSiteRequestError,
@@ -103,6 +104,7 @@ from robinauts.domain.errors import (
     without_secrets,
 )
 from robinauts.domain.events import (
+    MAX_CHECKPOINT_ID_CHARS,
     MAX_ENGINE_STATE_BYTES,
     Done,
     Event,
@@ -217,6 +219,7 @@ __all__ = [
     "Event",
     "Done",
     "MAX_CONTEXT_WINDOW",
+    "MAX_CHECKPOINT_ID_CHARS",
     "MAX_ENGINE_STATE_BYTES",
     "ACTIVE_RUN_STATES",
     "DB_INIT_COMMAND",
@@ -283,6 +286,7 @@ __all__ = [
     "CallCompleted",
     "CallStarted",
     "Channel",
+    "CheckpointNotFoundError",
     "ConfigError",
     "Conversation",
     "ConversationNotFoundError",
