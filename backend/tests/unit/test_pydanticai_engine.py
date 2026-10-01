@@ -15,7 +15,9 @@ from openai import AsyncOpenAI
 from pydantic_ai import Agent
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.test import TestModel
 
+from contracts.engine import EngineMemoryContract
 from robinauts.agent_engines.contract.domain import (
     ModelConfig,
     ModelProviderConfig,
@@ -24,12 +26,14 @@ from robinauts.agent_engines.contract.domain import (
     UnknownModelError,
 )
 from robinauts.agent_engines.contract.ports import (
+    AgentEngine,
     EngineSettings,
     ProviderKeyLookup,
     StorageConfig,
     StorageKind,
     ToolSecretLookup,
 )
+from robinauts.agent_engines.pydantic_ai_engine import engine as engine_module
 from robinauts.agent_engines.pydantic_ai_engine.clients import chat_model
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
 
@@ -114,3 +118,17 @@ def test_the_engine_answers_the_four_kinds_and_turns_tracing_off(
     assert engine.kinds() == frozenset(ProviderKind)
     assert Agent._instrument_default is False
     assert pydantic_ai.BANNER_ENABLED is False
+
+
+class TestPydanticAIEngineMemory(EngineMemoryContract):
+    @pytest.fixture(autouse=True)
+    def scripted_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        model = TestModel(custom_output_text="An answer.")
+        monkeypatch.setattr(engine_module, "chat_model", lambda *_: (model, {}))
+
+    async def new_engine(self) -> AgentEngine:
+        engine = PydanticAIEngine(
+            settings_for(ProviderKind.ANTHROPIC), StorageConfig(StorageKind.IN_MEMORY, {})
+        )
+        await engine.setup()
+        return engine
