@@ -21,12 +21,27 @@ and a turn can be continued from where the platform knows it stands.
 
 **An engine is more than an agent.** It runs the operator's agents, one turn
 at a time; it keeps every conversation those turns build, in its framework's
-own format, in tables of its own in the deployment's one database, from the
-moment the platform creates one until the platform deletes it; it copies one
-into another at a checkpoint, which is a fork; it reaches the model
-providers its framework has a client for; and it releases what a turn
-opened. An ``AgentDefinition`` -- the system prompt and the tool servers --
-is what it is handed to run a turn *with*; the engine is what runs it.
+own format, in storage of its own, from the moment the platform creates one
+until the platform deletes it; it copies one into another at a checkpoint,
+which is a fork; it reaches the model providers its framework has a client
+for; and it releases what a turn opened. An ``AgentDefinition`` -- the
+system prompt and the tool servers -- is what it is handed to run a turn
+*with*; the engine is what runs it.
+
+**An engine is standalone.** What it imports of the platform is this port
+and what crosses it -- the events, the definition, the errors -- and
+nothing else; what it is handed to build on is a **storage**, as the
+examples' backends are handed a store and its kind: a connection pool to a
+PostgreSQL, under which it keeps tables of its own; a folder, under which it
+keeps files of its own; or nothing, for a test, and it keeps everything in
+memory. It opens that storage with its own driver, makes it ready itself
+(``setup``), and names no table of the platform's: the platform's schema is
+the platform's, the engine's is the engine's, nothing cascades from one to
+the other, and ``forget`` is the one way a conversation leaves an engine.
+The platform never applies an engine's DDL, never reads its tables, and is
+never imported by one. Which storage an engine is built on is the
+composition root's choice and not part of this port, as the examples' store
+factory is not part of theirs.
 
 **A checkpoint is the memory at the end of a finished turn, and nothing
 else.** A turn makes whatever intermediate state its framework makes -- a
@@ -202,45 +217,41 @@ class AgentEngine(ABC):
         """
         return frozenset()
 
-    @classmethod
-    def schema_sql(cls) -> str:
-        """The SQL that creates this engine's tables, or empty for an engine that needs none.
+    @abstractmethod
+    async def setup(self) -> None:
+        """Make the storage this engine was built on ready for it.
 
-        An engine keeps its conversations in tables of its own in the
-        deployment's one database (``docs/specs/backend.md``). It ships the
-        DDL for them here, and ``robinauts db init`` applies it after the
-        platform's own file, in the same transaction and under the same pin,
-        so that a database is complete or it is nothing. The server never
-        applies it.
+        The tables under the pool, the folder on the disk, whatever the
+        engine's own persistence needs before the first conversation: the
+        engine makes it with its own driver, as the examples' LangChain
+        backend sets up its checkpointer's database. **Idempotent**, so that
+        it can be called at every start-up and by a command alike, and a
+        storage that is already ready is left as it is. Nothing of the
+        platform's is touched: an engine's tables are named so that two
+        engines never collide in one database, and none of them references a
+        table of the platform's.
 
-        What the DDL must keep to: names prefixed with the engine's, so that
-        two engines never collide in one schema; no schema named, so that the
-        whole thing lands wherever ``search_path`` points; and every table
-        keyed by the conversation, with ``conversation_id uuid NOT NULL
-        REFERENCES conversations (id) ON DELETE CASCADE`` -- the one place an
-        engine names a table of the platform's -- so that a conversation
-        purged below the application takes its memory with it. ``forget`` is
-        the application's way; the cascade is the database's backstop.
-
-        A class method, so that the command can read it without building an
-        engine, which would need keys it has no business asking for. The
-        same text every time it is asked: it is read once by the command and
-        once by the pin, and the two must agree.
+        Called by whoever built the engine, before anything else of this
+        port, once the storage exists: the composition root after it opened
+        the pool, a standalone process after it opened its own, a test after
+        it chose memory, for which there is nothing to do. When it is called
+        -- at start-up, or by an operator's command and never by a server --
+        is the deployment's rule and not the engine's.
         """
-        return ""
+        raise NotImplementedError
 
     @abstractmethod
     async def create(self, conversation_id: uuid.UUID) -> None:
         """Make that conversation exist in this engine, with no memory yet.
 
         The one way a conversation comes to exist here. Called by the
-        application when it creates the platform's record, **after** that
-        record is stored: the engine's tables reference it, and a create for
-        a conversation the platform does not have is the database's refusal
-        (``ConversationNotFoundError``). If this call fails after the record
-        was stored, the platform holds a conversation this engine does not
-        know, which ``exists`` says and the application mends by calling this
-        again before the first turn; nothing is answered into it meanwhile.
+        application when it creates the platform's record, after that record
+        is stored, so that an engine never holds a conversation the platform
+        does not; the engine knows nothing of that record and checks nothing
+        about it. If this call fails after the record was stored, the
+        platform holds a conversation this engine does not know, which
+        ``exists`` says and the application mends by calling this again
+        before the first turn; nothing is answered into it meanwhile.
 
         Also what the application calls when an agent has been moved to this
         engine and a conversation of it arrives with a transcript and no
@@ -422,14 +433,18 @@ class AgentEngine(ABC):
     async def forget(self, conversation_id: uuid.UUID) -> None:
         """Delete whatever this engine keeps for that conversation.
 
-        Called when the conversation is deleted, before the platform's own
-        record goes (``docs/specs/privacy.md``): if this fails, nothing is
-        deleted and the person is told; if the record's deletion then fails,
-        a conversation this engine no longer has is left, which ``exists``
-        says and no turn can run into, and nothing is left behind unowned.
-        Called again for a conversation that is already gone, or was never
-        here, it does nothing and raises nothing: deleting is idempotent, as a
-        retry needs it to be.
+        **The one way a conversation leaves an engine.** Nothing cascades
+        into an engine's storage from the platform's, so a purge or a
+        retention run that deletes the platform's record without calling
+        this leaves the memory behind; the application calls it for every
+        way a conversation goes. Called when the conversation is deleted,
+        before the platform's own record goes (``docs/specs/privacy.md``): if
+        this fails, nothing is deleted and the person is told; if the
+        record's deletion then fails, a conversation this engine no longer
+        has is left, which ``exists`` says and no turn can run into, and
+        nothing is left behind unowned. Called again for a conversation that
+        is already gone, or was never here, it does nothing and raises
+        nothing: deleting is idempotent, as a retry needs it to be.
 
         A fork of the conversation is untouched: what was copied into it is
         its own.
