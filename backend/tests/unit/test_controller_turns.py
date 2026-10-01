@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from aio import asyncio_test
+from robinauts.controller.composition import build
 from robinauts.controller.contract.domain import (
     AgentConfig,
     ArgumentsPiece,
@@ -27,7 +28,7 @@ from robinauts.controller.contract.domain import (
     TurnEnded,
     TurnState,
 )
-from robinauts.controller.controller import RobinautsController
+from robinauts.controller.contract.ports import Controller
 
 CONFIG = Config(
     providers={"echo": ProviderConfig("echo", ProviderKind.ANTHROPIC, "ECHO_API_KEY")},
@@ -38,10 +39,8 @@ CONFIG = Config(
 )
 
 
-async def opened() -> RobinautsController:
-    controller = RobinautsController(
-        CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get
-    )
+async def opened() -> Controller:
+    controller = build(CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
     await controller.open()
     return controller
 

@@ -14,8 +14,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from robinauts.controller.composition import build
 from robinauts.controller.contract.domain import Config, StorageConfig, StorageKind
-from robinauts.controller.controller import RobinautsController
 from robinauts.web.app import create_app
 
 SNAPSHOT = Path(__file__).resolve().parents[2] / "openapi.json"
@@ -25,9 +25,7 @@ REGENERATE = "scripts/update-openapi.sh"
 
 def written() -> str:
     """The snapshot's one spelling, the one ``scripts/update-openapi.sh`` writes."""
-    controller = RobinautsController(
-        Config(), storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get
-    )
+    controller = build(Config(), storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
     return json.dumps(create_app(controller).openapi(), indent=2, sort_keys=True) + "\n"
 
 

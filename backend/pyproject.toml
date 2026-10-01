@@ -193,3 +193,250 @@ norecursedirs = [
     "live",
 ]
 
+
+# ---------------------------------------------------------------------------
+# Layer rules. docs/architecture/rules.md says them; these enforce them.
+# Anything not allowed is forbidden. `legacy` keeps its old homes for the
+# third-party libraries until it is removed.
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_package = "robinauts"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "agent_engines imports nothing from robinauts outside itself"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.agent_engines"]
+forbidden_modules = ["robinauts.controller", "robinauts.web", "robinauts.legacy"]
+
+[[tool.importlinter.contracts]]
+name = "the engines' contract imports no engine"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.agent_engines.contract"]
+forbidden_modules = [
+    "robinauts.agent_engines.echo_engine",
+    "robinauts.agent_engines.langchain_engine",
+    "robinauts.agent_engines.pydantic_ai_engine",
+]
+
+[[tool.importlinter.contracts]]
+name = "no engine imports another"
+type = "independence"
+modules = [
+    "robinauts.agent_engines.echo_engine",
+    "robinauts.agent_engines.langchain_engine",
+    "robinauts.agent_engines.pydantic_ai_engine",
+]
+
+[[tool.importlinter.contracts]]
+name = "controller imports only the engines' contract of the engines"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.controller"]
+forbidden_modules = [
+    "robinauts.agent_engines.echo_engine",
+    "robinauts.agent_engines.langchain_engine",
+    "robinauts.agent_engines.pydantic_ai_engine",
+    "robinauts.web",
+    "robinauts.legacy",
+]
+
+[[tool.importlinter.contracts]]
+name = "the controller's contract imports nothing from robinauts"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.controller.contract"]
+forbidden_modules = [
+    "robinauts.controller.ports",
+    "robinauts.controller.adapters",
+    "robinauts.controller.application",
+    "robinauts.controller.composition",
+    "robinauts.agent_engines",
+]
+
+[[tool.importlinter.contracts]]
+name = "controller.ports imports only the controller's contract"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.controller.ports"]
+forbidden_modules = [
+    "robinauts.controller.adapters",
+    "robinauts.controller.application",
+    "robinauts.controller.composition",
+    "robinauts.agent_engines",
+]
+
+[[tool.importlinter.contracts]]
+name = "controller.adapters imports only the contract and the ports"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.controller.adapters"]
+forbidden_modules = [
+    "robinauts.controller.application",
+    "robinauts.controller.composition",
+    "robinauts.agent_engines",
+]
+
+[[tool.importlinter.contracts]]
+name = "controller.application imports the contract, the ports and the engines' contract"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.controller.application"]
+forbidden_modules = ["robinauts.controller.adapters", "robinauts.controller.composition"]
+
+[[tool.importlinter.contracts]]
+name = "composition is imported by web alone"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = [
+    "robinauts.controller.contract",
+    "robinauts.controller.ports",
+    "robinauts.controller.adapters",
+    "robinauts.controller.application",
+    "robinauts.agent_engines",
+]
+forbidden_modules = ["robinauts.controller.composition"]
+
+[[tool.importlinter.contracts]]
+name = "web imports only the controller's contract and composition"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.web"]
+forbidden_modules = [
+    "robinauts.controller.ports",
+    "robinauts.controller.adapters",
+    "robinauts.controller.application",
+    "robinauts.agent_engines",
+    "robinauts.legacy",
+]
+
+[[tool.importlinter.contracts]]
+name = "legacy imports nothing of the new layers"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.legacy"]
+forbidden_modules = ["robinauts.agent_engines", "robinauts.controller", "robinauts.web"]
+
+# --- third-party libraries: where each may be imported ----------------------
+# The source is the whole package, so a module added tomorrow is inside the
+# rule; the places that may import a library are written as exceptions.
+# `unmatched_ignore_imports_alerting = "none"`: an exception that matches
+# nothing (a client not installed, a module not written yet) leaves the rule
+# stricter, never looser.
+
+[[tool.importlinter.contracts]]
+name = "LangChain, LangGraph, its provider clients and langsmith only under langchain_engine"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts"]
+forbidden_modules = [
+    "langgraph",
+    "langchain",
+    "langchain_core",
+    "langchain_anthropic",
+    "langchain_openai",
+    "langchain_google_genai",
+    "langchain_aws",
+    "langchain_mcp_adapters",
+    "langsmith",
+]
+ignore_imports = [
+    "robinauts.agent_engines.langchain_engine -> *",
+    "robinauts.agent_engines.langchain_engine.** -> *",
+    "robinauts.legacy.adapters.agents.langgraph -> *",
+    "robinauts.legacy.adapters.agents.langgraph.** -> *",
+]
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "Pydantic AI, fastmcp, logfire and OpenTelemetry only under pydantic_ai_engine"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts"]
+forbidden_modules = [
+    "pydantic_ai",
+    "pydantic_graph",
+    "fastmcp",
+    "logfire",
+    "logfire_api",
+    "opentelemetry",
+]
+ignore_imports = [
+    "robinauts.agent_engines.pydantic_ai_engine -> *",
+    "robinauts.agent_engines.pydantic_ai_engine.** -> *",
+    "robinauts.legacy.adapters.agents.pydantic_ai -> *",
+    "robinauts.legacy.adapters.agents.pydantic_ai.** -> *",
+]
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "the Anthropic SDK, the OpenAI SDK and the MCP SDK only under the two framework engines"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts"]
+forbidden_modules = ["anthropic", "openai", "mcp"]
+ignore_imports = [
+    "robinauts.agent_engines.langchain_engine -> *",
+    "robinauts.agent_engines.langchain_engine.** -> *",
+    "robinauts.agent_engines.pydantic_ai_engine -> *",
+    "robinauts.agent_engines.pydantic_ai_engine.** -> *",
+    "robinauts.legacy.adapters.agents.langgraph -> *",
+    "robinauts.legacy.adapters.agents.langgraph.** -> *",
+    "robinauts.legacy.adapters.agents.pydantic_ai -> *",
+    "robinauts.legacy.adapters.agents.pydantic_ai.** -> *",
+]
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "database drivers only under the two framework engines and controller.adapters"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts"]
+forbidden_modules = ["asyncpg", "sqlite3", "aiosqlite"]
+ignore_imports = [
+    "robinauts.agent_engines.langchain_engine -> *",
+    "robinauts.agent_engines.langchain_engine.** -> *",
+    "robinauts.agent_engines.pydantic_ai_engine -> *",
+    "robinauts.agent_engines.pydantic_ai_engine.** -> *",
+    "robinauts.controller.adapters -> *",
+    "robinauts.controller.adapters.** -> *",
+    "robinauts.legacy.datastore -> *",
+    "robinauts.legacy.datastore.** -> *",
+]
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "httpx only under web and the two framework engines"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts"]
+forbidden_modules = ["httpx"]
+ignore_imports = [
+    "robinauts.web -> *",
+    "robinauts.web.** -> *",
+    "robinauts.agent_engines.langchain_engine -> *",
+    "robinauts.agent_engines.langchain_engine.** -> *",
+    "robinauts.agent_engines.pydantic_ai_engine -> *",
+    "robinauts.agent_engines.pydantic_ai_engine.** -> *",
+    "robinauts.legacy.adapters -> *",
+    "robinauts.legacy.adapters.** -> *",
+]
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "FastAPI, Starlette, uvicorn and ag_ui only under web"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts"]
+forbidden_modules = ["fastapi", "starlette", "uvicorn", "ag_ui"]
+ignore_imports = [
+    "robinauts.web -> *",
+    "robinauts.web.** -> *",
+    "robinauts.legacy.api -> *",
+    "robinauts.legacy.api.** -> *",
+    "robinauts.legacy.app -> *",
+    "robinauts.legacy.cli -> *",
+]
+unmatched_ignore_imports_alerting = "none"

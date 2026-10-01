@@ -12,6 +12,13 @@ from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
 from robinauts.agent_engines.contract.ports import AgentEngine, installed
+from robinauts.controller.application.engines import (
+    SecretLookup,
+    build_engines,
+    engine_settings,
+    engine_storage,
+)
+from robinauts.controller.application.turns import run_turn
 from robinauts.controller.contract.domain import (
     AgentListing,
     Config,
@@ -24,37 +31,27 @@ from robinauts.controller.contract.domain import (
     OpenedConversation,
     Role,
     StorageConfig,
-    StorageKind,
     TextPart,
     TurnEnded,
     TurnStarted,
     User,
 )
 from robinauts.controller.contract.ports import Controller
-from robinauts.controller.engines import (
-    SecretLookup,
-    build_engines,
-    engine_settings,
-    engine_storage,
-)
-from robinauts.controller.memory import MemoryStore
-from robinauts.controller.store import Store
-from robinauts.controller.turns import run_turn
+from robinauts.controller.ports.store import Store
 
 
 class RobinautsController(Controller):
-    def __init__(self, config: Config, *, storage: StorageConfig, secret_for: SecretLookup) -> None:
+    def __init__(
+        self, config: Config, *, store: Store, storage: StorageConfig, secret_for: SecretLookup
+    ) -> None:
         self._config = config
+        self._store = store
         self._storage = storage
         self._secret_for = secret_for
         self._engines: dict[str, AgentEngine] = {}
-        self._store: Store
         self._turns: dict[uuid.UUID, asyncio.Task[None]] = {}
 
     async def open(self) -> None:
-        if self._storage.kind is not StorageKind.IN_MEMORY:
-            raise NotImplementedError(f"{self._storage.kind} storage")
-        self._store = MemoryStore()
         settings = engine_settings(self._config, self._secret_for)
         self._engines = await build_engines(
             self._config, settings, engine_storage(self._storage, None), installed()

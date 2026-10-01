@@ -26,10 +26,10 @@ import json
 from pathlib import Path
 
 from robinauts.controller.contract.domain import Config, StorageConfig, StorageKind
-from robinauts.controller.controller import RobinautsController
+from robinauts.controller.composition import build
 from robinauts.web.app import create_app
 
-controller = RobinautsController(
+controller = build(
     Config(), storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get
 )
 document = create_app(controller).openapi()
