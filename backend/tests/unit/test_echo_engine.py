@@ -10,6 +10,7 @@ import uuid
 import pytest
 
 from aio import asyncio_test
+from contracts.engine import EngineMemoryContract
 from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
     CheckpointNotFoundError,
@@ -21,6 +22,7 @@ from robinauts.agent_engines.contract.domain import (
     ToolCall,
     ToolResult,
 )
+from robinauts.agent_engines.contract.ports import AgentEngine
 from robinauts.agent_engines.echo_engine.engine import ANSWER, TOOL, EchoEngine
 
 AGENT = AgentDefinition(system_prompt="")
@@ -108,3 +110,8 @@ async def test_fork_carries_the_checkpoints_up_to_the_one_asked_and_forget_drops
     assert not await engine.exists(source)
     with pytest.raises(SessionNotFoundError):
         await engine.fork(source, uuid.uuid4(), checkpoint_id=first.checkpoint_id)
+
+
+class TestEchoEngineMemory(EngineMemoryContract):
+    async def new_engine(self) -> AgentEngine:
+        return EchoEngine()
