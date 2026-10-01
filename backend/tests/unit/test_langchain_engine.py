@@ -5,11 +5,15 @@
 
 from __future__ import annotations
 
+import itertools
+
 import langsmith.utils
 import pytest
 from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_openai import ChatOpenAI
 
+from contracts.engine import EngineMemoryContract
 from robinauts.agent_engines.contract.domain import (
     ModelConfig,
     ModelProviderConfig,
@@ -18,12 +22,14 @@ from robinauts.agent_engines.contract.domain import (
     UnknownModelError,
 )
 from robinauts.agent_engines.contract.ports import (
+    AgentEngine,
     EngineSettings,
     ProviderKeyLookup,
     StorageConfig,
     StorageKind,
     ToolSecretLookup,
 )
+from robinauts.agent_engines.langchain_engine import engine as engine_module
 from robinauts.agent_engines.langchain_engine.clients import chat_model
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
 
@@ -101,3 +107,17 @@ def test_the_engine_answers_the_four_kinds_and_turns_hosted_tracing_off(
     )
     assert engine.kinds() == frozenset(ProviderKind)
     assert not langsmith.utils.tracing_is_enabled()
+
+
+class TestLangChainEngineMemory(EngineMemoryContract):
+    @pytest.fixture(autouse=True)
+    def scripted_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        model = GenericFakeChatModel(messages=itertools.repeat("An answer."))
+        monkeypatch.setattr(engine_module, "chat_model", lambda *_: model)
+
+    async def new_engine(self) -> AgentEngine:
+        engine = LangChainEngine(
+            settings_for(ProviderKind.ANTHROPIC), StorageConfig(StorageKind.IN_MEMORY, {})
+        )
+        await engine.setup()
+        return engine
