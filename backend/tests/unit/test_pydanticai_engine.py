@@ -8,16 +8,34 @@ Named apart from ``test_pydantic_ai_engine.py``, which tests legacy's engine.
 
 from __future__ import annotations
 
+import asyncio
+import json
+import re
+from collections.abc import AsyncIterator
+from typing import Any
+
 import pydantic_ai
 import pytest
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 from pydantic_ai import Agent
+from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
 from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.toolsets import FunctionToolset
 
-from contracts.engine import EngineMemoryContract
+from contracts.engine import (
+    ANSWER,
+    ARGUMENTS,
+    CALL_ID,
+    EngineMemoryContract,
+    EngineTurnContract,
+    ModelFailure,
+    Script,
+    add,
+)
 from robinauts.agent_engines.contract.domain import (
     ModelConfig,
     ModelProviderConfig,
@@ -127,6 +145,44 @@ class TestPydanticAIEngineMemory(EngineMemoryContract):
         monkeypatch.setattr(engine_module, "chat_model", lambda *_: (model, {}))
 
     async def new_engine(self) -> AgentEngine:
+        engine = PydanticAIEngine(
+            settings_for(ProviderKind.ANTHROPIC), StorageConfig(StorageKind.IN_MEMORY, {})
+        )
+        await engine.setup()
+        return engine
+
+
+def scripted(script: Script) -> FunctionModel:
+    async def stream(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[Any]:
+        if script is Script.FAIL:
+            raise ModelFailure()
+        if script is Script.HANG:
+            await asyncio.sleep(3600)
+        last = messages[-1]
+        answered = isinstance(last, ModelRequest) and isinstance(last.parts[-1], ToolReturnPart)
+        if script is Script.TOOL_ROUND and not answered:
+            yield {
+                0: DeltaToolCall(name="add", json_args=json.dumps(ARGUMENTS), tool_call_id=CALL_ID)
+            }
+            return
+        for piece in re.split(r"(\s)", ANSWER):
+            yield piece
+
+    return FunctionModel(stream_function=stream)
+
+
+class TestPydanticAIEngineTurn(EngineTurnContract):
+    @pytest.fixture(autouse=True)
+    def plain_tool(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        async def toolsets_for(*_: object) -> list[Any]:
+            return [FunctionToolset([add])]
+
+        monkeypatch.setattr(engine_module, "toolsets_for", toolsets_for)
+        self.monkeypatch = monkeypatch
+
+    async def new_engine(self, script: Script) -> AgentEngine:
+        model = scripted(script)
+        self.monkeypatch.setattr(engine_module, "chat_model", lambda *_: (model, {}))
         engine = PydanticAIEngine(
             settings_for(ProviderKind.ANTHROPIC), StorageConfig(StorageKind.IN_MEMORY, {})
         )

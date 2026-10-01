@@ -5,11 +5,25 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator, Iterator
+from contextlib import aclosing
 
-from pydantic_ai import Agent
-from pydantic_ai.messages import ModelMessage
+from pydantic_ai import Agent, AgentRunResult
+from pydantic_ai.messages import (
+    AgentStreamEvent,
+    FunctionToolCallEvent,
+    FunctionToolResultEvent,
+    ModelMessage,
+    PartDeltaEvent,
+    PartStartEvent,
+    RetryPromptPart,
+    TextPart,
+    TextPartDelta,
+    ThinkingPart,
+    ThinkingPartDelta,
+)
 
 from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
@@ -17,8 +31,12 @@ from robinauts.agent_engines.contract.domain import (
     Done,
     Event,
     ProviderKind,
+    ReasoningDelta,
     SessionExistsError,
     SessionNotFoundError,
+    TextDelta,
+    ToolCall,
+    ToolResult,
 )
 from robinauts.agent_engines.contract.ports import (
     AgentEngine,
@@ -26,6 +44,7 @@ from robinauts.agent_engines.contract.ports import (
     StorageConfig,
 )
 from robinauts.agent_engines.pydantic_ai_engine.clients import chat_model, force_tracing_off
+from robinauts.agent_engines.pydantic_ai_engine.tools import toolsets_for
 
 
 class PydanticAIEngine(AgentEngine):
@@ -69,14 +88,64 @@ class PydanticAIEngine(AgentEngine):
                 raise CheckpointNotFoundError(checkpoint_id)
 
         client, model_settings = chat_model(model, self._settings)
-        runner = Agent(client, instructions=agent.system_prompt, model_settings=model_settings)
-        result = await runner.run(prompt, message_history=history)
-        new = str(uuid.uuid4())
-        checkpoints[new] = result.all_messages()
-        yield Done(text=result.output, checkpoint_id=new)
+        runner = Agent(
+            client,
+            instructions=agent.system_prompt,
+            model_settings=model_settings,
+            toolsets=await toolsets_for(agent, self._settings),
+        )
+        # The deadline bounds the run, not the caller's handling of what is yielded.
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        async with aclosing(run_of(runner, prompt, history)) as items:
+            while True:
+                async with asyncio.timeout_at(deadline):
+                    item = await anext(items, None)
+                if item is None:
+                    break
+                if isinstance(item, AgentRunResult):
+                    new = str(uuid.uuid4())
+                    checkpoints[new] = item.all_messages()
+                    yield Done(text=item.output, checkpoint_id=new)
+                else:
+                    for event in events_of(item):
+                        yield event
 
     async def fork(self, source_id: uuid.UUID, target_id: uuid.UUID, *, checkpoint_id: str) -> None:
         raise NotImplementedError("fork")
 
     async def forget(self, session_id: uuid.UUID) -> None:
         self._sessions.pop(session_id, None)
+
+
+async def run_of(
+    runner: Agent[None, str], prompt: str, history: list[ModelMessage] | None
+) -> AsyncIterator[AgentStreamEvent | AgentRunResult[str]]:
+    async with runner.iter(prompt, message_history=history) as run:
+        async for node in run:
+            if Agent.is_model_request_node(node) or Agent.is_call_tools_node(node):
+                async with node.stream(run.ctx) as events:
+                    async for event in events:
+                        yield event
+    yield run.result
+
+
+def events_of(event: AgentStreamEvent) -> Iterator[Event]:
+    if isinstance(event, PartStartEvent):
+        if isinstance(event.part, TextPart) and event.part.content:
+            yield TextDelta(event.part.content)
+        elif isinstance(event.part, ThinkingPart) and event.part.content:
+            yield ReasoningDelta(event.part.content)
+    elif isinstance(event, PartDeltaEvent):
+        if isinstance(event.delta, TextPartDelta) and event.delta.content_delta:
+            yield TextDelta(event.delta.content_delta)
+        elif isinstance(event.delta, ThinkingPartDelta) and event.delta.content_delta:
+            yield ReasoningDelta(event.delta.content_delta)
+    elif isinstance(event, FunctionToolCallEvent):
+        yield ToolCall(event.part.tool_call_id, event.part.tool_name, event.part.args_as_dict())
+    elif isinstance(event, FunctionToolResultEvent):
+        part = event.part
+        if isinstance(part, RetryPromptPart):
+            yield ToolResult(part.tool_call_id, part.tool_name or "", part.model_response(), True)
+        else:
+            output = part.model_response_str(wrap_if_error=False)
+            yield ToolResult(part.tool_call_id, part.tool_name, output, part.outcome != "success")
