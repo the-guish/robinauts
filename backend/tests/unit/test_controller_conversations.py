@@ -40,3 +40,29 @@ async def test_open_conversation_shows_the_active_turn() -> None:
     assert opened_conversation.active.follows == started.question.id
     await controller._turns[cid]
     await controller.close()
+
+
+@asyncio_test
+async def test_list_rename_and_delete_conversations() -> None:
+    controller = await opened()
+    user = await controller.ensure_user(Identity("local", "me"))
+    first = await controller.start_conversation(user, agent="echo", model="echo", text="one")
+    await controller._turns[first.conversation_id]
+    second = await controller.start_conversation(user, agent="echo", model="echo", text="two")
+    await controller._turns[second.conversation_id]
+    page = await controller.list_conversations(user, limit=10)
+    assert [c.id for c in page.conversations] == [second.conversation_id, first.conversation_id]
+
+    renamed = await controller.rename_conversation(user, first.conversation_id, "First")
+    assert renamed.title == "First"
+    page = await controller.list_conversations(user, limit=10)
+    assert [(c.id, c.title) for c in page.conversations] == [
+        (first.conversation_id, "First"),
+        (second.conversation_id, ""),
+    ]
+
+    await controller.delete_conversation(user, first.conversation_id)
+    page = await controller.list_conversations(user, limit=10)
+    assert [c.id for c in page.conversations] == [second.conversation_id]
+    assert not await controller._engines["echo"].exists(first.conversation_id)
+    await controller.close()

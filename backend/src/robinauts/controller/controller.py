@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -87,7 +88,8 @@ class RobinautsController(Controller):
     async def list_conversations(
         self, user: User, *, limit: int, cursor: str | None = None
     ) -> ConversationPage:
-        raise NotImplementedError("list_conversations")
+        conversations = await self._store.conversations_of(user.id)
+        return ConversationPage(tuple(conversations[:limit]), cursor=None)
 
     async def open_conversation(self, user: User, conversation_id: uuid.UUID) -> OpenedConversation:
         conversation = await self._store.conversation(conversation_id)
@@ -102,10 +104,16 @@ class RobinautsController(Controller):
     async def rename_conversation(
         self, user: User, conversation_id: uuid.UUID, title: str
     ) -> Conversation:
-        raise NotImplementedError("rename_conversation")
+        conversation = await self._store.conversation(conversation_id)
+        renamed = dataclasses.replace(conversation, title=title, updated_at=datetime.now(UTC))
+        await self._store.update_conversation(renamed)
+        return renamed
 
     async def delete_conversation(self, user: User, conversation_id: uuid.UUID) -> None:
-        raise NotImplementedError("delete_conversation")
+        conversation = await self._store.conversation(conversation_id)
+        engine = self._engines[self._config.agents[conversation.agent].engine]
+        await engine.forget(conversation_id)
+        await self._store.delete_conversation(conversation_id)
 
     async def fork_conversation(
         self, user: User, conversation_id: uuid.UUID, *, at_message: uuid.UUID
