@@ -18,10 +18,20 @@ conversation id -- and nothing of the state.
 
 **An engine is more than an agent.** It runs the operator's agents, one turn
 at a time; it keeps every conversation those turns build, in its framework's
-own format, in tables of its own in the deployment's one database; it reaches
-the model providers its framework has a client for; and it releases what a
-turn opened. An ``AgentDefinition`` -- the system prompt and the tool servers
--- is what it is handed to run a turn *with*; the engine is what runs it.
+own format, in tables of its own in the deployment's one database, from the
+moment the platform creates one until the platform deletes it; it reaches the
+model providers its framework has a client for; and it releases what a turn
+opened. An ``AgentDefinition`` -- the system prompt and the tool servers --
+is what it is handed to run a turn *with*; the engine is what runs it.
+
+**A conversation is created on purpose, and never by a turn.** ``create``
+is the one call that makes a conversation exist in the engine; ``stream``
+refuses one that was not created, as the examples' runner refuses to resume
+what was never stored. A turn that could create what it was asked to
+continue would let a caller with the wrong id -- a typo, a stale record, a
+conversation already deleted -- start a conversation nobody asked for and
+answer into it, and the platform would never know. The refusal is where the
+mistake is found.
 
 **Flat, not a handle.** Every call names the conversation it is about, and
 nothing of a conversation is held in the engine between calls: a run outlives
@@ -74,6 +84,15 @@ than reading it as nothing.
   response, the connections to the tool servers -- is released by the
   ``finally`` of the generator, which closing runs. The same promise about the
   memory holds as for a turn that raised.
+
+**Every refusal, and its error**, the same two the conversation store uses
+for the same mistakes (``robinauts.ports.conversations``):
+
+- a conversation created twice: ``InvalidValueError``, as an id already
+  stored is -- a bug in the caller, not something to overwrite;
+- a turn of a conversation that was not created, or was forgotten:
+  ``ConversationNotFoundError``, raised where the stream is iterated;
+- forgetting what is not there: nothing. Deleting is idempotent.
 
 **What is not here.** How an engine is built (the composition root's
 business: the pool, the models, the keys, the servers and their secrets, and a
@@ -138,19 +157,42 @@ class AgentEngine(ABC):
     """
 
     @abstractmethod
+    async def create(self, conversation_id: uuid.UUID) -> None:
+        """Make that conversation exist in this engine, with no memory yet.
+
+        The one way a conversation comes to exist here. Called by the
+        application when it creates the platform's record, **after** that
+        record is stored: the engine's tables reference it, and a create for
+        a conversation the platform does not have is the database's refusal
+        (``ConversationNotFoundError``). If this call fails after the record
+        was stored, the platform holds a conversation this engine does not
+        know, which ``exists`` says and the application mends by calling this
+        again before the first turn; nothing is answered into it meanwhile.
+
+        Also what the application calls when an agent has been moved to this
+        engine and a conversation of it arrives with a transcript and no
+        memory here (``docs/specs/agents.md``, "A conversation stays with its
+        engine"): said in the log, then created, then begun from nothing. The
+        engine is not asked to know the difference.
+
+        A conversation already created here is a bug in the caller, not
+        something to start over: ``InvalidValueError``, and the memory stays
+        as it was. What "exists with no memory" is in the engine's own terms
+        -- a row, an empty history, a thread with nothing in it -- is the
+        engine's.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     async def exists(self, conversation_id: uuid.UUID) -> bool:
-        """Whether this engine holds a memory for that conversation.
+        """Whether this engine has that conversation.
 
-        True once a turn of it has finished here and until ``forget``; false
-        for a conversation it has never run, which is what the first turn
-        finds and what a conversation moved to this engine from another
-        finds -- a transcript with messages and no memory, which the
-        application notes in the log and begins from nothing, once
-        (``docs/specs/agents.md``, "A conversation stays with its engine").
-
-        Asked and answered on its own, not inside ``stream``: a turn does not
-        need it, and the application asks before a turn so that the loss is
-        said before the question is answered without it.
+        True from ``create`` until ``forget``, whether or not a turn has run;
+        false for one never created here, which is what a conversation moved
+        to this engine from another looks like, and what a create that failed
+        half way leaves. Asked and answered on its own, not inside ``stream``,
+        so that the application can say in the log that a memory is missing
+        before it answers without one.
         """
         raise NotImplementedError
 
@@ -165,10 +207,10 @@ class AgentEngine(ABC):
     ) -> AsyncGenerator[Event, None]:
         """Send ``prompt`` as the next turn of that conversation and yield the turn's events.
 
-        ``conversation_id`` names the conversation whose memory the turn
-        continues and extends. One the engine has no memory for begins a
-        conversation; the engine creates whatever it keeps under the id and
-        asks nothing of the platform about it.
+        ``conversation_id`` names a conversation ``create`` made, whose
+        memory the turn continues and extends. **A turn creates nothing**:
+        one the engine does not have is ``ConversationNotFoundError``, raised
+        where the stream is iterated, and nothing is written for it.
 
         ``agent`` is the definition as the operator has it now: its system
         prompt is sent with every request and never enters the memory, so
@@ -218,10 +260,11 @@ class AgentEngine(ABC):
         Called when the conversation is deleted, before the platform's own
         record goes (``docs/specs/privacy.md``): if this fails, nothing is
         deleted and the person is told; if the record's deletion then fails,
-        a conversation without a memory is left, which the next turn begins
-        from nothing, and nothing is left behind unowned. Called again for a
-        conversation that is already gone, or was never here, it does nothing
-        and raises nothing: deleting is idempotent, as a retry needs it to be.
+        a conversation this engine no longer has is left, which ``exists``
+        says and no turn can run into, and nothing is left behind unowned.
+        Called again for a conversation that is already gone, or was never
+        here, it does nothing and raises nothing: deleting is idempotent, as a
+        retry needs it to be.
 
         Must not be called while a turn of the conversation is running; the
         application ends the run first, as it does before deleting the
