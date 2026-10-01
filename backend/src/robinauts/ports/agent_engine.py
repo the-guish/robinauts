@@ -39,9 +39,17 @@ memory. It opens that storage with its own driver, makes it ready itself
 the platform's, the engine's is the engine's, nothing cascades from one to
 the other, and ``forget`` is the one way a conversation leaves an engine.
 The platform never applies an engine's DDL, never reads its tables, and is
-never imported by one. Which storage an engine is built on is the
-composition root's choice and not part of this port, as the examples' store
-factory is not part of theirs.
+never imported by one.
+
+**An engine is built by a function of one signature** (``EngineFactory``),
+as the examples' backends are by their ``init_*`` functions: handed the
+**settings** every engine needs -- the models and the tool servers, and
+where to ask for a provider's key and a server's secret -- and a **storage**
+to build on, it hands back an engine. Each adapter exports one such
+function, and the composition root keeps a table of them by engine name,
+so that adding an engine is a key and a function and nothing else. Which
+storage an engine is built on is the root's choice: the storage is plain
+data, a kind and its options, as the examples' ``StorageConfig`` is.
 
 **A checkpoint is the memory at the end of a finished turn, and nothing
 else.** A turn makes whatever intermediate state its framework makes -- a
@@ -174,9 +182,8 @@ for the same mistakes (``robinauts.ports.conversations``):
   run -- resuming is for the turn that was interrupted, never for the next;
 - forgetting what is not there: nothing. Deleting is idempotent.
 
-**What is not here.** How an engine is built (the composition root's
-business: the pool, the models, the keys, the servers and their secrets, and a
-storage kind for the tests); cutting a conversation back in place, which is
+**What is not here.** The table of engines and the choice of storage,
+which are the composition root's; cutting a conversation back in place, which is
 a turn continued from an earlier checkpoint and needs nothing more of the
 port; and a turn that suspends on a tool call and resumes, which stands on
 the per-step state this port leaves to the engine and changes the promise
@@ -191,16 +198,88 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any
 
-from robinauts.domain import AgentDefinition, Event, ProviderKind
+from robinauts.domain import AgentDefinition, Event, ModelsConfig, ProviderKind
+
+
+class ProviderKeyLookup(ABC):
+    """Where an engine asks for a model provider's API key, and the one question it may ask.
+
+    A base class and not the carrier itself (``adapters.config_file.ProviderKeys``
+    is one), so that this port names nothing of the adapters and a carrier
+    keeps its promises -- it prints nothing, holds a copy, and is not
+    iterable -- wherever it is built. A test's lookup answers the same
+    question from a dict.
+    """
+
+    __slots__ = ()
+
+    @abstractmethod
+    def key_for(self, provider_id: str) -> str:
+        """The key of that provider; ``ConfigError`` if this process has none."""
+        raise NotImplementedError
+
+
+class ToolSecretLookup(ABC):
+    """Where an engine asks for a tool server's secret: ``ProviderKeyLookup`` for the servers."""
+
+    __slots__ = ()
+
+    @abstractmethod
+    def secret_for(self, server_id: str) -> str:
+        """The secret of that server; ``ConfigError`` if this process has none."""
+        raise NotImplementedError
+
+
+@dataclass(frozen=True, slots=True)
+class EngineSettings:
+    """What every engine is built with: the models and tool servers, and how to reach them.
+
+    ``models`` is the deployment's configuration of models, providers and
+    tool servers, which the engine looks a run's model up in and builds the
+    vendor's client from; ``keys`` and ``tool_secrets`` are where it asks for
+    what it may not be handed in the open. The same record for every engine,
+    because it is the platform's configuration and not a framework's.
+    """
+
+    models: ModelsConfig
+    keys: ProviderKeyLookup
+    tool_secrets: ToolSecretLookup
+
+
+class StorageKind(Enum):
+    """Where an engine keeps its conversations; what each kind needs is on ``StorageConfig``."""
+
+    POSTGRES = "postgres"
+    """Tables of the engine's own under a connection pool: ``{"pool": <the pool>}``."""
+    LOCAL = "local"
+    """Files of the engine's own under a folder: ``{"path": <the folder>}``."""
+    IN_MEMORY = "in-memory"
+    """Nothing outlives the process; for the tests. No options."""
+
+
+@dataclass(frozen=True, slots=True)
+class StorageConfig:
+    """A storage an engine is built on: a kind, and what that kind needs.
+
+    Plain data, as the examples' is: the port types none of the options,
+    which is what keeps a driver's pool and a folder's path out of the
+    contract. The engine reads the option its kind names and refuses a kind
+    it does not support, as the examples' backends do.
+    """
+
+    kind: StorageKind
+    options: Mapping[str, Any]
 
 
 class AgentEngine(ABC):
     """One agent framework as the platform sees it: runs the agents, keeps the conversations."""
 
-    @classmethod
-    def kinds(cls) -> frozenset[ProviderKind]:
+    def kinds(self) -> frozenset[ProviderKind]:
         """The model provider kinds this engine has a client for.
 
         **Not every model exists under every engine** (``docs/specs/agents.md``),
@@ -209,9 +288,9 @@ class AgentEngine(ABC):
         reach, and the composition root asks it rather than knowing: the
         configuration is then refused at start-up, naming the provider,
         instead of a person waiting for an answer from a client that was
-        never built.
+        never built. Asked of the engine the factory handed back, which
+        holds nothing yet, so building first costs nothing.
 
-        A class method, because the root asks before it builds anything.
         Empty by default, which is a test double's honest answer: a scripted
         engine reaches no provider at all.
         """
@@ -454,3 +533,15 @@ class AgentEngine(ABC):
         record.
         """
         raise NotImplementedError
+
+
+EngineFactory = Callable[[EngineSettings, StorageConfig], Awaitable[AgentEngine]]
+"""Builds an engine from the settings and a storage: what each adapter exports as its ``init_*``.
+
+The examples' ``BackendFactory``, with their per-conversation arguments gone
+to ``stream`` and their store become the storage. Awaitable, because
+building may open what the storage needs -- a file under the folder, a
+check of the pool -- before the engine exists; ``setup`` is still the
+caller's to run on what comes back. The composition root's table maps each
+engine name to one of these, and a standalone process calls one directly.
+"""
