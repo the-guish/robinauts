@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncGenerator
 
-from robinauts.agent_engines.contract.ports import AgentEngine
+from robinauts.agent_engines.contract.ports import AgentEngine, installed
 from robinauts.controller.contract.domain import (
     AgentListing,
     Config,
@@ -44,7 +44,7 @@ class RobinautsController(Controller):
             raise NotImplementedError("postgres storage")
         settings = engine_settings(self._config, self._secret_for)
         self._engines = await build_engines(
-            self._config, settings, engine_storage(self._storage, None)
+            self._config, settings, engine_storage(self._storage, None), installed()
         )
 
     async def close(self) -> None:

@@ -3,8 +3,8 @@
 
 """How the controller builds the engines its agents name, from the ones this build has.
 
-The controller names no engine: ``installed`` in the engines' contract says which there
-are, and the configuration says which to build.
+The controller names no engine: it is handed the engines this build has, by name, and
+the configuration says which to build.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from robinauts.agent_engines.contract.ports import (
     StorageConfig,
     StorageKind,
     ToolSecretLookup,
-    installed,
 )
 from robinauts.controller.contract import domain
 
@@ -105,19 +104,18 @@ async def build_engines(
     config: domain.Config,
     settings: EngineSettings,
     storage: StorageConfig,
-    factories: Mapping[str, EngineFactory] | None = None,
+    factories: Mapping[str, EngineFactory],
 ) -> dict[str, AgentEngine]:
     """The engines the agents name, built, set up, and able to reach their models' providers.
 
     ``UnknownEngineError`` for an engine this build does not have, ``UnreachableProviderError``
     for an agent whose model is on a provider kind its engine cannot reach.
     """
-    available = installed() if factories is None else factories
     engines: dict[str, AgentEngine] = {}
     for agent in config.agents.values():
         if agent.engine in engines:
             continue
-        factory = available.get(agent.engine)
+        factory = factories.get(agent.engine)
         if factory is None:
             raise domain.UnknownEngineError(
                 f"agent {agent.id!r} runs on engine {agent.engine!r}, which this build"

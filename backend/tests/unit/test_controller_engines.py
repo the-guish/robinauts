@@ -157,7 +157,7 @@ async def test_the_installed_engines_are_built_by_name() -> None:
     expected = {"langchain": LangChainEngine, "pydantic-ai": PydanticAIEngine}
     for name, cls in expected.items():
         settings = engine_settings(config(engine=name), ENV.get)
-        engines = await build_engines(config(engine=name), settings, storage)
+        engines = await build_engines(config(engine=name), settings, storage, installed())
         assert isinstance(engines[name], cls)
         assert ProviderKind.OPENAI in engines[name].kinds()
         with pytest.raises(NotImplementedError):
