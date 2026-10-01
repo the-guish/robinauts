@@ -20,3 +20,8 @@ def test_loads_the_echo_example() -> None:
 def test_loads_the_langchain_example() -> None:
     config, _ = load(EXAMPLES / "langchain.toml", {})
     assert config.agents["assistant"].engine == "langchain"
+
+
+def test_loads_the_pydantic_ai_example() -> None:
+    config, _ = load(EXAMPLES / "pydantic-ai.toml", {})
+    assert config.agents["assistant"].engine == "pydantic-ai"
