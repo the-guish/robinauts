@@ -30,6 +30,8 @@ from robinauts.controller.engines import (
     engine_settings,
     engine_storage,
 )
+from robinauts.controller.memory import MemoryStore
+from robinauts.controller.store import Store
 
 
 class RobinautsController(Controller):
@@ -38,10 +40,12 @@ class RobinautsController(Controller):
         self._storage = storage
         self._secret_for = secret_for
         self._engines: dict[str, AgentEngine] = {}
+        self._store: Store
 
     async def open(self) -> None:
-        if self._storage.kind is StorageKind.POSTGRES:
-            raise NotImplementedError("postgres storage")
+        if self._storage.kind is not StorageKind.IN_MEMORY:
+            raise NotImplementedError(f"{self._storage.kind} storage")
+        self._store = MemoryStore()
         settings = engine_settings(self._config, self._secret_for)
         self._engines = await build_engines(
             self._config, settings, engine_storage(self._storage, None), installed()
