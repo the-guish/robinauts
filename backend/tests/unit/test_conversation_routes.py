@@ -23,13 +23,11 @@ tell the two apart by accident.
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
-from pathlib import Path
 from typing import get_args
 
 import httpx
@@ -65,6 +63,7 @@ from robinauts.legacy.api import (
     allowed_methods,
     api_routes,
     create_api,
+    openapi_document,
     read_once,
     session_cookie,
     status_of,
@@ -94,9 +93,6 @@ from turns import SOMEBODY_ELSE, Wiring, settled, submitted
 from turns import wired as wired_services
 from turns import written as stream_reached
 from webapp import JSON, PUBLIC_URL, open_session, serving, wired
-
-SNAPSHOT = Path(__file__).resolve().parents[2] / "openapi.json"
-"""The committed document, for the two tests that are about what it promises."""
 
 NOWHERE = uuid.UUID("99999999-9999-4999-8999-999999999999")
 """An id nothing here has: what "not there" is asked with."""
@@ -352,7 +348,7 @@ def test_the_page_bound_is_the_one_the_application_enforces() -> None:
     ``api`` may not import ``ports``, so the application is the door it comes
     through.
     """
-    document = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
+    document = openapi_document()
     limit = next(
         parameter
         for parameter in document["paths"]["/api/conversations"]["get"]["parameters"]
