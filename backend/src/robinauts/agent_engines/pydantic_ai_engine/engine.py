@@ -14,12 +14,14 @@ from robinauts.agent_engines.contract.ports import (
     EngineSettings,
     StorageConfig,
 )
+from robinauts.agent_engines.pydantic_ai_engine.clients import force_tracing_off
 
 
 class PydanticAIEngine(AgentEngine):
     def __init__(self, settings: EngineSettings, storage: StorageConfig) -> None:
         self._settings = settings
         self._storage = storage
+        force_tracing_off()
 
     def kinds(self) -> frozenset[ProviderKind]:
         return frozenset(ProviderKind)
