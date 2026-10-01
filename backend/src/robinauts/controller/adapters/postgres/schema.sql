@@ -6,9 +6,12 @@
 -- This is the controller's alone. The engines keep their memory in tables of
 -- their own, made by their own `setup`, and nothing here references them
 -- (docs/specs/agent-engines.md). Sign-in's tables (`user_sessions` and the
--- pending logins), `users`, `messages`, `turn_events` and the schema's own
--- version are added to this file in later steps; until then the foreign keys
--- to `users` and `messages` are written down below and not declared.
+-- pending logins), `users`, `turn_events` and the schema's own version are
+-- added to this file in later steps; until then the foreign key to `users` is
+-- written down below and not declared.
+--
+-- A table comes after every table it references, since the file is applied
+-- from the top.
 --
 -- Until the first release this file is edited in place and there are no
 -- migrations. It is applied by a command, never by the server, in one
@@ -49,8 +52,8 @@
 --
 -- `deleted_at` hides a session. From the moment it is set, every read treats
 -- the session as not found and no turn may start on it. The purge then calls
--- the engine's `forget` and deletes the row, and the cascade takes its turns
--- with it. Trash, in stage two, is a delay before the purge, not a change of
+-- the engine's `forget` and deletes the row, and the cascade takes its
+-- messages and turns with it. Trash, in stage two, is a delay before the purge, not a change of
 -- schema.
 --
 -- `owner_id` will reference `users (id) ON DELETE CASCADE`, declared with
@@ -80,6 +83,69 @@ CREATE INDEX IF NOT EXISTS sessions_deleted_at_idx
 
 
 -- ---------------------------------------------------------------------------
+-- Messages.
+-- ---------------------------------------------------------------------------
+
+-- One message of a session: a node of its tree. A question is stored before
+-- its turn starts, and an answer when its turn finishes. A turn that fails
+-- leaves no answer.
+--
+-- `document` is the message's content in the controller's versioned format:
+-- its parts (text, reasoning, tool calls with their arguments, tool results),
+-- the agent and the model, the engine's checkpoint id on an answer, and the
+-- turn that produced an answer. The columns are what the store orders, joins
+-- and checks by. They are not repeated in the document; the decoder reads
+-- both.
+--
+-- The id is a primary key, so it is unique across the deployment and not
+-- merely within a session.
+--
+-- `parent_id` is a message **of the same session**: the composite key points
+-- `(session_id, parent_id)` at `(session_id, id)`, so that a parent from
+-- another session's tree cannot be stored. A null `parent_id` is a root, and
+-- the key does not apply to it (MATCH SIMPLE). The key needs a unique
+-- constraint over exactly those two columns, which `messages_session_id_id_key`
+-- is; the primary key implies it, but PostgreSQL wants one declared. `turns`
+-- points at it too.
+--
+-- `parent_id` takes no action on delete: a message is never deleted alone,
+-- only with its session, whose cascade removes the whole tree in one
+-- statement. Deleting one message under which others hang is refused, which
+-- is what an edit, a new message under an earlier parent, never needs.
+--
+-- `role` is a column because it is what the message is, not what it says.
+-- `tool` is reserved: no message has it today, and the spelling is settled
+-- so that no column changes the day one does.
+CREATE TABLE IF NOT EXISTS messages (
+    id uuid
+        CONSTRAINT messages_pkey PRIMARY KEY,
+    session_id uuid NOT NULL
+        CONSTRAINT messages_session_id_fkey REFERENCES sessions (id) ON DELETE CASCADE,
+    parent_id uuid,
+    role text NOT NULL
+        CONSTRAINT messages_role_is_a_role CHECK (role IN ('user', 'assistant', 'tool')),
+    created_at timestamptz NOT NULL,
+    document jsonb NOT NULL,
+    CONSTRAINT messages_session_id_id_key UNIQUE (session_id, id),
+    CONSTRAINT messages_parent_id_fkey FOREIGN KEY (session_id, parent_id)
+        REFERENCES messages (session_id, id)
+);
+
+-- What opening a session reads: every message of it, oldest first, ties
+-- broken by id so that two stores hand back one order. It is also what the
+-- cascade from `sessions` deletes by.
+CREATE INDEX IF NOT EXISTS messages_session_id_created_at_idx
+    ON messages (session_id, created_at, id);
+
+-- A message's children: the answers to a question, and the edits under one
+-- message. It is also what the parent key checks when a session's tree is
+-- deleted, which would otherwise read the whole session once for every
+-- message.
+CREATE INDEX IF NOT EXISTS messages_session_id_parent_id_idx
+    ON messages (session_id, parent_id);
+
+
+-- ---------------------------------------------------------------------------
 -- Turns.
 -- ---------------------------------------------------------------------------
 
@@ -87,11 +153,16 @@ CREATE INDEX IF NOT EXISTS sessions_deleted_at_idx
 -- id on the wire, and its events are keyed by it, so their positions start at
 -- 1 with each turn and never collide.
 --
--- `follows` is the question the turn answers. It will reference
--- `messages (session_id, id)` together with `session_id`, so that a question
--- of another session cannot be answered here; that key is declared with
--- `messages`. The answer is not referenced: it is stored when the turn ends,
--- and it names its turn in its own document.
+-- `follows` is the question the turn answers. With `session_id`, it points at
+-- `messages (session_id, id)`, so that a question of another session cannot be
+-- answered here. A question has any number of turns: its first, each
+-- regeneration, and those that failed. The answer is not referenced: it is
+-- stored when the turn finishes, and it names its turn in its own document. A
+-- turn has one answer, or none if it did not finish.
+--
+-- That the question is a *user* message is the store's rule, since a foreign
+-- key cannot say "and its role is user". The question and its turn are
+-- written in one transaction, so a question refused a turn is not left behind.
 --
 -- `model` is the model the turn runs on. The question carries the one it was
 -- asked with, but a regeneration answers the same question on another model,
@@ -123,6 +194,8 @@ CREATE TABLE IF NOT EXISTS turns (
     error text,
     lease_until timestamptz NOT NULL,
     cancel_requested_at timestamptz,
+    CONSTRAINT turns_follows_fkey FOREIGN KEY (session_id, follows)
+        REFERENCES messages (session_id, id),
     -- A turn has ended exactly when it is no longer running.
     CONSTRAINT turns_ended_when_not_running CHECK (
         (state = 'running') = (ended_at IS NULL)
