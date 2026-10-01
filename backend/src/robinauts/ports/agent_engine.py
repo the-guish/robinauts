@@ -177,7 +177,6 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
-from typing import ClassVar
 
 from robinauts.domain import AgentDefinition, Event, ProviderKind
 
@@ -185,41 +184,50 @@ from robinauts.domain import AgentDefinition, Event, ProviderKind
 class AgentEngine(ABC):
     """One agent framework as the platform sees it: runs the agents, keeps the conversations."""
 
-    kinds: ClassVar[frozenset[ProviderKind]] = frozenset()
-    """The model provider kinds this engine has a client for.
+    @classmethod
+    def kinds(cls) -> frozenset[ProviderKind]:
+        """The model provider kinds this engine has a client for.
 
-    **Not every model exists under every engine** (``docs/specs/agents.md``),
-    and not every provider's client passes the dependency policy at a given
-    version (``DEPENDENCIES.md``). So an engine says what it can reach, and
-    the composition root asks it rather than knowing: the configuration is
-    then refused at start-up, naming the provider, instead of a person
-    waiting for an answer from a client that was never built.
+        **Not every model exists under every engine** (``docs/specs/agents.md``),
+        and not every provider's client passes the dependency policy at a
+        given version (``DEPENDENCIES.md``). So an engine says what it can
+        reach, and the composition root asks it rather than knowing: the
+        configuration is then refused at start-up, naming the provider,
+        instead of a person waiting for an answer from a client that was
+        never built.
 
-    Empty by default, which is a test double's honest answer: a scripted
-    engine reaches no provider at all.
-    """
+        A class method, because the root asks before it builds anything.
+        Empty by default, which is a test double's honest answer: a scripted
+        engine reaches no provider at all.
+        """
+        return frozenset()
 
-    schema_sql: ClassVar[str] = ""
-    """The SQL that creates this engine's tables, or empty for an engine that needs none.
+    @classmethod
+    def schema_sql(cls) -> str:
+        """The SQL that creates this engine's tables, or empty for an engine that needs none.
 
-    An engine keeps its conversations in tables of its own in the
-    deployment's one database (``docs/specs/backend.md``). It ships the DDL
-    for them here, and ``robinauts db init`` applies it after the platform's
-    own file, in the same transaction and under the same pin, so that a
-    database is complete or it is nothing. The server never applies it.
+        An engine keeps its conversations in tables of its own in the
+        deployment's one database (``docs/specs/backend.md``). It ships the
+        DDL for them here, and ``robinauts db init`` applies it after the
+        platform's own file, in the same transaction and under the same pin,
+        so that a database is complete or it is nothing. The server never
+        applies it.
 
-    What the DDL must keep to: names prefixed with the engine's, so that two
-    engines never collide in one schema; no schema named, so that the whole
-    thing lands wherever ``search_path`` points; and every table keyed by the
-    conversation, with ``conversation_id uuid NOT NULL REFERENCES
-    conversations (id) ON DELETE CASCADE`` -- the one place an engine names a
-    table of the platform's -- so that a conversation purged below the
-    application takes its memory with it. ``forget`` is the application's
-    way; the cascade is the database's backstop.
+        What the DDL must keep to: names prefixed with the engine's, so that
+        two engines never collide in one schema; no schema named, so that the
+        whole thing lands wherever ``search_path`` points; and every table
+        keyed by the conversation, with ``conversation_id uuid NOT NULL
+        REFERENCES conversations (id) ON DELETE CASCADE`` -- the one place an
+        engine names a table of the platform's -- so that a conversation
+        purged below the application takes its memory with it. ``forget`` is
+        the application's way; the cascade is the database's backstop.
 
-    Class-level, so that the command can read it without building an engine,
-    which would need keys it has no business asking for.
-    """
+        A class method, so that the command can read it without building an
+        engine, which would need keys it has no business asking for. The
+        same text every time it is asked: it is read once by the command and
+        once by the pin, and the two must agree.
+        """
+        return ""
 
     @abstractmethod
     async def create(self, conversation_id: uuid.UUID) -> None:
