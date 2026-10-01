@@ -19,20 +19,18 @@ path, minimal code.
 6. **PostgreSQL.** The store over asyncpg, the schema with `db init` and the start-up
    check, `LISTEN` and `NOTIFY` for watchers in other processes, and both engines'
    PostgreSQL storage.
-7. **Housekeeping.** Trash expiry and retention, each calling `forget`, on the process's
-   own schedule.
-8. **Auth.** The OIDC flow, sessions and cookies, the allow list, sign-out, API tokens,
+7. **Auth.** The OIDC flow, sessions and cookies, the allow list, sign-out, API tokens,
    and `ensure_user` called from the real identity.
-9. **The plan for stage two.** A detailed plan capturing every learning still held in
+8. **The plan for stage two.** A detailed plan capturing every learning still held in
    legacy's code, tests and specs: the refusals, the edge cases, the bounds, the
    protections, the operations, so that nothing is lost when legacy goes.
-10. **Removal.** Delete `robinauts.legacy` and `docs/specs/legacy`, repoint what still
+9. **Removal.** Delete `robinauts.legacy` and `docs/specs/legacy`, repoint what still
     references them, and rewrite `layout.md`, `backend.md` and the ADRs for the new
     layers.
 
 ## Stage two: hardening
 
-Planned in detail by stage one's step 9. The blocks known today:
+Planned in detail by stage one's step 8. The blocks known today:
 
 1. **Controller hardening.** The refusals, one active turn, the timeout, the bounded
    cancel, the sweep at start, the edit of a first question, titles, fork.
@@ -41,6 +39,8 @@ Planned in detail by stage one's step 9. The blocks known today:
    exhaustive test, log redaction, and the wire's "not yet served" list.
 3. **Packaging and operations.** The wheel hook, the demo, the deployment rehearsal and
    the CI scripts.
+4. **Housekeeping.** Trash expiry and retention, each calling `forget`, on the process's
+   own schedule.
 
 ## Discarded
 
