@@ -1,16 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The engines this build has, and how the controller builds them from its configuration.
+"""How the controller builds the engines its agents name, from the ones this build has.
 
-The one place that names an engine. Each is imported when first built, so that a
-build without an engine's extra fails at that import, naming it.
+The controller names no engine: ``robinauts.agent_engines.installed`` says which there
+are, and the configuration says which to build.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 
+from robinauts.agent_engines import installed
 from robinauts.agent_engines.contract import domain as engine_domain
 from robinauts.agent_engines.contract.ports import (
     AgentEngine,
@@ -25,24 +26,6 @@ from robinauts.controller.contract import domain
 
 SecretLookup = Callable[[str], str | None]
 """An environment variable's value by its name, or ``None``."""
-
-
-def _langchain() -> EngineFactory:
-    from robinauts.agent_engines.langchain_engine import init_langchain
-
-    return init_langchain
-
-
-def _pydantic_ai() -> EngineFactory:
-    from robinauts.agent_engines.pydantic_ai_engine import init_pydantic_ai
-
-    return init_pydantic_ai
-
-
-ENGINES: Mapping[str, Callable[[], EngineFactory]] = {
-    "langchain": _langchain,
-    "pydantic-ai": _pydantic_ai,
-}
 
 
 class _Keys(ProviderKeyLookup):
@@ -122,24 +105,25 @@ async def build_engines(
     config: domain.Config,
     settings: EngineSettings,
     storage: StorageConfig,
-    factories: Mapping[str, Callable[[], EngineFactory]] = ENGINES,
+    factories: Mapping[str, EngineFactory] | None = None,
 ) -> dict[str, AgentEngine]:
     """The engines the agents name, built, set up, and able to reach their models' providers.
 
-    ``UnknownEngineError`` for an engine not in the table, ``UnreachableProviderError`` for an
-    agent whose model is on a provider kind its engine cannot reach.
+    ``UnknownEngineError`` for an engine this build does not have, ``UnreachableProviderError``
+    for an agent whose model is on a provider kind its engine cannot reach.
     """
+    available = installed() if factories is None else factories
     engines: dict[str, AgentEngine] = {}
     for agent in config.agents.values():
         if agent.engine in engines:
             continue
-        loader = factories.get(agent.engine)
-        if loader is None:
+        factory = available.get(agent.engine)
+        if factory is None:
             raise domain.UnknownEngineError(
                 f"agent {agent.id!r} runs on engine {agent.engine!r}, which this build"
                 f" does not have"
             )
-        engine = await loader()(settings, storage)
+        engine = await factory(settings, storage)
         await engine.setup()
         engines[agent.engine] = engine
     for agent in config.agents.values():

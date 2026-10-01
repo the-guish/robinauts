@@ -64,7 +64,7 @@ async def init_fake(settings: EngineSettings, storage: StorageConfig) -> AgentEn
     return FakeEngine(settings, storage)
 
 
-FACTORIES = {"fake": lambda: init_fake}
+FACTORIES = {"fake": init_fake}
 
 
 def config(kind: domain.ProviderKind = domain.ProviderKind.ANTHROPIC, engine: str = "fake"):
@@ -147,12 +147,12 @@ async def test_a_provider_kind_the_engine_cannot_reach_is_refused() -> None:
 
 
 @asyncio_test
-async def test_the_real_table_builds_an_instance_of_each_engine() -> None:
+async def test_the_installed_engines_are_built_by_name() -> None:
+    from robinauts.agent_engines import installed
     from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
     from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
-    from robinauts.controller.engines import ENGINES
 
-    assert set(ENGINES) == {"langchain", "pydantic-ai"}
+    assert set(installed()) == {"langchain", "pydantic-ai"}
     storage = engine_storage(domain.StorageConfig(domain.StorageKind.IN_MEMORY), None)
     expected = {"langchain": LangChainEngine, "pydantic-ai": PydanticAIEngine}
     for name, cls in expected.items():
