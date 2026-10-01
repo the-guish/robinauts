@@ -64,8 +64,7 @@ vendor client is built per provider kind with the endpoint pinned, the key in it
 retries at zero and the `base_url` for the compatible kinds (`chat_model`, `endpoint_of`);
 how hosted tracing and the client environment overrides are turned off
 (`force_tracing_off`, `clear_client_overrides`); how the MCP client is built with the
-server's credential (`mcp_tools` / `mcp_toolset`); how the context window is kept
-(`middleware`, `within`) and the numbers behind it; how the framework's stream is
+server's credential (`mcp_tools` / `mcp_toolset`); how the framework's stream is
 translated to events (`_deltas_of`, `_events_of`). Copy ideas and small pieces; the new
 engine is a small fraction of the old one's volume.
 

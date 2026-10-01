@@ -41,6 +41,8 @@ Planned in detail by stage one's step 8. The blocks known today:
    the CI scripts.
 4. **Housekeeping.** Trash expiry and retention, each calling `forget`, on the process's
    own schedule.
+5. **Context management in the engines.** Summarisation or trimming within the model's
+   window, and the vendor's prompt cache, by each framework's own means.
 
 ## Discarded
 

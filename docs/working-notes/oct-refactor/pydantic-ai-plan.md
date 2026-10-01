@@ -21,6 +21,7 @@ snapshots, and passes the shared suite.
   servers; the unit suite uses plain function tools; MCP against a real server is a live
   test.
 - `resume` runs the turn again from the checkpoint; nothing is kept between attempts.
+- Context management is stage two: no history processor in this block.
 
 ## Steps
 
@@ -43,13 +44,10 @@ snapshots, and passes the shared suite.
    with the URL, the auth header from `settings.tool_secrets.secret_for` and the
    timeout. Test: the toolset built for bearer and basic servers carries the right
    header; no server is reached.
-5. Context. A history processor that keeps the history within the model's context
-   window, with legacy's `within` and its numbers. Test: a long history is trimmed
-   before the model is called.
-6. Over the wire. One turn over the OpenAI kind through `tests/chat_completions.py`'s
+5. Over the wire. One turn over the OpenAI kind through `tests/chat_completions.py`'s
    scripted transport, so the real client and the real framework are exercised with
    nothing leaving the process.
-7. Live, opt-in. One real turn on Anthropic when `ROBINAUTS_LIVE_ANTHROPIC_KEY` is set,
+6. Live, opt-in. One real turn on Anthropic when `ROBINAUTS_LIVE_ANTHROPIC_KEY` is set,
    skipped otherwise; `examples/pydantic-ai.toml` with one Anthropic provider, one model
    and one agent on `pydantic-ai`; if the key is in the session, start the shell from it
    and see a turn in the browser, as `config-plan.md`'s step 5 did. A short

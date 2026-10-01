@@ -19,6 +19,7 @@ answers in the browser, with tools over MCP, with the memory kept by LangGraph's
   `langchain-mcp-adapters`; the unit suite uses plain function tools; MCP against a real
   server is a live test.
 - `resume` runs the turn again from the checkpoint; nothing is kept between attempts.
+- Context management is stage two: no summarisation, no trimming in this block.
 
 ## Steps
 
@@ -42,17 +43,14 @@ answers in the browser, with tools over MCP, with the memory kept by LangGraph's
    URL, the auth header from `settings.tool_secrets.secret_for` and the timeout, tools
    listed with `MultiServerMCPClient`. Test: the connection built for bearer and basic
    servers carries the right header; no server is reached.
-5. Context. `SummarizationMiddleware` sized from the model's context window, with
-   legacy's numbers. Test: a long scripted history is summarised before the model is
-   called.
-6. Fork. `aget_state` at the checkpoint, `aupdate_state` on the target thread with its
+5. Fork. `aget_state` at the checkpoint, `aupdate_state` on the target thread with its
    messages; the target's first checkpoint is new. Test: the fork case of the memory
    half, with the known deviation stated in the test: the source's ids are not yet valid
    in the target.
-7. Over the wire. One turn over the OpenAI kind through `tests/chat_completions.py`'s
+6. Over the wire. One turn over the OpenAI kind through `tests/chat_completions.py`'s
    scripted transport, so the real client and the real framework are exercised with
    nothing leaving the process.
-8. Live, opt-in. One real turn on Anthropic when `ROBINAUTS_LIVE_ANTHROPIC_KEY` is set,
+7. Live, opt-in. One real turn on Anthropic when `ROBINAUTS_LIVE_ANTHROPIC_KEY` is set,
    skipped otherwise; `examples/langchain.toml` with one Anthropic provider, one model and
    one agent on `langchain`; if the key is in the session, start the shell from it and
    see a turn in the browser, as `config-plan.md`'s step 5 did. A short
