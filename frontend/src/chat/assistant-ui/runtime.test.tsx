@@ -436,6 +436,29 @@ test("a run cancelled in the middle of a batch leaves the call without a result"
   expect(failed.messages[1]?.detail).toBe(saidFor("failed"));
 });
 
+test("opened, an answer that holds its own results has them on its calls", () => {
+  const answer = calling("m2", "", [
+    { call_id: "call-1", name: "echo", arguments: { text: "hi" } },
+  ]);
+  answer.parts.push(
+    { kind: "tool_result", call_id: "call-1", text: "hi", is_error: false },
+    { kind: "text", text: "The tool said: hi" },
+  );
+  const stored = after({
+    kind: "opened",
+    conversationId: CONVERSATION,
+    messages: [message("m1", "user", "hi"), answer],
+    runId: null,
+    endedBadly: null,
+  });
+  expect(stored.messages[1]?.state).toBe("stored");
+  expect(call(stored, "m2", "call-1")).toMatchObject({ result: "hi" });
+  expect(parts(stored, "m2")).toEqual([
+    ["tool-call", "echo"],
+    ["text", "The tool said: hi"],
+  ]);
+});
+
 test("opened, an answer whose calls were never answered is shown as the run left it", () => {
   const stored = [
     message("m1", "user", "why?"),
