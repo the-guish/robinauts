@@ -597,7 +597,12 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     const conversationId = state.conversationId;
     if (conversationId !== null) {
       await follow(
-        (signal) => startTurn(conversationId, { text, parentId }, { signal }),
+        (signal) =>
+          startTurn(
+            conversationId,
+            { text, parentId, modelId: props.modelId },
+            { signal },
+          ),
         { text },
       );
       return;
@@ -662,7 +667,12 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     // edited text comes back in the edit box of the message it was of
     // (`follow`).
     await follow(
-      (signal) => startTurn(conversationId, { text, parentId }, { signal }),
+      (signal) =>
+        startTurn(
+          conversationId,
+          { text, parentId, modelId: props.modelId },
+          { signal },
+        ),
       { text, editing: message.sourceId },
     );
   }
@@ -692,7 +702,11 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
       after: turnStart(state, regenerate) ?? parentId,
     });
     await follow((signal) =>
-      startTurn(conversationId, { regenerate }, { signal }),
+      startTurn(
+        conversationId,
+        { regenerate, modelId: props.modelId },
+        { signal },
+      ),
     );
   }
 

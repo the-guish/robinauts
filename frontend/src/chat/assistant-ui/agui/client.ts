@@ -129,9 +129,14 @@ export async function startNewConversation(
   );
 }
 
-/** What a turn in a conversation that exists asks for: a message, or one again. */
-export type Turn =
-  { text: string; parentId: string | null } | { regenerate: string };
+/**
+ * What a turn in a conversation that exists asks for: a message, or one again,
+ * with the model it runs on -- the picker's, sent with every turn; left out,
+ * the backend takes the conversation's last one.
+ */
+export type Turn = (
+  { text: string; parentId: string | null } | { regenerate: string }
+) & { modelId?: string | null };
 
 /**
  * A turn in a conversation that exists, and the run it began.
@@ -145,10 +150,12 @@ export async function startTurn(
   turn: Turn,
   watching: Watching = {},
 ): Promise<Attached> {
-  const body =
-    "regenerate" in turn
+  const body = {
+    ...("regenerate" in turn
       ? { regenerate: turn.regenerate }
-      : { text: turn.text, parent_id: turn.parentId };
+      : { text: turn.text, parent_id: turn.parentId }),
+    ...(turn.modelId == null ? {} : { model_id: turn.modelId }),
+  };
   return attachTo(
     await post(
       `/api/conversations/${encodeURIComponent(conversationId)}/turns`,

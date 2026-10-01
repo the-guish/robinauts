@@ -1172,7 +1172,11 @@ test("editing is a new message under the parent of the one it replaces", async (
     });
     await settle();
   });
-  expect(posts[0]?.body).toEqual({ text: "and at night?", parent_id: "m2" });
+  expect(posts[0]?.body).toEqual({
+    text: "and at night?",
+    parent_id: "m2",
+    model_id: "sonnet",
+  });
 
   // The root's own edit still hangs under nothing.
   await act(async () => {
@@ -1184,7 +1188,11 @@ test("editing is a new message under the parent of the one it replaces", async (
     });
     await settle();
   });
-  expect(posts[1]?.body).toEqual({ text: "why really?", parent_id: null });
+  expect(posts[1]?.body).toEqual({
+    text: "why really?",
+    parent_id: null,
+    model_id: "sonnet",
+  });
 });
 
 test("an edit after a tool round hangs under the tool message, not the answer", async () => {
@@ -1227,7 +1235,11 @@ test("an edit after a tool round hangs under the tool message, not the answer", 
     });
     await settle();
   });
-  expect(posts[0]?.body).toEqual({ text: "and at night?", parent_id: "t1" });
+  expect(posts[0]?.body).toEqual({
+    text: "and at night?",
+    parent_id: "t1",
+    model_id: "sonnet",
+  });
 });
 
 test("after a turn that went wrong, asking again replaces the question", async () => {
@@ -1265,7 +1277,11 @@ test("after a turn that went wrong, asking again replaces the question", async (
     result.current.runtime.thread.append("why, really?");
     await settle();
   });
-  expect(posts[0]?.body).toEqual({ text: "why, really?", parent_id: null });
+  expect(posts[0]?.body).toEqual({
+    text: "why, really?",
+    parent_id: null,
+    model_id: "sonnet",
+  });
 });
 
 test("opening a conversation says what the server says it is", async () => {
@@ -1310,7 +1326,7 @@ test("regenerating names the answer to produce again, and sends no message", asy
     result.current.runtime.thread.startRun({ parentId: "m1", sourceId: "m2" });
     await settle();
   });
-  expect(posts[0]?.body).toEqual({ regenerate: "m2" });
+  expect(posts[0]?.body).toEqual({ regenerate: "m2", model_id: "sonnet" });
 });
 
 test("regenerating the answer after a tool round takes the whole turn off the screen", async () => {
@@ -1349,7 +1365,7 @@ test("regenerating the answer after a tool round takes the whole turn off the sc
     result.current.runtime.thread.startRun({ parentId: "m2", sourceId: "m3" });
     await settle();
   });
-  expect(posts[0]?.body).toEqual({ regenerate: "m3" });
+  expect(posts[0]?.body).toEqual({ regenerate: "m3", model_id: "sonnet" });
   expect(result.current.state.messages.map((each) => each.id)).toEqual(["m1"]);
   await act(async () => {
     write(event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 9));
@@ -1832,7 +1848,7 @@ test("a refused retry leaves the question it was retrying on the thread", async 
   expect(result.current.state.messages.map((each) => each.id)).toEqual(["m1"]);
 });
 
-test("the model goes with the first message, and no turn after it", async () => {
+test("the model goes with every turn", async () => {
   const posts: Call[] = [];
   const fetch = stub((call) => {
     if (call.url === "/api/turns") {
@@ -1884,11 +1900,11 @@ test("the model goes with the first message, and no turn after it", async () => 
     result.current.runtime.thread.startRun({ parentId: "m1", sourceId: "m2" });
     await settle();
   });
-  // A continued turn and a regeneration name no model: the conversation's
-  // is what they run on, and the server reads it.
+  // A continued turn and a regeneration name the model too: it goes with
+  // every turn.
   expect(posts).toHaveLength(2);
   for (const post of posts) {
-    expect(post.body).not.toHaveProperty("model_id");
+    expect(post.body).toHaveProperty("model_id", "opus");
   }
 });
 
