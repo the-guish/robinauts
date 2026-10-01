@@ -88,6 +88,10 @@ the checkpoint id, on the answer.
   obvious.
 - **Bounds.** Legacy bounded every stored text (a part at one million characters, a
   title, a checkpoint id at 256). Stage two; the columns should not forbid them.
+- **Serverless hosting.** `aws-serverless.md` argues for a port that also fits
+  DynamoDB (and Aurora DSQL) and for running web and turns on Lambda. It adds rules to
+  this list: positions from the runner, waits with a timeout, cancel and lease through
+  the store, `deleted_at` with a purge, and a turn dispatcher port.
 - **The engine's memory is not here.** No table of the controller's references an
   engine's, and the checkpoint id is text the controller never reads.
 
