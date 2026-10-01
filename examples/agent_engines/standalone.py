@@ -82,7 +82,7 @@ async def converse(engine: AgentEngine) -> None:
             "What's the warmer city righ now of Tampa, Madrid, Montevideo? Answer in one word",
             model=MODEL,
             checkpoint_id=None,
-            timeout=TURN_SECONDS,
+            timeout_seconds=TURN_SECONDS,
         )
     )
     # The platform stores the answer with `first` on it. That is all it keeps of the memory,
@@ -96,7 +96,7 @@ async def converse(engine: AgentEngine) -> None:
             "What's the coolest? One word",
             model=MODEL,
             checkpoint_id=first,
-            timeout=TURN_SECONDS,
+            timeout_seconds=TURN_SECONDS,
         )
     )
 

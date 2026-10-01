@@ -78,12 +78,12 @@ class AgentEngine(ABC):
         *,
         model: str,
         checkpoint_id: str | None,
-        timeout: float,
+        timeout_seconds: float,
         resume: bool = False,
     ) -> AsyncGenerator[Event, None]:
         """Not a coroutine: everything, the refusals included, happens inside the generator.
 
-        ``timeout`` is in seconds; past it the engine ends the turn by raising ``TimeoutError``.
+        Past ``timeout_seconds`` the engine ends the turn by raising ``TimeoutError``.
         Raised where iterated: ``ConversationNotFoundError`` for a session not created,
         ``CheckpointNotFoundError`` for a checkpoint not held for it, ``UnknownModelError`` for
         a model the settings do not have, ``InvalidValueError`` for a resume of another prompt.
