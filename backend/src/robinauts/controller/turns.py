@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 import uuid
@@ -91,7 +92,13 @@ async def run_turn(
                 await store.add_message(answer)
                 await store.append_event(cid, MessageCompleted(answer))
                 await store.append_event(cid, TurnEnded(TurnState.FINISHED))
+    except asyncio.CancelledError:
+        await store.append_event(cid, TurnEnded(TurnState.CANCELLED))
+        raise
     except Exception as exc:
         await store.append_event(cid, TurnEnded(TurnState.FAILED, error=str(exc)))
-    await store.update_conversation(dataclasses.replace(conversation, updated_at=datetime.now(UTC)))
-    await store.end_turn(cid)
+    finally:
+        await store.update_conversation(
+            dataclasses.replace(conversation, updated_at=datetime.now(UTC))
+        )
+        await store.end_turn(cid)

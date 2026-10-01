@@ -140,12 +140,8 @@ class RobinautsController(Controller):
         )
         await self._store.add_conversation(conversation)
         await self._store.add_message(question)
-        engine = self._engines[agent_config.engine]
-        await engine.create(conversation.id)
-        await self._store.start_turn(conversation.id, follows=question.id)
-        self._turns[conversation.id] = asyncio.create_task(
-            run_turn(self._store, engine, conversation, question, agent_config, model, None)
-        )
+        await self._engines[agent_config.engine].create(conversation.id)
+        await self._start_turn(conversation, question, model, None)
         return TurnStarted(conversation.id, question)
 
     async def send_message(
@@ -157,15 +153,49 @@ class RobinautsController(Controller):
         model: str,
         text: str,
     ) -> TurnStarted:
-        raise NotImplementedError("send_message")
+        conversation = await self._store.conversation(conversation_id)
+        messages = await self._store.messages_of(conversation_id)
+        parent = next(m for m in messages if m.id == parent_id)
+        question = Message(
+            uuid.uuid4(),
+            conversation_id,
+            parent_id=parent_id,
+            role=Role.USER,
+            parts=(TextPart(text),),
+            created_at=datetime.now(UTC),
+            agent=conversation.agent,
+            model=model,
+        )
+        await self._store.add_message(question)
+        await self._start_turn(conversation, question, model, parent.checkpoint_id)
+        return TurnStarted(conversation_id, question)
 
     async def regenerate_answer(
         self, user: User, conversation_id: uuid.UUID, *, question_id: uuid.UUID, model: str
     ) -> TurnStarted:
-        raise NotImplementedError("regenerate_answer")
+        conversation = await self._store.conversation(conversation_id)
+        by_id = {m.id: m for m in await self._store.messages_of(conversation_id)}
+        question = by_id[question_id]
+        checkpoint_id = None
+        if question.parent_id is not None:
+            checkpoint_id = by_id[question.parent_id].checkpoint_id
+        await self._start_turn(conversation, question, model, checkpoint_id)
+        return TurnStarted(conversation_id, question)
 
     async def cancel_turn(self, user: User, conversation_id: uuid.UUID) -> None:
-        raise NotImplementedError("cancel_turn")
+        self._turns[conversation_id].cancel()
+
+    async def _start_turn(
+        self, conversation: Conversation, question: Message, model: str, checkpoint_id: str | None
+    ) -> None:
+        agent_config = self._config.agents[conversation.agent]
+        engine = self._engines[agent_config.engine]
+        await self._store.start_turn(conversation.id, follows=question.id)
+        self._turns[conversation.id] = asyncio.create_task(
+            run_turn(
+                self._store, engine, conversation, question, agent_config, model, checkpoint_id
+            )
+        )
 
     async def watch_turn(
         self, user: User, conversation_id: uuid.UUID, *, after: int = 0
