@@ -8,26 +8,47 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncGenerator
 
+from robinauts.agent_engines.contract.ports import AgentEngine
 from robinauts.controller.contract.domain import (
     AgentListing,
+    Config,
     Conversation,
     ConversationPage,
     Identity,
     ModelListing,
     NumberedEvent,
     OpenedConversation,
+    StorageConfig,
+    StorageKind,
     TurnStarted,
     User,
 )
 from robinauts.controller.contract.ports import Controller
+from robinauts.controller.engines import (
+    SecretLookup,
+    build_engines,
+    engine_settings,
+    engine_storage,
+)
 
 
 class RobinautsController(Controller):
+    def __init__(self, config: Config, *, storage: StorageConfig, secret_for: SecretLookup) -> None:
+        self._config = config
+        self._storage = storage
+        self._secret_for = secret_for
+        self._engines: dict[str, AgentEngine] = {}
+
     async def open(self) -> None:
-        pass
+        if self._storage.kind is StorageKind.POSTGRES:
+            raise NotImplementedError("postgres storage")
+        settings = engine_settings(self._config, self._secret_for)
+        self._engines = await build_engines(
+            self._config, settings, engine_storage(self._storage, None)
+        )
 
     async def close(self) -> None:
-        pass
+        self._engines = {}
 
     async def ensure_user(self, identity: Identity) -> User:
         raise NotImplementedError("ensure_user")
