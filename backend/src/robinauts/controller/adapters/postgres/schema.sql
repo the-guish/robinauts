@@ -6,8 +6,8 @@
 -- This is the controller's alone. The engines keep their memory in tables of
 -- their own, made by their own `setup`, and nothing here references them
 -- (docs/specs/agent-engines.md). Sign-in's tables (`user_sessions` and the
--- pending logins), `users`, `turn_events` and the schema's own version are
--- added to this file in later steps; until then the foreign key to `users` is
+-- pending logins), `users` and the schema's own version are added to this
+-- file in later steps; until then the foreign key to `users` is
 -- written down below and not declared.
 --
 -- A table comes after every table it references, since the file is applied
@@ -223,3 +223,44 @@ CREATE INDEX IF NOT EXISTS turns_session_id_started_at_idx
 -- What the sweep reads: the running turns whose lease has passed.
 CREATE INDEX IF NOT EXISTS turns_lease_until_idx
     ON turns (lease_until) WHERE state = 'running';
+
+
+-- ---------------------------------------------------------------------------
+-- Turn events.
+-- ---------------------------------------------------------------------------
+
+-- What a turn published, numbered: the pieces a watcher streams and
+-- re-attaches to. `document` is the event in the controller's versioned
+-- format, kept whole and never read here.
+--
+-- Events are a replay log, not the record. Once a turn has ended, its answer
+-- is in `messages` and its outcome is in `turns`, and nothing reads its events
+-- again but a late watcher. So every event expires: `expires_at` is set by the
+-- application when the event is written, as that moment plus the retention
+-- (hours, not days), and the sweep deletes what has passed it. Ending a turn
+-- touches none of its events. Until they expire, the events are the only copy
+-- of what a turn's reasoning said and of what a turn that failed had
+-- streamed, which is why the retention is short.
+--
+-- The primary key is `(turn_id, position)`. The runner numbers its turn's
+-- events, starting at 1, and is their only writer, so a position offered
+-- twice means two runners on one turn. The store translates a violation of
+-- the key, by name, into that error instead of renumbering. It is also the
+-- index `events_after` reads: one turn's events, in order, past a position.
+--
+-- There is no `kind` column. "A turn ends once" is held by `end_turn`, which
+-- changes only a running turn, in the same transaction that writes the
+-- `TurnEnded` event, so no index on the event's kind is needed to hold it.
+CREATE TABLE IF NOT EXISTS turn_events (
+    turn_id uuid NOT NULL
+        CONSTRAINT turn_events_turn_id_fkey REFERENCES turns (id) ON DELETE CASCADE,
+    position integer NOT NULL
+        CONSTRAINT turn_events_position_from_one CHECK (position >= 1),
+    document jsonb NOT NULL,
+    expires_at timestamptz NOT NULL,
+    CONSTRAINT turn_events_pkey PRIMARY KEY (turn_id, position)
+);
+
+-- What the sweep deletes by: the events past their expiry, oldest first.
+CREATE INDEX IF NOT EXISTS turn_events_expires_at_idx
+    ON turn_events (expires_at);
