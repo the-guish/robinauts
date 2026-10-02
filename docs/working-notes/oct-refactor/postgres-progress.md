@@ -64,6 +64,9 @@ store's races cover the SQL.
   a live watch across processes is exercised by the store's two-pool test.
 - The PostgreSQL engine suites live beside the unit tests, since they share those tests'
   scripted models; they are marked `database` and skip without the URL.
-- The engines take their memory injected. `init_langchain` and `init_pydantic_ai` read
-  the storage kind and build the saver and sessions, or the memory, for it; the engine
-  classes know no storage kind, and a test hands them an in-process one directly.
+- The engines take their memory injected. Each has a `Memory` abstract base class with
+  an in-process and a PostgreSQL implementation; `init_langchain` and `init_pydantic_ai`
+  read the storage kind and pick one, the engine classes know no storage kind, and a
+  test hands them the in-process one directly. LangChain's memory holds the sessions
+  and LangGraph's saver together, since on PostgreSQL one `setup` makes the tables of
+  both.

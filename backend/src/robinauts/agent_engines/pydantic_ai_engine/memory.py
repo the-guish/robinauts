@@ -1,13 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""Where the Pydantic AI engine keeps its memory: in this process, or in two tables of its
-own on PostgreSQL, made by `setup`, named after the engine, referencing nothing of the
-controller's. `forget` deletes everything held for a session."""
+"""Where the Pydantic AI engine keeps what it has: which sessions exist, and the history
+of each at every checkpoint.
+
+`Memory` is the shape; one implementation keeps it in this process, and one in two tables
+of the engine's own on PostgreSQL, made by `setup`, named after the engine, referencing
+nothing of the controller's. `forget` deletes everything held for a session."""
 
 from __future__ import annotations
 
 import uuid
+from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from typing import Any
 
@@ -30,8 +34,36 @@ CREATE TABLE IF NOT EXISTS pydantic_ai_checkpoints (
 """
 
 
-class Memory:
-    """The engine's memory, in the process."""
+class Memory(ABC):
+    """The engine's sessions, and the history each has at each checkpoint."""
+
+    @abstractmethod
+    async def setup(self) -> None:
+        """Make the memory ready. Safe to repeat."""
+
+    @abstractmethod
+    async def create(self, session_id: uuid.UUID) -> None:
+        """``SessionExistsError`` for a session that exists."""
+
+    @abstractmethod
+    async def exists(self, session_id: uuid.UUID) -> bool: ...
+
+    @abstractmethod
+    async def history(self, session_id: uuid.UUID, checkpoint_id: str) -> list[ModelMessage] | None:
+        """The history at that checkpoint, or ``None`` for one the session does not have."""
+
+    @abstractmethod
+    async def save(
+        self, session_id: uuid.UUID, checkpoint_id: str, messages: list[ModelMessage]
+    ) -> None: ...
+
+    @abstractmethod
+    async def forget(self, session_id: uuid.UUID) -> None:
+        """Delete the session and every history of it; nothing if it is gone."""
+
+
+class InProcessMemory(Memory):
+    """In this process."""
 
     def __init__(self) -> None:
         self._sessions: dict[uuid.UUID, dict[str, list[ModelMessage]]] = {}
@@ -60,10 +92,9 @@ class Memory:
 
 
 class PostgresMemory(Memory):
-    """The same, in the engine's own tables, through the pool it was given."""
+    """In the engine's own tables, through the pool it was given."""
 
     def __init__(self, pool: Any) -> None:
-        super().__init__()
         self._pool = pool
 
     async def setup(self) -> None:

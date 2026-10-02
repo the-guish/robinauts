@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""Which sessions the LangChain engine has, in this process or on PostgreSQL, and a
-LangGraph checkpoint saver over asyncpg beside the PostgreSQL ones.
+"""A LangGraph checkpoint saver over asyncpg, for the engine's memory on PostgreSQL.
 
-The saver is ours because `langgraph-checkpoint-postgres` depends on `psycopg`, which is
-LGPL (ADR 0002). Three tables, made by the sessions' `setup`, named after the engine,
-referencing nothing of the controller's: the sessions, the checkpoints and the pending
-writes. A checkpoint and its metadata are written with the saver's own serializer
+Ours because `langgraph-checkpoint-postgres` depends on `psycopg`, which is LGPL
+(ADR 0002). Two tables, made by the memory's `setup` beside its own, named after the
+engine, referencing nothing of the controller's: the checkpoints and the pending writes.
+A checkpoint and its metadata are written with the saver's own serializer
 (`dumps_typed`), as bytes beside their type, never pickled by us. The async methods are
 the ones the engine runs on; the sync ones stay the base class's, which refuse.
 """
@@ -15,7 +14,6 @@ the ones the engine runs on; the sync ones stay the base class's, which refuse.
 from __future__ import annotations
 
 import random
-import uuid
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
@@ -31,12 +29,7 @@ from langgraph.checkpoint.base import (
     get_checkpoint_metadata,
 )
 
-from robinauts.agent_engines.contract.domain import SessionExistsError
-
-TABLES = """
-CREATE TABLE IF NOT EXISTS langgraph_sessions (
-    session_id uuid PRIMARY KEY
-);
+CHECKPOINT_TABLES = """
 CREATE TABLE IF NOT EXISTS langgraph_checkpoints (
     thread_id text NOT NULL,
     checkpoint_ns text NOT NULL DEFAULT '',
@@ -68,57 +61,8 @@ _CHECKPOINT_COLUMNS = (
 )
 
 
-class Sessions:
-    """Which sessions exist, in this process."""
-
-    def __init__(self) -> None:
-        self._known: set[uuid.UUID] = set()
-
-    async def setup(self) -> None:
-        pass
-
-    async def create(self, session_id: uuid.UUID) -> None:
-        if session_id in self._known:
-            raise SessionExistsError(str(session_id))
-        self._known.add(session_id)
-
-    async def exists(self, session_id: uuid.UUID) -> bool:
-        return session_id in self._known
-
-    async def forget(self, session_id: uuid.UUID) -> None:
-        self._known.discard(session_id)
-
-
-class PostgresSessions(Sessions):
-    """The same in a table of the engine's; `setup` makes the saver's two tables with it."""
-
-    def __init__(self, pool: Any) -> None:
-        super().__init__()
-        self._pool = pool
-
-    async def setup(self) -> None:
-        await self._pool.execute(TABLES)
-
-    async def create(self, session_id: uuid.UUID) -> None:
-        status = await self._pool.execute(
-            "INSERT INTO langgraph_sessions (session_id) VALUES ($1) ON CONFLICT DO NOTHING",
-            session_id,
-        )
-        if status.endswith(" 0"):
-            raise SessionExistsError(str(session_id))
-
-    async def exists(self, session_id: uuid.UUID) -> bool:
-        found = await self._pool.fetchval(
-            "SELECT 1 FROM langgraph_sessions WHERE session_id = $1", session_id
-        )
-        return found is not None
-
-    async def forget(self, session_id: uuid.UUID) -> None:
-        await self._pool.execute("DELETE FROM langgraph_sessions WHERE session_id = $1", session_id)
-
-
 class PostgresSaver(BaseCheckpointSaver[str]):
-    """Over the pool it is given; its tables are made by ``PostgresSessions.setup``."""
+    """Over the pool it is given; its tables are made by ``PostgresMemory.setup``."""
 
     def __init__(self, pool: Any) -> None:
         super().__init__()

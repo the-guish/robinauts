@@ -12,7 +12,7 @@ from robinauts.agent_engines.contract.ports import (
     StorageKind,
 )
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
-from robinauts.agent_engines.pydantic_ai_engine.memory import Memory, PostgresMemory
+from robinauts.agent_engines.pydantic_ai_engine.memory import InProcessMemory, PostgresMemory
 
 
 async def init_pydantic_ai(settings: EngineSettings, storage: StorageConfig) -> AgentEngine:
@@ -20,4 +20,4 @@ async def init_pydantic_ai(settings: EngineSettings, storage: StorageConfig) -> 
     kept in this process."""
     if storage.kind is StorageKind.POSTGRES:
         return PydanticAIEngine(settings, PostgresMemory(storage.options["pool"]))
-    return PydanticAIEngine(settings, Memory())
+    return PydanticAIEngine(settings, InProcessMemory())

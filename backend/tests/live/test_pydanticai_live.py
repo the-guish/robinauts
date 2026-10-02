@@ -30,7 +30,7 @@ from robinauts.agent_engines.contract.ports import (
     ToolSecretLookup,
 )
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
-from robinauts.agent_engines.pydantic_ai_engine.memory import Memory
+from robinauts.agent_engines.pydantic_ai_engine.memory import InProcessMemory
 
 pytestmark = [pytest.mark.io, pytest.mark.live]
 
@@ -60,7 +60,7 @@ async def one_real_turn(provider: ModelProviderConfig, name: str, key: str) -> N
         keys=Key(key),
         tool_secrets=NoSecrets(),
     )
-    engine = PydanticAIEngine(settings, Memory())
+    engine = PydanticAIEngine(settings, InProcessMemory())
     await engine.setup()
     session = uuid.uuid4()
     await engine.create(session)

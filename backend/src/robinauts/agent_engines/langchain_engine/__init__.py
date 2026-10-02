@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-from langgraph.checkpoint.memory import InMemorySaver
-
 from robinauts.agent_engines.contract.ports import (
     AgentEngine,
     EngineSettings,
@@ -14,17 +12,12 @@ from robinauts.agent_engines.contract.ports import (
     StorageKind,
 )
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
-from robinauts.agent_engines.langchain_engine.saver import (
-    PostgresSaver,
-    PostgresSessions,
-    Sessions,
-)
+from robinauts.agent_engines.langchain_engine.memory import InProcessMemory, PostgresMemory
 
 
 async def init_langchain(settings: EngineSettings, storage: StorageConfig) -> AgentEngine:
-    """The engine over the storage asked: its own saver and sessions in the controller's
-    PostgreSQL, else LangGraph's in-memory saver and sessions kept in this process."""
+    """The engine over the storage asked: its memory in the controller's PostgreSQL, else
+    kept in this process."""
     if storage.kind is StorageKind.POSTGRES:
-        pool = storage.options["pool"]
-        return LangChainEngine(settings, PostgresSaver(pool), PostgresSessions(pool))
-    return LangChainEngine(settings, InMemorySaver(), Sessions())
+        return LangChainEngine(settings, PostgresMemory(storage.options["pool"]))
+    return LangChainEngine(settings, InProcessMemory())

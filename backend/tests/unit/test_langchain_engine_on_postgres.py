@@ -13,7 +13,6 @@ from typing import Any
 import pytest
 from langchain_core.language_models import GenericFakeChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.checkpoint.memory import InMemorySaver
 from test_langchain_engine import ScriptedChatModel, settings_for
 
 from aio import asyncio_test
@@ -24,23 +23,18 @@ from robinauts.agent_engines.contract.ports import AgentEngine, StorageConfig, S
 from robinauts.agent_engines.langchain_engine import engine as engine_module
 from robinauts.agent_engines.langchain_engine import init_langchain
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
-from robinauts.agent_engines.langchain_engine.saver import (
-    PostgresSaver,
-    PostgresSessions,
-    Sessions,
-)
+from robinauts.agent_engines.langchain_engine.memory import InProcessMemory, PostgresMemory
+from robinauts.agent_engines.langchain_engine.saver import PostgresSaver
 
 pytestmark = requires_postgres
 
 
 def on_postgres(pool: Any) -> LangChainEngine:
-    return LangChainEngine(
-        settings_for(ProviderKind.ANTHROPIC), PostgresSaver(pool), PostgresSessions(pool)
-    )
+    return LangChainEngine(settings_for(ProviderKind.ANTHROPIC), PostgresMemory(pool))
 
 
 def in_memory() -> LangChainEngine:
-    return LangChainEngine(settings_for(ProviderKind.ANTHROPIC), InMemorySaver(), Sessions())
+    return LangChainEngine(settings_for(ProviderKind.ANTHROPIC), InProcessMemory())
 
 
 class OnPostgres:
@@ -121,7 +115,7 @@ def test_the_saver_holds_what_the_in_memory_one_would(
         ]
         done = events[-1]
         assert isinstance(done, Done)
-        return done, await checkpoints_of(engine._saver, session)
+        return done, await checkpoints_of(engine._memory.saver, session)
 
     async def both() -> None:
         in_process = in_memory()
@@ -146,8 +140,8 @@ async def test_init_langchain_puts_memory_on_postgres_when_asked() -> None:
             StorageConfig(StorageKind.POSTGRES, {"pool": schema.pool}),
         )
         assert isinstance(engine, LangChainEngine)
-        assert isinstance(engine._saver, PostgresSaver)
-        assert isinstance(engine._sessions, PostgresSessions)
+        assert isinstance(engine._memory, PostgresMemory)
+        assert isinstance(engine._memory.saver, PostgresSaver)
         await engine.setup()
         session = uuid.uuid4()
         await engine.create(session)
