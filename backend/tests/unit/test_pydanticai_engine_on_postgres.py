@@ -5,15 +5,20 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from test_pydanticai_engine import scripted, settings_for
 
+from aio import asyncio_test
 from contracts.engine import EngineMemoryContract, EngineTurnContract, Script
-from controller_db import TemporarySchema, requires_postgres
+from controller_db import TemporarySchema, requires_postgres, temporary_schema
 from robinauts.agent_engines.contract.domain import ProviderKind
 from robinauts.agent_engines.contract.ports import AgentEngine, StorageConfig, StorageKind
 from robinauts.agent_engines.pydantic_ai_engine import engine as engine_module
+from robinauts.agent_engines.pydantic_ai_engine import init_pydantic_ai
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
+from robinauts.agent_engines.pydantic_ai_engine.memory import PostgresMemory
 
 pytestmark = requires_postgres
 
@@ -27,10 +32,7 @@ class OnPostgres:
         schema = TemporarySchema(size=2)
         pool = await schema.open()
         self.__dict__.setdefault("schemas", []).append(schema)
-        engine = PydanticAIEngine(
-            settings_for(ProviderKind.ANTHROPIC),
-            StorageConfig(StorageKind.POSTGRES, {"pool": pool}),
-        )
+        engine = PydanticAIEngine(settings_for(ProviderKind.ANTHROPIC), PostgresMemory(pool))
         await engine.setup()
         return engine
 
@@ -68,3 +70,18 @@ class TestPydanticAIEngineTurnOnPostgres(OnPostgres, EngineTurnContract):
         model = scripted(script)
         self.monkeypatch.setattr(engine_module, "chat_model", lambda *_: (model, {}))
         return await self.engine_on_postgres()
+
+
+@asyncio_test
+async def test_init_pydantic_ai_puts_memory_on_postgres_when_asked() -> None:
+    async with temporary_schema(applied=False, size=2) as schema:
+        engine = await init_pydantic_ai(
+            settings_for(ProviderKind.ANTHROPIC),
+            StorageConfig(StorageKind.POSTGRES, {"pool": schema.pool}),
+        )
+        assert isinstance(engine, PydanticAIEngine)
+        assert isinstance(engine._memory, PostgresMemory)
+        await engine.setup()
+        session = uuid.uuid4()
+        await engine.create(session)
+        assert await schema.pool.fetchval("SELECT count(*) FROM pydantic_ai_sessions") == 1

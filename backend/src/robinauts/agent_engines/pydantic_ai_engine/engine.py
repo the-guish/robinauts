@@ -1,7 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The Pydantic AI engine: an agent per turn over the history it keeps per checkpoint."""
+"""The Pydantic AI engine: an agent per turn over the history it keeps per checkpoint.
+
+The engine is handed its memory; ``init_pydantic_ai`` picks it for the storage asked, and
+nothing here knows which storage that was.
+"""
 
 from __future__ import annotations
 
@@ -37,20 +41,16 @@ from robinauts.agent_engines.contract.domain import (
     ToolCall,
     ToolResult,
 )
-from robinauts.agent_engines.contract.ports import (
-    AgentEngine,
-    EngineSettings,
-    StorageConfig,
-)
+from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings
 from robinauts.agent_engines.pydantic_ai_engine.clients import chat_model, force_tracing_off
-from robinauts.agent_engines.pydantic_ai_engine.memory import memory_for
+from robinauts.agent_engines.pydantic_ai_engine.memory import Memory
 from robinauts.agent_engines.pydantic_ai_engine.tools import toolsets_for
 
 
 class PydanticAIEngine(AgentEngine):
-    def __init__(self, settings: EngineSettings, storage: StorageConfig) -> None:
+    def __init__(self, settings: EngineSettings, memory: Memory) -> None:
         self._settings = settings
-        self._memory = memory_for(storage)
+        self._memory = memory
         force_tracing_off()
 
     def kinds(self) -> frozenset[ProviderKind]:

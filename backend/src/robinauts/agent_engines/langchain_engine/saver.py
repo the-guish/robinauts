@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""A LangGraph checkpoint saver over asyncpg, and the engine's sessions beside it.
+"""Which sessions the LangChain engine has, in this process or on PostgreSQL, and a
+LangGraph checkpoint saver over asyncpg beside the PostgreSQL ones.
 
-Ours because `langgraph-checkpoint-postgres` depends on `psycopg`, which is LGPL
-(ADR 0002). Three tables, made by `setup`, named after the engine, referencing nothing of
-the controller's: the sessions, the checkpoints and the pending writes. A checkpoint and
-its metadata are written with the saver's own serializer (`dumps_typed`), as bytes beside
-their type, never pickled by us. The async methods are the ones the engine runs on; the
-sync ones stay the base class's, which refuse.
+The saver is ours because `langgraph-checkpoint-postgres` depends on `psycopg`, which is
+LGPL (ADR 0002). Three tables, made by the sessions' `setup`, named after the engine,
+referencing nothing of the controller's: the sessions, the checkpoints and the pending
+writes. A checkpoint and its metadata are written with the saver's own serializer
+(`dumps_typed`), as bytes beside their type, never pickled by us. The async methods are
+the ones the engine runs on; the sync ones stay the base class's, which refuse.
 """
 
 from __future__ import annotations
@@ -67,8 +68,32 @@ _CHECKPOINT_COLUMNS = (
 )
 
 
-class PostgresSessions:
+class Sessions:
+    """Which sessions exist, in this process."""
+
+    def __init__(self) -> None:
+        self._known: set[uuid.UUID] = set()
+
+    async def setup(self) -> None:
+        pass
+
+    async def create(self, session_id: uuid.UUID) -> None:
+        if session_id in self._known:
+            raise SessionExistsError(str(session_id))
+        self._known.add(session_id)
+
+    async def exists(self, session_id: uuid.UUID) -> bool:
+        return session_id in self._known
+
+    async def forget(self, session_id: uuid.UUID) -> None:
+        self._known.discard(session_id)
+
+
+class PostgresSessions(Sessions):
+    """The same in a table of the engine's; `setup` makes the saver's two tables with it."""
+
     def __init__(self, pool: Any) -> None:
+        super().__init__()
         self._pool = pool
 
     async def setup(self) -> None:
@@ -93,12 +118,11 @@ class PostgresSessions:
 
 
 class PostgresSaver(BaseCheckpointSaver[str]):
+    """Over the pool it is given; its tables are made by ``PostgresSessions.setup``."""
+
     def __init__(self, pool: Any) -> None:
         super().__init__()
         self._pool = pool
-
-    async def setup(self) -> None:
-        await self._pool.execute(TABLES)
 
     async def aget_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
         thread_id = config["configurable"]["thread_id"]

@@ -13,20 +13,34 @@ from typing import Any
 import pytest
 from langchain_core.language_models import GenericFakeChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.memory import InMemorySaver
 from test_langchain_engine import ScriptedChatModel, settings_for
 
+from aio import asyncio_test
 from contracts.engine import AGENT, EngineMemoryContract, EngineTurnContract, Script, add
 from controller_db import TemporarySchema, requires_postgres, temporary_schema
 from robinauts.agent_engines.contract.domain import Done, ProviderKind
 from robinauts.agent_engines.contract.ports import AgentEngine, StorageConfig, StorageKind
 from robinauts.agent_engines.langchain_engine import engine as engine_module
+from robinauts.agent_engines.langchain_engine import init_langchain
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
+from robinauts.agent_engines.langchain_engine.saver import (
+    PostgresSaver,
+    PostgresSessions,
+    Sessions,
+)
 
 pytestmark = requires_postgres
 
 
-def on(storage: StorageConfig) -> LangChainEngine:
-    return LangChainEngine(settings_for(ProviderKind.ANTHROPIC), storage)
+def on_postgres(pool: Any) -> LangChainEngine:
+    return LangChainEngine(
+        settings_for(ProviderKind.ANTHROPIC), PostgresSaver(pool), PostgresSessions(pool)
+    )
+
+
+def in_memory() -> LangChainEngine:
+    return LangChainEngine(settings_for(ProviderKind.ANTHROPIC), InMemorySaver(), Sessions())
 
 
 class OnPostgres:
@@ -34,7 +48,7 @@ class OnPostgres:
         schema = TemporarySchema(size=2)
         pool = await schema.open()
         self.__dict__.setdefault("schemas", []).append(schema)
-        engine = on(StorageConfig(StorageKind.POSTGRES, {"pool": pool}))
+        engine = on_postgres(pool)
         await engine.setup()
         return engine
 
@@ -110,15 +124,31 @@ def test_the_saver_holds_what_the_in_memory_one_would(
         return done, await checkpoints_of(engine._saver, session)
 
     async def both() -> None:
-        in_memory = on(StorageConfig(StorageKind.IN_MEMORY, {}))
-        await in_memory.setup()
-        done_in_memory, saved_in_memory = await run(in_memory)
+        in_process = in_memory()
+        await in_process.setup()
+        done_in_memory, saved_in_memory = await run(in_process)
         async with temporary_schema(applied=False, size=2) as schema:
-            on_postgres = on(StorageConfig(StorageKind.POSTGRES, {"pool": schema.pool}))
-            await on_postgres.setup()
-            done_on_postgres, saved_on_postgres = await run(on_postgres)
+            engine = on_postgres(schema.pool)
+            await engine.setup()
+            done_on_postgres, saved_on_postgres = await run(engine)
         assert done_on_postgres.text == done_in_memory.text
         assert saved_on_postgres == saved_in_memory
         assert len(saved_on_postgres) >= 2
 
     asyncio.run(both())
+
+
+@asyncio_test
+async def test_init_langchain_puts_memory_on_postgres_when_asked() -> None:
+    async with temporary_schema(applied=False, size=2) as schema:
+        engine = await init_langchain(
+            settings_for(ProviderKind.ANTHROPIC),
+            StorageConfig(StorageKind.POSTGRES, {"pool": schema.pool}),
+        )
+        assert isinstance(engine, LangChainEngine)
+        assert isinstance(engine._saver, PostgresSaver)
+        assert isinstance(engine._sessions, PostgresSessions)
+        await engine.setup()
+        session = uuid.uuid4()
+        await engine.create(session)
+        assert await schema.pool.fetchval("SELECT count(*) FROM langgraph_sessions") == 1

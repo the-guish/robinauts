@@ -28,13 +28,12 @@ from robinauts.agent_engines.contract.domain import (
 from robinauts.agent_engines.contract.ports import (
     EngineSettings,
     ProviderKeyLookup,
-    StorageConfig,
-    StorageKind,
     ToolSecretLookup,
 )
 from robinauts.agent_engines.pydantic_ai_engine import engine as engine_module
 from robinauts.agent_engines.pydantic_ai_engine.clients import chat_model
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
+from robinauts.agent_engines.pydantic_ai_engine.memory import Memory
 
 ENDPOINT = "https://gateway.example.test/v1"
 PROMPT = "What are two and three?"
@@ -75,7 +74,7 @@ async def turn_over(vendor: Vendor, monkeypatch: pytest.MonkeyPatch) -> list[Eve
 
     monkeypatch.setattr(engine_module, "chat_model", plugged_chat_model)
     monkeypatch.setattr(engine_module, "toolsets_for", toolsets_for)
-    engine = PydanticAIEngine(SETTINGS, StorageConfig(StorageKind.IN_MEMORY, {}))
+    engine = PydanticAIEngine(SETTINGS, Memory())
     await engine.setup()
     session = uuid.uuid4()
     await engine.create(session)

@@ -1,7 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The LangChain engine: a LangGraph agent per turn over a saver whose thread is the session."""
+"""The LangChain engine: a LangGraph agent per turn over a saver whose thread is the session.
+
+The engine is handed its saver and its sessions; ``init_langchain`` picks them for the
+storage asked, and nothing here knows which storage that was.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +19,6 @@ from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.checkpoint.memory import InMemorySaver
 
 from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
@@ -24,56 +27,24 @@ from robinauts.agent_engines.contract.domain import (
     Event,
     ProviderKind,
     ReasoningDelta,
-    SessionExistsError,
     SessionNotFoundError,
     TextDelta,
     ToolCall,
     ToolResult,
 )
-from robinauts.agent_engines.contract.ports import (
-    AgentEngine,
-    EngineSettings,
-    StorageConfig,
-    StorageKind,
-)
+from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings
 from robinauts.agent_engines.langchain_engine.clients import chat_model, force_tracing_off
-from robinauts.agent_engines.langchain_engine.saver import PostgresSaver, PostgresSessions
+from robinauts.agent_engines.langchain_engine.saver import Sessions
 from robinauts.agent_engines.langchain_engine.tools import tools_for
 
 
-class Sessions:
-    """Which sessions exist, in this process."""
-
-    def __init__(self) -> None:
-        self._known: set[uuid.UUID] = set()
-
-    async def setup(self) -> None:
-        pass
-
-    async def create(self, session_id: uuid.UUID) -> None:
-        if session_id in self._known:
-            raise SessionExistsError(str(session_id))
-        self._known.add(session_id)
-
-    async def exists(self, session_id: uuid.UUID) -> bool:
-        return session_id in self._known
-
-    async def forget(self, session_id: uuid.UUID) -> None:
-        self._known.discard(session_id)
-
-
 class LangChainEngine(AgentEngine):
-    def __init__(self, settings: EngineSettings, storage: StorageConfig) -> None:
+    def __init__(
+        self, settings: EngineSettings, saver: BaseCheckpointSaver[str], sessions: Sessions
+    ) -> None:
         self._settings = settings
-        self._saver: BaseCheckpointSaver[str]
-        self._sessions: Sessions
-        if storage.kind is StorageKind.POSTGRES:
-            pool = storage.options["pool"]
-            self._saver = PostgresSaver(pool)
-            self._sessions = PostgresSessions(pool)
-        else:
-            self._saver = InMemorySaver()
-            self._sessions = Sessions()
+        self._saver = saver
+        self._sessions = sessions
         force_tracing_off()
 
     def kinds(self) -> frozenset[ProviderKind]:
@@ -81,8 +52,6 @@ class LangChainEngine(AgentEngine):
 
     async def setup(self) -> None:
         await self._sessions.setup()
-        if isinstance(self._saver, PostgresSaver):
-            await self._saver.setup()
 
     async def create(self, session_id: uuid.UUID) -> None:
         await self._sessions.create(session_id)

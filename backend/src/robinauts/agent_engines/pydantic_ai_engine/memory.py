@@ -14,7 +14,6 @@ from typing import Any
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 
 from robinauts.agent_engines.contract.domain import SessionExistsError
-from robinauts.agent_engines.contract.ports import StorageConfig, StorageKind
 
 TABLES = """
 CREATE TABLE IF NOT EXISTS pydantic_ai_sessions (
@@ -109,9 +108,3 @@ class PostgresMemory(Memory):
         await self._pool.execute(
             "DELETE FROM pydantic_ai_sessions WHERE session_id = $1", session_id
         )
-
-
-def memory_for(storage: StorageConfig) -> Memory:
-    if storage.kind is StorageKind.POSTGRES:
-        return PostgresMemory(storage.options["pool"])
-    return Memory()

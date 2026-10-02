@@ -9,6 +9,7 @@ import uuid
 from typing import Any
 
 import pytest
+from langgraph.checkpoint.memory import InMemorySaver
 
 from aio import asyncio_test
 from chat_completions import PATH, Vendor, calling, finished, said, streamed
@@ -27,13 +28,12 @@ from robinauts.agent_engines.contract.domain import (
 from robinauts.agent_engines.contract.ports import (
     EngineSettings,
     ProviderKeyLookup,
-    StorageConfig,
-    StorageKind,
     ToolSecretLookup,
 )
 from robinauts.agent_engines.langchain_engine import engine as engine_module
 from robinauts.agent_engines.langchain_engine.clients import chat_model
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
+from robinauts.agent_engines.langchain_engine.saver import Sessions
 
 ENDPOINT = "https://gateway.example.test/v1"
 PROMPT = "What are two and three?"
@@ -74,7 +74,7 @@ async def turn_over(vendor: Vendor, monkeypatch: pytest.MonkeyPatch) -> list[Eve
 
     monkeypatch.setattr(engine_module, "chat_model", plugged_chat_model)
     monkeypatch.setattr(engine_module, "tools_for", tools_for)
-    engine = LangChainEngine(SETTINGS, StorageConfig(StorageKind.IN_MEMORY, {}))
+    engine = LangChainEngine(SETTINGS, InMemorySaver(), Sessions())
     await engine.setup()
     session = uuid.uuid4()
     await engine.create(session)
