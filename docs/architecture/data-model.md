@@ -23,9 +23,15 @@ agent to another engine, and what its sessions then do, is stage two.
 | message | `id` | `session_id`, `parent_id`, `role`, `created_at` | **yes** |
 | turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `lease_until`, `cancel_requested_at` | no |
 | turn event | `(turn_id, position)` | `expires_at` | **yes** |
+| user session | `id` | `user_id`, `secret_hash` (unique), `created_at`, `expires_at` | no |
+| pending login | `state_hash` | `provider`, `nonce`, `verifier`, `return_to`, `created_at`, `expires_at` | no |
+| API token | `id` | `user_id`, `name`, `secret_hash` (unique), `created_at`, `expires_at` | no |
 
 Also in the PostgreSQL schema: `schema_version`, one row with the version and the
-hash of the file. Sign-in adds `user_sessions` and the pending logins.
+hash of the file. The last three records are sign-in's, kept through the
+`Credentials` port and not the store, in `user_sessions`, `pending_logins` and
+`api_tokens`. Each holds the SHA-256 of a secret, never the secret, and is found by
+it (`docs/specs/sign-in.md`).
 
 A record whose fields are all ordered, filtered or decided by is columns. A record
 with content of many shapes is a document: the store keeps it whole and never reads

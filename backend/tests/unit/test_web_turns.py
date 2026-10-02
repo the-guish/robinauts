@@ -15,15 +15,17 @@ import httpx
 from test_controller_turns import CONFIG
 
 from aio import asyncio_test
-from robinauts.controller.composition import build
+from robinauts.controller.composition import compose
 from robinauts.controller.contract.domain import StorageConfig, StorageKind
 from robinauts.web.app import create_app
 
 
 @asynccontextmanager
 async def client() -> AsyncIterator[httpx.AsyncClient]:
-    controller = build(CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
-    app = create_app(controller)
+    composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
+    app = create_app(
+        composed.controller, credentials=composed.credentials, sign_in=None, secret_for={}.get
+    )
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:

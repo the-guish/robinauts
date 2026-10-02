@@ -169,6 +169,46 @@ class User:
     created_at: datetime | None = None
 
 
+# --- credentials --------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class UserSession:
+    """A signed-in browser. Its cookie holds the secret, and this the secret's SHA-256 hex."""
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    secret_hash: str
+    created_at: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PendingLogin:
+    """A sign-in begun and not yet finished, under the SHA-256 hex of its ``state``. Its nonce
+    and PKCE verifier are kept as they are, since the callback needs them."""
+
+    state_hash: str
+    provider: str
+    nonce: str
+    verifier: str
+    return_to: str
+    created_at: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ApiToken:
+    """Its owner was shown the secret once; this holds the secret's SHA-256 hex."""
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    name: str
+    secret_hash: str
+    created_at: datetime
+    expires_at: datetime
+
+
 # --- catalogue ----------------------------------------------------------------
 
 

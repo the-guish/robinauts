@@ -5,8 +5,9 @@
 --
 -- This is the controller's alone. The engines keep their memory in tables of
 -- their own, made by their own `setup`, and nothing here references them
--- (docs/specs/agent-engines.md). Sign-in's tables (`user_sessions` and the
--- pending logins) are added to this file with sign-in.
+-- (docs/specs/agent-engines.md). Sign-in's tables, `user_sessions`,
+-- `pending_logins` and `api_tokens`, are kept through the credentials port
+-- and not the store's, and come last (docs/specs/sign-in.md).
 --
 -- A table comes after every table it references, since the file is applied
 -- from the top.
@@ -337,6 +338,99 @@ CREATE TABLE IF NOT EXISTS turn_events (
 -- What the sweep deletes by: the events past their expiry, oldest first.
 CREATE INDEX IF NOT EXISTS turn_events_expires_at_idx
     ON turn_events (expires_at);
+
+
+-- ---------------------------------------------------------------------------
+-- User sessions.
+-- ---------------------------------------------------------------------------
+
+-- A signed-in browser. Its cookie holds a random secret, and this table its
+-- SHA-256 in hex and nothing that could open the session: a session is
+-- found by that hash, judged against the `now` the caller gives. It is never
+-- renewed, so `expires_at` is written once.
+--
+-- `user_id` cascades: a user's sessions end with the user.
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id uuid
+        CONSTRAINT user_sessions_pkey PRIMARY KEY,
+    user_id uuid NOT NULL
+        CONSTRAINT user_sessions_user_id_fkey REFERENCES users (id) ON DELETE CASCADE,
+    secret_hash text NOT NULL
+        CONSTRAINT user_sessions_secret_hash_key UNIQUE
+        CONSTRAINT user_sessions_secret_hash_is_a_hash CHECK (secret_hash ~ '^[0-9a-f]{64}$'),
+    created_at timestamptz NOT NULL,
+    expires_at timestamptz NOT NULL
+);
+
+-- What the cascade from `users` deletes by.
+CREATE INDEX IF NOT EXISTS user_sessions_user_id_idx
+    ON user_sessions (user_id);
+
+-- What stage two's sweep deletes by: the sessions past their expiry.
+CREATE INDEX IF NOT EXISTS user_sessions_expires_at_idx
+    ON user_sessions (expires_at);
+
+
+-- ---------------------------------------------------------------------------
+-- Pending logins.
+-- ---------------------------------------------------------------------------
+
+-- A sign-in begun and not yet finished: what is left between the button and
+-- the provider's callback, found by the SHA-256 of the `state` handed to the
+-- provider, and taken once, by a `DELETE ... RETURNING`. The nonce and the
+-- PKCE verifier are kept as they are, since the callback needs them.
+--
+-- No foreign key: a sign-in in progress belongs to nobody yet. Beginning one
+-- deletes the expired ones in the same statement, so the table holds ten
+-- minutes of sign-ins with no sweep.
+CREATE TABLE IF NOT EXISTS pending_logins (
+    state_hash text
+        CONSTRAINT pending_logins_pkey PRIMARY KEY
+        CONSTRAINT pending_logins_state_hash_is_a_hash CHECK (state_hash ~ '^[0-9a-f]{64}$'),
+    provider text NOT NULL,
+    nonce text NOT NULL,
+    verifier text NOT NULL,
+    return_to text,
+    created_at timestamptz NOT NULL,
+    expires_at timestamptz NOT NULL
+);
+
+-- What beginning a sign-in deletes by, and stage two's sweep.
+CREATE INDEX IF NOT EXISTS pending_logins_expires_at_idx
+    ON pending_logins (expires_at);
+
+
+-- ---------------------------------------------------------------------------
+-- API tokens.
+-- ---------------------------------------------------------------------------
+
+-- A token a signed-in person minted for a channel other than the browser.
+-- Its owner was shown the secret once; this table holds its SHA-256 in hex,
+-- and a bearer is found by that hash, judged against the `now` the caller
+-- gives. `name` is what the owner called it.
+--
+-- `user_id` cascades: a user's tokens are revoked with the user.
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id uuid
+        CONSTRAINT api_tokens_pkey PRIMARY KEY,
+    user_id uuid NOT NULL
+        CONSTRAINT api_tokens_user_id_fkey REFERENCES users (id) ON DELETE CASCADE,
+    name text NOT NULL,
+    secret_hash text NOT NULL
+        CONSTRAINT api_tokens_secret_hash_key UNIQUE
+        CONSTRAINT api_tokens_secret_hash_is_a_hash CHECK (secret_hash ~ '^[0-9a-f]{64}$'),
+    created_at timestamptz NOT NULL,
+    expires_at timestamptz NOT NULL
+);
+
+-- What the cascade from `users` deletes by, and what listing a user's tokens
+-- reads.
+CREATE INDEX IF NOT EXISTS api_tokens_user_id_idx
+    ON api_tokens (user_id);
+
+-- What stage two's sweep deletes by: the tokens past their expiry.
+CREATE INDEX IF NOT EXISTS api_tokens_expires_at_idx
+    ON api_tokens (expires_at);
 
 
 -- ---------------------------------------------------------------------------

@@ -238,5 +238,20 @@ Entries are never edited after the fact; a correction is a new entry.
   the directory in `REUSE.toml`. The copy was made by The Robinauts Authors
   via Claude Code, reviewed by the maintainers.
 
+### 2026-10-02, API tokens: a correction to the sign-in design entry
+
+- Corrects: "sign-in design, from neorc" (2026-09-21), whose modifications
+  end "no API tokens yet". API tokens have landed.
+- Source: this project. The spec had them planned with no design; block 7
+  designed them (`docs/working-notes/oct-refactor/auth-plan.md`, "API
+  tokens") and step 6 of that plan wrote them.
+- Their licence: Apache-2.0, this project's.
+- Landed as: `docs/specs/sign-in.md`, "API tokens", and the three
+  `/auth/tokens` routes in `backend/src/robinauts/web/app.py`.
+- Modifications: the 2026-09-21 entry's list gains API tokens. A signed-in
+  person mints one for themselves; it is shown once, kept as its SHA-256,
+  lives ninety days and is sent as a bearer.
+- Attribution added to: none needed. Nothing was taken from another project.
+
 <!-- Entries go above this line. -->
 <!-- REUSE-IgnoreEnd -->

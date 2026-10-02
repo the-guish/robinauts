@@ -70,6 +70,10 @@ class MemoryStore(Store):
     async def add_user_if_absent(self, user: User) -> User:
         return self._users.setdefault((user.provider, user.subject), user)
 
+    def user_by_id(self, user_id: uuid.UUID) -> User | None:
+        """Not the port's: what ``MemoryCredentials`` resolves a secret to."""
+        return next((u for u in self._users.values() if u.id == user_id), None)
+
     # --- sessions -----------------------------------------------------------
 
     async def add_session(self, session: Session) -> None:

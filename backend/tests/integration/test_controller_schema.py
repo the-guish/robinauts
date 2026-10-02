@@ -38,7 +38,9 @@ async def test_an_empty_schema_gets_the_whole_file_and_a_second_run_changes_noth
         tables = await schema.pool.fetch(
             "SELECT tablename FROM pg_tables WHERE schemaname = current_schema()"
         )
-        assert sorted(t["tablename"] for t in tables) == sorted(SCHEMA_TABLES)
+        names = sorted(t["tablename"] for t in tables)
+        assert names == sorted(SCHEMA_TABLES)
+        assert {"user_sessions", "pending_logins", "api_tokens"} <= set(names)
         await check_schema(schema.pool)
 
 
