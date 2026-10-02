@@ -5,8 +5,8 @@
 
 No sign-in yet: every request runs as one local user, named after the operating
 system's. A controller operation that is not implemented answers 501. The shapes are the
-ones the frontend reads (``docs/specs/wire.md``); a turn's stream is AG-UI over SSE, and
-its run id is the session's id.
+ones the frontend reads (``docs/specs/wire.md``); a turn's stream is AG-UI over SSE, its
+run id is the turn's id, and its thread id the session's.
 """
 
 from __future__ import annotations
@@ -236,9 +236,9 @@ def message_view(message: Message, session: Session) -> MessageView:
     if message.role is Role.ASSISTANT:
         provenance = ProvenanceView(
             agent=message.agent or session.agent,
-            engine="",
+            engine=message.engine or "",
             model=message.model or "",
-            run_id=session.id,
+            run_id=message.turn_id or session.id,
         )
     return MessageView(
         id=message.id,
@@ -263,22 +263,23 @@ def opened_view(opened: OpenedSession, default: str) -> OpenedConversationRespon
     return OpenedConversationResponse(
         conversation=summary(session, model_of(opened, default)),
         messages=[message_view(m, session) for m in opened.messages],
-        run_id=None if active is None else session.id,
+        run_id=None if active is None else active.turn_id,
         resume=None if active is None else ResumeView(after=0, follows=active.follows),
         ended_badly=None,
     )
 
 
-def event_stream(session_id: uuid.UUID, events: AsyncIterator[NumberedEvent]) -> StreamingResponse:
-    run_id = str(session_id)
+def event_stream(
+    session_id: uuid.UUID, turn_id: uuid.UUID, events: AsyncIterator[NumberedEvent]
+) -> StreamingResponse:
     return StreamingResponse(
-        agui.stream(run_id, events),
+        agui.stream(str(session_id), str(turn_id), events),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-store",
             "X-Accel-Buffering": "no",
-            "X-Robinauts-Run-Id": run_id,
-            "X-Robinauts-Conversation-Id": run_id,
+            "X-Robinauts-Run-Id": str(turn_id),
+            "X-Robinauts-Conversation-Id": str(session_id),
         },
     )
 
@@ -312,8 +313,8 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
     async def default_model(agent: str) -> str:
         return next(a.default_model for a in await controller.list_agents() if a.id == agent)
 
-    async def watched(session_id: uuid.UUID, after: int) -> StreamingResponse:
-        events = controller.watch_turn(app.state.user, session_id, after=after)
+    async def watched(session_id: uuid.UUID, turn_id: uuid.UUID, after: int) -> StreamingResponse:
+        events = controller.watch_turn(app.state.user, session_id, turn_id, after=after)
         # The refusals happen inside the generator: ask for the first event here, so that
         # they answer with a status rather than a broken stream.
         first = await anext(events, None)
@@ -325,7 +326,7 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
             async for event in events:
                 yield event
 
-        return event_stream(session_id, chained())
+        return event_stream(session_id, turn_id, chained())
 
     # --- sign-in: none yet ----------------------------------------------------
 
@@ -412,7 +413,7 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
         started = await controller.start_session(
             app.state.user, agent=body.agent_id, model=model, text=body.text
         )
-        return await watched(started.session_id, 0)
+        return await watched(started.session_id, started.turn_id, 0)
 
     @app.post("/api/conversations/{conversation_id}/turns", include_in_schema=False)
     async def send_message(conversation_id: uuid.UUID, body: TurnRequest) -> StreamingResponse:
@@ -422,30 +423,32 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
             # The frontend names the answer to produce again; the controller, its question.
             at = next(i for i, m in enumerate(opened.messages) if m.id == body.regenerate)
             question = next(m for m in reversed(opened.messages[: at + 1]) if m.role is Role.USER)
-            await controller.regenerate_answer(
+            started = await controller.regenerate_answer(
                 app.state.user, conversation_id, question_id=question.id, model=model
             )
         else:
-            await controller.send_message(
+            started = await controller.send_message(
                 app.state.user,
                 conversation_id,
                 parent_id=body.parent_id,
                 model=model,
                 text=body.text,
             )
-        return await watched(conversation_id, 0)
+        return await watched(conversation_id, started.turn_id, 0)
 
-    @app.get("/api/runs/{run_id}/events", include_in_schema=False)
+    @app.get("/api/conversations/{conversation_id}/runs/{run_id}/events", include_in_schema=False)
     async def watch_turn(
+        conversation_id: uuid.UUID,
         run_id: uuid.UUID,
         after: int | None = None,
         last_event_id: str | None = Header(default=None),
     ) -> StreamingResponse:
-        return await watched(run_id, after if after is not None else int(last_event_id or 0))
+        position = after if after is not None else int(last_event_id or 0)
+        return await watched(conversation_id, run_id, position)
 
     @app.post("/api/conversations/{conversation_id}/runs/{run_id}/cancel", status_code=204)
     async def cancel_turn(conversation_id: uuid.UUID, run_id: uuid.UUID) -> None:
-        await controller.cancel_turn(app.state.user, conversation_id)
+        await controller.cancel_turn(app.state.user, conversation_id, run_id)
 
     # --- the interface ---------------------------------------------------------
 

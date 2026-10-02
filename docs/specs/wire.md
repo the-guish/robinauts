@@ -15,15 +15,22 @@ until the frontend is revisited.
   events**, on the same origin. The UI starts a turn with a POST; the
   response is the event stream of the turn it began.
 - **The stream is a view of the turn, not the turn.** Closing it changes
-  nothing. A conversation has at most one turn going, so **the run id on the
-  wire is the conversation's id**: the UI re-attaches to the turn of a
-  conversation by that id, giving the last event it saw, and receives what
-  it missed and then the rest.
+  nothing. **The run id on the wire is the turn's id.** A conversation has at
+  most one turn going, but each turn is a run of its own: the UI re-attaches
+  to a turn by the conversation's id and the turn's, giving the last event it
+  saw, and receives what it missed and then the rest. An answer's
+  `provenance.run_id` names the turn that produced it, and `ended_badly.run_id`
+  the turn that ended badly. AG-UI's `thread_id` on `RUN_STARTED` and
+  `RUN_FINISHED` is the conversation's id, and its `run_id` the turn's.
 - Loading a conversation returns its messages and, when a turn is going, the
-  run id and where to attach (`resume`: the position to attach after, and
-  `follows`, the message the turn's answer hangs under). The messages end at
-  `follows`: a UI appends what streams in to the end of the list.
-- A turn is cancelled by an explicit request.
+  running turn's id as `run_id` and where to attach (`resume`: the position to
+  attach after, and `follows`, the message the turn's answer hangs under). The
+  messages end at `follows`: a UI appends what streams in to the end of the
+  list.
+- A turn is cancelled by an explicit request, naming the conversation and the
+  turn. Cancelling a turn that another process of the deployment runs is
+  refused (409) until cancelling goes through the store, and so is deleting a
+  conversation while a turn runs: stop the turn first.
 - The request names the conversation and **either** a new user message with
   the message it hangs under — nothing for the first, the parent of the
   message being replaced for an edit — **or** the assistant message whose
@@ -75,8 +82,8 @@ documented here, which is what "documented with the API" means for them.
 |---|---|---|
 | `POST /api/turns` | `{"agent_id": str, "model_id": str\|null, "text": str}` | the stream of the turn answering the first question of a **new** conversation |
 | `POST /api/conversations/{id}/turns` | `{"text": str, "parent_id": uuid\|null, "model_id": str\|null}` **or** `{"regenerate": uuid, "model_id": str\|null}` | the stream of the turn it began |
-| `GET /api/runs/{run_id}/events?after=<position>` | — | the stream of that turn from `after`; `Last-Event-ID` says the same thing, and is read when `after` is absent |
-| `POST /api/conversations/{id}/runs/{run_id}/cancel` | — | 204; the turn ends as cancelled |
+| `GET /api/conversations/{id}/runs/{run_id}/events?after=<position>` | — | the stream of that turn from `after`; `Last-Event-ID` says the same thing, and is read when `after` is absent; a run that is not in that conversation answers 404, as one in somebody else's does |
+| `POST /api/conversations/{id}/runs/{run_id}/cancel` | — | 204; the turn ends as cancelled. 409 for a turn another process runs |
 
 - `parent_id` is the message the new one hangs under — nothing for a
   conversation's first question, the parent of the message being replaced
@@ -84,9 +91,9 @@ documented here, which is what "documented with the API" means for them.
   turn answers that answer's question.
 - Every stream carries `Content-Type: text/event-stream`,
   `Cache-Control: no-store`, `X-Accel-Buffering: no`, and
-  `X-Robinauts-Run-Id` and `X-Robinauts-Conversation-Id` — the same value,
-  the conversation's id — so that a client which received the headers and
-  nothing else can re-attach.
+  `X-Robinauts-Run-Id` and `X-Robinauts-Conversation-Id` — the turn's id and
+  the conversation's — so that a client which received the headers and
+  nothing else can re-attach, with both.
 - **An `id: <position>` is the platform's own numbering of the turn's
   events**, and it is what makes `Last-Event-ID` re-attaching native. The
   numbering starts again at 1 with each turn. One wire event can be
@@ -145,29 +152,6 @@ hold as the rule and are not enforced yet:
   (`ended_badly` on the opened conversation).
 - A body is bounded at one mebibyte, refused with 413 on the declared length
   before a byte of it is read.
-
-**Planned with turn ids.** The controller gives each turn an id of its own
-([architecture/data-model.md](../architecture/data-model.md)). When it does,
-the wire changes in these ways and in no others:
-
-- **The run id is the turn's id**, no longer the conversation's. A
-  conversation still has at most one turn going, but each turn is a run of its
-  own: an answer's `provenance.run_id` names the turn that produced it, and
-  `ended_badly.run_id` the turn that ended badly.
-- **The events URL names the conversation as well as the run**:
-  `GET /api/conversations/{id}/runs/{run_id}/events`, as the cancel URL already
-  does. A store that keeps a conversation's records together finds a turn
-  from both ids, and a run that is not in that conversation answers 404, as
-  one in somebody else's does. `GET /api/runs/{run_id}/events` goes.
-- **`X-Robinauts-Run-Id` and `X-Robinauts-Conversation-Id` carry two values**:
-  the turn's id and the conversation's. A client that received the headers
-  and nothing else can still re-attach, with both.
-- **An opened conversation's `run_id` is the running turn's id**, so that a
-  client re-attaching after a reload asks for that turn and no other. The
-  frontend's client builds the events URL from it and the conversation's id.
-
-What does not change: positions still start at 1 with each turn, re-attaching
-is still `Last-Event-ID` or `after`, and the events themselves are the same.
 
 ## Without streaming
 

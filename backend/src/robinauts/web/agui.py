@@ -3,7 +3,7 @@
 
 """The controller's turn events as AG-UI events over server-sent events (``docs/specs/wire.md``).
 
-The run id is the session's id: a session has one active turn at a time.
+The run id is the turn's id, and the thread id the session's: each turn is a run of its own.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def sse(event: BaseEvent, position: int | None = None) -> str:
     return f"{numbered}event: {event.type.value}\n{ENCODER.encode(event)}"
 
 
-def mapped(run_id: str, event: TurnEvent) -> tuple[BaseEvent, ...]:
+def mapped(thread_id: str, run_id: str, event: TurnEvent) -> tuple[BaseEvent, ...]:
     match event:
         case MessageStarted(role=Role.ASSISTANT):
             return (TextMessageStartEvent(message_id=str(event.message_id), role="assistant"),)
@@ -89,11 +89,11 @@ def mapped(run_id: str, event: TurnEvent) -> tuple[BaseEvent, ...]:
         case MessageCompleted():
             return (TextMessageEndEvent(message_id=str(event.message_id)),)
         case TurnEnded(state=TurnState.FINISHED):
-            return (RunFinishedEvent(thread_id=run_id, run_id=run_id),)
+            return (RunFinishedEvent(thread_id=thread_id, run_id=run_id),)
         case TurnEnded(state=TurnState.CANCELLED):
             return (
                 RunFinishedEvent(
-                    thread_id=run_id, run_id=run_id, outcome=RunFinishedCancelledOutcome()
+                    thread_id=thread_id, run_id=run_id, outcome=RunFinishedCancelledOutcome()
                 ),
             )
         case TurnEnded():
@@ -101,9 +101,11 @@ def mapped(run_id: str, event: TurnEvent) -> tuple[BaseEvent, ...]:
     return ()
 
 
-async def stream(run_id: str, events: AsyncIterator[NumberedEvent]) -> AsyncIterator[str]:
+async def stream(
+    thread_id: str, run_id: str, events: AsyncIterator[NumberedEvent]
+) -> AsyncIterator[str]:
     """``RUN_STARTED``, then each event; the position goes on the last wire event of each."""
-    yield sse(RunStartedEvent(thread_id=run_id, run_id=run_id))
+    yield sse(RunStartedEvent(thread_id=thread_id, run_id=run_id))
     thinking: str | None = None
     async for numbered in events:
         event, position = numbered.event, numbered.position
@@ -116,6 +118,6 @@ async def stream(run_id: str, events: AsyncIterator[NumberedEvent]) -> AsyncIter
         if thinking is not None:
             yield sse(ReasoningMessageEndEvent(message_id=thinking))
             thinking = None
-        wire = mapped(run_id, event)
+        wire = mapped(thread_id, run_id, event)
         for index, sent in enumerate(wire):
             yield sse(sent, position if index == len(wire) - 1 else None)

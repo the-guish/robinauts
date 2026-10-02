@@ -25,6 +25,10 @@ from robinauts.web.app import create_app
 
 REPO = Path(__file__).resolve().parents[4]
 
+GRACEFUL_SHUTDOWN_SECONDS = 20
+"""How long uvicorn waits for open streams on a stop before it closes them, so that the
+controller's `close`, which runs after, still runs inside a service's stop timeout."""
+
 
 def start(host: str, port: int) -> None:
     named = os.environ.get("ROBINAUTS_UI_DIR")
@@ -32,7 +36,12 @@ def start(host: str, port: int) -> None:
     config, secret_for = load(Path(os.environ["ROBINAUTS_CONFIG"]), os.environ)
     controller = build(config, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for=secret_for)
     logging.basicConfig(level=logging.INFO)
-    uvicorn.run(create_app(controller, ui_dir=ui_dir), host=host, port=port)
+    uvicorn.run(
+        create_app(controller, ui_dir=ui_dir),
+        host=host,
+        port=port,
+        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
+    )
 
 
 def run(argv: Sequence[str] | None = None) -> None:
