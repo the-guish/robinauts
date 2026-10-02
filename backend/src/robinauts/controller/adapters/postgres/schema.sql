@@ -6,22 +6,25 @@
 -- This is the controller's alone. The engines keep their memory in tables of
 -- their own, made by their own `setup`, and nothing here references them
 -- (docs/specs/agent-engines.md). Sign-in's tables (`user_sessions` and the
--- pending logins), `users` and the schema's own version are added to this
--- file in later steps; until then the foreign key to `users` is
--- written down below and not declared.
+-- pending logins) are added to this file with sign-in.
 --
 -- A table comes after every table it references, since the file is applied
 -- from the top.
 --
 -- Until the first release this file is edited in place and there are no
--- migrations. It is applied by a command, never by the server, in one
--- transaction.
+-- migrations: the version stays 1, and a database made from an older edit is
+-- dropped and made again. It is applied by a command, never by the server,
+-- in one transaction, so that a failure half way leaves nothing behind. By
+-- hand, that transaction has to be asked for:
+--
+--     psql -v ON_ERROR_STOP=1 --single-transaction -f schema.sql
 --
 -- Conventions, as legacy's schema had them:
 --
 --   * every id is a uuid the application mints, and every time is a
 --     `timestamptz` the application sets. No default reads the clock or makes
---     an id: a store keeps no clock and no id source.
+--     an id: a store keeps no clock and no id source. The one `now()` below
+--     dates the schema itself, which is not a decision any code makes.
 --   * a document is the controller's versioned JSON, kept whole and never
 --     read here. The columns beside it are what the store orders, filters,
 --     joins or decides by.
@@ -32,6 +35,63 @@
 --     out what it promises, so that a store without foreign keys can keep the
 --     same promises (docs/working-notes/oct-refactor/aws-serverless.md). The
 --     keys here are a second guard, not the guarantee.
+
+
+-- ---------------------------------------------------------------------------
+-- The schema's own version.
+-- ---------------------------------------------------------------------------
+
+-- One row, for ever: `only_row` is a boolean primary key that must be true,
+-- so a second row cannot be inserted and the version cannot become ambiguous.
+-- The row itself is inserted at the bottom of this file, after every table,
+-- so that a file that stopped half way records no version at all.
+--
+-- `schema_sha256` is the SHA-256 of this file as the command applied it,
+-- written by the command right after the file, since a file cannot hold its
+-- own hash. Until the first release the version is 1 whatever edit of this
+-- file a database was made from, so the hash is what tells an older edit
+-- apart: the server refuses a database whose hash is not the build's, and
+-- says to make it again. NULL is a file applied by hand, refused the same way.
+CREATE TABLE IF NOT EXISTS schema_version (
+    only_row boolean
+        CONSTRAINT schema_version_pkey PRIMARY KEY DEFAULT true
+        CONSTRAINT schema_version_only_row CHECK (only_row),
+    version integer NOT NULL,
+    schema_sha256 text
+        CONSTRAINT schema_version_sha256_is_a_hash CHECK (schema_sha256 ~ '^[0-9a-f]{64}$'),
+    applied_at timestamptz NOT NULL DEFAULT now()
+);
+
+
+-- ---------------------------------------------------------------------------
+-- Users.
+-- ---------------------------------------------------------------------------
+
+-- A person, as an identity provider names them. Created on first sight by
+-- `ensure_user`; a terminal names the operating system's user the same way,
+-- with its own provider.
+--
+-- Keyed by `(provider, subject)`: the same address at two providers is two
+-- users, and a provider that reassigns an address does not hand over an
+-- account. Two first sign-ins of one person at once both insert, and the
+-- unique constraint makes one of them fail; the store reads that, by name, as
+-- "already there" and returns the row the other wrote.
+--
+-- `name` and `email` are what the provider said, and may be null.
+--
+-- Deleting a user deletes their sessions, by the cascade on
+-- `sessions.owner_id`. The cascade does not reach the engines, so whatever
+-- deletes a user purges their sessions first, calling `forget` for each.
+CREATE TABLE IF NOT EXISTS users (
+    id uuid
+        CONSTRAINT users_pkey PRIMARY KEY,
+    provider text NOT NULL,
+    subject text NOT NULL,
+    name text,
+    email text,
+    created_at timestamptz NOT NULL,
+    CONSTRAINT users_provider_subject_key UNIQUE (provider, subject)
+);
 
 
 -- ---------------------------------------------------------------------------
@@ -53,15 +113,16 @@
 -- `deleted_at` hides a session. From the moment it is set, every read treats
 -- the session as not found and no turn may start on it. The purge then calls
 -- the engine's `forget` and deletes the row, and the cascade takes its
--- messages and turns with it. Trash, in stage two, is a delay before the purge, not a change of
--- schema.
+-- messages and turns with it. Trash, in stage two, is a delay before the
+-- purge, not a change of schema.
 --
--- `owner_id` will reference `users (id) ON DELETE CASCADE`, declared with
--- `users`.
+-- `owner_id` cascades: a user's sessions are private to them, and there is
+-- nobody else for them to belong to once the user is gone.
 CREATE TABLE IF NOT EXISTS sessions (
     id uuid
         CONSTRAINT sessions_pkey PRIMARY KEY,
-    owner_id uuid NOT NULL,
+    owner_id uuid NOT NULL
+        CONSTRAINT sessions_owner_id_fkey REFERENCES users (id) ON DELETE CASCADE,
     agent text NOT NULL,
     title text NOT NULL,
     created_at timestamptz NOT NULL,
@@ -264,3 +325,15 @@ CREATE TABLE IF NOT EXISTS turn_events (
 -- What the sweep deletes by: the events past their expiry, oldest first.
 CREATE INDEX IF NOT EXISTS turn_events_expires_at_idx
     ON turn_events (expires_at);
+
+
+-- ---------------------------------------------------------------------------
+-- The version row, last.
+-- ---------------------------------------------------------------------------
+
+-- Inserted only if there is none. Overwriting one would stamp this version on
+-- an older edit's tables, which `CREATE TABLE IF NOT EXISTS` above left as
+-- they were, and every check afterwards would pass. Whether this database may
+-- be written to at all is decided by the command before this file runs.
+INSERT INTO schema_version (version) VALUES (1)
+ON CONFLICT (only_row) DO NOTHING;
