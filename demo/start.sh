@@ -395,7 +395,7 @@ say "Starting the server on http://$HOST:$PORT/ ..."
         ROBINAUTS_GITHUB_TOKEN=$github_token
         export ROBINAUTS_GITHUB_TOKEN
     fi
-    exec "$ROBINAUTS" start --port "$PORT"
+    exec "$ROBINAUTS" start --dev-no-sign-in --port "$PORT"
 ) >>"$LOG_FILE" 2>&1 &
 server=$!
 printf '%s\n' "$server" >"$PID_FILE"

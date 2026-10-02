@@ -15,7 +15,7 @@ async def test_a_conversation_from_the_first_message_to_its_deletion() -> None:
     async with client() as http:
         session = (await http.get("/auth/session")).json()
         assert session["sign_in"] is False
-        assert session["user"]["provider"] == "local"
+        assert session["user"]["provider"] == "!local"
         agents = (await http.get("/api/agents")).json()["items"]
         assert [a["id"] for a in agents] == ["echo"]
         models = (await http.get("/api/models")).json()["items"]

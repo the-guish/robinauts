@@ -2,13 +2,16 @@
 # Copyright The Robinauts Authors
 
 """Loads a configuration file, and builds a controller: the store for the storage asked, the
-dispatcher that runs its turns, and the application over them. Also what `robinauts db init`
-does, since it is the one other thing that names the store and the engines together."""
+dispatcher that runs its turns, and the application over them. The file holds web's tables
+beside the controller's, so web is handed the tables of one reading and parses its own. Also
+what `robinauts db init` does, since it is the one other thing that names the store and the
+engines together."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from robinauts.agent_engines.contract.ports import StorageConfig as EngineStorage
 from robinauts.agent_engines.contract.ports import StorageKind as EngineStorageKind
@@ -31,6 +34,9 @@ from robinauts.controller.contract.ports import Controller
 from robinauts.controller.ports.store import Store
 
 DATABASE_URL_VARIABLE = "ROBINAUTS_DATABASE_URL"
+
+CONTROLLER_TABLES = frozenset({"model_providers", "models", "tool_servers", "agents"})
+"""The file's tables that are the controller's, the ones `parse_config` reads."""
 
 SCHEMA_READY = "the database is at schema version {version} (schema.sql {digest})"
 """What `db init` says whether it created the schema or found it there: the command's
@@ -64,8 +70,16 @@ def build(config: Config, *, storage: StorageConfig, secret_for: SecretLookup) -
     return controller
 
 
+def read_tables(path: Path) -> dict[str, Any]:
+    return read_config(path)
+
+
 def load(path: Path, environ: Mapping[str, str]) -> tuple[Config, SecretLookup]:
-    return parse_config(read_config(path)), environ.get
+    return configure(read_tables(path), environ)
+
+
+def configure(tables: Mapping[str, Any], environ: Mapping[str, str]) -> tuple[Config, SecretLookup]:
+    return parse_config(tables), environ.get
 
 
 async def init_database(url: str, config: Config, secret_for: SecretLookup) -> str:

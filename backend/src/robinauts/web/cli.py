@@ -1,13 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""``robinauts start`` serves the web shell, no sign-in; ``robinauts db init`` makes the
-database ready; ``robinauts version`` prints the version.
+"""``robinauts start`` serves the web shell; ``robinauts db init`` makes the database ready;
+``robinauts version`` prints the version.
 
-The configuration is the TOML file ``ROBINAUTS_CONFIG`` names. The interface is the
-directory ``ROBINAUTS_UI_DIR`` names, or the build an installed wheel carries, or
-``frontend/dist`` of this checkout when it is built. Storage is PostgreSQL when
-``ROBINAUTS_DATABASE_URL`` is set, and in memory otherwise. The server never changes the
+The configuration is the TOML file ``ROBINAUTS_CONFIG`` names. It holds the controller's
+tables and sign-in's, read once and each half parsed by its own; a key that is neither is
+refused. ``start`` needs a sign-in configuration that names an identity provider, or
+``--dev-no-sign-in``, the local development mode, with no sign-in table and a loopback host
+(``docs/specs/sign-in.md``). A start that is refused prints why and binds nothing. The
+sign-in flow is not served yet: in either case every request runs as the mode's one local
+user. The interface is the directory ``ROBINAUTS_UI_DIR`` names, or the build an installed
+wheel carries, or ``frontend/dist`` of this checkout when it is built. Storage is PostgreSQL
+when ``ROBINAUTS_DATABASE_URL`` is set, and in memory otherwise. The server never changes the
 database: it refuses one that is not this build's and names the command.
 """
 
@@ -19,27 +24,39 @@ import importlib.metadata
 import logging
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from importlib import resources
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 
 from robinauts.controller.composition import (
+    CONTROLLER_TABLES,
     DATABASE_URL_VARIABLE,
+    SecretLookup,
     build,
+    configure,
     init_database,
     load,
+    read_tables,
     storage_from,
 )
-from robinauts.controller.contract.domain import ConfigError
+from robinauts.controller.contract.domain import Config, ConfigError
 from robinauts.web.app import create_app
+from robinauts.web.sign_in import SIGN_IN_KEYS, SignInConfig, is_loopback, parse_sign_in
 
 REPO = Path(__file__).resolve().parents[4]
 
 GRACEFUL_SHUTDOWN_SECONDS = 20
 """How long uvicorn waits for open streams on a stop before it closes them, so that the
 controller's `close`, which runs after, still runs inside a service's stop timeout."""
+
+NO_PROVIDER = (
+    "no identity provider is configured: name one in [providers], or start with"
+    " --dev-no-sign-in to develop on this machine with sign-in off"
+)
+SIGN_IN_OFF = "sign-in is off: the local development mode, one local user, loopback only"
 
 
 def interface() -> Path:
@@ -54,17 +71,68 @@ def interface() -> Path:
     return REPO / "frontend" / "dist"
 
 
-def start(host: str, port: int) -> None:
+def serving(
+    tables: Mapping[str, Any], environ: Mapping[str, str], *, host: str, dev_no_sign_in: bool
+) -> tuple[Config, SecretLookup, SignInConfig | None]:
+    """What ``start`` serves with: the controller's configuration, how a secret is read, and
+    sign-in's, ``None`` in the local development mode. ``ConfigError`` names every problem of
+    a start that is refused."""
+    problems = [
+        f"{key}: unknown key, neither a table of the controller's nor of sign-in's"
+        for key in tables
+        if key not in CONTROLLER_TABLES | SIGN_IN_KEYS
+    ]
+    sign_in = None
+    if dev_no_sign_in:
+        if held := sorted(SIGN_IN_KEYS & tables.keys()):
+            problems.append(
+                "--dev-no-sign-in cannot be combined with a sign-in configuration, and the file"
+                f" holds {', '.join(held)}"
+            )
+        if not is_loopback(host):
+            problems.append(
+                f"--dev-no-sign-in serves this machine alone: --host {host} is not a loopback"
+                " address or localhost"
+            )
+    else:
+        try:
+            sign_in = parse_sign_in(tables)
+        except ConfigError as refused:
+            problems.append(str(refused))
+        else:
+            if sign_in is None or not sign_in.providers:
+                problems.append(NO_PROVIDER)
+    try:
+        config, secret_for = configure(tables, environ)
+    except ConfigError as refused:
+        problems.append(str(refused))
+    if problems:
+        raise ConfigError("\n".join(problems))
+    return config, secret_for, sign_in
+
+
+def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     ui_dir = interface()
-    config, secret_for = load(Path(os.environ["ROBINAUTS_CONFIG"]), os.environ)
+    tables = read_tables(Path(os.environ["ROBINAUTS_CONFIG"]))
+    try:
+        # The sign-in configuration is judged here; nothing serves it yet.
+        config, secret_for, _ = serving(
+            tables, os.environ, host=host, dev_no_sign_in=dev_no_sign_in
+        )
+    except ConfigError as refused:
+        print(refused, file=sys.stderr)
+        return 1
     controller = build(config, storage=storage_from(os.environ), secret_for=secret_for)
     logging.basicConfig(level=logging.INFO)
+    if dev_no_sign_in:
+        logging.getLogger(__name__).warning(SIGN_IN_OFF)
     uvicorn.run(
         create_app(controller, ui_dir=ui_dir),
         host=host,
         port=port,
         timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
     )
+    return 0
 
 
 def database_init() -> int:
@@ -88,16 +156,22 @@ def run(argv: Sequence[str] | None = None) -> None:
     serve = commands.add_parser("start")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument(
+        "--dev-no-sign-in",
+        action="store_true",
+        help="the local development mode: no sign-in, one local user, loopback only",
+    )
     database = commands.add_parser("db", help="the deployment's database")
     database_commands = database.add_subparsers(dest="database_command", required=True)
     database_commands.add_parser("init", help="create this build's schema in an empty database")
     commands.add_parser("version")
     arguments = parser.parse_args(argv)
     if arguments.command == "start":
-        start(arguments.host, arguments.port)
+        status = start(arguments.host, arguments.port, dev_no_sign_in=arguments.dev_no_sign_in)
     elif arguments.command == "db":
         status = database_init()
-        if status:
-            raise SystemExit(status)
     else:
         print(importlib.metadata.version("robinauts"))
+        status = 0
+    if status:
+        raise SystemExit(status)

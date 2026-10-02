@@ -3,15 +3,14 @@
 
 """The web shell: the routes of ``docs/architecture/web.md`` over a controller, and the UI.
 
-No sign-in yet: every request runs as one local user, named after the operating
-system's. A controller operation that is not implemented answers 501. The shapes are the
-ones the frontend reads (``docs/specs/wire.md``); a turn's stream is AG-UI over SSE, its
-run id is the turn's id, and its thread id the session's.
+No sign-in yet: every request runs as the one user of the local development mode
+(``docs/specs/sign-in.md``). A controller operation that is not implemented answers 501.
+The shapes are the ones the frontend reads (``docs/specs/wire.md``); a turn's stream is
+AG-UI over SSE, its run id is the turn's id, and its thread id the session's.
 """
 
 from __future__ import annotations
 
-import getpass
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -47,7 +46,6 @@ from robinauts.controller.contract.domain import (
 from robinauts.controller.contract.ports import Controller
 from robinauts.web import agui
 
-LOCAL_PROVIDER = "local"
 DEFAULT_PAGE = 30
 
 STATUS_OF: dict[type[ControllerError], int] = {
@@ -61,10 +59,9 @@ STATUS_OF: dict[type[ControllerError], int] = {
 }
 
 
-def local_identity() -> Identity:
-    """The one user of a local start: the operating system's."""
-    subject = getpass.getuser()
-    return Identity(provider=LOCAL_PROVIDER, subject=subject, name=subject)
+LOCAL_IDENTITY = Identity(provider="!local", subject="developer", name="Local development")
+"""The one user of the local development mode, under a provider no configuration can name
+(``sign_in.PROVIDER_ID``), so that no identity a provider vouches for can carry it."""
 
 
 # --- what the frontend reads ---------------------------------------------------
@@ -288,7 +285,7 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await controller.open()
-        app.state.user = await controller.ensure_user(local_identity())
+        app.state.user = await controller.ensure_user(LOCAL_IDENTITY)
         yield
         await controller.close()
 
