@@ -33,11 +33,12 @@ path, minimal code.
 
 ## Stage two: hardening
 
-Planned in detail by stage one's step 8. The blocks known today:
+Planned in detail by stage one's step 8, and gathered meanwhile in
+`stage-two-plan.md`, which the data model's review added to. The blocks known today:
 
 1. **Controller hardening.** The refusals, one active turn, the timeout, the bounded
-   cancel, the sweep at start, the edit of a first question, titles, and fork in the
-   controller and in both engines.
+   cancel, the lease renewed and the sweep for turns nobody reads, the edit of a first
+   question, titles, and fork in the controller and in both engines.
 2. **Web protection and the rest of the wire.** CSRF and origin checks, the body bound,
    the security headers and CSP, hashed asset caching, the error mapping with its
    exhaustive test, log redaction, and the wire's "not yet served" list.

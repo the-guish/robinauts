@@ -113,7 +113,7 @@ everything else is a column (PostgreSQL) or an attribute (DynamoDB).
 | record | key | other columns | document |
 |---|---|---|---|
 | user | `id` | `provider`, `subject` (unique together), `created_at` | — (`name`, `email` as columns; they are few) |
-| session | `id` | `owner_id`, `agent`, `title`, `created_at`, `updated_at`, `deleted_at` | — |
+| session | `id` | `owner_id`, `agent`, `engine`, `title`, `created_at`, `updated_at`, `deleted_at` | — |
 | message | `(session_id, id)` | `parent_id`, `role`, `created_at` | the whole message (`docs/architecture/data-model.md`) |
 | turn | `(session_id, id)` | `follows`, `state`, `started_at`, `ended_at`, `error`, `cancel_requested_at`, `lease_until` | — |
 | turn event | `(turn_id, position)` | `expires_at` | the event, by kind |
@@ -137,17 +137,21 @@ Decisions inside it, each with the reason:
   dispatcher may also cancel the task directly to save latency.
 - **A turn holds a lease.** The runner extends `lease_until` (say 30 s ahead, every
   10 s), and the same write reads back `cancel_requested_at`, so one call per tick is
-  both the heartbeat and the cancel check. A running turn whose lease has passed was
-  left by a runner that died, and the next reader to find it (`open_session`,
-  `watch_turn`, `start_turn`) ends it as `interrupted`. This replaces the sweep in
-  `open` and works with any number of processes.
-- **`deleted_at` exists.** Deleting a session sets it, and `start_turn` refuses a
-  deleted session. From then on every read treats the session as not found. A
-  purge removes the records and calls `forget`. In PostgreSQL the purge may run right
-  away and cascade. In DynamoDB, deleting a session is many batch writes and can't be
-  atomic, so a single conditional write that hides the session, followed by a purge,
-  is the only honest shape. Trash in stage two is then a delay before the purge, not a
-  schema change.
+  both the heartbeat and the cancel check (the renewal is stage two; stage one writes
+  the lease once, as the turn's bound plus a margin). A running turn whose lease has
+  passed was left by a runner that died, and the next reader to find it
+  (`open_session`, `watch_turn`, `start_turn`) ends it as `interrupted`, in the record
+  alone: no event is written, and a watcher supplies `turn_ended` from the record. A
+  runner that outlived its lease finds its next conditional write refused and stops.
+  This replaces the sweep in `open` and works with any number of processes.
+- **`deleted_at` exists.** Deleting a session sets it, on condition that no turn is
+  running (no `ACTIVE` marker), and `start_turn` refuses a deleted session, so
+  nothing writes under a purge. From then on every read treats the session as not
+  found. A purge removes the records and calls `forget` on the engine the session
+  names. In PostgreSQL the purge may run right away and cascade. In DynamoDB,
+  deleting a session is many batch writes and can't be atomic, so a single
+  conditional write that hides the session, followed by a purge, is the only honest
+  shape. Trash in stage two is then a delay before the purge, not a schema change.
 - **Events can expire; messages are the record.** The events of an ended turn are
   needed only to re-attach and to answer how the turn ended (and the turn row answers
   that). Each event carries `expires_at`. DynamoDB TTL deletes expired items for free,
@@ -314,8 +318,12 @@ browser ── CloudFront ──┬── /ui/*                ── S3 (the bu
   origin read timeout is 30 s by default).
 - **The turn worker** is a second handler in the same image. Web stores the question
   and the turn, then invokes the worker with `InvocationType=Event`. Set the worker's
-  retries to zero: a retried turn would run twice. The lease turns a lost worker into
-  `interrupted` instead. A turn is bounded at 120 s today, well inside 15 minutes. If
+  retries to zero and its maximum event age below the lease. That is not at most
+  once: an async invocation may be delivered twice, and a throttled one is held for
+  up to the event age. A second delivery is refused at position 1, the runner's claim,
+  and returns without running the engine; one delivered after the lease finds the
+  turn `interrupted` and is refused the same way. The lease turns a lost worker into
+  `interrupted`. A turn is bounded at 120 s today, well inside 15 minutes. If
   agent loops ever outgrow that, Lambda durable functions (Python 3.13 and later)
   checkpoint and resume a long run. They would fit the engines' `resume`, which
   continues an interrupted turn without repeating its tool calls.

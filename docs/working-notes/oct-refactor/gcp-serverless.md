@@ -103,10 +103,12 @@ The logical model maps onto paths instead of `PK`/`SK`:
   Cloud Run allows only 10 s after `SIGTERM`, too little to finish a turn.
 - **Cloud Tasks dispatches the turn.** Web creates a task carrying the two ids. Cloud
   Tasks POSTs it to the worker service with an OIDC token, and the turn runs for the
-  length of that request. Set `max_attempts` to 1 (the same reason the AWS note sets
-  retries to zero). The dispatch deadline can be up to 30 minutes, longer than the
-  120 s turn bound. Tasks are billed per operation, and the first million a month are
-  free.
+  length of that request. Set `max_attempts` to 1, as the AWS note sets retries to
+  zero, and for the same reason it is not enough: delivery is at least once, and a
+  second delivery loses the claim at position 1 and returns. The dispatch deadline can
+  be up to 30 minutes, longer than the 120 s turn bound; keep it under the lease, so
+  that a late delivery finds the turn ended. Tasks are billed per operation, and the
+  first million a month are free.
 - **The worker is the same image deployed as a second service.** It allows only
   authenticated callers, has more memory, and imports the engines. Web imports none.
 - **No VPC.** Cloud Run reaches the internet directly. A Serverless VPC Access

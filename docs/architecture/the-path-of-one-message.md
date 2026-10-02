@@ -57,7 +57,9 @@ already has a running turn, or has been deleted, it stores neither and raises
 
 - **PostgreSQL:** one transaction:
   - `SELECT 1 FROM sessions WHERE id = $s AND deleted_at IS NULL FOR SHARE`. No row
-    means the session is gone.
+    means the session is gone. The session row is locked first in every transaction
+    that writes a session and one of its turns (here, in step 14 and in the hide), so
+    no two of them wait for each other.
   - `INSERT INTO messages (id, session_id, parent_id, role, created_at, document)`,
     with the document as `jsonb`.
   - `INSERT INTO turns (…, state) VALUES (…, 'running')`. A violation of
@@ -81,8 +83,10 @@ The turn dispatcher port is given `(session_id, turn_id)`.
   in the uvicorn process that took the request, as today. With several processes, the
   one that got the request runs the turn.
 - **AWS:** `lambda:Invoke` with `InvocationType=Event` on the worker Lambda, with
-  retries set to zero. It returns in milliseconds. A cold worker spends a few seconds
-  importing the frameworks and the vendors' SDKs.
+  retries set to zero and the event's age bounded below the lease. It returns in
+  milliseconds. A cold worker spends a few seconds importing the frameworks and the
+  vendors' SDKs. Async invocation may still deliver the event twice; the second
+  delivery loses the claim in step 7 and returns.
 
 ### 6. Web opens the stream
 
@@ -99,14 +103,18 @@ and sends `RUN_STARTED` (`web/agui.py`).
 
 `run_turn` loads the session, the question, the agent's configuration and the parent
 answer's checkpoint id. Today these are passed in as objects. It starts a lease tick
-in the background, then appends `MessageStarted` at position 1, numbered by itself.
+in the background (stage two; in block 5 the lease is written once, with the turn),
+then appends `MessageStarted` at position 1, numbered by itself. That first append is
+its claim on the turn: refused, it has lost the turn to a second runner, and it
+returns without running the engine.
 
 - **PostgreSQL:**
   - The loads are `SELECT`s.
   - The event is `INSERT INTO turn_events (turn_id, position, document)` plus
     `NOTIFY robinauts_turns, '<turn> 1'` in the same transaction, delivered on commit.
-  - The lease tick is `UPDATE turns SET lease_until = … RETURNING
-    cancel_requested_at`.
+  - The lease tick is `UPDATE turns SET lease_until = … WHERE id = $turn AND state =
+    'running' RETURNING cancel_requested_at`. No row means the turn was ended by a
+    reader, and the runner stops.
 - **AWS:**
   - The loads are one `Query` on the session's partition.
   - The event is a `PutItem` with `SK = EVT#<turn>#0000000001`, on condition
@@ -157,8 +165,11 @@ The provider streams deltas. LangGraph yields `AIMessageChunk`s, the engine's
 next position. Pieces that arrive within about 50 ms of each other should be merged
 into one event.
 
-- **PostgreSQL:** an `INSERT` and a `NOTIFY` for each event.
-- **AWS:** a conditional `PutItem` for each event.
+- **PostgreSQL:** an `INSERT … SELECT` conditioned on the turn being `running`, and a
+  `NOTIFY`, for each event. No row inserted, or another document at that position, is
+  `TurnLostError`, and the runner stops.
+- **AWS:** a conditional `PutItem` for each event, read back on a failed condition for
+  the same reason.
 
 ### 12. The model calls a tool
 
@@ -205,15 +216,18 @@ runner then:
 
 All of that is one store operation. Today it is several calls.
 
-- **PostgreSQL:** one transaction:
+- **PostgreSQL:** one transaction, the session row first (step 4):
+  - `UPDATE sessions SET updated_at = …`;
   - `INSERT` the message and the two events;
   - `UPDATE turns SET state = 'finished', ended_at = … WHERE id = $turn AND state =
-    'running'`. The turn leaves `turns_one_running_per_session` by itself;
-  - `UPDATE sessions SET updated_at = …`;
+    'running'`. The turn leaves `turns_one_running_per_session` by itself. No row
+    means a reader ended the turn while its lease was out: `TurnLostError`, the
+    transaction rolled back, and the runner has nothing more to write;
   - `NOTIFY '<turn> end'`.
 - **AWS:** one `TransactWriteItems`:
   - a `Put` of the message and of the two events;
-  - an `Update` of the turn, on condition that it is `running`;
+  - an `Update` of the turn, on condition that it is `running`, which failing is
+    `TurnLostError` for the whole transaction;
   - a `Delete` of the session's `ACTIVE` marker;
   - an `Update` of the session's `updated_at`. That changes `GSI1SK`, so the session
     moves to the top of the list.
@@ -241,6 +255,18 @@ the client sees the terminal event and stops.
   turn ends as `cancelled`.
 - **The runner dies**, whether the process crashed or the Lambda was killed. Its lease
   runs out. The next read that finds the turn (`open_session`, `watch_turn`,
-  `start_turn`) ends it as `interrupted`, and the UI shows it as `ended_badly`.
+  `start_turn`) ends it as `interrupted` through `end_expired_turn`, in the record
+  alone, and the UI shows it as `ended_badly`. A watcher that finds the turn ended
+  with no `turn_ended` event supplies one from the record. A runner that was slow
+  rather than dead finds its next write refused and stops.
+- **A second runner is dispatched for the turn**, which an async invocation allows.
+  Its `MessageStarted` is refused at position 1 and it returns without running the
+  engine. On PostgreSQL the dispatcher is in-process, and it does not happen.
+- **The session is deleted during the turn.** `delete_session` cancels the turn its
+  own process runs and waits for it to end, then hides. A turn running in another
+  process makes the hide refuse with 409, and the owner cancels it first. So no
+  runner, and no engine, writes under a purge, and `forget` is the last word.
+- **A tool returns a NUL**, or half a character. The encoder drops the one and
+  replaces the other before the event is written, on both stores alike.
 - **A stream reaches a limit**, such as Lambda's 15 minutes or a proxy's timeout. The
   client re-attaches after the last id it saw. Nothing is lost or repeated.

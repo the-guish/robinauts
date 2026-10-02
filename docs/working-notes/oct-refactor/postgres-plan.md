@@ -20,7 +20,8 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
 - the store port in the shape of `data-model.md`: documents for messages and events,
   sessions addressed by owner and session, turns by owner, session and turn,
   positions given by the runner, the question stored with its turn, a turn finished
-  in one operation, paging in the store, `deleted_at`;
+  in one operation, `end_expired_turn`, `TurnLostError`, the hide refused while a
+  turn runs, paging in the store, `deleted_at`, and `engine` on the session;
 - the two encode/decode pairs, so this block never builds a document;
 - the memory store following all of it, and the store's contract suite in
   `tests/contracts/`, importable, which the PostgreSQL store must pass unchanged;
@@ -29,9 +30,11 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
 
 ## Decisions
 
-- **The schema is the file as it is.** It ships in the package, beside the store.
-  `SCHEMA_VERSION` is 1 and `SCHEMA_SHA256` is the file's hash, pinned by a test, so an
-  edit is deliberate and visible, as legacy did (`legacy/datastore/schema.py`).
+- **The schema is the file, with one edit block 5 asks for:** `sessions.engine text
+  NOT NULL`, after `agent`, with a comment saying the purge forgets on it. It ships in
+  the package, beside the store. `SCHEMA_VERSION` is 1 and `SCHEMA_SHA256` is the
+  file's hash, pinned by a test, so an edit is deliberate and visible, as legacy did
+  (`legacy/datastore/schema.py`).
 - **The server never changes the database** (`docs/deployment.md`). `robinauts db init`
   applies `schema.sql` to an empty database in one transaction, records the hash, and
   calls `setup` on **every installed engine**, so adding an agent on another engine
@@ -42,14 +45,33 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
   `ROBINAUTS_DATABASE_URL`, used by the controller's store and handed to the engines
   as `StorageConfig(POSTGRES, {"pool": pool})`, which `controller/application/engines.py`
   already builds. `close` closes it. A `jsonb` codec on the pool turns documents into
-  dicts and back, so no SQL in the store spells JSON.
+  dicts and back, so no SQL in the store spells JSON. `jsonb` refuses a NUL and an
+  unpaired surrogate, which is why block 5's encoder writes neither.
 - **No schema is named.** Nothing in `schema.sql`, the store or the engines' SQL names
   one; everything lands where `search_path` points. The tests rely on it.
 - **Constraint names are the interface** between the database and the store. The
   store translates a violation by name:
   - `turns_one_running_per_session` → `TurnActiveError`;
-  - `turn_events_pkey` → a position offered twice, which is a bug of two runners;
+  - `turn_events_pkey` → read the row there: the same document is the runner's own
+    write, acknowledged late, and is accepted; another document is `TurnLostError`;
   - `users_provider_subject_key` → the user exists: read it and return it.
+
+  Two refusals are not violations but rows not written: an append is an `INSERT …
+  SELECT` conditioned on `turns.state = 'running'`, and `finish_turn`'s `UPDATE turns`
+  has `WHERE … AND state = 'running'`. Zero rows is `TurnLostError`, and the finish's
+  transaction is rolled back. `hide_session`'s `UPDATE sessions` has `AND NOT EXISTS`
+  a running turn, and zero rows is `TurnActiveError`.
+- **The session row first.** Every transaction that writes a session and one of its
+  turns locks the session row before it touches `turns`: `start_turn` with `SELECT …
+  FOR SHARE`, `finish_turn` and `hide_session` with their `UPDATE`. So `finish_turn`
+  moves `updated_at` first and ends the turn last. The other way round, a `start_turn`
+  waiting on `turns_one_running_per_session` and a `finish_turn` waiting on the
+  session row deadlock, and PostgreSQL kills the finish, which loses the answer and
+  leaves the turn running.
+- **A turn ended by its lease is one statement.** `end_expired_turn` is `UPDATE turns
+  SET state = 'interrupted', ended_at = $now, error = 'lease expired' WHERE session_id
+  = $s AND state = 'running' AND lease_until < $now RETURNING …`, with no `NOTIFY`:
+  a watcher reads the record when its wait returns.
 - **Waking watchers is `LISTEN` and `NOTIFY`.** Channel `robinauts_turns`, payload
   `<turn> <position>` or `<turn> end`, sent in the transaction that writes the event,
   so it is delivered on commit. One listening connection per process, held apart from
@@ -57,28 +79,32 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
   when woken, when the turn has ended, or when the timeout passes, and the caller
   reads the store again in every case, so a notification lost with a dropped
   connection costs a timeout and nothing else.
-- **Deleting a session purges it at once.** `delete_session` sets `deleted_at`, calls
-  the engine's `forget`, and deletes the row, whose cascade takes the messages, turns
-  and events. The scheduled purge, and trash before it, are stage two's
-  housekeeping. `deleted_at` already lets them come without a change of schema.
+- **Deleting a session purges it at once.** `delete_session` sets `deleted_at`, on
+  condition that no turn is running, calls `forget` on the engine the session's row
+  names, and deletes the row, whose cascade takes the messages, turns and events. The
+  scheduled purge, and trash before it, are stage two's housekeeping. `deleted_at`
+  already lets them come without a change of schema.
 - **The engines' tables are their own.** Each engine makes its tables in `setup` with
   `CREATE TABLE IF NOT EXISTS`, names them after itself, and references nothing of the
   controller's. `forget` deletes everything it holds for a session.
 - **Pydantic AI's memory** is two tables. `pydantic_ai_sessions (session_id)` answers
   `create` and `exists`. `pydantic_ai_checkpoints (session_id, checkpoint_id,
-  history jsonb, created_at)` holds `all_messages()` after each finished turn, written
+  history json, created_at)` holds `all_messages()` after each finished turn, written
   with the framework's own `ModelMessagesTypeAdapter`, under a checkpoint id the
-  engine mints.
+  engine mints. `json`, not `jsonb`: the framework's bytes are kept as written, and
+  `jsonb` refuses the `\u0000` a tool result may carry, which the engine's memory does
+  not clean.
 - **LangGraph's memory** is a checkpoint saver of our own over asyncpg, because
   `langgraph-checkpoint-postgres` depends on `psycopg`, which is LGPL (ADR 0002). At
   langgraph-checkpoint 4.2.0, an async saver implements `aget_tuple`, `alist`, `aput`,
   `aput_writes`, `adelete_thread` and `get_next_version`. `acopy_thread` waits for fork
   in stage two. Three tables: `langgraph_sessions (session_id)` for `create` and
   `exists`; `langgraph_checkpoints (thread_id, checkpoint_ns, checkpoint_id,
-  parent_checkpoint_id, checkpoint bytea, metadata jsonb)`; and `langgraph_writes
+  parent_checkpoint_id, checkpoint bytea, metadata json)`; and `langgraph_writes
   (thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, value bytea)`. The
   values are written with the saver's own serializer (`serde.dumps_typed`), never
-  pickled by us.
+  pickled by us. `metadata` is `json`, as Pydantic AI's history is: the framework's
+  own PostgreSQL saver has to strip `\u0000` to write it as `jsonb`.
 - **Echo stays in memory** whatever the storage. It exists for tests and the local
   start, and keeps nothing worth keeping.
 
@@ -86,7 +112,8 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
 
 - The sweep: deleting expired events, ending turns whose lease has passed when nobody
   reads them, and the scheduled purge. Stage two's housekeeping. Until then, events
-  stay in `turn_events` after they expire.
+  stay in `turn_events` after they expire, and a turn whose lease has passed is ended
+  by the next reader to find it, as block 5 has it.
 - Sign-in's tables, `user_sessions` and the pending logins: block 7.
 - Fork, in the controller and in both engines' storage: stage two.
 - Bounds on stored text: stage two.
@@ -120,7 +147,8 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
 
 ## Steps
 
-1. **The schema in the package.** `controller/adapters/postgres/schema.py`:
+1. **The schema in the package.** `schema.sql` gains `sessions.engine`.
+   `controller/adapters/postgres/schema.py`:
    `SCHEMA_VERSION`, `SCHEMA_SHA256`, `create_schema(connection)` for an empty schema,
    and `check_schema(connection)`, which refuses a missing version, another version or
    another hash and names `robinauts db init`. Test: the hash matches the file; the
@@ -132,15 +160,19 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
 3. **The store: users, sessions, messages.** `controller/adapters/postgres/store.py`
    implements the port's operations on these three, by hand-written SQL: a user by
    identity or created, with the duplicate translated; a session added, read by owner
-   and id, renamed, listed a page at a time by `(updated_at, id)`, hidden and purged;
-   a session's messages, oldest first. Test: the store's contract suite, for these
-   operations.
+   and id, renamed, listed a page at a time by `(updated_at, id)`, hidden unless a turn
+   is running, and purged; a session's messages, oldest first. Test: the store's
+   contract suite, for these operations.
 4. **The store: turns and events.** A question stored with its turn, the duplicate
-   running turn translated; an event appended at its position, with its `expires_at`;
-   the events after a position; a turn finished in one transaction; the active turn
-   looked up. `lease_until` is written as block 5's runner gives it, and
-   `cancel_requested_at` is left empty: both are read in stage two
-   (`data-model-plan.md`). Test: the store's contract suite, whole.
+   running turn translated; an event appended at its position, with its `expires_at`,
+   only while the turn runs, the same document accepted again and another refused;
+   the events after a position; a turn finished in one transaction, the session row
+   first; the active turn looked up; `end_expired_turn`. `lease_until` is written as
+   block 5's runner gives it and read by `end_expired_turn`; `cancel_requested_at` is
+   left empty and read in stage two (`data-model-plan.md`). Test: the store's contract
+   suite, whole; and a `finish_turn` and a `start_turn` on one session raced from two
+   connections, many times over: neither deadlocks, the finish always lands, and the
+   start starts or is refused.
 5. **Watchers in other processes.** The listening connection, `NOTIFY` in the
    transactions that append an event and end a turn, and `wait_for_events` with its
    timeout. Test: a store on one pool waits while a store on a second pool appends, and
@@ -162,6 +194,8 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
 9. **Proof.** A PostgreSQL, `robinauts db init`, and `robinauts start` from
    `examples/pydantic-ai.toml` and from a LangChain example: a turn in the browser;
    the server restarted; the session reopened with its thread; a second turn that
-   remembers the first. A second `robinauts start` on another port over the same
-   database: a turn started through one is watched to its end through the other. A
-   short `postgres-progress.md` records what was verified.
+   remembers the first. The server killed during a turn and started again: the
+   session opens, and once the lease has passed (three minutes after the turn
+   started) a new turn starts on it. A second `robinauts start` on another port over
+   the same database: a turn started through one is watched to its end through the
+   other. A short `postgres-progress.md` records what was verified.

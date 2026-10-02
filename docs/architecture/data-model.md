@@ -8,14 +8,16 @@ store, outside this repository, holds it by the rules of
 
 Engines keep their memory apart, in storage of their own, and nothing here references
 it (`docs/specs/agent-engines.md`). The controller keeps only the checkpoint id an
-engine hands back, on the answer.
+engine hands back, on the answer, and the engine's name on the session and on the
+answer, so that the purge forgets on the engine that holds the memory and not on the
+one the agent's configuration names today.
 
 ## Records
 
 | record | key | holds | document |
 |---|---|---|---|
 | user | `id` | `provider` and `subject` (unique together), `name`, `email`, `created_at` | no |
-| session | `id` | `owner_id`, `agent`, `title`, `created_at`, `updated_at`, `deleted_at` | no |
+| session | `id` | `owner_id`, `agent`, `engine`, `title`, `created_at`, `updated_at`, `deleted_at` | no |
 | message | `id` | `session_id`, `parent_id`, `role`, `created_at` | **yes** |
 | turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `lease_until`, `cancel_requested_at` | no |
 | turn event | `(turn_id, position)` | `expires_at` | **yes** |
@@ -62,19 +64,35 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   turn is not left behind.
 - **A turn finishes in one operation:** its answer, its last events, its state, and
   the session's `updated_at`.
-- **The runner numbers its turn's events** and is their only writer. The store
-  refuses a position it already has.
+- **The runner numbers its turn's events** and is their only writer, one at a time, so
+  positions commit in order. The store accepts the same document again at a position
+  it has, since a write retried after a lost acknowledgement is not a second runner,
+  and refuses another document there, or any append or finish on a turn that is no
+  longer running, with `TurnLostError`. A runner refused has lost its turn, to a second
+  runner or to a reader that ended it: it cancels its engine's stream and writes
+  nothing more. **The first append is the claim:** a second runner dispatched for the
+  same turn is refused at position 1, before it has run the engine.
 - **Deleting hides, then purges.** `deleted_at` makes a session not found and closes
-  it to turns. The purge calls the engine's `forget`, then deletes the session with
-  its messages, turns and events.
+  it to turns. The hide is refused while a turn is running (`TurnActiveError`), so no
+  runner and no engine writes under a purge: the controller cancels the turn it runs
+  itself and waits for it to end first, and a turn run by another process is the
+  owner's to cancel. The purge calls `forget` on the engine the session records, which
+  may no longer be the one its agent's configuration names, then deletes the session
+  with its messages, turns and events.
 - **Events expire.** `expires_at` is set when an event is written, as that moment
   plus a retention of hours. Ending a turn touches none of its events. The answer is
   in `messages` and the outcome is in `turns`, so after a turn ends nothing reads its
   events but a late watcher. Until they expire, they are the only copy of a turn's
   reasoning and of what a failed turn streamed.
-- **A turn holds a lease.** The runner pushes `lease_until` forward and reads back
-  `cancel_requested_at`. A running turn whose lease has passed is ended as
-  `interrupted` by the next reader to find it.
+- **A turn holds a lease.** `lease_until` is written with the turn, as its start plus
+  its timeout and a margin. A running turn whose lease has passed is ended as
+  `interrupted` by the next reader to find it (`open_session`, `start_turn`,
+  `watch_turn`), through `end_expired_turn`: one conditional write that only a running
+  turn takes, in the record alone. No event is written, since a `turn_ended` event is
+  the runner's; a watcher that finds the turn ended with none supplies it from the
+  record. A runner that outlives its lease has lost the turn, and its next write is
+  refused. Renewing the lease for a long turn, and reading back `cancel_requested_at`
+  with each renewal, are stage two.
 - **No clocks and no ids in a store.** The controller mints every id and sets every
   time.
 - **A session and its records are addressed from the owner down.** Every operation on
@@ -110,6 +128,11 @@ same write. The decoder reads the document alone.
   stores sort by.
 - **A document is JSON.** A store that has no JSON type keeps it as UTF-8 text, never
   as its own map type.
+- **Text holds no NUL and no unpaired surrogate.** The encoder drops the one and
+  replaces the other with U+FFFD in every string it writes, question, pieces, tool
+  arguments and results alike, as legacy's `clean_text` did. PostgreSQL's `text` and
+  `jsonb` hold neither, a provider or a tool may send either, and a store that
+  accepts them would hold what another cannot.
 
 ### A message
 
@@ -122,6 +145,7 @@ same write. The decoder reads the document alone.
   "role": "assistant",
   "created_at": "2026-10-02T12:00:03.141592Z",
   "agent": "assistant",
+  "engine": "langchain",
   "model": "sonnet",
   "checkpoint_id": "1f0a…",
   "turn_id": "c9e4…",
@@ -140,7 +164,7 @@ same write. The decoder reads the document alone.
 |---|---|---|
 | `parent_id` | the message it follows, or `null` for the first | the question |
 | `role` | `user` | `assistant` |
-| `agent`, `model` | what it was asked with | what answered |
+| `agent`, `engine`, `model` | what it was asked with | what answered |
 | `checkpoint_id` | `null` | the engine's checkpoint after this answer |
 | `turn_id` | `null` | the turn that produced it, which web shows as the run id |
 
@@ -244,4 +268,8 @@ them in line.
   turn's record.
 - An answer records its turn, and web takes the run id from it.
 - The runner builds an answer's parts in stream order.
+- A session records its engine, and the purge forgets on it.
+- The encoder cleans every string it writes.
+- Readers end a turn whose lease has passed; the runner stops on `TurnLostError`; the
+  hide refuses a session with a running turn.
 - The memory store follows, and a contract suite that every store passes proves it.
