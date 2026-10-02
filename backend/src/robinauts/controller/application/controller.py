@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import dataclasses
 import uuid
 from collections.abc import AsyncGenerator, Callable
@@ -28,6 +30,7 @@ from robinauts.controller.contract.domain import (
     AgentListing,
     Config,
     Identity,
+    InvalidValueError,
     Message,
     MessageNotFoundError,
     ModelListing,
@@ -51,7 +54,7 @@ from robinauts.controller.contract.domain import (
 )
 from robinauts.controller.contract.ports import Controller
 from robinauts.controller.ports.dispatcher import TurnDispatcher
-from robinauts.controller.ports.store import Store
+from robinauts.controller.ports.store import Cursor, Store
 
 LEASE_MARGIN = timedelta(minutes=1)
 """What a turn's lease allows past its timeout."""
@@ -132,8 +135,10 @@ class RobinautsController(Controller):
     async def list_sessions(
         self, user: User, *, limit: int, cursor: str | None = None
     ) -> SessionPage:
-        sessions = await self._store.sessions_of(user.id, limit, None)
-        return SessionPage(tuple(sessions), cursor=None)
+        before = None if cursor is None else _decode_cursor(cursor)
+        sessions = await self._store.sessions_of(user.id, limit, before)
+        following = _encode_cursor(sessions[-1]) if len(sessions) == limit else None
+        return SessionPage(tuple(sessions), cursor=following)
 
     async def _messages(self, owner: uuid.UUID, session_id: uuid.UUID) -> list[Message]:
         documents = await self._store.messages_of(owner, session_id)
@@ -348,3 +353,20 @@ class RobinautsController(Controller):
 
     async def sweep(self) -> None:
         raise NotImplementedError("sweep")
+
+
+def _encode_cursor(session: Session) -> str:
+    """Where a page ended, as an opaque string: the last session's ``(updated_at, id)``."""
+    plain = f"{session.updated_at.isoformat()} {session.id}"
+    return base64.urlsafe_b64encode(plain.encode()).decode()
+
+
+def _decode_cursor(cursor: str) -> Cursor:
+    try:
+        when, which = base64.urlsafe_b64decode(cursor.encode()).decode().split(" ")
+        updated_at = datetime.fromisoformat(when)
+        if updated_at.tzinfo is None:
+            raise ValueError("a time without its zone")
+        return updated_at, uuid.UUID(which)
+    except (ValueError, UnicodeDecodeError, binascii.Error) as exc:
+        raise InvalidValueError(f"a cursor that does not decode: {cursor!r}") from exc
