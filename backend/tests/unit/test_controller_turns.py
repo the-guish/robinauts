@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from aio import asyncio_test
+from robinauts.controller.application.documents import event_from_document, message_from_document
 from robinauts.controller.composition import build
 from robinauts.controller.contract.domain import (
     AgentConfig,
@@ -54,10 +55,11 @@ async def test_start_session_stores_the_session_and_the_question() -> None:
     assert question.parts == (TextPart("hello"),)
     assert question.role is Role.USER
     assert question.parent_id is None
-    session = await controller._store.get_session(started.session_id)
-    assert session is not None
+    session = await controller._store.get_session(user.id, started.session_id)
     assert session.owner_id == user.id
-    assert await controller._store.messages_of(started.session_id) == [question]
+    assert session.engine == "echo"
+    stored = await controller._store.messages_of(user.id, started.session_id)
+    assert [message_from_document(d) for d in stored] == [question]
     await controller._turns[started.session_id]
     await controller.close()
 
@@ -69,7 +71,11 @@ async def test_the_turn_stores_its_events_and_the_answer() -> None:
     started = await controller.start_session(user, agent="echo", model="echo", text="hello")
     sid = started.session_id
     await controller._turns[sid]
-    numbered = await controller._store.events_after(sid, 0)
+    turn = await controller._store.get_turn(user.id, sid, started.turn_id)
+    assert turn is not None
+    assert turn.state is TurnState.FINISHED
+    stored = await controller._store.events_after(user.id, sid, turn.id, 0)
+    numbered = [event_from_document(d) for _, d in stored]
     assert [n.position for n in numbered] == list(range(1, 10))
     events = [n.event for n in numbered]
     assert [type(e) for e in events] == [
@@ -86,14 +92,16 @@ async def test_the_turn_stores_its_events_and_the_answer() -> None:
     assert events[-1] == TurnEnded(TurnState.FINISHED)
     completed = events[-2]
     assert isinstance(completed, MessageCompleted)
-    question, answer = await controller._store.messages_of(sid)
+    stored = await controller._store.messages_of(user.id, sid)
+    question, answer = [message_from_document(d) for d in stored]
     assert question == started.question
     assert answer.id == completed.message_id
     assert answer.parts[-1] == TextPart("The tool said: hello")
     assert answer.parent_id == started.question.id
     assert answer.checkpoint_id is not None
     assert answer.engine == "echo"
-    assert await controller._store.active_turn(sid) is None
+    assert answer.turn_id == turn.id
+    assert await controller._store.active_turn(user.id, sid) is None
     await controller.close()
 
 
@@ -103,9 +111,11 @@ async def test_watch_turn_follows_the_turn_to_its_end() -> None:
     user = await controller.ensure_user(Identity("local", "me"))
     started = await controller.start_session(user, agent="echo", model="echo", text="hello")
     sid = started.session_id
-    watched = [e async for e in controller.watch_turn(user, sid)]
+    watched = [e async for e in controller.watch_turn(user, sid, started.turn_id)]
     assert [n.position for n in watched] == list(range(1, len(watched) + 1))
     assert watched[-1].event == TurnEnded(TurnState.FINISHED)
-    again = [e async for e in controller.watch_turn(user, sid, after=len(watched) - 1)]
+    again = [
+        e async for e in controller.watch_turn(user, sid, started.turn_id, after=len(watched) - 1)
+    ]
     assert again == [watched[-1]]
     await controller.close()

@@ -43,6 +43,7 @@ from robinauts.controller.contract.domain import (
     TurnStarted,
     TurnState,
 )
+from robinauts.controller.ports.store import StoredMessage
 
 VERSION = 1
 """One number for both documents. Additive changes keep it; anything else moves it."""
@@ -415,3 +416,15 @@ def event_from_document(document: object) -> NumberedEvent:
                 raise InvalidValueError(f"a turn_ended event's state is not a state: {state!r}")
             event = TurnEnded(TurnState(state))
     return NumberedEvent(position, event)
+
+
+def stored_message(message: Message) -> StoredMessage:
+    """A message as the store keeps it: the columns it orders and joins by, and the document."""
+    return StoredMessage(
+        message.id,
+        message.session_id,
+        message.parent_id,
+        message.role,
+        message.created_at,
+        message_to_document(message),
+    )

@@ -19,7 +19,7 @@ async def test_open_session_shows_the_thread_after_the_turn() -> None:
     sid = started.session_id
     await controller._turns[sid]
     opened_session = await controller.open_session(user, sid)
-    assert opened_session.session == await controller._store.get_session(sid)
+    assert opened_session.session == await controller._store.get_session(user.id, sid)
     question, answer = opened_session.messages
     assert question == started.question
     assert answer.role is Role.ASSISTANT

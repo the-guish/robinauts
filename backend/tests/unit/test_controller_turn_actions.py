@@ -15,6 +15,7 @@ from test_controller_turns import opened
 from aio import asyncio_test
 from robinauts.agent_engines.contract.domain import Event
 from robinauts.agent_engines.echo_engine.engine import EchoEngine
+from robinauts.controller.application.documents import event_from_document
 from robinauts.controller.contract.domain import (
     Identity,
     MessageStarted,
@@ -68,7 +69,8 @@ async def test_regenerate_answer_runs_a_new_answer_under_the_question() -> None:
     )
     assert regenerated.question == question
     await controller._turns[sid]
-    first_event = (await controller._store.events_after(sid, 0))[0].event
+    stored = await controller._store.events_after(user.id, sid, regenerated.turn_id, 0)
+    first_event = event_from_document(stored[0][1]).event
     assert isinstance(first_event, MessageStarted)
     assert first_event.parent_id == question.id
     thread = (await controller.open_session(user, sid)).messages
@@ -86,11 +88,11 @@ async def test_cancel_turn_ends_the_turn_cancelled() -> None:
     user = await controller.ensure_user(Identity("local", "me"))
     started = await controller.start_session(user, agent="echo", model="echo", text="one")
     sid = started.session_id
-    await controller._store.wait_for_events(sid, 0)
-    await controller.cancel_turn(user, sid)
+    await controller._store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
+    await controller.cancel_turn(user, sid, started.turn_id)
     with pytest.raises(asyncio.CancelledError):
         await controller._turns[sid]
-    events = await controller._store.events_after(sid, 0)
-    assert events[-1].event == TurnEnded(TurnState.CANCELLED)
-    assert await controller._store.active_turn(sid) is None
+    stored = await controller._store.events_after(user.id, sid, started.turn_id, 0)
+    assert event_from_document(stored[-1][1]).event == TurnEnded(TurnState.CANCELLED)
+    assert await controller._store.active_turn(user.id, sid) is None
     await controller.close()
