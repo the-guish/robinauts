@@ -48,6 +48,17 @@ Planned in detail by stage one's step 8. The blocks known today:
 5. **Context management in the engines.** Summarisation or trimming within the model's
    window, and the vendor's prompt cache, by each framework's own means.
 
+## Stage three: open to other packages
+
+Not planned until stages one and two are done.
+
+1. **Extension points.** A store, a turn dispatcher and an engine's storage supplied
+   by an installed package that this repository does not name, and the store's
+   contract suite importable by such a package. It is what an integration for a
+   serverless cloud, in a repository of its own, would build on
+   (`aws-serverless.md`). This repository ships no vendor's library, in this stage or
+   any other.
+
 ## Discarded
 
 - SQLite as a local storage kind. PostgreSQL is the one database; in-memory storage is

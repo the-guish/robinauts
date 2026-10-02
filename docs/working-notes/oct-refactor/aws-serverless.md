@@ -23,7 +23,10 @@ the vendor-neutral rules in this note. Those rules are what let a package outsid
 the repository implement the ports for a cloud. Every adapter, driver and saver named
 in these three notes belongs to such a package.
 
-Three things follow for this repository:
+Letting such a package plug in is stage three of `master-plan.md`, after the
+product is workable and hardened. Nothing in stages one and two is built for it
+beyond keeping the rules in this note. When it comes, three things follow for this
+repository:
 
 - **The extension points are reachable from outside.** An installed package must be
   able to supply the store, the turn dispatcher and an engine's storage without this
@@ -248,7 +251,8 @@ TTL deletes expired items at no cost, and Streams can drive the purge.
   The LangGraph engine could use `langgraph-checkpoint-aws`'s `DynamoDBSaver`, which
   offloads to S3 too. Its licence and dependency tree still need checking against
   `DEPENDENCIES.md`. The Pydantic AI engine writes its `ModelMessage` list as JSON
-  items. Both reach the engine through the supplied-storage kind, not through a
+  items. Both would reach the engine through the supplied-storage kind of stage
+  three, not through a
   `DYNAMODB` member of the contract.
 - **The driver** would be `aiobotocore` (Apache-2.0), in the external package. Its
   tests would run against `moto` (Apache-2.0) or DynamoDB Local, and they would also
@@ -371,15 +375,14 @@ Beyond `data-model-context.md`'s list:
   ids.
 - The memory store follows all of it, so the contract tests prove the rules before
   any durable store exists. Those tests should be a suite that every store must pass,
-  as the engines have, and one that a package outside this repository can import.
+  as the engines have.
 - The encoder writes fixed-width times and JSON text, as above.
 
 Not in this repository at all: the DynamoDB adapter, the engines' DynamoDB storage,
 the image, the infrastructure code, and the deployment documentation for AWS. They
 belong to an external integration. What this repository owes them is the extension
 points above: the store, the dispatcher and the engines' storage, supplied from
-outside, and an importable contract suite. Those could be a step of block 6 or a
-block after it, to be added to `master-plan.md` once this direction is agreed.
+outside, and an importable contract suite. Those are stage three.
 
 ## Sources checked
 

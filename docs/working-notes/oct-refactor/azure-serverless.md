@@ -83,7 +83,7 @@ Users go in a second container partitioned by `/id`.
 - **Engine memory.** The Pydantic AI engine's message list would be stored as items in
   its own container. For LangGraph, community Cosmos savers exist; check the licence
   and the maintenance, or write one against `BaseCheckpointSaver`. Both are handed to
-  the engines through the supplied-storage kind.
+  the engines through the supplied-storage kind of stage three.
 
 ## Compute
 

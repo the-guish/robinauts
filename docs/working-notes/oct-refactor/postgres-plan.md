@@ -91,7 +91,7 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
 - Fork, in the controller and in both engines' storage: stage two.
 - Bounds on stored text: stage two.
 - The extension points that let a store, a dispatcher or an engine's storage come
-  from a package outside this repository. Not decided; see below.
+  from a package outside this repository: stage three.
 
 ## Rules
 
@@ -165,11 +165,3 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
    remembers the first. A second `robinauts start` on another port over the same
    database: a turn started through one is watched to its end through the other. A
    short `postgres-progress.md` records what was verified.
-
-## Open before starting
-
-- **The extension points.** Registering a store, a turn dispatcher or an engine's
-  storage from an installed package is what the serverless notes ask of this
-  repository. Recommendation: a block of its own after this one, so that this block
-  stays the happy path over one store and the extension points are shaped by two
-  stores that exist, not one.

@@ -103,7 +103,7 @@ store, and block 6's PostgreSQL store passes it unchanged. Happy path only.
   nobody until it is decided (`data-model.md`, "Parts").
 - Fork, titles and bounds: stage two.
 - The extension points for stores, dispatchers and engines' storage from outside this
-  repository: a block after block 6.
+  repository: stage three.
 
 ## Rules
 

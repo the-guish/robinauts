@@ -244,4 +244,4 @@ them in line.
   turn's record.
 - An answer records its turn, and web takes the run id from it.
 - The runner builds an answer's parts in stream order.
-- The memory store follows, and a contract suite that any store can import proves it.
+- The memory store follows, and a contract suite that every store passes proves it.

@@ -82,7 +82,7 @@ The logical model maps onto paths instead of `PK`/`SK`:
   documents in its own collection. For LangGraph there is no first-party Firestore
   saver; community ones exist, or one can be written against `BaseCheckpointSaver`.
   Either way, check the licence and the maintenance. Both are handed to the engines
-  through the supplied-storage kind.
+  through the supplied-storage kind of stage three.
 
 ## Compute
 
