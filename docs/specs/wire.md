@@ -146,6 +146,29 @@ hold as the rule and are not enforced yet:
 - A body is bounded at one mebibyte, refused with 413 on the declared length
   before a byte of it is read.
 
+**Planned with turn ids.** The controller gives each turn an id of its own
+([architecture/data-model.md](../architecture/data-model.md)). When it does,
+the wire changes in these ways and in no others:
+
+- **The run id is the turn's id**, no longer the conversation's. A
+  conversation still has at most one turn going, but each turn is a run of its
+  own: an answer's `provenance.run_id` names the turn that produced it, and
+  `ended_badly.run_id` the turn that ended badly.
+- **The events URL names the conversation as well as the run**:
+  `GET /api/conversations/{id}/runs/{run_id}/events`, as the cancel URL already
+  does. A store that keeps a conversation's records together finds a turn
+  from both ids, and a run that is not in that conversation answers 404, as
+  one in somebody else's does. `GET /api/runs/{run_id}/events` goes.
+- **`X-Robinauts-Run-Id` and `X-Robinauts-Conversation-Id` carry two values**:
+  the turn's id and the conversation's. A client that received the headers
+  and nothing else can still re-attach, with both.
+- **An opened conversation's `run_id` is the running turn's id**, so that a
+  client re-attaching after a reload asks for that turn and no other. The
+  frontend's client builds the events URL from it and the conversation's id.
+
+What does not change: positions still start at 1 with each turn, re-attaching
+is still `Last-Event-ID` or `after`, and the events themselves are the same.
+
 ## Without streaming
 
 - A client that cannot stream starts a turn and obtains the result once the

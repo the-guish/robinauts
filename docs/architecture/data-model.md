@@ -77,6 +77,12 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   `interrupted` by the next reader to find it.
 - **No clocks and no ids in a store.** The controller mints every id and sets every
   time.
+- **A session and its records are addressed from the owner down.** Every operation on
+  a session names its owner and the session; every operation on a turn or its events
+  names the owner, the session and the turn. A store that keeps a session's records in
+  one partition (DynamoDB, Cosmos DB, Firestore) finds the partition from those ids,
+  with no index on a turn's id alone. PostgreSQL needs only the innermost id, and
+  checks the rest. A session that is not its caller's owner's is not found.
 
 ## Documents
 
@@ -228,6 +234,9 @@ The contract and the port today differ from this model in these places. Block 5 
 them in line.
 
 - The store port passes documents for messages and events, with their keys.
+- The store port addresses sessions by owner and session, and turns by owner, session
+  and turn. So does the turn dispatcher, and so does the wire's events URL
+  (`docs/specs/wire.md`, "Planned with turn ids").
 - Turns have ids. `TurnStarted` and the active turn carry the turn's id, positions
   are given by the runner, and `start_turn` stores the question and the turn
   together.

@@ -18,7 +18,7 @@ path, minimal code.
    writes and reads back. Nothing durable can be written before this is decided.
 6. **PostgreSQL.** The store over asyncpg, the schema with `db init` and the start-up
    check, `LISTEN` and `NOTIFY` for watchers in other processes, and both engines'
-   PostgreSQL storage.
+   PostgreSQL storage. Planned: `postgres-plan.md`.
 7. **Auth.** The OIDC flow, sessions and cookies, the allow list, sign-out, API tokens,
    and `ensure_user` called from the real identity.
 8. **The plan for stage two.** A detailed plan capturing every learning still held in
