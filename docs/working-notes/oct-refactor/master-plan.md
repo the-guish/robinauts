@@ -15,7 +15,10 @@ path, minimal code.
 4. **Pydantic AI engine over in-memory storage.** Same suite, second implementation,
    which is what proves the contract is not shaped by one framework.
 5. **The conversation format's encoding and versioning.** The documents a durable store
-   writes and reads back. Nothing durable can be written before this is decided.
+   writes and reads back. Nothing durable can be written before this is decided. It
+   grew into the data model as a whole: turns with ids, the store port in the shape a
+   durable store needs, and the run id on the wire (`docs/architecture/data-model.md`).
+   Planned: `data-model-plan.md`.
 6. **PostgreSQL.** The store over asyncpg, the schema with `db init` and the start-up
    check, `LISTEN` and `NOTIFY` for watchers in other processes, and both engines'
    PostgreSQL storage. Planned: `postgres-plan.md`.

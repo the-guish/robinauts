@@ -138,8 +138,9 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
 4. **The store: turns and events.** A question stored with its turn, the duplicate
    running turn translated; an event appended at its position, with its `expires_at`;
    the events after a position; a turn finished in one transaction; the active turn
-   looked up; and the lease and the cancel request, if block 5 brought them. Test: the
-   store's contract suite, whole.
+   looked up. `lease_until` is written as block 5's runner gives it, and
+   `cancel_requested_at` is left empty: both are read in stage two
+   (`data-model-plan.md`). Test: the store's contract suite, whole.
 5. **Watchers in other processes.** The listening connection, `NOTIFY` in the
    transactions that append an event and end a turn, and `wait_for_events` with its
    timeout. Test: a store on one pool waits while a store on a second pool appends, and
@@ -167,9 +168,6 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
 
 ## Open before starting
 
-- **Leases and the cancel request, in block 5 or stage two?** The schema has both
-  columns. If block 5 brings them, step 4 stores them; if not, step 4 leaves them
-  unwritten, and stage two's hardening brings them with the sweep that reads them.
 - **The extension points.** Registering a store, a turn dispatcher or an engine's
   storage from an installed package is what the serverless notes ask of this
   repository. Recommendation: a block of its own after this one, so that this block
