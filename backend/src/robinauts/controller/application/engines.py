@@ -105,11 +105,15 @@ async def build_engines(
     settings: EngineSettings,
     storage: StorageConfig,
     factories: Mapping[str, EngineFactory],
+    *,
+    setup: bool = True,
 ) -> dict[str, AgentEngine]:
     """The engines the agents name, built, set up, and able to reach their models' providers.
 
-    ``UnknownEngineError`` for an engine this build does not have, ``UnreachableProviderError``
-    for an agent whose model is on a provider kind its engine cannot reach.
+    ``setup`` is false on PostgreSQL, where ``robinauts db init`` set the engines up and the
+    server never changes the database. ``UnknownEngineError`` for an engine this build does
+    not have, ``UnreachableProviderError`` for an agent whose model is on a provider kind its
+    engine cannot reach.
     """
     engines: dict[str, AgentEngine] = {}
     for agent in config.agents.values():
@@ -122,7 +126,8 @@ async def build_engines(
                 f" does not have"
             )
         engine = await factory(settings, storage)
-        await engine.setup()
+        if setup:
+            await engine.setup()
         engines[agent.engine] = engine
     for agent in config.agents.values():
         model = config.models[agent.model]

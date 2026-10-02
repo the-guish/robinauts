@@ -176,11 +176,16 @@ export async function startTurn(
  * (`docs/specs/runs.md`).
  */
 export async function attach(
+  conversationId: string,
   runId: string,
   after: number,
   watching: Watching = {},
 ): Promise<Attached> {
-  return attachTo(await open(runId, after, watching), after, watching);
+  return attachTo(
+    await open(conversationId, runId, after, watching),
+    after,
+    watching,
+  );
 }
 
 /** The stream of a run, from the response that carries it. */
@@ -208,7 +213,7 @@ function attachTo(
   return {
     runId,
     conversationId,
-    events: following(body, runId, from, watching),
+    events: following(body, conversationId, runId, from, watching),
   };
 }
 
@@ -217,13 +222,15 @@ function attachTo(
  *
  * The loop is: read until the stream ends; if it ended with a terminal event
  * the run is over and so is this; otherwise the connection went and the run
- * did not, so wait a moment and open `GET /api/runs/{id}/events` after the
- * last position seen. `Last-Event-ID` is how that position is said, which is
+ * did not, so wait a moment and open
+ * `GET /api/conversations/{id}/runs/{run_id}/events` after the last position
+ * seen. `Last-Event-ID` is how that position is said, which is
  * what a browser's own `EventSource` would send and what the backend reads
  * whether or not `after` is there as well.
  */
 async function* following(
   first: ReadableStream<Uint8Array>,
+  conversationId: string,
   runId: string,
   from: number,
   watching: Watching,
@@ -240,7 +247,7 @@ async function* following(
       // ended. Outside it, the one failure that a dropped network is most
       // likely to produce -- the next `GET` never getting through -- would
       // have been the one failure that ended the watch.
-      body ??= streamOf(await open(runId, position, watching));
+      body ??= streamOf(await open(conversationId, runId, position, watching));
       for await (const block of blocks(body, signal)) {
         const event = decode(block.data);
         if (event === null) continue;
@@ -351,8 +358,9 @@ async function post(
   );
 }
 
-/** `GET` the events of a run from a position. */
+/** `GET` the events of a run of a conversation, from a position. */
 async function open(
+  conversationId: string,
   runId: string,
   after: number,
   { signal }: Watching,
@@ -362,12 +370,15 @@ async function open(
   // there is nothing to gain from sending the same number twice.
   if (after > 0) headers["last-event-id"] = String(after);
   return answered(
-    fetch(`/api/runs/${encodeURIComponent(runId)}/events`, {
-      method: "GET",
-      headers,
-      credentials: "same-origin",
-      ...(signal === undefined ? {} : { signal }),
-    }),
+    fetch(
+      `/api/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/events`,
+      {
+        method: "GET",
+        headers,
+        credentials: "same-origin",
+        ...(signal === undefined ? {} : { signal }),
+      },
+    ),
     signal,
   );
 }

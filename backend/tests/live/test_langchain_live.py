@@ -27,11 +27,10 @@ from robinauts.agent_engines.contract.domain import (
 from robinauts.agent_engines.contract.ports import (
     EngineSettings,
     ProviderKeyLookup,
-    StorageConfig,
-    StorageKind,
     ToolSecretLookup,
 )
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
+from robinauts.agent_engines.langchain_engine.memory import InProcessMemory
 
 pytestmark = [pytest.mark.io, pytest.mark.live]
 
@@ -61,7 +60,7 @@ async def one_real_turn(provider: ModelProviderConfig, name: str, key: str) -> N
         keys=Key(key),
         tool_secrets=NoSecrets(),
     )
-    engine = LangChainEngine(settings, StorageConfig(StorageKind.IN_MEMORY, {}))
+    engine = LangChainEngine(settings, InProcessMemory())
     await engine.setup()
     session = uuid.uuid4()
     await engine.create(session)

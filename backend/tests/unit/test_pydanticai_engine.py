@@ -59,8 +59,10 @@ from robinauts.agent_engines.contract.ports import (
     ToolSecretLookup,
 )
 from robinauts.agent_engines.pydantic_ai_engine import engine as engine_module
+from robinauts.agent_engines.pydantic_ai_engine import init_pydantic_ai
 from robinauts.agent_engines.pydantic_ai_engine.clients import chat_model
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
+from robinauts.agent_engines.pydantic_ai_engine.memory import InProcessMemory
 from robinauts.agent_engines.pydantic_ai_engine.tools import toolset_for, toolsets_for
 
 
@@ -198,11 +200,18 @@ def test_the_engine_answers_the_four_kinds_and_turns_tracing_off(
 ) -> None:
     monkeypatch.setattr(Agent, "_instrument_default", True)
     monkeypatch.setattr(pydantic_ai, "BANNER_ENABLED", True)
-    engine = PydanticAIEngine(
-        settings_for(ProviderKind.ANTHROPIC), StorageConfig(StorageKind.IN_MEMORY, {})
-    )
+    engine = PydanticAIEngine(settings_for(ProviderKind.ANTHROPIC), InProcessMemory())
     assert engine.kinds() == frozenset(ProviderKind)
     assert Agent._instrument_default is False
+
+
+@asyncio_test
+async def test_init_pydantic_ai_keeps_memory_in_this_process_without_postgres() -> None:
+    engine = await init_pydantic_ai(
+        settings_for(ProviderKind.ANTHROPIC), StorageConfig(StorageKind.IN_MEMORY, {})
+    )
+    assert isinstance(engine, PydanticAIEngine)
+    assert isinstance(engine._memory, InProcessMemory)
     assert pydantic_ai.BANNER_ENABLED is False
 
 
@@ -213,9 +222,7 @@ class TestPydanticAIEngineMemory(EngineMemoryContract):
         monkeypatch.setattr(engine_module, "chat_model", lambda *_: (model, {}))
 
     async def new_engine(self) -> AgentEngine:
-        engine = PydanticAIEngine(
-            settings_for(ProviderKind.ANTHROPIC), StorageConfig(StorageKind.IN_MEMORY, {})
-        )
+        engine = PydanticAIEngine(settings_for(ProviderKind.ANTHROPIC), InProcessMemory())
         await engine.setup()
         return engine
 
@@ -251,8 +258,6 @@ class TestPydanticAIEngineTurn(EngineTurnContract):
     async def new_engine(self, script: Script) -> AgentEngine:
         model = scripted(script)
         self.monkeypatch.setattr(engine_module, "chat_model", lambda *_: (model, {}))
-        engine = PydanticAIEngine(
-            settings_for(ProviderKind.ANTHROPIC), StorageConfig(StorageKind.IN_MEMORY, {})
-        )
+        engine = PydanticAIEngine(settings_for(ProviderKind.ANTHROPIC), InProcessMemory())
         await engine.setup()
         return engine

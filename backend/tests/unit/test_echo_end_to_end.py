@@ -49,7 +49,10 @@ async def test_a_conversation_from_the_first_message_to_its_deletion() -> None:
             f"/api/conversations/{cid}/turns", json={"text": "again", "parent_id": answer["id"]}
         )
         assert events(again.text)[-1]["type"] == "RUN_FINISHED"
-        replayed = events((await http.get(f"/api/runs/{cid}/events?after=0")).text)
+        rid = again.headers["x-robinauts-run-id"]
+        replayed = events(
+            (await http.get(f"/api/conversations/{cid}/runs/{rid}/events?after=0")).text
+        )
         assert replayed[0]["type"] == "RUN_STARTED"
         assert replayed[-1]["type"] == "RUN_FINISHED"
         said = "".join(e["delta"] for e in replayed if e["type"] == "TEXT_MESSAGE_CONTENT")

@@ -202,24 +202,24 @@ came back, as text ([../docs/specs/legacy/agents-engines-models.md](../docs/spec
 **GitHub's server is on whenever a GitHub token is exported** in the shell
 that runs `start.sh`, as `ROBINAUTS_GITHUB_TOKEN`. Both agents then get `tools = ["github"]`, and a
 question about a repository has the model call, say,
-`github_get_latest_release`; the answer arrives with the call's toggle above
+`get_latest_release`; the answer arrives with the call's toggle above
 it. `start.sh` says `Tools: GitHub's MCP server, for both agents.` when it is
 on.
 
 The token is handled like the model key: taken **out of the script's
 environment** as the first thing it does, so nvm, node, uv, PostgreSQL and
 npm never see it, and put back on the server's invocation alone, as
-`ROBINAUTS_GITHUB_TOKEN`, the variable `[mcp_servers.github]` names. The
+`ROBINAUTS_GITHUB_TOKEN`, the variable `[tool_servers.github]` names. The
 configuration holds that name and nothing else. **The agents act as the
 token's owner** on `api.githubcopilot.com`, with whatever the token may do,
 so a token with no more than read access to public repositories is the one to
 give a demo.
 
 **Microsoft Learn's server needs no credential.** Take the `#` off the
-`[mcp_servers.learn]` table in `robinauts.toml.in`, add `"learn"` to an
+`[tool_servers.learn]` table in `robinauts.toml.in`, add `"learn"` to an
 agent's `tools` (or give it the line, `tools = ["learn"]`, when GitHub is
 off), restart (`demo/stop.sh`, then `demo/start.sh`), and ask that agent
-something about, say, Azure: the model calls `learn_microsoft_docs_search`.
+something about, say, Azure: the model calls `microsoft_docs_search`.
 **The demo then reaches `learn.microsoft.com` from this machine** for as long
 as the line is on. What the request carries is no credential and nothing that
 names you, but it does carry what the model wrote for the tool -- the search

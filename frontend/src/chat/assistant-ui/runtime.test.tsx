@@ -1129,7 +1129,7 @@ test("a conversation with a run in flight is attached to at resume.after", async
         }),
       );
     }
-    if (call.url === `/api/runs/${RUN}/events`) {
+    if (call.url === `/api/conversations/${CONVERSATION}/runs/${RUN}/events`) {
       return streamed(
         [
           event(
@@ -1149,7 +1149,8 @@ test("a conversation with a run in flight is attached to at resume.after", async
     expect(result.current.state.messages).toHaveLength(2);
   });
   const attaching = fetch.mock.calls.find(
-    ([url]) => String(url) === `/api/runs/${RUN}/events`,
+    ([url]) =>
+      String(url) === `/api/conversations/${CONVERSATION}/runs/${RUN}/events`,
   );
   expect(
     (attaching?.[1]?.headers as Record<string, string>)["last-event-id"],
@@ -1525,7 +1526,7 @@ test("a stream that is lost reads the store and watches the run again", async ()
           event("TEXT_MESSAGE_CONTENT", { messageId: "m2", delta: "half" }, 3),
         ),
     ],
-    [`/api/runs/${RUN}/events`]: [
+    [`/api/conversations/${CONVERSATION}/runs/${RUN}/events`]: [
       // The client's own tries are spent: a refusal is not one it repeats.
       () => refusal(404, "NotFoundError", "no"),
       // Read again, the run is still in flight, and this watch delivers.
@@ -1563,7 +1564,8 @@ test("a stream that is lost reads the store and watches the run again", async ()
   expect(result.current.state.ended).toBeNull();
   expect(
     fetch.mock.calls.filter(
-      ([url]) => String(url) === `/api/runs/${RUN}/events`,
+      ([url]) =>
+        String(url) === `/api/conversations/${CONVERSATION}/runs/${RUN}/events`,
     ),
   ).toHaveLength(2);
 });
@@ -1571,7 +1573,9 @@ test("a stream that is lost reads the store and watches the run again", async ()
 test("a second loss is said rather than retried for ever", async () => {
   inTurn({
     "/api/turns": [() => streamOf()],
-    [`/api/runs/${RUN}/events`]: [() => refusal(404, "NotFoundError", "no")],
+    [`/api/conversations/${CONVERSATION}/runs/${RUN}/events`]: [
+      () => refusal(404, "NotFoundError", "no"),
+    ],
     [`/api/conversations/${CONVERSATION}`]: [
       () => json(opened(conversation(1), [TREE[0]!], ANSWERING)),
     ],
@@ -1748,7 +1752,7 @@ test("a read that finds a run in flight watches it, whichever read it is", async
         ),
       () => json(opened(conversation(1), TREE)),
     ],
-    [`/api/runs/${OTHER_RUN}/events`]: [
+    [`/api/conversations/${CONVERSATION}/runs/${OTHER_RUN}/events`]: [
       () =>
         streamed(
           [
@@ -1776,7 +1780,9 @@ test("a read that finds a run in flight watches it, whichever read it is", async
   // answering here.
   expect(
     fetch.mock.calls.filter(
-      ([url]) => String(url) === `/api/runs/${OTHER_RUN}/events`,
+      ([url]) =>
+        String(url) ===
+        `/api/conversations/${CONVERSATION}/runs/${OTHER_RUN}/events`,
     ),
   ).toHaveLength(1);
   // And the panel was still told, though the turn's own watcher was stopped

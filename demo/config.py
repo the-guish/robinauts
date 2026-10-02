@@ -159,7 +159,7 @@ def filled(template: str, values: dict[str, str], base_url: str, github_env: str
                 continue
             line = line.replace(
                 GITHUB_SERVER,
-                f'[mcp_servers.github]\nurl = "{GITHUB_URL}"\nsecret_env = "{github_env}"',
+                f'[tool_servers.github]\nurl = "{GITHUB_URL}"\nsecret_env = "{github_env}"',
             )
         lines.append(line)
     text = "".join(lines)
@@ -199,7 +199,7 @@ def written(text: str, values: dict[str, str], base_url: str, github_env: str) -
     for agent_id, agent in agents.items():
         said[f"{agent_id}'s model"] = (agent.get("model", ""), ids[0])
         said[f"{agent_id}'s tools"] = (agent.get("tools", []), tools)
-    servers = tables.get("mcp_servers", {})
+    servers = tables.get("tool_servers", {})
     if github_env:
         github = servers.get("github", {})
         said["the GitHub server's url"] = (github.get("url", ""), GITHUB_URL)

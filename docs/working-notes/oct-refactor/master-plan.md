@@ -15,10 +15,13 @@ path, minimal code.
 4. **Pydantic AI engine over in-memory storage.** Same suite, second implementation,
    which is what proves the contract is not shaped by one framework.
 5. **The conversation format's encoding and versioning.** The documents a durable store
-   writes and reads back. Nothing durable can be written before this is decided.
+   writes and reads back. Nothing durable can be written before this is decided. It
+   grew into the data model as a whole: turns with ids, the store port in the shape a
+   durable store needs, and the run id on the wire (`docs/architecture/data-model.md`).
+   Planned: `data-model-plan.md`.
 6. **PostgreSQL.** The store over asyncpg, the schema with `db init` and the start-up
    check, `LISTEN` and `NOTIFY` for watchers in other processes, and both engines'
-   PostgreSQL storage.
+   PostgreSQL storage. Planned: `postgres-plan.md`.
 7. **Auth.** The OIDC flow, sessions and cookies, the allow list, sign-out, API tokens,
    and `ensure_user` called from the real identity.
 8. **The plan for stage two.** A detailed plan capturing every learning still held in
@@ -30,11 +33,12 @@ path, minimal code.
 
 ## Stage two: hardening
 
-Planned in detail by stage one's step 8. The blocks known today:
+Planned in detail by stage one's step 8, and gathered meanwhile in
+`stage-two-plan.md`, which the data model's review added to. The blocks known today:
 
 1. **Controller hardening.** The refusals, one active turn, the timeout, the bounded
-   cancel, the sweep at start, the edit of a first question, titles, and fork in the
-   controller and in both engines.
+   cancel, the lease renewed and the sweep for turns nobody reads, the edit of a first
+   question, titles, and fork in the controller and in both engines.
 2. **Web protection and the rest of the wire.** CSRF and origin checks, the body bound,
    the security headers and CSP, hashed asset caching, the error mapping with its
    exhaustive test, log redaction, and the wire's "not yet served" list.
@@ -44,6 +48,17 @@ Planned in detail by stage one's step 8. The blocks known today:
    own schedule.
 5. **Context management in the engines.** Summarisation or trimming within the model's
    window, and the vendor's prompt cache, by each framework's own means.
+
+## Stage three: open to other packages
+
+Not planned until stages one and two are done.
+
+1. **Extension points.** A store, a turn dispatcher and an engine's storage supplied
+   by an installed package that this repository does not name, and the store's
+   contract suite importable by such a package. It is what an integration for a
+   serverless cloud, in a repository of its own, would build on
+   (`aws-serverless.md`). This repository ships no vendor's library, in this stage or
+   any other.
 
 ## Discarded
 

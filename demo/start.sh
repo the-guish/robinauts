@@ -47,7 +47,7 @@ ENV_MODE=600
 # demo/.env may hold a key, so it is read only when nobody else can read it.
 
 GITHUB_VARIABLE=ROBINAUTS_GITHUB_TOKEN
-# The variable the platform reads GitHub's token from, as [mcp_servers.github]
+# The variable the platform reads GitHub's token from, as [tool_servers.github]
 # names it. Without it in the environment, the agents have no tools.
 
 OPENROUTER_VARIABLE=OPENROUTER_API_KEY
@@ -395,7 +395,7 @@ say "Starting the server on http://$HOST:$PORT/ ..."
         ROBINAUTS_GITHUB_TOKEN=$github_token
         export ROBINAUTS_GITHUB_TOKEN
     fi
-    exec "$ROBINAUTS" start --dev-no-sign-in --port "$PORT"
+    exec "$ROBINAUTS" start --port "$PORT"
 ) >>"$LOG_FILE" 2>&1 &
 server=$!
 printf '%s\n' "$server" >"$PID_FILE"

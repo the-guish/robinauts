@@ -22,8 +22,8 @@ cross components first, then one section per component.
   its own, which the engines' event translation must tolerate (see LangChain below).
 - **Resume.** The spec's `resume=True`: an interrupted turn run again from the engine's
   partial work without repeating tool calls. Both engines run the turn again from the
-  checkpoint today. Needs the controller to mark a turn interrupted at start-up (the
-  sweep) and to pass `resume` when the same question is asked again.
+  checkpoint today. Needs a turn marked interrupted, which block 5's lease does, and
+  the controller to pass `resume` when the same question is asked again.
 - **Housekeeping.** Trash expiry and retention in the controller, on the process's own
   schedule, each calling the engine's `forget`, which is the only way memory is deleted.
 - **Titles.** A conversation's title from its first exchange: legacy derived it in `core`;
@@ -36,6 +36,212 @@ cross components first, then one section per component.
   failure of the turn, in both engines (`handle_tool_errors` / `tool_error_behavior`).
 - **Usage and cost**, attachments, and tool approval: out of the engine contract today;
   planned, not specified.
+
+## Data model and PostgreSQL
+
+Findings of the review of `design/data-model` (blocks 5 and 6), numbered as the review
+ranked them. Findings 1 to 7 were answered in `data-model.md`, the path of one message,
+`data-model-plan.md` and `postgres-plan.md`; these are the rest.
+
+8. **The path doc and the lease.** `the-path-of-one-message.md` says it describes the
+   controller after block 5, but its lease tick and its `request_cancel` through the
+   store are stage two: mark them so, or move them here. Add
+   `cancel_requested_at` to the `Turn` record when cancel goes through the store. Until
+   then, with several processes, a cancel that lands on a process not running the turn
+   returns 204 and cancels nothing; when it does go through the store, the store
+   checks the owner before it writes the flag.
+9. **Expiry enforced.** The sweep deletes `turn_events` past `expires_at`, one statement
+   on `turn_events_expires_at_idx`, and every read treats an event past `expires_at`
+   as absent, whatever the store's deletion lag: DynamoDB deletes "typically within a
+   few days" and returns the item from a `Query` until then, Firestore within about a
+   day, Cosmos hides it at once. Correct `aws-serverless.md`'s "TTL deletes expired
+   events, user sessions and pending logins without code": a sign-in read checks
+   expiry itself. Give all of a turn's events one `expires_at`, the turn's start plus
+   the retention, so that a late replay never starts in the middle of a turn. Say in
+   `wire.md` that reasoning is kept as events until they expire, not "never stored".
+10. **The document's bytes and its version.** `data-model.md` says every store keeps the
+    same bytes; `jsonb` reorders keys, drops whitespace and re-renders numbers, so say
+    "the same document, equal after decoding", and align `aws-serverless.md`'s "JSON
+    text, not a map" with the port's `Mapping`. Decide what a reader does with a newer
+    document during a rolling deploy, a minor version it reads past and a major one it
+    refuses, since "a new key moves the version" makes every new message unreadable to
+    the old process, and refusing one message breaks the thread walk.
+    `messages_role_is_a_role` is a CHECK, so a new role is a schema change, not an
+    additive one: say so, or drop the CHECK. The schema hash does not cover the
+    document format.
+11. **An index on `turns (session_id, follows)`.** Without it the cascade from `sessions`
+    checks `turns_follows_fkey` once per message by a range scan of the session's
+    turns: measured at 55 ms for 2,000 messages, 718 ms for 8,000, and 87 ms with the
+    index. It also serves the turns of a question. One line in `schema.sql`, which its
+    own rule for the parent key asks for.
+12. **The path doc's SQL.** Its `INSERT INTO turn_events` omits `expires_at`, which is
+    `NOT NULL`; its `start_turn` checks no `owner_id`, though `data-model.md` says
+    PostgreSQL checks the rest of the address; a deleted session raises
+    `TurnActiveError` (409) there and is not found (404) in `data-model.md`, the schema
+    and the wire; `NOTIFY '<turn> end'` names no channel; `start_turn(question, turn)`
+    is not the plan's signature. Fix the doc, and name `SessionNotFoundError` for a
+    hidden session in the plan's `start_turn`.
+13. **Decisions that reverse a spec or an ADR, unrecorded.** `core.md` says no framework
+    checkpointer and no framework tables in the deployment's schema, and ADR 0005 keeps
+    memory in `runs.engine_state`; block 6 builds engine-owned checkpoint tables, and
+    `data-model.md` cites ADR 0005 as its authority. ADR 0005 says the transcript shows
+    a cancelled turn's tool calls; the model stores no message for one, so a call with
+    side effects survives only in events that expire. ADR 0005's checkpoint rule, the
+    nearest finished answer on the path above the question, is dropped: a turn under a
+    question (after a failed turn, or on an edited first question) passes
+    `checkpoint_id=None`, which LangChain reads as the thread's latest and Pydantic AI
+    as an empty history. Write each decision down, in the doc or a superseding ADR,
+    and state the checkpoint rule.
+14. **Tree and turn invariants, enforced and owned.** A self-parent and a two-node
+    cycle pass the composite key, which is checked at the end of the statement: add
+    `CHECK (parent_id <> id)` and make the thread walk cycle-safe. "A turn produces at
+    most one answer" is held by nothing: `turns.answer_id UNIQUE`, with a key to
+    `messages (session_id, parent_id, id)`, holds it at no extra index. "`follows` is a
+    user message" is held by nothing, and the schema's comment that a key cannot say
+    so is wrong: a constant `follows_role` column with a composite key does. Decide
+    whether the store or the controller owns these rules (the schema says the store,
+    `aws-serverless.md` the controller), list them under the rules every store keeps,
+    and test them in the contract suite. Decide the visible thread while a
+    regeneration runs ("the newest message" against the wire's "messages end at
+    `follows`") and after a failed turn, and let `regenerate` work on a question whose
+    only turn failed. Editing the first question makes a second root: the tree is a
+    forest, and `data-model.md` should say so.
+15. **Opening a session is one snapshot.** Messages and the active turn are read
+    separately, so an answer can show twice, or be missing with no run id; the frontend
+    assumes a snapshot. Read both in one transaction, or the active turn first and
+    the messages up to it.
+16. **Cascades, and what keeps the schema's claims.** No port operation deletes a user,
+    so that deletion depends on the cascade alone, against the schema's header, and
+    the purge relies on the cascade for messages, turns and events. On DynamoDB the
+    sparse listing index hides trashed sessions, and the sweeps for hidden sessions
+    and expired leases need a `Scan` or an index. `schema.sql` says, in the present
+    tense, that the server refuses a wrong hash, and nothing keeps it: port legacy's
+    schema tests (one row, the hash, a half-applied file, four `db init` at once);
+    the advisory lock itself is block 6's step 1.
+17. **Where deferred work lives.** `master-plan.md` and this plan listed "the sweep at
+    start", which with two processes on one database would interrupt live turns; the
+    lease replaces it (`aws-serverless.md`), and both now say so. `controller.md`'s
+    `open` and `close`, and `web.md`'s `cancel_turn` and `watch_turn`, describe the old
+    lifecycle; block 5's step 6 rewrites `controller.md`, and `web.md` waits for this
+    stage. Block 5's steps 1, 3 and 4 cannot
+    each leave the suite green as written: no turn id exists until step 3, web has
+    none until step 6, and step 3's port forces step 4's runner; the plan says so, or
+    regroups them.
+18. **One name for each operation, and one address.** `end_turn` in `schema.sql`'s
+    comments and the three serverless notes, against the plan's `finish_turn`;
+    `request_cancel` in the path doc, in no port; `delete_session(session, at)`
+    against `hide_session(owner, session, at)`; `start_turn(question, turn)` against
+    `start_turn(owner, turn, question)`. Turn operations take two ids in the path doc
+    and the AWS and GCP notes, three in `data-model.md` and the plan, and the turn id
+    alone in the AWS sketch's `events_after` and `end_turn`, which cannot find `EVT#`
+    items under `PK = SESSION#` without an index. `azure-serverless.md` says PostgreSQL
+    may ignore the owner, and `data-model.md` says it checks it. The AWS note keys
+    messages and turns by `(session_id, id)` and omits `turns.model`.
+19. **The wire with turn ids.** `agui.py` sets `thread_id = run_id`; once the run id is
+    the turn's, say in the planned section that `thread_id` is the conversation's. Say
+    what "two headers carrying two values" means on the wire. `watched()` waits for
+    the first event before it sends the headers, and CloudFront gives up after 30 s on
+    a cold or lost worker: send the headers first, or bound the wait. "A session that
+    is not its caller's owner's is not found" meets privacy.md's share links and
+    projects; say which wins.
+20. **`position` as `bigint`**, as legacy had it, and `after` bounded at the edge: with
+    an `int4` column asyncpg raises on `?after=3000000000` or a large `Last-Event-ID`,
+    a 500 where an empty replay or a 422 is due.
+
+The second round of review, of the answers to the first seven, left these:
+
+21. **The lease margin on a serverless dispatch.** Block 5's margin is a minute past
+    the turn's timeout, counted from `start_turn`; a dispatch that is late eats it, and
+    Lambda's minimum event age is 60 s, Cloud Tasks' dispatch deadline bounds the
+    handler's run and not its delivery, and the GCP note says otherwise. Size the
+    margin for the dispatch, or have the claim write the lease. DynamoDB cannot
+    condition a `PutItem` on another item, so the conditioned append, the hide's check
+    of the `ACTIVE` marker and `end_expired_turn` are `TransactWriteItems` there, at
+    about four times the write units; the sketches in `aws-serverless.md` and the path
+    doc say "one conditional write".
+22. **Text split across pieces, and the engines' own stores.** Block 5 cleans each
+    document alone, so a surrogate pair split across two pieces becomes two U+FFFD in
+    the events and in the answer; legacy's `publishable` held the high half back for
+    the next piece (`legacy/domain/values.py`), and `data-model.md` still promises
+    "what a person watched arrive is what is stored". Pydantic AI's
+    `ModelMessagesTypeAdapter.dump_json` refuses a lone surrogate before `json` can
+    help, and LangGraph's serializer writes `?` for one: the engines clean what they
+    save, with a lone-surrogate case in the engines' contract suite over PostgreSQL.
+23. **Writes fenced by the claimant, and an idempotent finish.** Block 5 fences a
+    runner's writes by the turn's state and its lease; `turns.answer_id`, written by
+    the claim and checked by every append and the finish (item 14), fences them by the
+    claimant too. A `finish_turn` retried after a lost acknowledgement gets
+    `TurnLostError` although the turn finished: accept a matching repeat (same state,
+    same answer id), and decide who retries a write asyncpg reports as a lost
+    connection, since block 6 retries nothing.
+24. **`NOTIFY` once per interval.** A `pg_notify` in every append serialises those
+    commits across the cluster (measured: 16,161 tps without, 3,118 with, at 32
+    clients). Watchers re-read the table anyway, so notify at most once per turn per
+    interval.
+25. **Cancel through the store.** Block 5 refuses a cancel of a turn another process
+    runs (409), and the frontend's 409 copy says "Stop the answer first", the one
+    action that then does nothing. `cancel_requested_at`, read by the runner at each
+    lease renewal, removes both; `Turn` gains the field then.
+26. **A moved agent.** Block 5 runs a session's turns on the engine it records and
+    builds it on demand; `agent-engines.md` and ADR 0005 say a moved conversation
+    starts again on the new engine. Decide which, and if the latter: `create` on the
+    new engine, no checkpoint, the new engine recorded, and `forget` on the old.
+27. **Drift the two rounds of review left.** `aws-serverless.md` still has cancel
+    through the store unqualified and asks block 5 for "cancel and lease through the
+    store"; `azure-serverless.md` says `close` waits where block 5 waits and then
+    interrupts; this section is ordered by review rank, not by what it touches;
+    `wire.md`'s "in these ways and in no others" omits the two 409s block 5 adds and
+    AG-UI's `thread_id`; the position of the supplied `turn_ended` is stated only in
+    the plan; `finish_turn` takes no `expires_at` for its last events; and the nits:
+    text splitting differs between `data-model.md` and the plan, "an id is a uuid"
+    would reject `call_id` and `checkpoint_id`, "(hours, not days)" against 24 hours,
+    `turns_error_only_when_failed` also holds `interrupted`, and "Web builds no
+    engine" against `create` and `forget` running in web.
+
+A third round, of `design/data-model` at the end of block 6, kept what is on the users'
+path or is not undone by a reload, and set the rest aside: an empty session left by a
+first message refused for its model, the stop button racing a turn that is finishing,
+`limit=0` on the listing, the two stores disagreeing on a repeated position, `follows`
+not checked to be a user message, the engines' memory relying on the pool's `json`
+codecs, and the schema hash stamped from the pin rather than from the file applied.
+
+28. **A session on a removed agent breaks the listing and the open.** `web/app.py`'s
+    `list_sessions` builds `defaults` from the agents the configuration names today and
+    indexes it by each session's `agent`, a `KeyError`; `default_model` is a `next()`
+    with no default inside a coroutine, so for an agent that is gone the exhausted
+    generator surfaces as `RuntimeError`. Both are 500s, on every load of the history
+    and on every open of that conversation, for as long as the user has one session on
+    an agent the operator removed; the row never renders, so the user cannot delete it
+    from the interface. `schema.sql` promises the opposite: the operator may remove the
+    agent, and the session keeps its row. In the controller, `run_turn` indexes
+    `self._config.agents[session.agent]` and `self._config.models[turn.model]`
+    unguarded, where `_engine()` already builds an engine the configuration no longer
+    names. Decide what such a session shows (its stored agent id and the model of its
+    last message, or a refusal naming the agent) and apply it to the listing, the open
+    and the runner, with a test over a configuration that lost an agent.
+29. **`watch_turn` reads twice per wake.** After `wait_for_events` returns, the loop
+    queries `events_after` to test for emptiness and then `continue`s to the top, where
+    the same query runs again: two identical SELECTs on `turn_events` per wake of every
+    watcher, on the one path every open conversation sits on. Bind the list the second
+    read fetched and feed it to the `for`, or restructure the loop so the read after the
+    wait is the one iterated.
+30. **The dispatcher discards a runner's exception.** `InProcessDispatcher._settled`
+    calls `task.exception()` only to silence asyncio's "never retrieved" warning. A
+    `run_turn` that raises before the claim (the `KeyError` of item 28, a store error)
+    is logged nowhere; the turn stays `running` until `lease_until`, the timeout plus
+    the minute of margin, the session answers 409 to every new turn meanwhile, and
+    watchers wake every `WAIT_SECONDS` until one's `end_expired_turn` ends it as
+    `interrupted`. Nothing reaches it under normal operation, and it turns every
+    failure that does into a silent lock-out. Log the exception, and end the turn
+    there, as `cancel_turn` does with `_end_if_running`.
+31. **The engines' DDL outside the lock.** `init_database` runs `create_schema` under
+    `pg_advisory_xact_lock`, so two `db init` at once serialise on the schema, and then
+    runs every installed engine's `setup()` outside any lock: both pass the schema and
+    then race `CREATE TABLE IF NOT EXISTS` on the engines' tables, where one fails with
+    `duplicate key value violates unique constraint pg_type_typname_nsp_index` and exits
+    non-zero on a database that is fine. Hold the same lock around the setups. It bites
+    only where init runs concurrently, as two replicas' init containers do; the "four
+    `db init` at once" test item 16 asks for catches it if it covers the engines' tables.
 
 ## langchain_engine
 
@@ -78,8 +284,8 @@ From the echo and config blocks, outside the happy path:
 - The refusals the contract names: ownership (a conversation that is not the user's is
   not found), not found, unknown agent or model, an invalid title or cursor, empty text.
 - One active turn per conversation (`TurnActiveError`), the turn timeout, a bounded
-  cancel, and the sweep at start that ends turns a dead process left active as
-  interrupted.
+  cancel, the lease renewed for long turns, and the sweep for turns a dead process
+  left running that nobody reads (block 5 ends the ones a reader finds, by the lease).
 - A cancel that lands before the runner starts leaves the turn active with no
   `TurnEnded`.
 - A rename during a turn is overwritten when the turn ends: the runner writes back the
@@ -92,8 +298,8 @@ From the echo and config blocks, outside the happy path:
   `ConfigError`; missing fields are reported in the dataclass's own words; URLs, env
   names, bounds and text are not validated.
 - Event positions restart at 1 per turn and the last turn's events stay until the next
-  turn starts; `watch_turn` relies on it. Decide whether positions become per
-  conversation with PostgreSQL.
+  turn starts; `watch_turn` relies on it. Decided in block 5: positions are per turn,
+  keyed by the turn's id.
 - One `asyncio.Condition` for the whole in-memory store wakes every watcher on every
   append.
 - The user's id is a fresh uuid on each start with in-memory storage.

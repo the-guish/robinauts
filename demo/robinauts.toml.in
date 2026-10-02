@@ -56,7 +56,7 @@ title = "@MODEL_3_TITLE@"
 [agents.assistant-langgraph]
 title = "Assistant (LangGraph)"
 model = "@MODEL_ID@"
-engine = "langgraph"
+engine = "langchain"
 system_prompt = "You are the Robinauts demo assistant. Answer briefly, and play fair."
 @TOOLS@
 
@@ -81,6 +81,6 @@ system_prompt = "You are the Robinauts demo assistant. Answer briefly, and play 
 # each call behind a toggle above the answer.
 @GITHUB_SERVER@
 #
-# [mcp_servers.learn]
+# [tool_servers.learn]
 # url = "https://learn.microsoft.com/api/mcp"
 # auth = "none"

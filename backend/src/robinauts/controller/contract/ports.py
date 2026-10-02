@@ -101,19 +101,27 @@ class Controller(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def cancel_turn(self, user: User, session_id: uuid.UUID) -> None:
-        """``SessionNotFoundError``; ``NoActiveTurnError`` when nothing runs."""
+    async def cancel_turn(
+        self, user: User, session_id: uuid.UUID, turn_id: uuid.UUID | None = None
+    ) -> None:
+        """``SessionNotFoundError``; ``NoActiveTurnError`` when nothing runs. ``turn_id``
+        ``None`` names the session's running turn."""
         raise NotImplementedError
 
     @abstractmethod
     def watch_turn(
-        self, user: User, session_id: uuid.UUID, *, after: int = 0
+        self,
+        user: User,
+        session_id: uuid.UUID,
+        turn_id: uuid.UUID | None = None,
+        *,
+        after: int = 0,
     ) -> AsyncGenerator[NumberedEvent, None]:
         """Not a coroutine: the refusals happen inside the generator.
 
-        Yields the turn's events past ``after`` until ``TurnEnded``, then stops.
-        ``SessionNotFoundError``; ``NoActiveTurnError`` when nothing runs and nothing
-        ended past ``after``.
+        Yields the turn's events past ``after`` until ``TurnEnded``, then stops. ``turn_id``
+        ``None`` names the session's latest turn. ``SessionNotFoundError``;
+        ``NoActiveTurnError`` for a turn the session does not have.
         """
         raise NotImplementedError
 
