@@ -41,6 +41,7 @@ from robinauts.controller.contract.domain import (
     Session,
     SessionPage,
     StorageConfig,
+    StorageKind,
     TextPart,
     Turn,
     TurnActiveError,
@@ -87,17 +88,28 @@ class RobinautsController(Controller):
         self._now = now or (lambda: datetime.now(UTC))
         self._engines: dict[str, AgentEngine] = {}
         self._factories: dict[str, EngineFactory] = {}
+        self._handle: object | None = None
+
+    def _sets_up_engines(self) -> bool:
+        """On PostgreSQL `robinauts db init` set the engines up; the server never does."""
+        return self._storage.kind is not StorageKind.POSTGRES
 
     async def open(self) -> None:
+        self._handle = await self._store.open()
         self._factories = dict(installed())
         settings = engine_settings(self._config, self._secret_for)
         self._engines = await build_engines(
-            self._config, settings, engine_storage(self._storage, None), self._factories
+            self._config,
+            settings,
+            engine_storage(self._storage, self._handle),
+            self._factories,
+            setup=self._sets_up_engines(),
         )
 
     async def close(self) -> None:
         await self._dispatcher.close(self._close_timeout)
         self._engines = {}
+        await self._store.close()
 
     async def _engine(self, name: str) -> AgentEngine:
         """The engine of that name: built at `open` for the agents, or on demand for a session
@@ -108,8 +120,9 @@ class RobinautsController(Controller):
             if factory is None:
                 raise UnknownEngineError(f"engine {name!r}, which this build does not have")
             settings = engine_settings(self._config, self._secret_for)
-            engine = await factory(settings, engine_storage(self._storage, None))
-            await engine.setup()
+            engine = await factory(settings, engine_storage(self._storage, self._handle))
+            if self._sets_up_engines():
+                await engine.setup()
             self._engines[name] = engine
         return engine
 

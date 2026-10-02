@@ -22,6 +22,8 @@ from datetime import datetime
 
 import asyncpg
 
+from robinauts.controller.adapters.postgres.pool import open_pool
+from robinauts.controller.adapters.postgres.schema import check_schema
 from robinauts.controller.contract.domain import (
     Role,
     Session,
@@ -110,18 +112,32 @@ def _rows(status: str) -> int:
 
 
 class PostgresStore(Store):
-    def __init__(self, pool: asyncpg.Pool, dsn: str | None = None) -> None:
-        self._pool = pool
+    """Over a pool it is given, which the giver closes, or over a dsn, from which ``open``
+    makes its own pool, checks the schema, and ``close`` closes it."""
+
+    def __init__(self, pool: asyncpg.Pool | None = None, dsn: str | None = None) -> None:
+        self._pool: asyncpg.Pool = pool  # type: ignore[assignment]
+        self._owns_pool = pool is None
         self._dsn = dsn
         self._listener: asyncpg.Connection | None = None
         self._waiters: dict[uuid.UUID, set[asyncio.Future[None]]] = {}
         self._opening: asyncio.Lock | None = None
 
+    async def open(self) -> asyncpg.Pool:
+        if self._owns_pool and self._pool is None:
+            if self._dsn is None:
+                raise RuntimeError("a store opened from nothing needs the database's dsn")
+            self._pool = await open_pool(self._dsn)
+        await check_schema(self._pool)
+        return self._pool
+
     async def close(self) -> None:
-        """Close the listening connection. The pool is the composition's to close."""
         if self._listener is not None:
             listener, self._listener = self._listener, None
             await listener.close()
+        if self._owns_pool and self._pool is not None:
+            pool, self._pool = self._pool, None  # type: ignore[assignment]
+            await pool.close()
 
     # --- users --------------------------------------------------------------
 
