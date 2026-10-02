@@ -141,11 +141,25 @@ With providers configured and no allow entry, start-up fails.
 - Tests still exercise the real sign-in flow, against a stand-in identity
   provider; this mode is not a substitute for that.
 
-## Not there yet
+## API tokens
 
-- **API tokens** are planned. Until they exist every API is reached with a
-  signed-in session. They are also what channels other than the browser
-  will sign in with ([channels.md](legacy/channels.md)).
+- A signed-in person mints a token for themselves, with a name, at
+  `POST /auth/tokens`. The answer shows its secret, and it is the only
+  time the secret is shown: the database holds its SHA-256, as it does a
+  session's.
+- A token lives ninety days and is not renewed. `GET /auth/tokens` lists
+  the person's tokens, oldest first, without their secrets;
+  `DELETE /auth/tokens/{token_id}` revokes one of them.
+- It is sent as `Authorization: Bearer <secret>` and reaches every route
+  under `/api/`, and these three, as the person who minted it. It is what
+  channels other than the browser sign in with
+  ([channels.md](legacy/channels.md)).
+- A bearer is not a cookie: a write that carries one, and no session
+  cookie, is not subject to the `Origin` check.
+- In the local development mode a token is minted for the local user. Like
+  a session naming that user, it signs nobody in where sign-in is on.
+- Not there yet: tokens minted by an operator for somebody else, and scopes.
+  A token reaches all that its owner can.
 
 ## Details likely to change
 
@@ -193,6 +207,9 @@ Routes:
 | `GET /auth/login/{provider}` | start a sign-in |
 | `GET /auth/callback/{provider}` | finish it; the redirect URI to register |
 | `POST /auth/logout` | sign out |
+| `POST /auth/tokens` | mint an API token; the one answer that shows its secret |
+| `GET /auth/tokens` | the API tokens of the person asking, without their secrets |
+| `DELETE /auth/tokens/{token_id}` | revoke one of them |
 
 - A pending sign-in is stored under the SHA-256 of `state`, single use, for
   10 minutes; their number is capped.

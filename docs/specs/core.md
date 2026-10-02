@@ -147,6 +147,7 @@ topic documents listed under [Documents](#documents).
   [operations.md](operations.md).
 - **Sign-in.** Google and Okta over OpenID Connect, the way neorc does it;
   an allow list decides who gets in. Two roles, user and admin.
+  API tokens, minted by a signed-in person, reach the API without a browser.
   [sign-in.md](sign-in.md).
 - **Interface.** neorc's layout: a collapsible left navigation panel that
   this project owns, and the chat in the middle; the application opens on
@@ -193,7 +194,6 @@ hard, the decision is taken with them in mind.
   model's memory of one conversation is the framework's and is already
   stored ([agents-engines-models.md](legacy/agents-engines-models.md)).
 - Usage reporting (goal 7).
-- API tokens.
 - More delivery channels: a mobile application, a Slack bridge; and a way
   to consume a run without streaming, for the clients that need it.
 - Agents created by users.

@@ -3,10 +3,11 @@
 
 """The web shell: the routes of ``docs/architecture/web.md`` over a controller, and the UI.
 
-Every route under ``/api/`` answers for whoever ``current_user`` names: the person a session
-cookie stands for, signed in through an identity provider by the ``/auth/`` routes, or the one
-user of the local development mode (``docs/specs/sign-in.md``); with nobody, it is 401. A
-write that carries the session cookie must carry ``Origin`` equal to ``public_url``, else 403.
+Every route under ``/api/`` answers for whoever ``current_user`` names: the person an API
+token (``Authorization: Bearer``) or a session cookie stands for, signed in through an identity
+provider by the ``/auth/`` routes, or the one user of the local development mode
+(``docs/specs/sign-in.md``); with nobody, it is 401. A write that carries the session cookie
+must carry ``Origin`` equal to ``public_url``, else 403; a write with a bearer alone need not.
 A controller operation that is not implemented answers 501.
 The shapes are the ones the frontend reads (``docs/specs/wire.md``); a turn's stream is
 AG-UI over SSE, its run id is the turn's id, and its thread id the session's.
@@ -18,7 +19,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -29,6 +30,7 @@ from pydantic import BaseModel
 
 from robinauts.controller.composition import SecretLookup
 from robinauts.controller.contract.domain import (
+    ApiToken,
     ControllerError,
     Identity,
     InvalidValueError,
@@ -60,6 +62,8 @@ from robinauts.web.sign_in import (
     SignInConfig,
     SignInError,
     SignInErrorCode,
+    random_secret,
+    secret_hash,
 )
 
 DEFAULT_PAGE = 30
@@ -76,8 +80,11 @@ STATUS_OF: dict[type[ControllerError], int] = {
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 SIGN_IN_PAGE = "/ui/#/sign-in?error="
+TOKEN_LIFE = timedelta(days=90)
 NOT_SIGNED_IN = "nobody is signed in: sign in at /ui/"
 NOT_SAME_ORIGIN = "a write that carries the session cookie must carry Origin equal to public_url"
+UNKNOWN_TOKEN = "the API token is unknown, revoked or expired"
+NO_SUCH_TOKEN = "you have no API token of that id"
 
 LOCAL_IDENTITY = Identity(provider=LOCAL_PROVIDER, subject="developer", name="Local development")
 """The one user of the local development mode, under a provider no configuration can name
@@ -122,6 +129,25 @@ class UserSessionResponse(BaseModel):
     public_url: str | None = None
     providers: list[ProviderSummary] = []
     user: UserSummary | None = None
+
+
+class NewApiTokenRequest(BaseModel):
+    name: str
+
+
+class ApiTokenSummary(BaseModel):
+    id: uuid.UUID
+    name: str
+    created_at: datetime
+    expires_at: datetime
+
+
+class NewApiTokenResponse(ApiTokenSummary):
+    secret: str
+
+
+class ApiTokenListResponse(BaseModel):
+    items: list[ApiTokenSummary]
 
 
 class AgentSummary(BaseModel):
@@ -239,6 +265,12 @@ class TurnRequest(BaseModel):
 
 def user_summary(user: User) -> UserSummary:
     return UserSummary(id=user.id, name=user.name, email=user.email, provider=user.provider)
+
+
+def token_summary(token: ApiToken) -> ApiTokenSummary:
+    return ApiTokenSummary(
+        id=token.id, name=token.name, created_at=token.created_at, expires_at=token.expires_at
+    )
 
 
 def summary(session: Session, model: str) -> ConversationSummary:
@@ -360,10 +392,21 @@ def create_app(
         secret = request.cookies.get(cookies.session)
         return await flow.resolve(secret, datetime.now(UTC)) if secret else None
 
+    async def token_user(secret: str) -> User | None:
+        user = await credentials.resolve_api_token(secret_hash(secret), datetime.now(UTC))
+        # The local development mode mints tokens for its user too: as with a session, a token
+        # naming that user signs nobody in.
+        return None if user is None or user.provider == LOCAL_PROVIDER else user
+
     async def current_user(request: Request) -> User:
         if flow is None:
             return local_user
-        # The API token, `Authorization: Bearer <secret>`, will be resolved here, beside the cookie.
+        scheme, _, secret = request.headers.get("authorization", "").partition(" ")
+        if scheme.lower() == "bearer":
+            user = await token_user(secret)
+            if user is None:
+                raise Refused(401, "Unauthorized", UNKNOWN_TOKEN)
+            return user
         user = await session_user(request)
         if user is None:
             raise Refused(401, "Unauthorized", NOT_SIGNED_IN)
@@ -491,6 +534,28 @@ def create_app(
             cookies.set(response, cookies.session, done.secret, done.expires_at - now)
             cookies.clear(response, cookies.login)
             return response
+
+    # --- API tokens: shown once, kept as their SHA-256 ---------------------------
+
+    @app.post("/auth/tokens", status_code=201)
+    async def mint_api_token(body: NewApiTokenRequest, user: User = asking) -> NewApiTokenResponse:
+        secret = random_secret()
+        now = datetime.now(UTC)
+        token = ApiToken(
+            uuid.uuid4(), user.id, body.name, secret_hash(secret), now, now + TOKEN_LIFE
+        )
+        await credentials.add_api_token(token)
+        return NewApiTokenResponse(**token_summary(token).model_dump(), secret=secret)
+
+    @app.get("/auth/tokens")
+    async def list_api_tokens(user: User = asking) -> ApiTokenListResponse:
+        tokens = await credentials.api_tokens_of(user.id)
+        return ApiTokenListResponse(items=[token_summary(t) for t in tokens])
+
+    @app.delete("/auth/tokens/{token_id}", status_code=204)
+    async def revoke_api_token(token_id: uuid.UUID, user: User = asking) -> None:
+        if not await credentials.delete_api_token(user.id, token_id):
+            raise Refused(404, "NotFound", NO_SUCH_TOKEN)
 
     # --- catalogue -------------------------------------------------------------
 

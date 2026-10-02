@@ -45,6 +45,53 @@
         "title": "AgentSummary",
         "type": "object"
       },
+      "ApiTokenListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ApiTokenSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ApiTokenListResponse",
+        "type": "object"
+      },
+      "ApiTokenSummary": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "ApiTokenSummary",
+        "type": "object"
+      },
       "ConversationListResponse": {
         "properties": {
           "items": {
@@ -273,6 +320,55 @@
           "title"
         ],
         "title": "ModelSummary",
+        "type": "object"
+      },
+      "NewApiTokenRequest": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "NewApiTokenRequest",
+        "type": "object"
+      },
+      "NewApiTokenResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "expires_at",
+          "secret"
+        ],
+        "title": "NewApiTokenResponse",
         "type": "object"
       },
       "OpenedConversationResponse": {
@@ -1024,6 +1120,103 @@
           }
         },
         "summary": "Current User Session"
+      }
+    },
+    "/auth/tokens": {
+      "get": {
+        "operationId": "list_api_tokens_auth_tokens_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiTokenListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "List Api Tokens"
+      },
+      "post": {
+        "operationId": "mint_api_token_auth_tokens_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewApiTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewApiTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "Mint Api Token"
+      }
+    },
+    "/auth/tokens/{token_id}": {
+      "delete": {
+        "operationId": "revoke_api_token_auth_tokens__token_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Token Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "Revoke Api Token"
       }
     }
   }
