@@ -609,7 +609,6 @@ projects; say which wins.
 an `int4` column asyncpg raises on `?after=3000000000` or a large `Last-Event-ID`,
 a 500 where an empty replay or a 422 is due.
 
-
 The second round of review, of the answers to the first seven, left these:
 
 ### data-21: The lease margin on a serverless dispatch
@@ -679,7 +678,6 @@ text splitting differs between `data-model.md` and the plan, "an id is a uuid"
 would reject `call_id` and `checkpoint_id`, "(hours, not days)" against 24 hours,
 `turns_error_only_when_failed` also holds `interrupted`, and "Web builds no
 engine" against `create` and `forget` running in web.
-
 
 A third round, of `design/data-model` at the end of block 6, kept what is on the users'
 path or is not undone by a reload, and set the rest aside: an empty session left by a
