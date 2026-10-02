@@ -102,17 +102,21 @@ CREATE TABLE IF NOT EXISTS users (
 -- (docs/architecture/controller.md).
 --
 -- `agent` is an id of the configuration, not a foreign key: the operator may
--- remove the agent, and the session keeps its row. There is no `model`: the
--- model travels with each turn and is recorded on the turn and on the
--- messages it produces (docs/specs/wire.md).
+-- remove the agent, and the session keeps its row. `engine` is the engine that
+-- holds the session's memory, the agent's when the session was made: a turn
+-- runs on it and the purge forgets on it, whatever the configuration names
+-- today. There is no `model`: the model travels with each turn and is recorded
+-- on the turn and on the messages it produces (docs/specs/wire.md).
 --
 -- There is no pointer to the running turn. "At most one running turn" is the
 -- partial unique index on `turns` below, and what is running is looked up
 -- there.
 --
--- `deleted_at` hides a session. From the moment it is set, every read treats
--- the session as not found and no turn may start on it. The purge then calls
--- the engine's `forget` and deletes the row, and the cascade takes its
+-- `deleted_at` hides a session. It is set only while no turn is running, under
+-- a lock on the row taken first, so that no runner and no engine writes under
+-- a purge. From the moment it is set, every read treats the session as not
+-- found and no turn may start on it. The purge then calls `forget` on the
+-- engine the row names and deletes the row, and the cascade takes its
 -- messages and turns with it. Trash, in stage two, is a delay before the
 -- purge, not a change of schema.
 --
@@ -124,6 +128,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     owner_id uuid NOT NULL
         CONSTRAINT sessions_owner_id_fkey REFERENCES users (id) ON DELETE CASCADE,
     agent text NOT NULL,
+    engine text NOT NULL,
     title text NOT NULL,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
@@ -230,11 +235,13 @@ CREATE INDEX IF NOT EXISTS messages_session_id_parent_id_idx
 -- asked with, but a regeneration answers the same question on another model,
 -- so the turn records its own.
 --
--- `lease_until` is pushed forward by the runner while it runs. A running turn
--- whose lease has passed was left by a runner that went away, and the next
--- reader to find it ends it as `interrupted`. `cancel_requested_at` is how a
--- cancel reaches a runner in another process: the runner reads it back with
--- each renewal of its lease. Both are set by the application's clock.
+-- `lease_until` is written with the turn, as its start plus its timeout and a
+-- margin. Every write of the runner's is refused past it, and a running turn
+-- whose lease has passed was left by a runner that went away: the next reader
+-- to find it ends it as `interrupted`, with no event. Renewing the lease for a
+-- long turn, and `cancel_requested_at`, which a cancel from another process
+-- will set and the runner read back, are stage two. Both are set by the
+-- application's clock.
 CREATE TABLE IF NOT EXISTS turns (
     id uuid
         CONSTRAINT turns_pkey PRIMARY KEY,
@@ -305,14 +312,18 @@ CREATE INDEX IF NOT EXISTS turns_lease_until_idx
 -- streamed, which is why the retention is short.
 --
 -- The primary key is `(turn_id, position)`. The runner numbers its turn's
--- events, starting at 1, and is their only writer, so a position offered
--- twice means two runners on one turn. The store translates a violation of
--- the key, by name, into that error instead of renumbering. It is also the
--- index `events_after` reads: one turn's events, in order, past a position.
+-- events, starting at 1, and is their only writer. The same document offered
+-- again at a position it has is the runner's own write, acknowledged late, and
+-- is accepted; another document there means two runners on one turn, and the
+-- store translates the key's violation, by name, into `TurnLostError` instead
+-- of renumbering. It is also the index `events_after` reads: one turn's
+-- events, in order, past a position.
 --
--- There is no `kind` column. "A turn ends once" is held by `end_turn`, which
--- changes only a running turn, in the same transaction that writes the
--- `TurnEnded` event, so no index on the event's kind is needed to hold it.
+-- There is no `kind` column. "A turn ends once" is held by `finish_turn`, which
+-- changes only a running turn whose lease has not passed, in the same
+-- transaction that writes its last events; a turn ended by its lease
+-- (`end_expired_turn`) writes no event at all, and a watcher reads the record.
+-- So no index on the event's kind is needed to hold it.
 CREATE TABLE IF NOT EXISTS turn_events (
     turn_id uuid NOT NULL
         CONSTRAINT turn_events_turn_id_fkey REFERENCES turns (id) ON DELETE CASCADE,
