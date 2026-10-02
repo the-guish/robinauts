@@ -3,14 +3,18 @@
 
 """The web shell: the routes of ``docs/architecture/web.md`` over a controller, and the UI.
 
-No sign-in yet: every request runs as the one user of the local development mode
-(``docs/specs/sign-in.md``). A controller operation that is not implemented answers 501.
+Every route under ``/api/`` answers for whoever ``current_user`` names: the person a session
+cookie stands for, signed in through an identity provider by the ``/auth/`` routes, or the one
+user of the local development mode (``docs/specs/sign-in.md``); with nobody, it is 401. A
+write that carries the session cookie must carry ``Origin`` equal to ``public_url``, else 403.
+A controller operation that is not implemented answers 501.
 The shapes are the ones the frontend reads (``docs/specs/wire.md``); a turn's stream is
 AG-UI over SSE, its run id is the turn's id, and its thread id the session's.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -18,11 +22,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, Header, Request
+from fastapi import Depends, FastAPI, Header, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from robinauts.controller.composition import SecretLookup
 from robinauts.controller.contract.domain import (
     ControllerError,
     Identity,
@@ -42,9 +47,20 @@ from robinauts.controller.contract.domain import (
     TurnActiveError,
     UnknownAgentError,
     UnknownModelError,
+    User,
 )
-from robinauts.controller.contract.ports import Controller
+from robinauts.controller.contract.ports import Controller, Credentials
 from robinauts.web import agui
+from robinauts.web.cookies import Cookies
+from robinauts.web.oidc import Exchange
+from robinauts.web.sign_in import (
+    LOCAL_PROVIDER,
+    PENDING_LOGIN_LIFE,
+    SignIn,
+    SignInConfig,
+    SignInError,
+    SignInErrorCode,
+)
 
 DEFAULT_PAGE = 30
 
@@ -58,10 +74,26 @@ STATUS_OF: dict[type[ControllerError], int] = {
     NoActiveTurnError: 404,
 }
 
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+SIGN_IN_PAGE = "/ui/#/sign-in?error="
+NOT_SIGNED_IN = "nobody is signed in: sign in at /ui/"
+NOT_SAME_ORIGIN = "a write that carries the session cookie must carry Origin equal to public_url"
 
-LOCAL_IDENTITY = Identity(provider="!local", subject="developer", name="Local development")
+LOCAL_IDENTITY = Identity(provider=LOCAL_PROVIDER, subject="developer", name="Local development")
 """The one user of the local development mode, under a provider no configuration can name
 (``sign_in.PROVIDER_ID``), so that no identity a provider vouches for can carry it."""
+
+log = logging.getLogger(__name__)
+
+
+class Refused(Exception):
+    """A request answered with the wire's error body before it reaches the controller."""
+
+    def __init__(self, status: int, error: str, detail: str) -> None:
+        super().__init__(detail)
+        self.status = status
+        self.error = error
+        self.detail = detail
 
 
 # --- what the frontend reads ---------------------------------------------------
@@ -205,6 +237,10 @@ class TurnRequest(BaseModel):
     model_id: str | None = None
 
 
+def user_summary(user: User) -> UserSummary:
+    return UserSummary(id=user.id, name=user.name, email=user.email, provider=user.provider)
+
+
 def summary(session: Session, model: str) -> ConversationSummary:
     return ConversationSummary(
         id=session.id,
@@ -281,13 +317,59 @@ def event_stream(
     )
 
 
-def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI:
+def create_app(
+    controller: Controller,
+    *,
+    credentials: Credentials,
+    sign_in: SignInConfig | None,
+    secret_for: SecretLookup,
+    ui_dir: Path | None = None,
+) -> FastAPI:
+    """``sign_in`` is ``None`` in the local development mode."""
+    exchange: Exchange | None = None
+    flow: SignIn | None = None
+    if sign_in is not None:
+        exchange = Exchange(sign_in, secret_for)
+        flow = SignIn(sign_in, credentials=credentials, exchange=exchange, controller=controller)
+        cookies = Cookies(sign_in.public_url)
+    local_user: User | None = None
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        nonlocal local_user
         await controller.open()
-        app.state.user = await controller.ensure_user(LOCAL_IDENTITY)
+        if sign_in is None:
+            local_user = await controller.ensure_user(LOCAL_IDENTITY)
         yield
+        if exchange is not None:
+            await exchange.aclose()
         await controller.close()
+
+    # --- who is asking -----------------------------------------------------------
+
+    async def same_origin(request: Request) -> None:
+        if (
+            sign_in is not None
+            and request.method not in SAFE_METHODS
+            and cookies.session in request.cookies
+            and request.headers.get("origin") != sign_in.public_url
+        ):
+            raise Refused(403, "Forbidden", NOT_SAME_ORIGIN)
+
+    async def session_user(request: Request) -> User | None:
+        secret = request.cookies.get(cookies.session)
+        return await flow.resolve(secret, datetime.now(UTC)) if secret else None
+
+    async def current_user(request: Request) -> User:
+        if flow is None:
+            return local_user
+        # The API token, `Authorization: Bearer <secret>`, will be resolved here, beside the cookie.
+        user = await session_user(request)
+        if user is None:
+            raise Refused(401, "Unauthorized", NOT_SIGNED_IN)
+        return user
+
+    asking = Depends(current_user)
 
     app = FastAPI(
         lifespan=lifespan,
@@ -296,7 +378,12 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
         docs_url=None,
         redoc_url=None,
         responses={"default": {"model": ErrorResponse, "description": "A refusal"}},
+        dependencies=[Depends(same_origin)],
     )
+
+    @app.exception_handler(Refused)
+    async def not_let_in(request: Request, exc: Refused) -> JSONResponse:
+        return JSONResponse({"error": exc.error, "detail": exc.detail}, status_code=exc.status)
 
     @app.exception_handler(NotImplementedError)
     async def not_implemented(request: Request, exc: NotImplementedError) -> JSONResponse:
@@ -310,8 +397,10 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
     async def default_model(agent: str) -> str:
         return next(a.default_model for a in await controller.list_agents() if a.id == agent)
 
-    async def watched(session_id: uuid.UUID, turn_id: uuid.UUID, after: int) -> StreamingResponse:
-        events = controller.watch_turn(app.state.user, session_id, turn_id, after=after)
+    async def watched(
+        user: User, session_id: uuid.UUID, turn_id: uuid.UUID, after: int
+    ) -> StreamingResponse:
+        events = controller.watch_turn(user, session_id, turn_id, after=after)
         # The refusals happen inside the generator: ask for the first event here, so that
         # they answer with a status rather than a broken stream.
         first = await anext(events, None)
@@ -325,24 +414,87 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
 
         return event_stream(session_id, turn_id, chained())
 
-    # --- sign-in: none yet ----------------------------------------------------
+    # --- sign-in -----------------------------------------------------------------
+
+    def not_signed_in(refusal: SignInError) -> RedirectResponse:
+        log.warning("sign-in refused, %s: %s", refusal.code, refusal.detail)
+        return RedirectResponse(SIGN_IN_PAGE + refusal.code, status_code=302)
 
     @app.get("/auth/session")
-    async def current_user_session() -> UserSessionResponse:
-        user = app.state.user
+    async def current_user_session(request: Request) -> UserSessionResponse:
+        if sign_in is None:
+            return UserSessionResponse(
+                sign_in=False, local_development=True, user=user_summary(local_user)
+            )
+        user = await session_user(request)
         return UserSessionResponse(
-            sign_in=False,
-            local_development=True,
-            user=UserSummary(id=user.id, name=user.name, email=user.email, provider=user.provider),
+            sign_in=True,
+            public_url=sign_in.public_url,
+            providers=[ProviderSummary(id=p.id, title=p.title) for p in sign_in.providers.values()],
+            user=None if user is None else user_summary(user),
         )
 
     @app.post("/auth/logout", status_code=204)
-    async def sign_out() -> None:
-        return None
+    async def sign_out(request: Request, response: Response) -> None:
+        if flow is None:
+            return
+        secret = request.cookies.get(cookies.session)
+        if secret:
+            user = await flow.resolve(secret, datetime.now(UTC))
+            if await flow.sign_out(secret) and user is not None:
+                log.info("user %s signed out", user.id)
+        cookies.clear(response, cookies.session)
+
+    if flow is not None:
+        # Navigations, not calls: outside the OpenAPI document.
+
+        @app.get("/auth/login/{provider}", include_in_schema=False)
+        async def begin_sign_in(provider: str, return_to: str | None = None) -> Response:
+            try:
+                url, state = await flow.begin(provider, return_to=return_to, now=datetime.now(UTC))
+            except SignInError as refusal:
+                return not_signed_in(refusal)
+            response = RedirectResponse(url, status_code=302)
+            cookies.set(response, cookies.login, state, PENDING_LOGIN_LIFE)
+            return response
+
+        @app.get("/auth/callback/{provider}", include_in_schema=False)
+        async def finish_sign_in(
+            request: Request,
+            provider: str,
+            code: str | None = None,
+            state: str | None = None,
+            error: str | None = None,
+            error_description: str | None = None,
+        ) -> Response:
+            if error is not None or code is None:
+                return not_signed_in(
+                    SignInError(
+                        SignInErrorCode.PROVIDER_REFUSED,
+                        f"{provider} answered error={error!r}"
+                        f" error_description={error_description!r}",
+                    )
+                )
+            now = datetime.now(UTC)
+            try:
+                done = await flow.complete(
+                    provider,
+                    state=state,
+                    cookie_state=request.cookies.get(cookies.login),
+                    code=code,
+                    now=now,
+                )
+            except SignInError as refusal:
+                return not_signed_in(refusal)
+            log.info("user %s signed in with %s", done.user.id, provider)
+            response = RedirectResponse(sign_in.public_url + done.return_to, status_code=302)
+            cookies.set(response, cookies.session, done.secret, done.expires_at - now)
+            cookies.clear(response, cookies.login)
+            return response
 
     # --- catalogue -------------------------------------------------------------
 
-    @app.get("/api/agents")
+    @app.get("/api/agents", dependencies=[asking])
     async def list_agents() -> AgentListResponse:
         agents = await controller.list_agents()
         return AgentListResponse(
@@ -352,7 +504,7 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
             ]
         )
 
-    @app.get("/api/models")
+    @app.get("/api/models", dependencies=[asking])
     async def list_models() -> ModelListResponse:
         models = await controller.list_models()
         return ModelListResponse(items=[ModelSummary(id=m.id, title=m.title) for m in models])
@@ -361,9 +513,9 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
 
     @app.get("/api/conversations")
     async def list_sessions(
-        limit: int = DEFAULT_PAGE, cursor: str | None = None
+        limit: int = DEFAULT_PAGE, cursor: str | None = None, user: User = asking
     ) -> ConversationListResponse:
-        page = await controller.list_sessions(app.state.user, limit=limit, cursor=cursor)
+        page = await controller.list_sessions(user, limit=limit, cursor=cursor)
         defaults = {a.id: a.default_model for a in await controller.list_agents()}
         return ConversationListResponse(
             items=[summary(c, defaults[c.agent]) for c in page.sessions],
@@ -371,67 +523,73 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
         )
 
     @app.get("/api/conversations/{conversation_id}")
-    async def open_session(conversation_id: uuid.UUID) -> OpenedConversationResponse:
-        opened = await controller.open_session(app.state.user, conversation_id)
+    async def open_session(
+        conversation_id: uuid.UUID, user: User = asking
+    ) -> OpenedConversationResponse:
+        opened = await controller.open_session(user, conversation_id)
         return opened_view(opened, await default_model(opened.session.agent))
 
     @app.patch("/api/conversations/{conversation_id}")
     async def rename_session(
-        conversation_id: uuid.UUID, body: RenameRequest
+        conversation_id: uuid.UUID, body: RenameRequest, user: User = asking
     ) -> ConversationSummary:
-        renamed = await controller.rename_session(app.state.user, conversation_id, body.title)
+        renamed = await controller.rename_session(user, conversation_id, body.title)
         return summary(renamed, await default_model(renamed.agent))
 
     @app.delete("/api/conversations/{conversation_id}", status_code=204)
-    async def delete_session(conversation_id: uuid.UUID) -> None:
-        await controller.delete_session(app.state.user, conversation_id)
+    async def delete_session(conversation_id: uuid.UUID, user: User = asking) -> None:
+        await controller.delete_session(user, conversation_id)
 
     @app.put("/api/conversations/{conversation_id}/model")
-    async def set_model(conversation_id: uuid.UUID, body: SetModelRequest) -> ConversationSummary:
+    async def set_model(
+        conversation_id: uuid.UUID, body: SetModelRequest, user: User = asking
+    ) -> ConversationSummary:
         # The model goes with each turn now: this stores nothing, and answers the
         # conversation as the picker will send its next turn.
-        opened = await controller.open_session(app.state.user, conversation_id)
+        opened = await controller.open_session(user, conversation_id)
         moved = summary(opened.session, body.model_id)
         moved.updated_at = datetime.now(UTC)
         return moved
 
     @app.post("/api/conversations/{conversation_id}/fork", status_code=201)
-    async def fork_session(conversation_id: uuid.UUID, body: ForkRequest) -> ConversationSummary:
-        forked = await controller.fork_session(
-            app.state.user, conversation_id, at_message=body.at_message
-        )
+    async def fork_session(
+        conversation_id: uuid.UUID, body: ForkRequest, user: User = asking
+    ) -> ConversationSummary:
+        forked = await controller.fork_session(user, conversation_id, at_message=body.at_message)
         return summary(forked, await default_model(forked.agent))
 
     # --- turns: AG-UI over SSE, outside the OpenAPI document -------------------
 
     @app.post("/api/turns", include_in_schema=False)
-    async def start_session(body: NewChatRequest) -> StreamingResponse:
+    async def start_session(body: NewChatRequest, user: User = asking) -> StreamingResponse:
         model = body.model_id or await default_model(body.agent_id)
         started = await controller.start_session(
-            app.state.user, agent=body.agent_id, model=model, text=body.text
+            user, agent=body.agent_id, model=model, text=body.text
         )
-        return await watched(started.session_id, started.turn_id, 0)
+        return await watched(user, started.session_id, started.turn_id, 0)
 
     @app.post("/api/conversations/{conversation_id}/turns", include_in_schema=False)
-    async def send_message(conversation_id: uuid.UUID, body: TurnRequest) -> StreamingResponse:
-        opened = await controller.open_session(app.state.user, conversation_id)
+    async def send_message(
+        conversation_id: uuid.UUID, body: TurnRequest, user: User = asking
+    ) -> StreamingResponse:
+        opened = await controller.open_session(user, conversation_id)
         model = body.model_id or model_of(opened, await default_model(opened.session.agent))
         if body.regenerate is not None:
             # The frontend names the answer to produce again; the controller, its question.
             at = next(i for i, m in enumerate(opened.messages) if m.id == body.regenerate)
             question = next(m for m in reversed(opened.messages[: at + 1]) if m.role is Role.USER)
             started = await controller.regenerate_answer(
-                app.state.user, conversation_id, question_id=question.id, model=model
+                user, conversation_id, question_id=question.id, model=model
             )
         else:
             started = await controller.send_message(
-                app.state.user,
+                user,
                 conversation_id,
                 parent_id=body.parent_id,
                 model=model,
                 text=body.text,
             )
-        return await watched(conversation_id, started.turn_id, 0)
+        return await watched(user, conversation_id, started.turn_id, 0)
 
     @app.get("/api/conversations/{conversation_id}/runs/{run_id}/events", include_in_schema=False)
     async def watch_turn(
@@ -439,13 +597,16 @@ def create_app(controller: Controller, *, ui_dir: Path | None = None) -> FastAPI
         run_id: uuid.UUID,
         after: int | None = None,
         last_event_id: str | None = Header(default=None),
+        user: User = asking,
     ) -> StreamingResponse:
         position = after if after is not None else int(last_event_id or 0)
-        return await watched(conversation_id, run_id, position)
+        return await watched(user, conversation_id, run_id, position)
 
     @app.post("/api/conversations/{conversation_id}/runs/{run_id}/cancel", status_code=204)
-    async def cancel_turn(conversation_id: uuid.UUID, run_id: uuid.UUID) -> None:
-        await controller.cancel_turn(app.state.user, conversation_id, run_id)
+    async def cancel_turn(
+        conversation_id: uuid.UUID, run_id: uuid.UUID, user: User = asking
+    ) -> None:
+        await controller.cancel_turn(user, conversation_id, run_id)
 
     # --- liveness --------------------------------------------------------------
 

@@ -2,7 +2,9 @@
 # Copyright The Robinauts Authors
 
 """Sign-in's half of the configuration file: where the deployment is served, the identity
-providers people sign in through, and who may (``docs/specs/sign-in.md``).
+providers people sign in through, and who may (``docs/specs/sign-in.md``). And the flow, from
+the button to a session, over the credentials, the exchange and the controller's
+``ensure_user``.
 
 A provider's client secret is the name of the environment variable that holds it. Nothing
 here reads it.
@@ -11,15 +13,29 @@ here reads it.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import ipaddress
 import re
-from collections.abc import Mapping
+import secrets
+import uuid
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from robinauts.controller.contract.domain import ConfigError
+from robinauts.controller.contract.domain import (
+    ConfigError,
+    Identity,
+    PendingLogin,
+    User,
+    UserSession,
+)
+from robinauts.controller.contract.ports import Controller, Credentials
+
+if TYPE_CHECKING:
+    from robinauts.web.oidc import Claims, Exchange
 
 SIGN_IN_KEYS = frozenset({"public_url", "session_hours", "providers", "allow", "admin"})
 """The file's top-level keys that are sign-in's. ``admin`` is one of them so that it is
@@ -32,6 +48,9 @@ SESSION_HOURS = 12
 PROVIDER_ID = re.compile(r"[a-z0-9][a-z0-9_-]*")
 """How a provider's id is spelt. The local development mode's ``!local`` is not spelt so, and
 no configuration can name it."""
+LOCAL_PROVIDER = "!local"
+
+PENDING_LOGIN_LIFE = timedelta(minutes=10)
 
 
 class Matcher(StrEnum):
@@ -175,3 +194,143 @@ def parse_sign_in(raw: Mapping[str, Any]) -> SignInConfig | None:
         providers=providers,
         allow=tuple(allow),
     )
+
+
+# --- the flow -------------------------------------------------------------------
+
+
+def random_secret() -> str:
+    """A URL-safe random value of 32 bytes: a ``state``, a ``nonce``, a PKCE verifier or a
+    session's secret."""
+    return secrets.token_urlsafe(32)
+
+
+def secret_hash(secret: str) -> str:
+    return hashlib.sha256(secret.encode()).hexdigest()
+
+
+def safe_return_to(target: str | None) -> str:
+    """``target`` when it is a path of this origin, else ``/``."""
+    if target and target.startswith("/") and not target.startswith("//"):
+        return target
+    return "/"
+
+
+def allows(entry: AllowEntry, claims: Claims) -> bool:
+    value = entry.value or ""
+    email = claims.email.lower() if claims.email else None
+    match entry.matcher:
+        case Matcher.EVERYONE:
+            return True
+        case Matcher.SUBJECT:
+            return claims.subject == value
+        case Matcher.EMAIL:
+            return email is not None and email == value.lower()
+        case Matcher.EMAIL_DOMAIN:
+            return email is not None and email.rpartition("@")[2] == value.lower()
+        case Matcher.HOSTED_DOMAIN:
+            return claims.hosted_domain == value
+        case Matcher.GROUP:
+            return value in claims.groups
+
+
+def is_allowed(allow: Iterable[AllowEntry], provider_id: str, claims: Claims) -> bool:
+    return any(entry.provider == provider_id and allows(entry, claims) for entry in allow)
+
+
+@dataclass(frozen=True, slots=True)
+class SignedIn:
+    """A completed sign-in: the user, the session's secret for the cookie, and where to land."""
+
+    user: User
+    secret: str
+    expires_at: datetime
+    return_to: str
+
+
+class SignIn:
+    """Signing in and out, and who a session cookie stands for. Every call is given ``now``."""
+
+    def __init__(
+        self,
+        config: SignInConfig,
+        *,
+        credentials: Credentials,
+        exchange: Exchange,
+        controller: Controller,
+    ) -> None:
+        self._config = config
+        self._credentials = credentials
+        self._exchange = exchange
+        self._controller = controller
+
+    async def begin(
+        self, provider_id: str, *, return_to: str | None, now: datetime
+    ) -> tuple[str, str]:
+        """The provider's authorization URL, and the ``state`` for the login cookie."""
+        state, nonce, verifier = random_secret(), random_secret(), random_secret()
+        # The exchange refuses an unknown provider, and one it cannot reach, before anything
+        # is stored.
+        url = await self._exchange.begin(provider_id, state=state, nonce=nonce, verifier=verifier)
+        login = PendingLogin(
+            state_hash=secret_hash(state),
+            provider=provider_id,
+            nonce=nonce,
+            verifier=verifier,
+            return_to=safe_return_to(return_to),
+            created_at=now,
+            expires_at=now + PENDING_LOGIN_LIFE,
+        )
+        await self._credentials.add_pending_login(login, now)
+        return url, state
+
+    async def complete(
+        self,
+        provider_id: str,
+        *,
+        state: str | None,
+        cookie_state: str | None,
+        code: str,
+        now: datetime,
+    ) -> SignedIn:
+        if state is None or state != cookie_state:
+            raise SignInError(
+                SignInErrorCode.STATE_MISMATCH,
+                "the callback's state is not the one in this browser's login cookie",
+            )
+        login = await self._credentials.take_pending_login(secret_hash(state), now)
+        if login is None:
+            raise SignInError(
+                SignInErrorCode.EXPIRED, "the sign-in is unknown, used already or expired"
+            )
+        if login.provider != provider_id:
+            raise SignInError(
+                SignInErrorCode.STATE_MISMATCH,
+                f"the sign-in was begun with {login.provider!r}, not {provider_id!r}",
+            )
+        claims = await self._exchange.complete(
+            provider_id, code=code, nonce=login.nonce, verifier=login.verifier, now=now
+        )
+        if not is_allowed(self._config.allow, provider_id, claims):
+            raise SignInError(
+                SignInErrorCode.NOT_ALLOWED,
+                f"no allow entry of {provider_id!r} lets in {claims.email or claims.subject!r}",
+            )
+        user = await self._controller.ensure_user(
+            Identity(provider_id, claims.subject, name=claims.name, email=claims.email)
+        )
+        secret = random_secret()
+        expires_at = now + timedelta(hours=self._config.session_hours)
+        await self._credentials.add_user_session(
+            UserSession(uuid.uuid4(), user.id, secret_hash(secret), now, expires_at)
+        )
+        return SignedIn(user, secret, expires_at, login.return_to)
+
+    async def resolve(self, secret: str, now: datetime) -> User | None:
+        user = await self._credentials.resolve_user_session(secret_hash(secret), now)
+        # No sign-in makes the local development mode's user, so a session naming it came from
+        # elsewhere: a database kept from a run of the mode hands nobody that account.
+        return None if user is None or user.provider == LOCAL_PROVIDER else user
+
+    async def sign_out(self, secret: str) -> bool:
+        return await self._credentials.delete_user_session(secret_hash(secret))

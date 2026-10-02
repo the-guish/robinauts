@@ -17,7 +17,6 @@ import base64
 import hashlib
 import json
 import math
-import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -43,11 +42,6 @@ TOTAL_SECONDS = 20.0
 """The bound on one request, its body included: a provider that sends a byte every few
 seconds passes the read timeout for as long as it likes."""
 CLOCK_SKEW_SECONDS = 60
-
-
-def random_secret() -> str:
-    """A URL-safe random value of 32 bytes: a ``state``, a ``nonce`` or a PKCE verifier."""
-    return secrets.token_urlsafe(32)
 
 
 def s256(verifier: str) -> str:

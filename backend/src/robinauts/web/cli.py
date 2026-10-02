@@ -8,12 +8,13 @@ The configuration is the TOML file ``ROBINAUTS_CONFIG`` names. It holds the cont
 tables and sign-in's, read once and each half parsed by its own; a key that is neither is
 refused. ``start`` needs a sign-in configuration that names an identity provider, or
 ``--dev-no-sign-in``, the local development mode, with no sign-in table and a loopback host
-(``docs/specs/sign-in.md``). A start that is refused prints why and binds nothing. The
-sign-in flow is not served yet: in either case every request runs as the mode's one local
-user. The interface is the directory ``ROBINAUTS_UI_DIR`` names, or the build an installed
-wheel carries, or ``frontend/dist`` of this checkout when it is built. Storage is PostgreSQL
-when ``ROBINAUTS_DATABASE_URL`` is set, and in memory otherwise. The server never changes the
-database: it refuses one that is not this build's and names the command.
+(``docs/specs/sign-in.md``). A start that is refused prints why and binds nothing. With a
+provider, every ``/api/`` route answers for the person signed in through it; in the local
+development mode, for the mode's one local user. The interface is the directory
+``ROBINAUTS_UI_DIR`` names, or the build an installed wheel carries, or ``frontend/dist`` of
+this checkout when it is built. Storage is PostgreSQL when ``ROBINAUTS_DATABASE_URL`` is set,
+and in memory otherwise; the sign-in records are kept on the same storage. The server never
+changes the database: it refuses one that is not this build's and names the command.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ from robinauts.controller.composition import (
     CONTROLLER_TABLES,
     DATABASE_URL_VARIABLE,
     SecretLookup,
-    build,
+    compose,
     configure,
     init_database,
     load,
@@ -115,19 +116,24 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     ui_dir = interface()
     tables = read_tables(Path(os.environ["ROBINAUTS_CONFIG"]))
     try:
-        # The sign-in configuration is judged here; nothing serves it yet.
-        config, secret_for, _ = serving(
+        config, secret_for, sign_in = serving(
             tables, os.environ, host=host, dev_no_sign_in=dev_no_sign_in
         )
     except ConfigError as refused:
         print(refused, file=sys.stderr)
         return 1
-    controller = build(config, storage=storage_from(os.environ), secret_for=secret_for)
+    composed = compose(config, storage=storage_from(os.environ), secret_for=secret_for)
     logging.basicConfig(level=logging.INFO)
     if dev_no_sign_in:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
     uvicorn.run(
-        create_app(controller, ui_dir=ui_dir),
+        create_app(
+            composed.controller,
+            credentials=composed.credentials,
+            sign_in=sign_in,
+            secret_for=secret_for,
+            ui_dir=ui_dir,
+        ),
         host=host,
         port=port,
         timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,

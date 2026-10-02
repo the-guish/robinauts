@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from robinauts.controller.composition import build
+from robinauts.controller.composition import compose
 from robinauts.controller.contract.domain import Config, StorageConfig, StorageKind
 from robinauts.web.app import create_app
 
@@ -25,8 +25,11 @@ REGENERATE = "scripts/update-openapi.sh"
 
 def written() -> str:
     """The snapshot's one spelling, the one ``scripts/update-openapi.sh`` writes."""
-    controller = build(Config(), storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
-    return json.dumps(create_app(controller).openapi(), indent=2, sort_keys=True) + "\n"
+    composed = compose(Config(), storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
+    app = create_app(
+        composed.controller, credentials=composed.credentials, sign_in=None, secret_for={}.get
+    )
+    return json.dumps(app.openapi(), indent=2, sort_keys=True) + "\n"
 
 
 def test_the_snapshot_is_what_the_code_describes() -> None:

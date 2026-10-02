@@ -32,11 +32,17 @@ The frontend's AG-UI client sends `POST /api/conversations/{id}/turns` with
 
 ### 2. Web works out who is asking and which model to use
 
-Sign-in is block 7; today everyone is the local user. Web calls
-`controller.open_session` to choose the model (`model_of`, `web/app.py`).
+`current_user` (`web/app.py`) reads the session cookie and resolves it through the
+credentials, by the SHA-256 of its secret and against the time now, to the user, before
+the session is opened. No cookie, or one that resolves to nobody, is 401, and the local
+development mode's user is never the answer. The turn is a write that carries the cookie,
+so its `Origin` must be `public_url`, else 403. In the local development mode there is no
+cookie, and the answer is the mode's one user. Web then calls `controller.open_session` as
+that user to choose the model (`model_of`, `web/app.py`).
 
-- **PostgreSQL:** a `SELECT` on `user_sessions` by the hashed secret. Then the session
-  row, its messages and its running turn, in one round trip or a few.
+- **PostgreSQL:** one `SELECT` on `user_sessions` joined to `users`, by the hashed
+  secret. Then the session row, its messages and its running turn, in one round trip or
+  a few.
 - **AWS:** a `GetItem` on `USESS#<hash>`. Then one consistent `Query` on
   `PK = SESSION#<id>`, which returns the session's record, messages and turns
   together.
