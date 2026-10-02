@@ -123,6 +123,11 @@ class PostgresStore(Store):
         self._waiters: dict[uuid.UUID, set[asyncio.Future[None]]] = {}
         self._opening: asyncio.Lock | None = None
 
+    @property
+    def pool(self) -> asyncpg.Pool:
+        """The pool given, or the one ``open`` made: the credentials share it."""
+        return self._pool
+
     async def open(self) -> asyncpg.Pool:
         if self._owns_pool and self._pool is None:
             if self._dsn is None:

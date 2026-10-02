@@ -6,15 +6,17 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import pathlib
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
 
 from aio import asyncio_test
 from controller_db import requires_postgres, temporary_schema, url
-from robinauts.controller.composition import SCHEMA_READY, build, init_database
+from robinauts.controller.composition import SCHEMA_READY, compose, init_database
 from robinauts.controller.contract.domain import (
     AgentConfig,
     Config,
@@ -26,6 +28,7 @@ from robinauts.controller.contract.domain import (
     StorageConfig,
     StorageKind,
     TextPart,
+    UserSession,
 )
 from robinauts.web.cli import run
 
@@ -53,7 +56,8 @@ async def test_start_refuses_a_database_with_no_schema_and_serves_after_db_init(
     async with temporary_schema(applied=False) as schema:
         dsn = dsn_in(schema.name)
         storage = StorageConfig(StorageKind.POSTGRES, url=dsn)
-        controller = build(CONFIG, storage=storage, secret_for={}.get)
+        composed = compose(CONFIG, storage=storage, secret_for={}.get)
+        controller = composed.controller
         with pytest.raises(ConfigError, match="no schema: run `robinauts db init`"):
             await controller.open()
         said = await init_database(dsn, CONFIG, {}.get)
@@ -71,6 +75,13 @@ async def test_start_refuses_a_database_with_no_schema_and_serves_after_db_init(
         assert opened.active is None
         page = await controller.list_sessions(user, limit=10)
         assert [s.id for s in page.sessions] == [started.session_id]
+
+        # The credentials are on the pool the controller opened.
+        now = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
+        cookie = hashlib.sha256(b"cookie").hexdigest()
+        signed_in = UserSession(uuid.uuid4(), user.id, cookie, now, now + timedelta(hours=1))
+        await composed.credentials.add_user_session(signed_in)
+        assert await composed.credentials.resolve_user_session(cookie, now) == user
         await controller.close()
 
 
