@@ -97,8 +97,8 @@ session outlives a restart. Happy path only.
   carry `Origin` equal to `public_url`, else 403: the one request-protection rule the
   cookie makes necessary now. `Sec-Fetch-Site`, the JSON type, duplicate headers and
   the body bound stay stage two's (`stage-two-plan.md`, "web").
-- **A sign-in that does not complete** redirects to the sign-in page with `error=<code>`
-  in the query, one of the spec's fixed codes (`expired`, `state_mismatch`,
+- **A sign-in that does not complete** redirects to `/ui/#/sign-in?error=<code>`, where
+  the sign-in page reads it, with one of the spec's fixed codes (`expired`, `state_mismatch`,
   `not_allowed`, `unknown_provider`, `busy`, `provider_unavailable`,
   `provider_refused`, `invalid_id_token`); the provider's own words go to the log alone.
   One log line per sign-in, refusal and sign-out, with the user's id or the code; the
