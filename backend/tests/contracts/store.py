@@ -3,19 +3,21 @@
 
 """What every ``Store`` must do: the rules of ``docs/architecture/data-model.md``.
 
-Subclass ``StoreContract`` and override ``new_store``, which returns an empty store. The
-documents here are any mapping: a store keeps them whole and never reads inside.
+Subclass ``StoreContract`` and override ``new_store``, which returns an empty store, and
+``close_store`` when a store has something to release. The documents here are any mapping:
+a store keeps them whole and never reads inside.
 """
 
 from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
-from aio import asyncio_test
 from robinauts.controller.contract.domain import (
     Role,
     Session,
@@ -34,7 +36,7 @@ EXPIRY = NOW + timedelta(hours=24)
 
 
 def user(subject: str = "me") -> User:
-    return User(uuid.uuid4(), "local", subject)
+    return User(uuid.uuid4(), "local", subject, created_at=NOW)
 
 
 def session(owner: uuid.UUID, updated_at: datetime = NOW) -> Session:
@@ -63,9 +65,32 @@ def piece(position: int, text: str = "x") -> StoredEvent:
     )
 
 
+def store_test(test: Callable[..., Coroutine[Any, Any, None]]) -> Callable[..., None]:
+    """Run the test on a loop of its own, with a fresh store, closed however it ends."""
+
+    def run(self: StoreContract) -> None:
+        async def go() -> None:
+            store = await self.new_store()
+            try:
+                await test(self, store)
+            finally:
+                await self.close_store(store)
+
+        asyncio.run(go())
+
+    # The name and the doc, but not `__wrapped__`: pytest would read the wrapped signature
+    # and look for a fixture called `store`.
+    run.__name__, run.__qualname__ = test.__name__, test.__qualname__
+    run.__doc__, run.__module__ = test.__doc__, test.__module__
+    return run
+
+
 class StoreContract:
     async def new_store(self) -> Store:
         raise NotImplementedError("a StoreContract subclass overrides `new_store`")
+
+    async def close_store(self, store: Store) -> None:
+        """Release what the store holds; nothing by default."""
 
     async def started(self, store: Store) -> tuple[User, Session, StoredMessage, Turn]:
         """A session with its first question and a running turn."""
@@ -93,20 +118,19 @@ class StoreContract:
 
     # --- users --------------------------------------------------------------
 
-    @asyncio_test
-    async def test_a_user_is_added_once_and_found_after(self) -> None:
-        store = await self.new_store()
-        first = User(uuid.uuid4(), "local", "me", name="Me")
-        again = User(uuid.uuid4(), "local", "me", name="Me again")
+    @store_test
+    async def test_a_user_is_added_once_and_found_after(self, store: Store) -> None:
+        first = User(uuid.uuid4(), "local", "me", name="Me", created_at=NOW)
+        again = User(uuid.uuid4(), "local", "me", name="Me again", created_at=NOW)
         assert await store.add_user_if_absent(first) == first
         assert await store.add_user_if_absent(again) == first
-        assert await store.add_user_if_absent(User(uuid.uuid4(), "other", "me")) != first
+        other = User(uuid.uuid4(), "other", "me", created_at=NOW)
+        assert await store.add_user_if_absent(other) != first
 
     # --- sessions -----------------------------------------------------------
 
-    @asyncio_test
-    async def test_a_session_is_its_owners_and_not_another_users(self) -> None:
-        store = await self.new_store()
+    @store_test
+    async def test_a_session_is_its_owners_and_not_another_users(self, store: Store) -> None:
         me, one, asked, _ = await self.started(store)
         assert await store.get_session(me.id, one.id) == one
         assert await store.messages_of(me.id, one.id) == [asked.document]
@@ -118,33 +142,35 @@ class StoreContract:
         with pytest.raises(SessionNotFoundError):
             await store.get_session(me.id, uuid.uuid4())
 
-    @asyncio_test
-    async def test_sessions_page_newest_first_and_the_next_page_follows_the_cursor(self) -> None:
-        store = await self.new_store()
-        me = user()
+    @store_test
+    async def test_sessions_page_newest_first_and_the_next_page_follows_the_cursor(
+        self, store: Store
+    ) -> None:
+        me = await store.add_user_if_absent(user())
+        you = await store.add_user_if_absent(user("you"))
         first = session(me.id, NOW)
         second = session(me.id, NOW + MINUTE)
         third = session(me.id, NOW + 2 * MINUTE)
         for each in (second, third, first):
             await store.add_session(each)
-        await store.add_session(session(user("you").id, NOW + 3 * MINUTE))
+        await store.add_session(session(you.id, NOW + 3 * MINUTE))
         page = await store.sessions_of(me.id, 2, None)
         assert page == [third, second]
         rest = await store.sessions_of(me.id, 2, (page[-1].updated_at, page[-1].id))
         assert rest == [first]
         assert await store.sessions_of(me.id, 2, (first.updated_at, first.id)) == []
 
-    @asyncio_test
-    async def test_a_renamed_session_reads_back(self) -> None:
-        store = await self.new_store()
+    @store_test
+    async def test_a_renamed_session_reads_back(self, store: Store) -> None:
         me, one, _, _ = await self.started(store)
         renamed = Session(one.id, me.id, one.agent, one.engine, one.created_at, one.updated_at, "T")
         await store.update_session(renamed)
         assert await store.get_session(me.id, one.id) == renamed
 
-    @asyncio_test
-    async def test_a_hide_is_refused_while_a_turn_runs_and_hides_the_session_after(self) -> None:
-        store = await self.new_store()
+    @store_test
+    async def test_a_hide_is_refused_while_a_turn_runs_and_hides_the_session_after(
+        self, store: Store
+    ) -> None:
         me, one, _, running = await self.started(store)
         with pytest.raises(TurnActiveError):
             await store.hide_session(me.id, one.id, NOW)
@@ -164,11 +190,10 @@ class StoreContract:
 
     # --- turns --------------------------------------------------------------
 
-    @asyncio_test
+    @store_test
     async def test_a_question_is_stored_with_its_turn_and_a_second_running_turn_refused(
-        self,
+        self, store: Store
     ) -> None:
-        store = await self.new_store()
         me, one, asked, running = await self.started(store)
         assert await store.active_turn(me.id, one.id) == running
         assert await store.latest_turn(me.id, one.id) == running
@@ -178,9 +203,10 @@ class StoreContract:
             await store.start_turn(me.id, turn(one.id, second.id), second)
         assert await store.messages_of(me.id, one.id) == [asked.document]
 
-    @asyncio_test
-    async def test_events_are_numbered_by_the_runner_and_read_after_a_position(self) -> None:
-        store = await self.new_store()
+    @store_test
+    async def test_events_are_numbered_by_the_runner_and_read_after_a_position(
+        self, store: Store
+    ) -> None:
         me, one, _, running = await self.started(store)
         for n in (1, 2, 3):
             await self.append(store, me, one, running, piece(n, str(n)))
@@ -191,9 +217,8 @@ class StoreContract:
             await self.append(store, me, one, running, piece(2, "other"))
         assert len(await store.events_after(me.id, one.id, running.id, 0)) == 3
 
-    @asyncio_test
-    async def test_a_finished_turn_keeps_its_answer_and_its_last_events(self) -> None:
-        store = await self.new_store()
+    @store_test
+    async def test_a_finished_turn_keeps_its_answer_and_its_last_events(self, store: Store) -> None:
         me, one, asked, running = await self.started(store)
         await self.append(store, me, one, running, piece(1))
         said = answer(one.id, asked.id, NOW + MINUTE)
@@ -223,9 +248,8 @@ class StoreContract:
         assert await store.active_turn(me.id, one.id) is None
         assert await store.latest_turn(me.id, one.id) == finished
 
-    @asyncio_test
-    async def test_an_append_or_a_finish_on_an_ended_turn_is_refused(self) -> None:
-        store = await self.new_store()
+    @store_test
+    async def test_an_append_or_a_finish_on_an_ended_turn_is_refused(self, store: Store) -> None:
         me, one, _, running = await self.started(store)
         await store.finish_turn(
             me.id, one.id, running.id, TurnState.FAILED, NOW, "boom", None, [piece(1)], NOW
@@ -240,10 +264,9 @@ class StoreContract:
         assert failed is not None
         assert (failed.state, failed.error) == (TurnState.FAILED, "boom")
 
-    @asyncio_test
-    async def test_an_append_or_a_finish_past_the_lease_is_refused(self) -> None:
-        store = await self.new_store()
-        me = user()
+    @store_test
+    async def test_an_append_or_a_finish_past_the_lease_is_refused(self, store: Store) -> None:
+        me = await store.add_user_if_absent(user())
         one = session(me.id)
         await store.add_session(one)
         asked = question(one.id)
@@ -258,10 +281,11 @@ class StoreContract:
             )
         assert await store.active_turn(me.id, one.id) == running
 
-    @asyncio_test
-    async def test_end_expired_turn_ends_only_a_turn_whose_lease_has_passed(self) -> None:
-        store = await self.new_store()
-        me = user()
+    @store_test
+    async def test_end_expired_turn_ends_only_a_turn_whose_lease_has_passed(
+        self, store: Store
+    ) -> None:
+        me = await store.add_user_if_absent(user())
         one = session(me.id)
         await store.add_session(one)
         asked = question(one.id)
@@ -280,10 +304,11 @@ class StoreContract:
         assert await store.active_turn(me.id, one.id) is None
         assert await store.end_expired_turn(me.id, one.id, NOW + 3 * MINUTE) is None
 
-    @asyncio_test
-    async def test_a_start_and_a_hide_succeed_after_an_expired_turn_is_ended(self) -> None:
-        store = await self.new_store()
-        me = user()
+    @store_test
+    async def test_a_start_and_a_hide_succeed_after_an_expired_turn_is_ended(
+        self, store: Store
+    ) -> None:
+        me = await store.add_user_if_absent(user())
         one = session(me.id)
         await store.add_session(one)
         asked = question(one.id)
@@ -297,9 +322,8 @@ class StoreContract:
         with pytest.raises(SessionNotFoundError):
             await store.get_session(me.id, one.id)
 
-    @asyncio_test
-    async def test_a_turn_of_another_session_is_not_found_through_it(self) -> None:
-        store = await self.new_store()
+    @store_test
+    async def test_a_turn_of_another_session_is_not_found_through_it(self, store: Store) -> None:
         me, _, _, running = await self.started(store)
         other = session(me.id)
         await store.add_session(other)
@@ -308,9 +332,10 @@ class StoreContract:
         assert await store.active_turn(me.id, other.id) is None
         assert await store.latest_turn(me.id, other.id) is None
 
-    @asyncio_test
-    async def test_wait_for_events_returns_on_an_append_and_at_its_timeout(self) -> None:
-        store = await self.new_store()
+    @store_test
+    async def test_wait_for_events_returns_on_an_append_and_at_its_timeout(
+        self, store: Store
+    ) -> None:
         me, one, _, running = await self.started(store)
         assert await store.wait_for_events(me.id, one.id, running.id, 0, 0.05) is False
 
