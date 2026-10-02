@@ -264,23 +264,6 @@ it. That is the store's own business, invisible at the port.
 
 ## What this asks of the code
 
-The contract and the port today differ from this model in these places. Block 5 brings
-them in line.
-
-- The store port passes documents for messages and events, with their keys.
-- The store port addresses sessions by owner and session, and turns by owner, session
-  and turn. So does the turn dispatcher, and so does the wire's events URL
-  (`docs/specs/wire.md`, "Planned with turn ids").
-- Turns have ids. `TurnStarted` and the active turn carry the turn's id, positions
-  are given by the runner, and `start_turn` stores the question and the turn
-  together.
-- `MessageCompleted` carries the message's id. `TurnEnded`'s error moves to the
-  turn's record.
-- An answer records its turn, and web takes the run id from it.
-- The runner builds an answer's parts in stream order.
-- A session records its engine; a turn runs on it and the purge forgets on it, built
-  on demand when the configuration no longer names it.
-- The encoder cleans every string it writes.
-- Readers end a turn whose lease has passed; the runner stops on `TurnLostError`; the
-  hide refuses a session with a running turn.
-- The memory store follows, and a contract suite that every store passes proves it.
+Block 5 brought the contract, the store port, the memory store, the runner, web and the
+frontend in line with this model (`docs/working-notes/oct-refactor/data-model-progress.md`
+says what was verified). PostgreSQL is block 6 (`postgres-plan.md`).
