@@ -12,7 +12,7 @@ on the company's servers; this document says who, inside them, sees what.
   follows the author when they continue, edit or regenerate, and the
   interface says so when the link is created. What an edit or a
   regeneration discarded is shown to nobody
-  ([conversations.md](legacy/conversations.md)).
+  ([data-model.md](../architecture/data-model.md)).
 - **Projects.** Any user can create a project at any time and add people.
   - The creator is the owner. Owners add and remove members and can make
     another member an owner.
@@ -20,7 +20,7 @@ on the company's servers; this document says who, inside them, sees what.
     thread of each — and can start new ones there.
   - Only a conversation's author continues it. Another member who wants to
     carry it on forks it into a conversation of their own
-    ([conversations.md](legacy/conversations.md)).
+    ([controller.md](../architecture/controller.md)).
 
 ## Administrators
 
@@ -40,8 +40,7 @@ on the company's servers; this document says who, inside them, sees what.
 
 ## Retention and purge
 
-- Deletion by the author is soft, with a fixed 30 days in the trash
-  ([conversations.md](legacy/conversations.md)).
+- Deletion by the author is soft, with a fixed 30 days in the trash.
 - **Edited-away and regenerated-away messages are retained** with their
   conversation, shown to no user, and readable by analytics alone. They
   leave with the conversation: deleting it, purging its owner and the

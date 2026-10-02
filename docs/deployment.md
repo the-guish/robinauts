@@ -23,9 +23,8 @@ start, the reverse proxy before signing anyone in — the session cookie is
   and no compiler where every dependency has a wheel of its own, which on
   an ordinary Linux they do.
 - **PostgreSQL 16**, reachable from the machine. It is always required and
-  there is no mode without it ([specs/legacy/backend.md](specs/legacy/backend.md)). The
-  platform sets no session time zone and stores every time as
-  `timestamptz`, so the server's time zone is its own business.
+  there is no mode without it. The platform sets no session time zone and
+  stores every time as `timestamptz`, so the server's time zone is its own business.
 - **A reverse proxy that terminates TLS**, on this machine or in front of
   it. Which one is the platform team's choice; nginx and Caddy are shown
   below.
@@ -106,8 +105,7 @@ names the command that fixes it.
 ## 4. The configuration file
 
 One TOML file describes the deployment: the sign-in half and the model
-half ([specs/sign-in.md](specs/sign-in.md),
-[specs/legacy/agents-engines-models.md](specs/legacy/agents-engines-models.md)). `ROBINAUTS_CONFIG` names it. It holds
+half ([specs/sign-in.md](specs/sign-in.md)). `ROBINAUTS_CONFIG` names it. It holds
 **no secret**: a secret is always the *name* of an environment variable.
 Unknown keys are errors and every problem is reported at once.
 
@@ -229,7 +227,7 @@ Notes on what is and is not there:
   Anthropic's protocol, which requires a ceiling, and no ceiling at all over
   OpenAI's; one that is set is sent to `openai` as `max_completion_tokens`
   and to `openai-compatible` as `max_tokens`, the field OpenRouter and older
-  servers know ([specs/legacy/agents-engines-models.md](specs/legacy/agents-engines-models.md)).
+  servers know.
 - **What the engines take out of the environment.** The vendors' clients
   would otherwise read settings from variables nobody wrote in this file, so
   the engines pass everything as arguments and, when they are built at
@@ -249,8 +247,7 @@ Notes on what is and is not there:
   when the conversation starts, so changing it reaches new conversations
   only. Removing a model that conversations are using refuses their next
   turn, saying the conversation's model is no longer offered, rather than
-  answering with another model; the log names the model
-  ([specs/legacy/agents-engines-models.md](specs/legacy/agents-engines-models.md)).
+  answering with another model; the log names the model.
 - A file with no `[agents]` table is a deployment with no agents: it
   starts, the picker is empty, and the log says so.
 
@@ -320,7 +317,7 @@ It prints `the database is at schema version N (schema.sql …)` whether it
 created the schema or found it already there. It works on an **empty**
 database only: there are no migrations before the first release, and a
 database made from another `schema.sql` is refused and made again rather
-than upgraded ([specs/legacy/backend.md](specs/legacy/backend.md)). The command records
+than upgraded. The command records
 the file's hash in the database, and the server checks it at every start.
 
 The local development mode has **no** variable: it is asked for on the
@@ -601,9 +598,9 @@ effect at the next restart, because the file is read once at start-up.
 3. `robinauts version` — until the first release the schema version stays
    1, so what to compare is the `schema.sql` hash it prints beside it. If
    it differs from what the previous install printed, the database is
-   **recreated**, not migrated, and all data in it is disposable
-   ([specs/legacy/backend.md](specs/legacy/backend.md)). The server refuses the old
-   database anyway, saying it was made from an older `schema.sql`.
+   **recreated**, not migrated, and all data in it is disposable. The server
+   refuses the old database anyway, saying it was made from an older
+   `schema.sql`.
 4. `robinauts db init` (a no-op when the schema is unchanged), then start
    the service.
 
@@ -663,8 +660,8 @@ engine = "pydantic-ai"
 | `model_providers.<id>.kind: this build cannot reach '…' providers; it was built with …` | a build whose engines do not offer that kind; this one offers all four, so it is a build of something else | use one of the kinds the message lists |
 | every turn on an `openai-compatible` provider fails, most often with a `404` | `base_url` is missing the API's version: OpenAI's client appends `/chat/completions` alone | end `base_url` where the endpoint's own documentation puts `/chat/completions` after it, usually at `/v1` |
 | every turn on an `openai-compatible` provider fails with a `400` naming `max_tokens` | the endpoint knows only the newer `max_completion_tokens`, and a compatible endpoint is sent the older field every server has known | leave `max_output_tokens` out for that model |
-| every turn on one OpenAI model fails, and the vendor's message says the model is not supported on this endpoint, or to use the Responses API | OpenAI serves some models (several `-pro` and agentic ones) only over the Responses API, and this build speaks Chat Completions for both OpenAI kinds | pick a model whose page on OpenAI's site lists `v1/chat/completions` ([specs/legacy/agents-engines-models.md](specs/legacy/agents-engines-models.md)) |
-| a turn with tools on GPT-6 Sol, GPT-6 Luna or GPT-5.6 Sol is refused by OpenAI (for GPT-5.6 Sol, "Function tools with reasoning_effort are not supported … in /v1/chat/completions"), and the same model answers without tools | OpenAI documents function calling over Chat Completions on GPT-6 Sol and Luna only with reasoning off, OpenAI Support reported the GPT-5.6 Sol refusal (2026-09-07), and the other GPT-5.6 models reason by default and are untried; the engines do not turn reasoning off (not yet seen in a live turn here) | use another model for an agent with tools ([specs/legacy/agents-engines-models.md](specs/legacy/agents-engines-models.md), "Known findings") |
+| every turn on one OpenAI model fails, and the vendor's message says the model is not supported on this endpoint, or to use the Responses API | OpenAI serves some models (several `-pro` and agentic ones) only over the Responses API, and this build speaks Chat Completions for both OpenAI kinds | pick a model whose page on OpenAI's site lists `v1/chat/completions` |
+| a turn with tools on GPT-6 Sol, GPT-6 Luna or GPT-5.6 Sol is refused by OpenAI (for GPT-5.6 Sol, "Function tools with reasoning_effort are not supported … in /v1/chat/completions"), and the same model answers without tools | OpenAI documents function calling over Chat Completions on GPT-6 Sol and Luna only with reasoning off, OpenAI Support reported the GPT-5.6 Sol refusal (2026-09-07), and the other GPT-5.6 models reason by default and are untried; the engines do not turn reasoning off (not yet seen in a live turn here) | use another model for an agent with tools |
 | `agents.<id>.engine: one of langgraph, pydantic-ai, not '…'` | a misspelt engine | `langgraph` or `pydantic-ai`; both are wired in this build |
 | `admin: roles are not in this release …` | an `[[admin]]` table | remove it; roles are deferred |
 | `allow: no entry, so nobody could sign in` | providers configured, allow list empty | add at least one `[[allow]]` |

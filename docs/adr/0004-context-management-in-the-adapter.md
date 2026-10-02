@@ -15,9 +15,7 @@ the code that shapes a turn may live: "anything that must behave identically
 under both frameworks lives above the agent port, not inside an adapter", with
 "trimming or summarising a long history to fit a context window" named as the
 first example. The specs repeated it
-([agents-engines-models.md](../specs/legacy/agents-engines-models.md), "A turn";
-[conversations.md](../specs/legacy/conversations.md), "Details likely to change";
-[operations.md](../specs/operations.md), "Limits"), and the code followed it:
+([operations.md](../specs/operations.md), "Limits"), and the code followed it:
 `core.trim_history` counted characters, dropped whole turns from the front of
 the visible path, and the application handed each engine the trimmed suffix
 (`Turns._history`, `DEFAULT_HISTORY_CHARS`).
@@ -69,8 +67,7 @@ has. The adapter decides what the model sees.**
   call. Tools came with this decision (2026-09-28) and the answer is no: the
   platform owns the tool loop, calls the tool itself, appends the result to
   the record and runs the engine again from the stored history, so the
-  conversation record is the checkpoint ([specs/legacy/runs.md](../specs/legacy/runs.md))
-  and no checkpointer is used.
+  conversation record is the checkpoint and no checkpointer is used.
 
 ## Consequences
 

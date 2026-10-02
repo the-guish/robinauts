@@ -159,7 +159,7 @@ Decisions inside it, each with the reason:
   and PostgreSQL deletes them in the sweep. This keeps history without keeping every
   token forever.
 - **Large documents are the adapter's problem.** A DynamoDB item is at most 400 KB, and
-  legacy bounded a part at a million characters. The DynamoDB adapter stores a
+  a part may be bounded at a million characters. The DynamoDB adapter stores a
   document over about 350 KB in S3 under `sessions/<session>/<record>` and keeps the
   pointer in the item. That is the same pattern `langgraph-checkpoint-aws` uses for
   checkpoints. The port is unchanged and the bound can stay where stage two sets it.
@@ -169,8 +169,8 @@ Decisions inside it, each with the reason:
   `list_sessions` stops slicing a full list.
 - **The wake-up payload is `turn_id` and `position`**, or `turn_id` and `end`. On
   PostgreSQL it is one channel, `robinauts_turns`, with that text as the payload.
-- **The message tree is checked by the controller.** Same-session parents were a
-  composite foreign key in legacy. DSQL has no foreign keys and DynamoDB has none at
+- **The message tree is checked by the controller.** Same-session parents can be a
+  composite foreign key. DSQL has no foreign keys and DynamoDB has none at
   all, so `send_message` checks that the parent belongs to the session; it already
   loads the session's messages to do so. PostgreSQL may keep the key as a guard.
 
@@ -198,8 +198,7 @@ And one new controller port, the **turn dispatcher**: `dispatch(session_id, turn
 The in-process implementation creates an asyncio task, as today. The Lambda
 implementation invokes the turn worker asynchronously. `run_turn` then takes ids and
 loads the session, the question, the model and the checkpoint from the store, so what
-crosses an invocation is two uuids. Legacy had the same seam
-(`legacy/ports/run_executor.py`).
+crosses an invocation is two uuids.
 
 ### The documents
 

@@ -591,7 +591,7 @@ For a reader with no memory of it. Kept short; rewritten as the steps land.
   that streamed any text completes with exactly what it streamed
   (`cut_short=True` for the failure cases, where a turn ends wherever it
   ended). What the specs left open and this step settled is written into
-  `docs/specs/legacy/conversations.md` and `docs/specs/legacy/runs.md`, not only here.
+  the conversations and runs specs, not only here.
   `backend/tests/conversations.py` holds the builders every later step will
   use; the tests are the `backend/tests/unit/test_conversation_*.py`,
   `test_run_*.py` and `test_turn_events.py` modules, one per source module.
@@ -1309,7 +1309,7 @@ For a reader with no memory of it. Kept short; rewritten as the steps land.
   Tests: `tests/unit/test_models_config.py`, `tests/unit/test_langgraph_engine.py`
   (the contract, the messages the model is given, thinking, the client's
   fields, tracing), the key checks in `tests/integration/test_config_file.py`
-  (which also parses the example in `docs/specs/legacy/agents-engines-models.md`), the wiring in
+  (which also parses the agents spec's example), the wiring in
   `tests/unit/test_app_composition.py` and `tests/integration/test_create_app.py`.
   `tests/live/test_langgraph_live.py` runs one real turn against Anthropic
   when `ROBINAUTS_LIVE_ANTHROPIC_KEY` is set; `tests/live` is in
@@ -1577,7 +1577,7 @@ For a reader with no memory of it. Kept short; rewritten as the steps land.
   are served under. `src/history/` is the panel's list: `useHistory` over
   `GET /api/conversations`, thirty at a time, "Load more" with the opaque
   cursor until `next_cursor` is `null`, folding by id because paging walks a
-  list that is changing (`docs/specs/legacy/conversations.md`, "Listing"), a
+  list that is changing (the conversations spec, "Listing"), a
   numbered ask so that a page arriving after a refresh is dropped rather than
   spliced into a listing that no longer exists, and every write followed by a
   fresh first page. `HistoryList` draws it as **links** (`#/c/<id>`, so a
@@ -1971,7 +1971,7 @@ For a reader with no memory of it. Kept short; rewritten as the steps land.
   the refusal reads *"this build cannot reach 'openai' providers; it was built
   with anthropic, anthropic-compatible"*. What the licence exclusion still
   costs is a vendor reachable over OpenAI's protocol alone, which OpenRouter is
-  not (`DEPENDENCIES.md`, `docs/specs/legacy/agents-engines-models.md`, `docs/deployment.md`).
+  not (`DEPENDENCIES.md`, the agents spec, `docs/deployment.md`).
   `backend/tests/live/test_vendor_routing.py` proves where a turn's request
   really goes: one turn per engine at OpenRouter with a **bogus, key-shaped
   key**, asserting that it arrived at `https://openrouter.ai/api/v1/messages`
@@ -2157,7 +2157,7 @@ sweep). About 3,400 lines with tests, over the aim.
 Important design decisions made / open questions:
 - One clock: the application computes every deadline from the `Clock` port
   and tells the stores what "now" is; stores keep no clock.
-  `docs/specs/legacy/backend.md` was changed to say so (it said the database
+  The backend spec was changed to say so (it said the database
   clock).
 - `CredentialStore` must be safe under concurrent calls: the take is one
   `DELETE … RETURNING`, the cap holds exactly (an advisory lock or
@@ -2422,7 +2422,7 @@ Reviewers property-tested `publishable` (100,000 sequences), the two order
 checks end to end (4,000 answers at every re-attach prefix), and the
 encoding (30,000 encode/mutate/decode rounds).
 Not done / to watch: the one low left is `Run` recording no owning process
-or heartbeat — single process is the POC's scope (`docs/specs/legacy/runs.md`
+or heartbeat — single process is the POC's scope (the runs spec
 describes the multi-process rules). About 6,500 lines with tests: far over
 the aim, and eight review rounds — this step should have been two (records
 and encoding; tree, runs and events).
@@ -3287,7 +3287,7 @@ frontend; the wheel and its requirements built, installed the locked way
 and answering) and with one required (2876); the rehearsal 32/32.
 Not done / to watch: the real deployment is the user's (below). The
 systemd unit and the proxy snippets are prose that has not been run. The
-guide is 613 lines. `docs/specs/legacy/runs.md` now says shutdown cancels and
+guide is 613 lines. The runs spec now says shutdown cancels and
 draining is planned.
 What remains for the real deployment ("Done when"):
 1. a machine, a host name, a certificate, nginx or Caddy from the guide,

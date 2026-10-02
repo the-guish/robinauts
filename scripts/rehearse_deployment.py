@@ -510,7 +510,7 @@ def every_row(database_url: str) -> str:
 
     import asyncpg
 
-    from robinauts.legacy.datastore.schema import SCHEMA_TABLES
+    from robinauts.controller.adapters.postgres.schema import SCHEMA_TABLES
 
     async def read() -> str:
         connection = await asyncpg.connect(database_url)

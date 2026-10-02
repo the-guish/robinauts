@@ -107,9 +107,8 @@ With providers configured and no allow entry, start-up fails.
   on** — only the argument the starting command passes — so nothing a
   process inherits can turn sign-in off in a deployment.
 - It may still be given the **configuration file** (`ROBINAUTS_CONFIG`),
-  and then **only its model tables are read** ([agents-engines-models.md](legacy/agents-engines-models.md)):
-  the chat is developed in this mode ([frontend.md](frontend.md)) and a
-  chat needs an agent. A file that also holds sign-in tables — `public_url`,
+  and then **only its model tables are read**: the chat is developed in
+  this mode ([frontend.md](frontend.md)) and a chat needs an agent. A file that also holds sign-in tables — `public_url`,
   `session_hours`, `providers`, `allow`, `admin` — is what "cannot be
   combined" refuses,
   because the mode exists where there is nothing to sign in to. With no
@@ -152,8 +151,7 @@ With providers configured and no allow entry, start-up fails.
   `DELETE /auth/tokens/{token_id}` revokes one of them.
 - It is sent as `Authorization: Bearer <secret>` and reaches every route
   under `/api/`, and these three, as the person who minted it. It is what
-  channels other than the browser sign in with
-  ([channels.md](legacy/channels.md)).
+  channels other than the browser sign in with.
 - A bearer is not a cookie: a write that carries one, and no session
   cookie, is not subject to the `Origin` check.
 - In the local development mode a token is minted for the local user. Like
@@ -164,7 +162,7 @@ With providers configured and no allow entry, start-up fails.
 ## Details likely to change
 
 Configuration — one TOML file, named by `ROBINAUTS_CONFIG`, holding the
-sign-in tables below and the model tables of [agents-engines-models.md](legacy/agents-engines-models.md);
+sign-in tables below and the model tables of [deployment.md](../deployment.md);
 secrets are given as the *name* of an environment variable; unknown keys
 are errors; all problems are reported at once:
 

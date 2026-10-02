@@ -26,12 +26,10 @@ path, minimal code.
    and `ensure_user` called from the real identity. Done: `auth-progress.md`.
    Planned: `auth-plan.md`.
 8. **The plan for stage two.** A detailed plan capturing every learning still held in
-   legacy's code, tests and specs: the refusals, the edge cases, the bounds, the
-   protections, the operations, so that nothing is lost when legacy goes. Surveyed:
+   the old backend's code, tests and specs: the refusals, the edge cases, the bounds,
+   the protections, the operations, so that nothing is lost when it goes. Surveyed:
    `legacy-learnings.md`.
-9. **Removal.** Delete `robinauts.legacy` and `docs/specs/legacy`, repoint what still
-    references them, and rewrite `layout.md`, `backend.md` and the ADRs for the new
-    layers.
+9. **Removal.** Done: the pre-refactor backend package and its specs are deleted.
 
 ## Stage two: hardening
 

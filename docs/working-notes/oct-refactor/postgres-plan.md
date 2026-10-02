@@ -36,7 +36,7 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
   a position offered twice is "two runners", or the runner pushes the lease forward
   and reads the cancel flag. It ships in the package, beside the store.
   `SCHEMA_VERSION` is 1 and `SCHEMA_SHA256` is the file's hash, pinned by a test, so
-  an edit is deliberate and visible, as legacy did (`legacy/datastore/schema.py`).
+  an edit is deliberate and visible.
 - **The server never changes the database** (`docs/deployment.md`). `robinauts db init`
   applies `schema.sql` to an empty database in one transaction, records the hash, and
   calls `setup` on **every installed engine**, so adding an agent on another engine
@@ -152,8 +152,7 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
   the owner.
 - Tests that need a database are marked `database` and take
   `ROBINAUTS_TEST_DATABASE_URL`. Each runs in a schema of its own, named after a fresh
-  uuid and dropped however the test ends, as `tests/postgres.py` does for legacy. A new
-  helper does the same without importing legacy. With no URL they skip; CI sets
+  uuid and dropped however the test ends, by a new helper. With no URL they skip; CI sets
   `ROBINAUTS_REQUIRE_POSTGRES`, which makes a skip a failure.
 - Before each commit, from `backend/`: `uv run --locked ruff check --config
   pyproject.toml . ../scripts ../demo ../examples`, `uv run --locked black --check
@@ -168,8 +167,8 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
 
 1. **The schema in the package.** `schema.sql` gains `sessions.engine` and the
    comment edits above. `controller/adapters/postgres/schema.py`: `SCHEMA_VERSION`,
-   `SCHEMA_SHA256`, `create_schema(connection)` for an empty schema, under the
-   advisory lock legacy took (`legacy/datastore/schema.py`), since two `db init` at
+   `SCHEMA_SHA256`, `create_schema(connection)` for an empty schema, under an
+   advisory lock, since two `db init` at
    once otherwise collide, and `check_schema(connection)`, which refuses a missing
    version, another version, another hash or a `server_encoding` that is not `UTF8`,
    and names `robinauts db init`. Test: the hash matches the file; the file applied

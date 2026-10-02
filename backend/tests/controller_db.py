@@ -3,9 +3,9 @@
 
 """A PostgreSQL for the controller's database tests, and a schema of their own in it.
 
-The same arrangement as ``postgres.py`` has for legacy, without importing legacy: the URL
-comes from ``ROBINAUTS_TEST_DATABASE_URL``, the tests skip with a reason when there is
-none, and every test gets a schema named after a fresh uuid, dropped however it ends.
+The URL comes from ``ROBINAUTS_TEST_DATABASE_URL``, the tests skip with a reason when
+there is none, and every test gets a schema named after a fresh uuid, dropped however it
+ends.
 """
 
 from __future__ import annotations

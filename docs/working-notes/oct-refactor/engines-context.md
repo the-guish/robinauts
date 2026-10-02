@@ -6,9 +6,8 @@ way, from the same base, and may run in parallel.
 
 ## The shape of the backend now
 
-`backend/src/robinauts/` has four packages. `legacy/` is the old backend, kept whole
-until stage one ends; nothing new imports it, and it is reference material only.
-`agent_engines/`, `controller/` and `web/` are the new layers. `docs/architecture/rules.md`
+`backend/src/robinauts/` has three packages: `agent_engines/`, `controller/` and `web/`,
+the new layers. `docs/architecture/rules.md`
 says who may import whom, and `backend/tests/unit/test_architecture.py` enforces it with
 import-linter, so a wrong import fails the unit suite. The two rules that matter here:
 an engine imports its own package, `agent_engines.contract`, its framework, the vendors'
@@ -54,27 +53,6 @@ called when a conversation is deleted. The session id is the conversation id. Th
 shape: `model_providers.<id>`, `models.<id>`, `tool_servers.<id>`, `agents.<id>`, engine
 names `langchain`, `pydantic-ai`, `echo`) serves the UI; a turn can be watched in the
 browser. `docs/working-notes/oct-refactor/config-plan.md` is how that was built.
-
-## What legacy knows, to copy from and never import
-
-`legacy/adapters/agents/langgraph/engine.py` and `legacy/adapters/agents/pydantic_ai/
-engine.py` are the old engines on the old port (memory as bytes handed to the caller).
-Each is about 1100 lines, most of it docstrings. What is worth copying, in each: how the
-vendor client is built per provider kind with the endpoint pinned, the key in its header,
-retries at zero and the `base_url` for the compatible kinds (`chat_model`, `endpoint_of`);
-how hosted tracing and the client environment overrides are turned off
-(`force_tracing_off`, `clear_client_overrides`); how the MCP client is built with the
-server's credential (`mcp_tools` / `mcp_toolset`); how the framework's stream is
-translated to events (`_deltas_of`, `_events_of`). Copy ideas and small pieces; the new
-engine is a small fraction of the old one's volume.
-
-The old tests are reference too: `tests/unit/test_langgraph_engine.py` and
-`test_pydantic_ai_engine.py` (each engine over its framework's own scripted model and
-plain-function tools), `tests/contracts/agents.py` (the old suite, on the old port),
-`tests/chat_completions.py` (a scripted OpenAI Chat Completions transport the real SDK
-and framework talk to, so a turn over the OpenAI kinds runs with nothing leaving the
-process), `tests/unit/test_engines_over_chat_completions.py`, and `tests/live/` (one real
-turn, run only when a key is in a variable of the test's own). None of these are changed.
 
 ## Verified facts about the frameworks, at the locked versions
 

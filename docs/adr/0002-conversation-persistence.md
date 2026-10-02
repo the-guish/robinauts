@@ -49,7 +49,7 @@ The LangGraph core (`langgraph`, `langgraph-checkpoint`, `langchain-core`)
 does not have this dependency and is not affected.
 
 The same finding excludes `psycopg` as the platform's own Postgres driver;
-the platform uses `asyncpg` ([specs/legacy/backend.md](../specs/legacy/backend.md)).
+the platform uses `asyncpg`.
 
 ## Decision
 

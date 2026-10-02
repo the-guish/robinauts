@@ -96,7 +96,7 @@ still says otherwise, this is the direction and the spec changes.
 
 3. **The transcript is the platform's, and it forks as it does today.** The
    message tree, the visible thread, edits and regenerations stay exactly
-   as [specs/legacy/conversations.md](../specs/legacy/conversations.md) has them: the
+   as the conversations spec has them: the
    application turns the adapter's events into the platform's messages
    (an answer with its tool calls, one tool message per batch of results
    under it, the next answer under that) and its own numbered run events,
@@ -292,20 +292,20 @@ Postgres suite is run where a database is to hand.
   framework-neutral" becomes "The transcript is the platform's, the memory
   is the framework's"; the one-page "Tools" and "A turn" bullets; the seams
   list names the MCP clients as the frameworks'.
-- [specs/legacy/agents-engines-models.md](../specs/legacy/agents-engines-models.md): rewritten -- the port, a turn, the
+- The agents spec: rewritten -- the port, a turn, the
   frameworks' share of tools and context, the configuration sketch without
   `prefix` and with `context_window`, the known findings.
-- [specs/legacy/runs.md](../specs/legacy/runs.md): "Tools" -- the framework runs the loop
+- The runs spec: "Tools" -- the framework runs the loop
   inside the run; a run stopped in the middle leaves the transcript as it
   was and no memory; the order of a run's events is unchanged.
-- [specs/legacy/conversations.md](../specs/legacy/conversations.md): the format is the
+- The conversations spec: the format is the
   transcript; the model's memory is the framework's, stored on the run and
   never read; what crosses a swap: nothing, a conversation stays with its
   engine; the vendor's signed blocks are in the memory and not in `extras`.
 - [specs/wire.md](../specs/wire.md): a call's arguments arrive whole.
 - [specs/operations.md](../specs/operations.md): `context_window` among the
   limits; what a tool server sees.
-- [specs/legacy/backend.md](../specs/legacy/backend.md): the schema is still the
+- The backend spec: the schema is still the
   platform's; the memory is a column of it.
 - [layout.md](../layout.md): the ports list, the adapters section, the
   responsibilities table, the enforcement list, the discard test.

@@ -1,10 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The new Pydantic AI engine builds its models from the settings, and nothing leaves.
-
-Named apart from ``test_pydantic_ai_engine.py``, which tests legacy's engine.
-"""
+"""The new Pydantic AI engine builds its models from the settings, and nothing leaves."""
 
 from __future__ import annotations
 

@@ -32,7 +32,7 @@ Branches `feature/langchain-engine-1` to `-6`, one commit each, on
 - The timeout is one deadline around every `await` on the framework's stream, not
   `asyncio.timeout` around the whole run: a timer around a `yield` would fire inside the
   caller's handling of an event.
-- `tools_for` does not prefix tool names with the server id, as legacy did; two servers
+- `tools_for` does not prefix tool names with the server id; two servers
   offering a tool of the same name would collide. Left for the stage-two plan.
 - The live test has an OpenRouter route beside the Anthropic one, so a machine with only an
   OpenRouter key can run it.
@@ -40,4 +40,4 @@ Branches `feature/langchain-engine-1` to `-6`, one commit each, on
 ## Known
 
 - `tests/unit/test_conversation_routes.py::test_a_body_nested_deeper_than_it_can_be_read_is_refused`
-  fails on this machine before and after this block (a legacy recursion-depth test).
+  fails on this machine before and after this block (a recursion-depth test).

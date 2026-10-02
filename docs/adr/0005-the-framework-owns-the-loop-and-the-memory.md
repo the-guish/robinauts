@@ -128,7 +128,7 @@ Costs:
 - **A framework checkpointer per engine**, as the examples' LangChain
   backend uses. Rejected: two persistence mechanisms for two frameworks,
   tables a framework migrates in the deployment's database (against
-  [specs/legacy/backend.md](../specs/legacy/backend.md)), a second connection pool, and
+  [specs/core.md](../specs/core.md)), a second connection pool, and
   `psycopg` in the tree. A column of the run does the same for both.
 - **Keep the transcript as the memory** — translate it into each framework's
   format on every turn, as before, but let the framework run the loop.

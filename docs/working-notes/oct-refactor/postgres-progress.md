@@ -7,7 +7,7 @@ PostgreSQL 16.14 cluster (`ROBINAUTS_TEST_DATABASE_URL`), each in a schema of it
 ## The steps
 
 1. **The schema in the package.** `schema.sql` gained `sessions.engine` and the comment
-   edits block 5 asked for; `schema.py` pins the hash, applies the file under legacy's
+   edits block 5 asked for; `schema.py` pins the hash, applies the file under an
    advisory lock, and refuses, naming `robinauts db init`, a database with no schema,
    another version, another edit, a table missing, a name of ours ahead on the search
    path, or an encoding that is not UTF8. A refusal is a `ConfigError`: no new class was
@@ -15,7 +15,7 @@ PostgreSQL 16.14 cluster (`ROBINAUTS_TEST_DATABASE_URL`), each in a schema of it
 2. **The pool**, with the `jsonb` and `json` codecs; a number JSON cannot write is refused
    before the database sees it.
 3. to 5. **The store, and watchers across processes.** `tests/controller_db.py` gives each
-   database test its schema without importing legacy. The store passes the contract suite;
+   database test its schema. The store passes the contract suite;
    the three races the plan names are proved deterministically: an append waits on a
    reader's end and then inserts nothing, a hide waits on a starting turn and is then
    refused, and a finish raced against a start never deadlocks and always lands. A watcher

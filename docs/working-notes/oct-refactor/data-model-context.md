@@ -41,7 +41,7 @@ the checkpoint id, on the answer.
 
 ## What is fixed
 
-- PostgreSQL is the one database (`docs/specs/legacy/backend.md`, kept): asyncpg, no
+- PostgreSQL is the one database: asyncpg, no
   ORM, hand-written SQL in the controller's adapters, the schema as a SQL file shipped in
   the package and applied by a command, a recorded schema version the server checks at
   start-up. Before the first release the schema is one definition edited in place, no
@@ -61,17 +61,17 @@ the checkpoint id, on the answer.
   (id, session, follows, state, started_at, ended_at, error) makes the active turn "the
   row in state running" with a unique partial index, gives the UI `ended_badly`, keeps a
   history, and lets events key on the turn so positions never restart. It also lets
-  `TurnStarted` carry a turn id that web can use as AG-UI's run id. This is what legacy
-  arrived at (`runs`). The alternative is a nullable column on the session.
-- **The message tree.** `parent_id` points at a message of the same session; legacy
-  enforced that with a composite foreign key `(session, parent) -> (session, id)`. The
+  `TurnStarted` carry a turn id that web can use as AG-UI's run id. The alternative is a
+  nullable column on the session.
+- **The message tree.** `parent_id` points at a message of the same session; a
+  composite foreign key `(session, parent) -> (session, id)` enforces that. The
   visible thread is the path from the root to the newest message; nothing else is
   stored for it today. Edits and regenerations are new messages under an earlier parent.
 - **Parts and events as documents or as rows.** A message's parts nest; an event's
   fields differ by kind. Either goes into one `jsonb` document the store never reads
   inside, written by a pure function of the controller with a version number, or into
   rows and typed columns (a `message_parts` table, an events table with one column per
-  field). Documents are what legacy did (ADR 0002) and what versioning is for; rows are
+  field). Documents are what ADR 0002 chose and what versioning is for; rows are
   queryable and need no version.
 - **Which fields are columns.** Whatever is filtered, sorted or joined on: ids, the
   owner, the parent, created_at and updated_at, the position, the turn state. The rest
@@ -86,7 +86,7 @@ the checkpoint id, on the answer.
   PostgreSQL will `NOTIFY` on append and on end, carrying the session or turn id and
   the position, and `wait_for_events` will `LISTEN`. The model should make the payload
   obvious.
-- **Bounds.** Legacy bounded every stored text (a part at one million characters, a
+- **Bounds.** Every stored text wants a bound (a part at one million characters, a
   title, a checkpoint id at 256). Stage two; the columns should not forbid them.
 - **Serverless hosting.** `aws-serverless.md` argues for a port that also fits
   DynamoDB (and Aurora DSQL) and for running web and turns on Lambda. It adds rules to
@@ -111,7 +111,7 @@ the checkpoint id, on the answer.
   piecemeal. Events are read by position in order and never queried by field, which
   argues for a document there; parts are read whole with their message, which argues
   the same. The question is only whether anything will ever be queried inside.
-- **D. Events only.** Messages derived from the turn events. Rejected by legacy: every
+- **D. Events only.** Messages derived from the turn events. Rejected: every
   read of a session replays its turns, and the question message of a turn is written
   before any event.
 

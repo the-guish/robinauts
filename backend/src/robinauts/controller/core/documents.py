@@ -96,8 +96,8 @@ EVENT_KEYS: Mapping[str, frozenset[str]] = {
 def clean_text(text: str) -> str:
     """``text`` as a store can hold it: no NUL, and no unpaired surrogate.
 
-    A pair that arrived as two code points is joined first, as legacy did, so that only
-    what is still half a character is replaced.
+    A pair that arrived as two code points is joined first, so that only what is still
+    half a character is replaced.
     """
     text = text.replace(NUL, "")
     if _SURROGATE.search(text) is None:

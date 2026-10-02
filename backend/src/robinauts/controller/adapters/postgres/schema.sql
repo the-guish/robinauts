@@ -20,7 +20,7 @@
 --
 --     psql -v ON_ERROR_STOP=1 --single-transaction -f schema.sql
 --
--- Conventions, as legacy's schema had them:
+-- Conventions:
 --
 --   * every id is a uuid the application mints, and every time is a
 --     `timestamptz` the application sets. No default reads the clock or makes

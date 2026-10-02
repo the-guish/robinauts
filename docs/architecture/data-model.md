@@ -144,8 +144,7 @@ same write. The decoder reads the document alone.
   as its own map type.
 - **Text holds no NUL and no unpaired surrogate.** The encoder drops the one and
   replaces the other with U+FFFD in every string it writes, keys and values alike,
-  question, pieces, tool arguments and results, as legacy's `clean_text` did, and
-  writes no NaN or infinity. The controller cleans the same way every text it stores
+  question, pieces, tool arguments and results, and writes no NaN or infinity. The controller cleans the same way every text it stores
   as a column: a title, a name, an email, a turn's error. PostgreSQL's `text` and
   `jsonb` hold neither, a provider or a tool may send either, and a store that
   accepts them would hold what another cannot.

@@ -29,7 +29,7 @@ request, and a deployment that is one wheel plus one PostgreSQL.
 - The local development mode: no sign-in, one fixed local user, loopback
   only, with its warning and banner.
 
-**Conversations** ([conversations.md](../specs/legacy/conversations.md))
+**Conversations**
 
 - Private to their author. Every route checks ownership; there is no other
   way to see a conversation.
@@ -42,7 +42,7 @@ request, and a deployment that is one wheel plus one PostgreSQL.
 - List in the panel, open, rename, delete. The title is the beginning of
   the first message.
 
-**Agents and models** ([agents-engines-models.md](../specs/legacy/agents-engines-models.md))
+**Agents and models**
 
 - Agents defined in the configuration; a picker on the empty chat when
   there is more than one.
@@ -58,7 +58,7 @@ request, and a deployment that is one wheel plus one PostgreSQL.
   suite are written for two from the start.
 - Tracing to LangSmith and Logfire forced off.
 
-**Runs and the wire** ([runs.md](../specs/legacy/runs.md), [wire.md](../specs/wire.md))
+**Runs and the wire** ([wire.md](../specs/wire.md))
 
 - A message starts a run; the run executes in the background, persists
   messages as they are produced, and survives a dropped request.
@@ -77,8 +77,7 @@ request, and a deployment that is one wheel plus one PostgreSQL.
   the lint rule that confines it.
 - Dark mode following the operating system.
 
-**Backend and deployment** ([backend.md](../specs/legacy/backend.md),
-[operations.md](../specs/operations.md))
+**Backend and deployment** ([operations.md](../specs/operations.md))
 
 - The layout and its contracts, as scaffolded. FastAPI, asyncpg,
   hand-written SQL.

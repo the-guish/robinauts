@@ -36,7 +36,7 @@ topic documents listed under [Documents](#documents).
   no telemetry, no CDN, no hosted service it depends on.
 - The only data that leaves is what a conversation sends to the model
   providers the operator has configured (goal 5), and what a model asks a
-  configured tool server ([agents-engines-models.md](legacy/agents-engines-models.md), "Tools").
+  configured tool server.
 
 ### 4. Compose over build
 
@@ -93,7 +93,7 @@ topic documents listed under [Documents](#documents).
     [ADR 0001](../adr/0001-chat-ui-assistant-ui-with-tailwind.md),
     [frontend.md](frontend.md);
   - the agent frameworks (LangGraph, Pydantic AI) —
-    [agents-engines-models.md](legacy/agents-engines-models.md), [layout.md](../layout.md);
+    [agent-engines.md](agent-engines.md), [layout.md](../layout.md);
   - the wire between UI and backend, which is a published standard —
     [wire.md](wire.md).
 
@@ -143,8 +143,7 @@ topic documents listed under [Documents](#documents).
 
 - **Shape.** One Python backend that also serves the built frontend, one
   PostgreSQL database. Delivered as one Python wheel.
-  [backend.md](legacy/backend.md), [frontend.md](frontend.md),
-  [operations.md](operations.md).
+  [frontend.md](frontend.md), [operations.md](operations.md).
 - **Sign-in.** Google and Okta over OpenID Connect, the way neorc does it;
   an allow list decides who gets in. Two roles, user and admin.
   API tokens, minted by a signed-in person, reach the API without a browser.
@@ -155,29 +154,30 @@ topic documents listed under [Documents](#documents).
 - **Conversations.** A tree of messages in the platform's own format —
   text, images, files, reasoning, tool calls and their results — the
   transcript of what was said; with attachments, search and export.
-  [conversations.md](legacy/conversations.md).
+  [data-model.md](../architecture/data-model.md).
 - **Privacy.** Private by default; projects; share links; admins see
   metadata and never content; soft delete, retention, audit.
   [privacy.md](privacy.md).
 - **Agents.** Named agents defined by the operator — a prompt, a model, an
   engine, and the tool servers it may use. Users pick one per conversation.
-  [agents-engines-models.md](legacy/agents-engines-models.md).
+  [agent-engines.md](agent-engines.md).
 - **Tools.** Remote MCP servers the operator configures like model
   providers; the framework's own MCP client calls them inside its loop, and
   the platform writes each call and result into the transcript as it
-  happens. [agents-engines-models.md](legacy/agents-engines-models.md), [runs.md](legacy/runs.md).
+  happens. [agent-engines.md](agent-engines.md),
+  [the-path-of-one-message.md](../architecture/the-path-of-one-message.md).
 - **A turn.** The UI posts a message, which starts a **run**: the
   controller finds the conversation's memory, hands the agent port the
   question and that memory, publishes what the adapter streams as AG-UI
   events, appends each new message as it completes, and stores the memory
   the adapter hands back. The run executes in the background and is
   persisted: if the request drops, the agent keeps working, and the UI
-  re-attaches. One active run per conversation. [runs.md](legacy/runs.md),
-  [agents-engines-models.md](legacy/agents-engines-models.md), [wire.md](wire.md).
+  re-attaches. One active run per conversation.
+  [the-path-of-one-message.md](../architecture/the-path-of-one-message.md),
+  [agent-engines.md](agent-engines.md), [wire.md](wire.md).
 - **Channels.** One API for every delivery channel. The web UI is the
   first client; a mobile application and a Slack bridge are planned, and
   consume the same agents and conversations through the same API.
-  [channels.md](legacy/channels.md).
 - **Open source.** Apache-2.0 throughout, DCO, provenance records,
   dependency gates. [open-source.md](open-source.md).
 
@@ -188,11 +188,11 @@ hard, the decision is taken with them in mind.
 
 - Tools that suspend a run — a person's approval before a tool runs, an
   external job whose result arrives later — and per-user credentials to a
-  tool server ([runs.md](legacy/runs.md), [agents-engines-models.md](legacy/agents-engines-models.md)).
+  tool server.
 - Memories a person keeps across conversations. When they come they live
   in the one database and are framework-neutral, like the transcript; the
   model's memory of one conversation is the framework's and is already
-  stored ([agents-engines-models.md](legacy/agents-engines-models.md)).
+  stored ([agent-engines.md](agent-engines.md)).
 - Usage reporting (goal 7).
 - More delivery channels: a mobile application, a Slack bridge; and a way
   to consume a run without streaming, for the clients that need it.
@@ -210,16 +210,14 @@ hard, the decision is taken with them in mind.
 |---|---|
 | [core.md](core.md) | goals, principles, the system in one page |
 | [sign-in.md](sign-in.md) | sign-in, users, roles |
-| [conversations.md](legacy/conversations.md) | the message tree, features, deletion |
 | [privacy.md](privacy.md) | visibility, projects, sharing, admins, retention, leavers, audit |
-| [agents-engines-models.md](legacy/agents-engines-models.md) | agents, the agent port, the turn, engines, model providers |
-| [runs.md](legacy/runs.md) | runs: background execution, persistence, re-attaching, tools of any duration |
+| [agent-engines.md](agent-engines.md) | the agent engines: their contract, the turn, the memory |
 | [wire.md](wire.md) | the UI-to-backend protocol |
-| [channels.md](legacy/channels.md) | one API for many delivery channels: web, mobile, Slack |
-| [backend.md](legacy/backend.md) | web framework, background work, database, schema |
 | [frontend.md](frontend.md) | the interface, build, supply chain, packaging |
 | [operations.md](operations.md) | deployment, configuration, limits, usage (planned) |
 | [open-source.md](open-source.md) | licence, contributions, dependency policy, checks |
+| [../architecture/data-model.md](../architecture/data-model.md) | the stored records, the message tree, how a message is written |
+| [../architecture/the-path-of-one-message.md](../architecture/the-path-of-one-message.md) | one turn from the UI to the model and back: background execution, re-attaching |
 | [../layout.md](../layout.md) | backend layers and their enforced dependency rules |
 | [../oss-checklist.md](../oss-checklist.md) | the open source to-do list |
 | [../adr/](../adr/README.md) | decisions that needed a discussion, and why they went the way they did |

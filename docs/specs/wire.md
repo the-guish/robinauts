@@ -3,7 +3,7 @@
 The wire is one of the seams: the backend is not shaped by the UI library
 ([ADR 0001](../adr/0001-chat-ui-assistant-ui-with-tailwind.md)), and
 another UI — or no UI — can drive it. It is the one API that every
-delivery channel uses ([channels.md](legacy/channels.md)). It is served by
+delivery channel uses. It is served by
 the web shell over the controller ([architecture/web.md](../architecture/web.md),
 [architecture/controller.md](../architecture/controller.md)). What the wire
 calls a conversation is the controller's session: the wire keeps the word
@@ -156,7 +156,7 @@ hold as the rule and are not enforced yet:
 ## Without streaming
 
 - A client that cannot stream starts a turn and obtains the result once the
-  turn has finished. Planned ([channels.md](legacy/channels.md)).
+  turn has finished. Planned.
 
 ## Everything else
 

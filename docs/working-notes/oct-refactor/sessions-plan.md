@@ -31,7 +31,7 @@ The sign-in session becomes the user session, so the word is free.
   `conversation_id`, `/auth/session`), the OpenAPI snapshot and the frontend. The wire
   keeps saying conversation until the frontend is revisited; `wire.md` gains one sentence
   saying the wire's conversation is the controller's session.
-- The engine contract, which already speaks of sessions, and legacy.
+- The engine contract, which already speaks of sessions.
 
 ## Steps
 

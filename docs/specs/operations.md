@@ -15,32 +15,29 @@ What an internal platform team deploys and controls.
   ([sign-in.md](sign-in.md)).
 - Upgrades: install the new wheel, bring the schema up to date, restart.
   Until the first release the schema is edited in place and the database
-  is recreated; after that, migrations upgrade it in place
-  ([backend.md](legacy/backend.md)).
+  is recreated; after that, migrations upgrade it in place.
 - A restart ends the runs that are in flight: each is marked interrupted,
-  and its author retries it by sending the message again
-  ([runs.md](legacy/runs.md)). Letting them **drain** for a bounded time first is
-  planned there too; the bounded window a shutdown has today is for ending
-  them and giving back what the process holds, not for finishing
-  them. Several backend processes may run against
+  and its author retries it by sending the message again. Letting them
+  **drain** for a bounded time first is planned; the bounded window a
+  shutdown has today is for ending them and giving back what the process
+  holds, not for finishing them. Several backend processes may run against
   the one database.
 - Outbound traffic: the identity providers at sign-in, the model providers
-  the operator configured, and the MCP tool servers the operator configured
-  ([agents-engines-models.md](legacy/agents-engines-models.md)). Nothing else.
+  the operator configured, and the MCP tool servers the operator configured.
+  Nothing else.
 - **What a tool server sees is one identity per deployment.** A server's
   credential is the operator's, read from the environment variable its table
   names, so every user's turns act as that service account and the server's
   own audit log names it and not the person. That is the scope of this
-  iteration and is said in [agents-engines-models.md](legacy/agents-engines-models.md); an operator who needs the
-  server to know the person waits for per-user credentials. What an agent
-  may do through a server is bounded by the credential's scopes and by the
+  iteration; an operator who needs the server to know the person waits for
+  per-user credentials. What an agent may do through a server is bounded by the credential's scopes and by the
   server's own admin gates, and by nothing here: every tool the agent's
   servers offer runs without asking. A server configured with `auth =
   "none"` — a public one, such as Microsoft Learn's — is sent no credential
   at all: what it sees is the deployment's address and the arguments the
   model wrote for the call, and nothing that names anyone. The client that
   connects is the agent framework's own MCP client, built from the server's
-  table and nothing else ([agents-engines-models.md](legacy/agents-engines-models.md), "Tools").
+  table and nothing else.
 
 ## Configuration
 
@@ -52,8 +49,7 @@ What an internal platform team deploys and controls.
   are set, `ROBINAUTS_CONFIG` is what is read and the start-up log says so.
 - What the operator configures: sign-in providers, the allow list and the
   admins ([sign-in.md](sign-in.md)); model providers, models, agents and
-  the MCP tool servers agents may use ([agents-engines-models.md](legacy/agents-engines-models.md)); limits and
-  retention (below).
+  the MCP tool servers agents may use; limits and retention (below).
 - The **local development mode** ([sign-in.md](sign-in.md)) may be given the
   same file and reads only its model tables; a file that also holds sign-in
   tables is a start-up refusal there.
@@ -106,7 +102,7 @@ is settled:
 ## Details likely to change
 
 - Whether the configuration is one file or several, and the key names.
-  Sketches are in [sign-in.md](sign-in.md) and [agents-engines-models.md](legacy/agents-engines-models.md).
+  Sketches are in [sign-in.md](sign-in.md).
 - The `robinauts` command: `start`, `db init`, `version`, later
   `db migrate`, and what else it needs. `start` runs uvicorn with
   `--proxy-headers` on and `--forwarded-allow-ips` naming the reverse proxy

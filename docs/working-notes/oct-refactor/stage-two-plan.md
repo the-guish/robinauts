@@ -1,18 +1,17 @@
 # Stage two: hardening
 
-The running plan for stage two of `master-plan.md`. Stage one's last step completes it
-with every learning still held in legacy before legacy goes; until then, each block of
-stage one adds what it found. Items are grouped by what they touch: the security gaps
-first, then the features that cross components, then one section per component. Each item
+The running plan for stage two of `master-plan.md`. Stage one's last step completed it
+with every learning of the survey in [`legacy-learnings.md`](legacy-learnings.md), and each
+block of stage one added what it found. Items are grouped by what they touch: the security
+gaps first, then the features that cross components, then one section per component. Each item
 has a code, `<section>-<number>`, to cite it by; the data-model items keep the numbers the
 review ranked them with.
 
 ## Security
 
-Found by the survey of legacy before block 9 (`legacy-learnings.md`), by reading what
-legacy guarded and then running the new layers at `refactor/cleanup` (`52a4ebf`). Each is a
-live gap today, not a feature deferred. "Verified" means the behaviour was observed, not
-read. `L` is `backend/src/robinauts/legacy/`.
+Found by the survey before block 9 ([`legacy-learnings.md`](legacy-learnings.md)) and by
+running the new layers at `refactor/cleanup` (`52a4ebf`). Each is a live gap today, not a
+feature deferred. "Verified" means the behaviour was observed, not read.
 
 ### security-01: The sign-in exchange keeps its credentials reachable from its exceptions
 
@@ -25,28 +24,25 @@ what error reporters such as Sentry do: both printed all three. Nothing logs the
 `exc_info` today, so the first error reporter or `logger.exception` added to the sign-in
 path would write the deployment's client secret and a live authorization code to the log.
 
-Legacy made that impossible by construction (`L adapters/identity_provider.py:42-52`,
-`:327-580`): the frames that touch a secret return a value and never raise; `_exchanged`
+Make that impossible by construction: the frames that touch a secret return a value and never raise; `_exchanged`
 returns the provider's answer or a `_Refused` and clears and deletes the secret, the form
 and the headers in a `finally`; `exchange_code` deletes the code and the verifier before it
 raises, from a frame that holds none of them and while no exception is being handled, so
 `__cause__` and `__context__` stay empty; the token request keeps no `httpx` cause
 (`keep_cause=False`) where discovery, which carries no credential, keeps its own; a
 `CancelledError` or a closed-client `RuntimeError` is re-raised as itself with every
-traceback in its chain cleared. The docstring's reason: "a traceback captured with locals,
+traceback in its chain cleared. The reason: "a traceback captured with locals,
 which error reporters do, prints every frame's variables, and the frames of a code exchange
 hold the client secret, the authorization code and the PKCE verifier; an `httpx` exception
 holds the `Request`, whose body holds all three, and stays reachable through `__context__`
 even when it is raised `from None`."
 
-Do the same in `web/oidc.py`, and port the traceback walker
-(`tests/integration/test_http_identity_provider.py:848-1153`): it walks every exception
+Do it in `web/oidc.py`, and add a traceback-walker test: it walks every exception
 reachable through `__cause__` and `__context__` and every frame's `f_locals`, reads an
 `httpx.Request` as an attacker would (headers, the form body parsed, the Basic header
 decoded), formats with `capture_locals`, and runs over the stand-in's eight misbehaviours
 (500, HTML, OAuth error, timeout, deep JSON, gzip bomb, oversized chunked, redirect). Use a
-secret with a colon, a space, `&`, `=`, `+`, `%`, `/` and non-ASCII, as legacy's
-`AWKWARD_SECRET` did, so RFC 6749 form-encoding is exercised too. Document the rule in
+secret with a colon, a space, `&`, `=`, `+`, `%`, `/` and non-ASCII, so RFC 6749 form-encoding is exercised too. Document the rule in
 `docs/architecture/web.md`: what may be reachable from an exception.
 
 ### security-02: An environment variable replaces the configured API key in both engines
@@ -63,15 +59,10 @@ too. For a protocol kind (`anthropic-compatible`, `openai-compatible`) with no `
 the new engines pass `None`, and the SDKs then read `ANTHROPIC_BASE_URL` or
 `OPENAI_BASE_URL`, so a variable in the process environment decides where the operator's
 key is sent. `parse_config` accepts `base_url` on any kind and does not require it on a
-protocol kind. The legacy negative control that proves the header leak
-(`tests/unit/test_engines_over_chat_completions.py:315-330`) still passes on the installed
-SDKs.
+protocol kind.
 
-Legacy's rule, in the spec (`docs/specs/legacy/agents-engines-models.md:195-240`) and
-promised to operators (`docs/deployment.md:233-243`, `:582-586`), had three layers
-(`L adapters/agents/langgraph/engine.py:242-306`, `:351-367`, `:510-530`; the same in the
-Pydantic AI engine): the endpoint, the key and the proxy are passed as arguments, because
-an argument beats the environment; the key is passed again as a default header (`x-api-key`
+The rule, promised to operators (`docs/deployment.md:233-243`, `:582-586`), has three
+layers: the endpoint, the key and the proxy are passed as arguments, because an argument beats the environment; the key is passed again as a default header (`x-api-key`
 or `Authorization: Bearer`), since the SDKs merge the variable's headers under the caller's
 and the caller's win; and the variables no argument can refuse are removed from
 `os.environ` once, at engine construction and never per turn ("a process-wide edit made
@@ -86,7 +77,7 @@ kind and require it on a protocol kind, and put the rule and the list of variabl
 `docs/specs/agent-engines.md` under "Reach the model providers". Add a case to the shared
 suite `tests/contracts/engine.py`: with every variable above set to a poison value, the
 request the engine builds carries the configured key, the configured endpoint and no
-header nobody configured. Keep legacy's negative control beside it: the same variables do
+header nobody configured. Add a negative control beside it: the same variables do
 reach a client built without the engine, so the test proves something.
 
 ### security-03: The vendor SDKs' debug logging writes whole conversations to stderr
@@ -97,24 +88,21 @@ and every message of the conversation. An operator who turns the root logger up 
 "which is a thing an operator does", gets the same from `anthropic._base_client` and
 `openai._base_client`. The new engines pin no logger (`grep getLogger` under
 `agent_engines/` finds nothing), and `docs/specs/agent-engines.md` promises "never write a
-key, a secret or conversation content to a log". Legacy's two negative controls
-(`tests/unit/test_langgraph_engine.py:1291-1300` and `:1380-1391`, which show the
-conversation leaking without the pin) still pass, so the leak is real on the installed
-SDKs.
+key, a secret or conversation content to a log". Verified: without a pin, the
+conversation leaks on the installed SDKs.
 
-Legacy (`L adapters/agents/langgraph/engine.py:308-349`, `:533-580`; Pydantic AI
-`:298-338`, `:507-548`) set six loggers to WARNING at engine construction: `anthropic`,
+The fix sets six loggers to WARNING at engine construction: `anthropic`,
 `anthropic._base_client`, `openai`, `openai._base_client`, `httpx2`, `httpcore2`. The
-decision was on each logger's own level, not its effective one: a logger at `NOTSET` or
-below WARNING was pinned, one an operator had set stricter was left alone. The emitting
-child was named as well as the parent, because a `dictConfig` entry on the child walks past
+decision is on each logger's own level, not its effective one: a logger at `NOTSET` or
+below WARNING is pinned, one an operator has set stricter is left alone. The emitting
+child is named as well as the parent, because a `dictConfig` entry on the child walks past
 a pin on the parent. `httpx2` and `httpcore2` are the SDKs' forks, not the `httpx` that
-sign-in uses. `tests/conftest.py:44-78` restored the levels around every test.
+sign-in uses. `tests/conftest.py` restores the levels around every test.
 
 Restore the pins in both engines, name the loggers and the rule in
-`docs/specs/agent-engines.md` under "Keep secrets secret", port the two negative controls,
-and keep the subprocess test that sets `ANTHROPIC_LOG=debug` before import
-(`tests/unit/test_langgraph_engine.py:1225-1275`), since what is read at import cannot be
+`docs/specs/agent-engines.md` under "Keep secrets secret", add two negative controls that
+show the conversation leaking without the pin, and a subprocess test that sets
+`ANTHROPIC_LOG=debug` before import, since what is read at import cannot be
 tested in the same process.
 
 ### security-04: The local development mode answers a rebound `Host`
@@ -130,17 +118,16 @@ conversation and spend the developer's model keys. `web/cli.py` refuses a non-lo
 bind, which is the other half of the rule and does nothing against rebinding.
 `docs/specs/sign-in.md:117-140` states the request rule in the present tense.
 
-Legacy (`L api/protection.py:51-71`, `:422-524`; `tests/unit/test_local_mode.py:364-560`)
-ran one check on every request in the mode, reads included: exactly one `Host` header,
+The fix is one check on every request in the mode, reads included: exactly one `Host` header,
 naming a loopback host in any spelling, any port, `*.localhost` included; the address the
 server answered on (`scope["server"]`) loopback, or a unix socket; a scope that does not
-say where it was answered refused rather than believed. Every write was then judged as
+say where it was answered refused rather than believed. Every write is then judged as
 credentialed, against the origin of the `Host` it named: `Origin` equal to
 `http://<host>`, port included, or no `Origin` and `Sec-Fetch-Site: same-origin`. "The
 `Host` header is what says otherwise, and it is why this check covers reads: a rebound name
 is read from, not only written to."
 
-Restore the check as middleware in front of the app, with the tests of `test_local_mode.py`
+Add the check as middleware in front of the app, with tests for each case
 (two `Host` headers, a unix socket, a scope with no server, a server answering off
 loopback), and mark the rule in `sign-in.md` as not yet served until it is.
 
@@ -153,17 +140,16 @@ carries a `Content-Security-Policy` or a `Cache-Control`, a missing file answers
 `{"detail": "Not Found"}`, and the not-built page answers 200. `docs/specs/frontend.md:84-97`
 still states the CSP, the 405 with `Allow` and the dotfile rule as served.
 
-Legacy (`L api/ui.py:98-112`, `:138-239`, `:255-463`): `NothingHidden` answered 404 for
-any path with a segment that starts with a dot, the same answer as a file that is not there;
-`UiHeaders` wrapped the mount, set the CSP, `X-Frame-Options` and `Cache-Control` with
-`setdefault`, and caught the `HTTPException` that `StaticFiles` raises to build the 404 and
-405 inside the mount, so a refusal carries the policy too; an asset under `assets/` whose
-name ends in exactly eight hash characters was cached for a year and immutable ("exactly
-eight, not at least: the digest's own alphabet includes the hyphen"), any other asset
-`no-cache`, everything else `no-store`; an installation without the interface answered a
-503 page with no script.
+The fix: `NothingHidden` answers 404 for any path with a segment that starts with a dot,
+the same answer as a file that is not there; `UiHeaders` wraps the mount, sets the CSP,
+`X-Frame-Options` and `Cache-Control` with `setdefault`, and catches the `HTTPException`
+that `StaticFiles` raises to build the 404 and 405 inside the mount, so a refusal carries
+the policy too; an asset under `assets/` whose name ends in exactly eight hash characters is
+cached for a year and immutable ("exactly eight, not at least: the digest's own alphabet
+includes the hyphen"), any other asset `no-cache`, everything else `no-store`; an
+installation without the interface answers a 503 page with no script.
 
-Restore the mount's wrapper with the tests of `tests/unit/test_ui_routes.py`, and put the
+Add the mount's wrapper with a test for each of these rules, and put the
 rules in `docs/architecture/web.md` under "The interface". The digest rule lives today only
 in `frontend/vite.config.ts:486-493` and `scripts/check-wheel.sh:100-103`; write it down
 in `frontend.md`.
@@ -177,14 +163,13 @@ that goes with it, written to a file on every sign-in. A code is single use and 
 but a log is read by more people than a database and kept for longer.
 `docs/deployment.md` section 8 promises that query strings do not reach the log.
 
-Legacy's `NoQueryStrings` (`L cli.py:233`, installed by `configure_logging` at `:259` on
-`uvicorn.access`, replacing rather than adding filters) cut every access-log line at the
-`?`. The path, the method and the status stayed. Every path rather than the sign-in paths,
+The fix: a `NoQueryStrings` filter, installed on `uvicorn.access` where logging is
+configured, replacing rather than adding filters, cuts every access-log line at the `?`.
+The path, the method and the status stay. Every path rather than the sign-in paths,
 because "a rule that named the sign-in paths would be a list to keep in step with the
-routes, and the query string of every other request is of no use in a log". Tests:
-`tests/unit/test_cli.py:717`, `:728`, `:736`.
+routes, and the query string of every other request is of no use in a log".
 
-Restore the filter in `web/cli.py`, where logging is configured, with the test that a
+Add the filter in `web/cli.py`, where logging is configured, with the test that a
 callback's line in the access log holds neither the code nor the state.
 
 ### security-07: Validation errors echo the request back
@@ -197,8 +182,7 @@ a client or a script comes back in the response, is shown by the frontend (which
 `detail` and cannot read this shape, `frontend/src/api/client.ts:65-71`, `:206`) and lands
 in whatever log or proxy keeps responses. Pydantic's `msg` often quotes the value too.
 
-Legacy (`L api/errors.py:156-224`, `:417-478`; `L api/schemas.py:564-589`) turned a
-`RequestValidationError` into one `InvalidValueError("<location>: <rule>")`: the rule a
+The fix turns a `RequestValidationError` into one `InvalidValueError("<location>: <rule>")`: the rule a
 sentence of ours keyed on pydantic's error `type`, with one fallback sentence for an
 unknown type and pydantic's `msg` and `input` never used; unknown keys counted, not named,
 "because a secret pasted into the wrong tool arrives as a key as readily as as a value"; a
@@ -207,9 +191,8 @@ clipped to 40 characters, the whole detail to 300 characters and five fields; th
 rule for a turn checked in the route rather than by a discriminated union, so no tag the
 sender wrote gets into a location.
 
-Restore the handler with the tests of `tests/unit/test_api_errors.py:365-422` and
-`tests/unit/test_conversation_routes.py:745-927`, and add the guard test legacy's docstring
-names and never had: no request model puts a sender's word in a location.
+Add the handler with tests for each of these rules, and a guard test: no request model
+puts a sender's word in a location.
 
 ### security-08: 5xx bodies carry the exception's text, and refusals carry no security headers
 
@@ -225,8 +208,7 @@ a `POST` to `/api/conversations/{id}` answered 405 with `Allow: GET`, which hide
 and `PATCH`. The frontend shows `detail` to the person, so whatever is in it reaches a
 screen.
 
-Legacy (`L api/errors.py:4-53`, `:243-398`, `:481-578`; `L api/protection.py:859-877`):
-one status per error class found through the MRO, with a test that every class has an
+The fix: one status per error class found through the MRO, with a test that every class has an
 entry of its own and no stale entry survives; every 5xx body `{"error": "InternalError",
 "detail": "the request could not be served"}`, "a 500 is a mistake of ours, and its message
 is written for an operator: it may hold a query, a row, the name of a variable"; the cause
@@ -240,8 +222,7 @@ matches the path; `nosniff` and `Referrer-Policy: same-origin` on every answer t
 `setdefault`, the latter "so that a path of ours, which may name a conversation, is not
 sent to whatever a person clicks through to".
 
-Restore the handlers and the headers, map every contract class, and port the canary test
-(`tests/unit/test_api_errors.py:140-237`): routes that raise with `SECRET_IN_A_BUG` in the
+Add the handlers and the headers, map every contract class, and add a canary test: routes that raise with `SECRET_IN_A_BUG` in the
 message, the canary absent from the body, present in the log, the log one line, and
 "Traceback" and the class name absent from the body.
 
@@ -254,8 +235,7 @@ says it is refused "on the declared length before a byte of it is read"; neither
 happens to a body sent with no length, or that the bound must stand in front of
 authentication.
 
-Legacy's bound (`L api/protection.py:166-204`, `:384-419`, `:538-710`) was pure ASGI
-middleware on writes: a declared `Content-Length` over 1 MiB refused before a byte is read,
+The bound is pure ASGI middleware on writes: a declared `Content-Length` over 1 MiB refused before a byte is read,
 two `Content-Length` headers refused, leading zeros stripped and the digit count checked
 before `int()` ("CPython refuses to convert a decimal of a few thousand digits and raises a
 `ValueError` that would be a 500 over a header somebody chose the length of"); a body with
@@ -264,9 +244,8 @@ over, the app seeing `http.disconnect` and every later `receive` answering a dis
 once without waiting ("a request that hangs until something else times it out"); a wrapped
 `send` dropping whatever the app made of the cut body and the middleware sending the 413;
 `GET` not wrapped, because a streaming response listens on `receive` to hear a disconnect.
-Tests: `tests/unit/test_api_protection.py:290-575`.
 
-Restore it as the first middleware, before the write checks, with those tests. It belongs
+Add it as the first middleware, before the write checks, with a test for each case. It belongs
 with `web-01`, which this item details.
 
 ### security-10: A route's permission is declared by hand, and nothing checks the next one
@@ -274,12 +253,10 @@ with `web-01`, which this item details.
 Every `/api/` route in `web/app.py` writes `user: User = asking` or `dependencies=[asking]`
 by hand. A route added without it answers anyone, and no test would notice.
 `docs/specs/sign-in.md:68-70` requires that "every route declares the permission it needs,
-and a test asserts that every route declares one"; `backend/pyproject.toml:11-21` pins
-FastAPI below 0.142 for the sake of legacy's walk, whose stated reason goes when legacy
-does.
+and a test asserts that every route declares one"; `backend/pyproject.toml` pins
+FastAPI below 0.142, the version whose route lists the walk below is written against.
 
-Legacy (`L api/access.py:4-55`, `:79-107`, `:220-343`, `:389-426`; `L api/web.py:133`,
-`:193`; `tests/unit/test_api_access.py:131-500`): a route declares `public()` or
+The rule: a route declares `public()` or
 `signed_in()`, a dependency whose callable carries the permission's name. `undeclared()`
 walks every list a router keeps routes in, into included routers and into mounts, and
 reports anything that is not a declared `APIRoute`: an undeclared route, a plain Starlette
@@ -289,11 +266,11 @@ hand-written list (`/openapi.json`, `/ui`) excuses non-API things by name and ne
 an `APIRoute`. A backstop, `unknown_route_lists`, reports any other router attribute
 holding routes, so a framework that grows a new place for routes stops the deployment: "a
 check that only understands the routes it was written for is a check that stops working
-the day somebody adds another kind". `create_api` ran the check when it built the app, and
-the lifespan ran it again at start, "so the door cannot be left open by a branch nobody ran
+the day somebody adds another kind". The check runs when the app is built, and the
+lifespan runs it again at start, "so the door cannot be left open by a branch nobody ran
 the test on".
 
-Restore the declaration and the walk, at build and at start. For the port: FastAPI 0.141
+Add the declaration and the walk, at build and at start. Note that FastAPI 0.141
 keeps the frontend group in `router._frontend_routes` as one object, not a list, as well as
 in `_low_priority_routes`. Put the rule in `docs/architecture/web.md` under "Who may ask";
 the declaration is where a permission argument goes when roles arrive.
@@ -302,15 +279,14 @@ the declaration is where a permission argument goes when roles arrive.
 
 `SignedIn.secret` (`web/sign_in.py:246`) is in the dataclass's default repr, so a log line,
 a traceback or a crash report that prints the record prints the session secret, and
-"whoever reads it can finish someone else's sign-in". Legacy hid every secret-bearing field
-with `field(repr=False)` (`L application/sign_in.py:120-136`: the state, the authorization
-URL and the session secret) and tested it two ways (`tests/unit/test_signin_flow.py:1007`,
-`:1048`): every stored row, dumped through `store.everything()`, scanned for the raw secret,
+"whoever reads it can finish someone else's sign-in". Every secret-bearing field (the
+state, the authorization URL and the session secret) wants `field(repr=False)`, tested two
+ways: every stored row, dumped through `store.everything()`, scanned for the raw secret,
 and every repr scanned too. The deployment rehearsal did the same end to end, grepping every
 secret it was given across the server log, every response and every database row
 (`scripts/rehearse_deployment.py:467-499`).
 
-Hide the fields, port the two tests to `web/sign_in.py` and the credential suite, and give
+Hide the fields, add the two tests to `web/sign_in.py` and the credential suite, and give
 `tests/integration/test_web_sign_in.py` an end-to-end search of every table for the cookie
 secret, the `state` and the client secret after a whole sign-in.
 
@@ -324,18 +300,16 @@ reaches the log ("unchecked it would reach a message, and a message reaches a lo
 `web/cookies.py:34` rounds `Max-Age` down with `int()`, and `Max-Age=0` is how a cookie is
 deleted.
 
-Legacy (`L api/auth_routes.py:65-79`, `:114-206`, `:241-320`; `L api/cookies.py:11-23`,
-`:57-72`; `tests/unit/test_api_auth_routes.py:205-598`): every `/auth` answer carried
-`no-store`; navigations answered 303; every way a sign-in failed cleared the login cookie,
-an unexpected exception included ("a state cookie left behind would be offered to the next
-callback that arrives"), the handler catching `Exception` so `CancelledError` still passed;
-the provider path parameter was checked against the id pattern before anything used it,
-and a misshapen one went to the sign-in page as `unknown_provider`; a finished sign-in
-landed on `public_url` plus `/ui/` plus the hash of `return_to` and nothing else from it;
-cookies were `Lax`, since `Strict` "would drop the `state` cookie on exactly that request,
+The fix: every `/auth` answer carries `no-store`; navigations answer 303; every way a
+sign-in fails clears the login cookie, an unexpected exception included ("a state cookie
+left behind would be offered to the next callback that arrives"), the handler catching
+`Exception` so `CancelledError` still passes; the provider path parameter is checked
+against the id pattern before anything uses it, and a misshapen one goes to the sign-in
+page as `unknown_provider`; a finished sign-in lands on `public_url` plus `/ui/` plus the
+hash of `return_to` and nothing else from it; cookies are `Lax`, since `Strict` "would drop the `state` cookie on exactly that request,
 so no sign-in would ever complete"; `Max-Age` never rounded down to 0.
 
-Restore all of it, with those tests, and give `docs/specs/sign-in.md` one line on why the
+Do all of it, with a test for each, and give `docs/specs/sign-in.md` one line on why the
 cookies are `Lax`.
 
 ### security-13: A repeated JSON key is accepted
@@ -343,18 +317,17 @@ cookies are `Lax`.
 `{"title": "Safe", "title": "Evil"}` is parsed by the framework as the last value. "It is a
 write that asked two things and was answered on one of them, and a reviewer, a log or a
 proxy reading the same bytes may well pick the other." Nothing in the new web layer refuses
-it, at any depth. The trap legacy avoided is still set: `controller/contract/domain.py:22`
+it, at any depth. A trap is set: `controller/contract/domain.py:22`
 makes `InvalidValueError` a `ValueError` too, so a `JSONDecodeError` caught as a `ValueError`
 would swallow the refusal.
 
-Legacy's `read_once` (`L api/protection.py:732-856`; `tests/unit/test_conversation_routes.py:
-929-1043`): a dependency parsed the cached body again with an `object_pairs_hook` that
-raises on a repeated key; `RecursionError` became a 422, since there is a narrow band of
-nesting where the framework's parse succeeds and the deeper one runs out of stack;
-`JSONDecodeError` was caught by its own class; a test walked the routes and required every
-route with a body to declare the check, and asserted that list is not empty.
+The fix, a `read_once` dependency: it parses the cached body again with an
+`object_pairs_hook` that raises on a repeated key; `RecursionError` becomes a 422, since
+there is a narrow band of nesting where the framework's parse succeeds and the deeper one
+runs out of stack; `JSONDecodeError` is caught by its own class; a test walks the routes and
+requires every route with a body to declare the check, and asserts that list is not empty.
 
-Restore it on every route that takes a body, with the walk that proves the declaration.
+Add it on every route that takes a body, with the walk that proves the declaration.
 
 ### security-14: No cap on pending sign-ins, and `busy` is never raised
 
@@ -366,8 +339,7 @@ says the cap "bounds the table; it does not protect sign-in", and the rate limit
 front of the platform. Both halves need the cap to exist. `auth-plan.md` deferred it to
 "stage two, housekeeping" and `cross-04` never received it.
 
-Legacy (`L datastore/credentials.py:19`, `:105-124`, `:266`, `:355`; `L application/
-sign_in.py:350`; `L domain/identity.py:32`, 10,000): count the unexpired sign-ins and
+The cap, 10,000: count the unexpired sign-ins and
 insert one in a single transaction under `pg_advisory_xact_lock((space << 32) |
 'pending_logins'::regclass::oid)`, because `SELECT count(*)` sees committed rows only, so
 "ten transactions inserting at once each count nine and all ten get in" at any isolation
@@ -378,8 +350,7 @@ Python before the statement, because "a constraint only runs when a row is reall
 inserted" and at the cap nothing is; each lock kind in a high half of its own, the low half
 the OID of the thing locked, so two deployments or two test schemas do not queue behind
 each other. The new schema lock uses `1382508616` (`controller/adapters/postgres/schema.py`),
-so the cap's space must differ. The contract suite's cap tests
-(`tests/contracts/credential_store.py:352-397`) need a warm pool to bite
+so the cap's space must differ. The cap's contract tests need a warm pool to bite
 (`tests/postgres.py:143`).
 
 Add the cap to the credential port and both implementations, raise `busy` from `begin`,
@@ -395,14 +366,13 @@ sixty-seven megabytes of memory before anybody looks at the number"). `_token_an
 `error_description` into the log unbounded, so a provider's 429 tells the person their
 sign-in was refused and "sends them to fix something that is not broken".
 
-Legacy (`L adapters/identity_provider.py:20-33`, `:97-143`, `:523-609`, `:625-688`): every
-request sent `Accept-Encoding: identity` and an answer carrying a content encoding was
-refused unread; a declared `Content-Length` over 256 KiB was refused before the body was
-read, and the raw stream was counted off the wire and abandoned past the bound; 408, 425
-and 429 were `provider_unavailable`, not `provider_refused`; the provider's words were cut
-to 120 characters before they reached a message; a fixed, honest `User-Agent` was sent.
+The fix: every request sends `Accept-Encoding: identity` and an answer carrying a content
+encoding is refused unread; a declared `Content-Length` over 256 KiB is refused before the
+body is read, and the raw stream is counted off the wire and abandoned past the bound; 408,
+425 and 429 are `provider_unavailable`, not `provider_refused`; the provider's words are cut
+to 120 characters before they reach a message; a fixed, honest `User-Agent` is sent.
 
-Restore the bound, the encoding rule and the retryable statuses in `web/oidc.py`, and run
+Add the bound, the encoding rule and the retryable statuses in `web/oidc.py`, and run
 the stand-in's gzip bomb, oversized and overstated-length misbehaviours against them.
 
 ## Cross-component features
@@ -421,8 +391,9 @@ in the target unless the saver's rows are copied, which the PostgreSQL saver can
 
 Each engine keeps the history within the model's window by its
 own means: `SummarizationMiddleware` on LangChain, a history processor on Pydantic AI,
-sized from `ModelConfig.context_window`, with legacy's numbers (`SUMMARIZE_AT`,
-`KEEP_MESSAGES`, `TRIM_AT`, `CHARS_PER_TOKEN`, `DEFAULT_CONTEXT_WINDOW`). The vendor's
+sized from `ModelConfig.context_window`: summarize at 80% of the window keeping the last
+20 messages, trim at 80%, estimate 4 characters per token, and assume a 200,000-token
+window when none is configured. The vendor's
 prompt cache placed on the system prompt. Any middleware or processor writes updates of
 its own, which the engines' event translation must tolerate (see LangChain below).
 
@@ -440,15 +411,15 @@ schedule, each calling the engine's `forget`, which is the only way memory is de
 
 ### cross-05: Titles
 
-A conversation's title from its first exchange: legacy derived it in `core`;
-the spec says ask the model, which needs a sessionless call the engine contract does
+A conversation's title from its first exchange: derived from its text, or, as
+the spec says, asked of the model, which needs a sessionless call the engine contract does
 not have. Decide, then add the operation or keep the derivation.
 
 ### cross-06: Tool names across servers
 
 Both engines list tools from several MCP servers; a tool
-of the same name on two servers collides. Legacy prefixed `<server id>_<tool>` in both
-frameworks. Restore in both engines, and decide whether the prefix is shown in the UI.
+of the same name on two servers collides. Prefix each as `<server id>_<tool>` in
+both engines, and decide whether the prefix is shown in the UI.
 
 ### cross-07: A tool result the server marks as an error
 
@@ -564,7 +535,7 @@ so that deletion depends on the cascade alone, against the schema's header, and
 the purge relies on the cascade for messages, turns and events. On DynamoDB the
 sparse listing index hides trashed sessions, and the sweeps for hidden sessions
 and expired leases need a `Scan` or an index. `schema.sql` says, in the present
-tense, that the server refuses a wrong hash, and nothing keeps it: port legacy's
+tense, that the server refuses a wrong hash, and nothing keeps it: add
 schema tests (one row, the hash, a half-applied file, four `db init` at once);
 the advisory lock itself is block 6's step 1.
 
@@ -605,7 +576,7 @@ projects; say which wins.
 
 ### data-20: `position` as `bigint`
 
-**`position` as `bigint`**, as legacy had it, and `after` bounded at the edge: with
+**`position` as `bigint`**, and `after` bounded at the edge: with
 an `int4` column asyncpg raises on `?after=3000000000` or a large `Last-Event-ID`,
 a 500 where an empty replay or a 422 is due.
 
@@ -627,8 +598,8 @@ doc say "one conditional write".
 
 Block 5 cleans each
 document alone, so a surrogate pair split across two pieces becomes two U+FFFD in
-the events and in the answer; legacy's `publishable` held the high half back for
-the next piece (`legacy/domain/values.py`), and `data-model.md` still promises
+the events and in the answer; hold the high half back for the next piece
+instead, since `data-model.md` still promises
 "what a person watched arrive is what is stored". Pydantic AI's
 `ModelMessagesTypeAdapter.dump_json` refuses a lone surrogate before `json` can
 help, and LangGraph's serializer writes `?` for one: the engines clean what they
@@ -760,7 +731,7 @@ turns continued from the same earlier checkpoint.
 ### langchain-04: `force_tracing_off` pops two LangChain variables from the environment
 
 `force_tracing_off` pops two LangChain variables from the process environment at
-construction. Legacy did the same; keep the one comment that says why.
+construction. Keep the one comment that says why.
 
 ### langchain-05: Sessions are a set beside the saver
 
@@ -835,8 +806,8 @@ Paging: `list_conversations` answers a plain slice with no cursor.
 
 ### controller-07: The visible thread after edits
 
-The visible thread after edits: the path to the newest message; the tree rules legacy
-kept in `core` (`ConversationTree`) say what may follow what.
+The visible thread after edits: the path to the newest message, with tree rules that say
+what may follow what.
 
 ### controller-08: `parse_config` validates shape only
 
@@ -893,12 +864,7 @@ The set-model route stores nothing; decide whether it stays.
 ### web-06: The frontend's `folded()` accepts two shapes of tool result
 
 The frontend's `folded()` accepts a tool result inside the answer and in a separate
-tool message; `docs/specs/legacy/conversations.md` still describes the latter.
-
-### web-07: The legacy subcommands and `db init`
-
-`robinauts db init` and the other legacy subcommands are gone from the console script
-until the PostgreSQL block adds `db init` back.
+tool message.
 
 ## Packaging and operations
 
@@ -906,7 +872,7 @@ until the PostgreSQL block adds `db init` back.
 
 The wheel hook, the demo (`demo/robinauts.toml.in` uses `mcp_servers` and
 `engine = "langgraph"`), the deployment rehearsal and the CI scripts, all pointing at
-legacy paths or legacy subcommands.
+paths or subcommands that no longer exist.
 
 ### packaging-02: `check-frontend.sh` refuses Node 22, and one timing test is flaky
 

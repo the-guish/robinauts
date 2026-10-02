@@ -23,7 +23,7 @@ store, and block 6's PostgreSQL store passes it unchanged. Happy path only.
   key nobody wrote, an unknown kind, or a version above 1 is an `InvalidValueError`
   that names what it found. The table of upgrades is empty: there is one version. The
   encoder cleans every string it writes, keys and values alike, dropping a NUL and
-  replacing an unpaired surrogate with U+FFFD, as legacy's `clean_text` did, and
+  replacing an unpaired surrogate with U+FFFD, and
   refuses NaN and infinity (`allow_nan=False`): PostgreSQL holds none of them, and a
   tool may send any. The controller cleans a title, a name, an email and a turn's
   error the same way before they reach a column.

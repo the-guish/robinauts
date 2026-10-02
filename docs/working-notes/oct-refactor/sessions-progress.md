@@ -3,7 +3,7 @@
 Branches `feature/sessions-1` to `-4`, one commit each, on `refactor/sessions`.
 
 - The unit suite after step 3 is what it was before step 1: 2944 passed, 6 skipped, and
-  the one legacy failure below. The layer rules (`tests/unit/test_architecture.py`,
+  the one known failure below. The layer rules (`tests/unit/test_architecture.py`,
   which runs `lint-imports`) pass on every step; ruff, black and `reuse lint` are green on
   every step.
 - The frontend's typecheck, which regenerates `schema.d.ts` from the snapshot, passes
@@ -13,7 +13,7 @@ Branches `feature/sessions-1` to `-4`, one commit each, on `refactor/sessions`.
   tool said: hello from the browser"; the requests on the wire were the ones the frontend
   has always sent (`/auth/session`, `/api/conversations`, `/api/turns`,
   `/api/conversations/{id}`), and the server log shows one turn and no error.
-- Nothing under `docs/` or `backend/src/` outside `legacy` names the old operations or
+- Nothing under `docs/` or `backend/src/` names the old operations or
   types any more.
 
 ## Departures from the plan
@@ -40,4 +40,4 @@ Branches `feature/sessions-1` to `-4`, one commit each, on `refactor/sessions`.
 ## Known
 
 - `tests/unit/test_conversation_routes.py::test_a_body_nested_deeper_than_it_can_be_read_is_refused`
-  fails on this machine before and after this block (a legacy recursion-depth test).
+  fails on this machine before and after this block (a recursion-depth test).

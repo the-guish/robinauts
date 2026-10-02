@@ -8,16 +8,6 @@ description = "Conversational agents that play fair: the Robinauts backend."
 requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "The Robinauts Authors" }]
-# FastAPI is pinned to the one minor version whose `APIRouter` somebody has
-# read. `robinauts.legacy.api.access` reads two of its private route lists to check
-# that nothing is served without a permission (ROUTE_LISTS), and
-# `test_the_walk_knows_every_route_list_fastapi_keeps` pins the same range as
-# READ_FASTAPI, so the metadata and the test say one thing rather than two.
-# **Bumping this means opening `fastapi.routing.APIRouter`**, seeing which
-# attributes hold routes, and updating ROUTE_LISTS and READ_FASTAPI to match.
-# There is a backstop that needs no such knowledge -- a list of routes under a
-# name nothing reads stops the deployment -- so a bump cannot quietly open a
-# door either way; the range is what makes somebody look.
 dependencies = [
     "ag-ui-protocol>=1.0,<2",
     # Anthropic's own SDK, which both engines reach the vendor through and
@@ -55,13 +45,13 @@ dependencies = [
     # that engine reaches the tool servers (docs/specs/agents.md, "Tools").
     "pydantic-ai-slim[anthropic,mcp,openai]>=2.47,<3",
     # The ASGI server `robinauts start` runs (docs/specs/backend.md, "Web"),
-    # imported by `robinauts.legacy.cli` and by nothing else -- the import-linter
+    # imported by `robinauts.web.cli` and by nothing else -- the import-linter
     # contract below has named it since before it was a dependency. BSD-3-Clause,
     # bringing `click` (BSD-3-Clause) and `h11` (MIT), both already in the lock.
     # Not `uvicorn[standard]`: that adds `uvloop`, `httptools`, `watchfiles`,
     # `websockets` and `python-dotenv` -- a faster loop and a parser we have not
     # measured a need for, a reloader a deployment must not have, a protocol
-    # this platform deliberately does not serve (robinauts.legacy.api.protection) and a
+    # this platform deliberately does not serve and a
     # second way to set environment variables.
     #
     # The upper bound is the ten-day cooldown (.github/dependabot.yml): 0.53.0
@@ -114,7 +104,7 @@ path = "hatch_build.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/robinauts"]
 # The built interface (`frontend/dist` -> `robinauts/ui/`, which is what
-# `robinauts.legacy.app.packaged_ui` reads) and the refusal to build a wheel without
+# `robinauts.web.cli.interface` reads) and the refusal to build a wheel without
 # it. Both are in the hook rather than in a `force-include` table here, because
 # an **editable** install has no built frontend by design and a declared
 # force-include is looked for whichever kind of build it is -- which would make
@@ -156,10 +146,7 @@ testpaths = ["tests"]
 # and neither can pytest: "coroutine was never awaited" is raised inside the
 # garbage collector, where nothing can turn it into a failure -- it reaches
 # the warnings summary and no further -- and "task exception was never
-# retrieved" is not a warning at all but a line the event loop logs. That is
-# why robinauts.legacy.adapters.run_executor retrieves every exception itself, and
-# why its tests install an exception handler on the loop and assert that it
-# saw nothing.
+# retrieved" is not a warning at all but a line the event loop logs.
 filterwarnings = ["error"]
 # The gate scripts are not part of the robinauts package, but their pure
 # logic is tested like anything else.
@@ -173,7 +160,7 @@ markers = [
 ]
 # `tests/live/` is never collected by a plain run, and therefore never by CI:
 # those tests call a vendor with a real key and are run by hand, by naming the
-# file (`uv run pytest tests/live/test_langgraph_live.py`). Not a marker
+# file (`uv run pytest tests/live/test_langchain_live.py`). Not a marker
 # expression in `addopts`, which would set `markexpr` on every run and so
 # silence the check that the database tests really ran (tests/conftest.py).
 #
@@ -196,8 +183,7 @@ norecursedirs = [
 
 # ---------------------------------------------------------------------------
 # Layer rules. docs/architecture/rules.md says them; these enforce them.
-# Anything not allowed is forbidden. `legacy` keeps its old homes for the
-# third-party libraries until it is removed.
+# Anything not allowed is forbidden.
 # ---------------------------------------------------------------------------
 [tool.importlinter]
 root_package = "robinauts"
@@ -208,7 +194,7 @@ name = "agent_engines imports nothing from robinauts outside itself"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts.agent_engines"]
-forbidden_modules = ["robinauts.controller", "robinauts.web", "robinauts.legacy"]
+forbidden_modules = ["robinauts.controller", "robinauts.web"]
 
 [[tool.importlinter.contracts]]
 name = "the engines' contract imports no engine"
@@ -240,7 +226,6 @@ forbidden_modules = [
     "robinauts.agent_engines.langchain_engine",
     "robinauts.agent_engines.pydantic_ai_engine",
     "robinauts.web",
-    "robinauts.legacy",
 ]
 
 [[tool.importlinter.contracts]]
@@ -324,15 +309,7 @@ forbidden_modules = [
     "robinauts.controller.adapters",
     "robinauts.controller.application",
     "robinauts.agent_engines",
-    "robinauts.legacy",
 ]
-
-[[tool.importlinter.contracts]]
-name = "legacy imports nothing of the new layers"
-type = "forbidden"
-allow_indirect_imports = true
-source_modules = ["robinauts.legacy"]
-forbidden_modules = ["robinauts.agent_engines", "robinauts.controller", "robinauts.web"]
 
 # --- third-party libraries: where each may be imported ----------------------
 # The source is the whole package, so a module added tomorrow is inside the
@@ -360,8 +337,6 @@ forbidden_modules = [
 ignore_imports = [
     "robinauts.agent_engines.langchain_engine -> *",
     "robinauts.agent_engines.langchain_engine.** -> *",
-    "robinauts.legacy.adapters.agents.langgraph -> *",
-    "robinauts.legacy.adapters.agents.langgraph.** -> *",
 ]
 unmatched_ignore_imports_alerting = "none"
 
@@ -381,8 +356,6 @@ forbidden_modules = [
 ignore_imports = [
     "robinauts.agent_engines.pydantic_ai_engine -> *",
     "robinauts.agent_engines.pydantic_ai_engine.** -> *",
-    "robinauts.legacy.adapters.agents.pydantic_ai -> *",
-    "robinauts.legacy.adapters.agents.pydantic_ai.** -> *",
 ]
 unmatched_ignore_imports_alerting = "none"
 
@@ -397,10 +370,6 @@ ignore_imports = [
     "robinauts.agent_engines.langchain_engine.** -> *",
     "robinauts.agent_engines.pydantic_ai_engine -> *",
     "robinauts.agent_engines.pydantic_ai_engine.** -> *",
-    "robinauts.legacy.adapters.agents.langgraph -> *",
-    "robinauts.legacy.adapters.agents.langgraph.** -> *",
-    "robinauts.legacy.adapters.agents.pydantic_ai -> *",
-    "robinauts.legacy.adapters.agents.pydantic_ai.** -> *",
 ]
 unmatched_ignore_imports_alerting = "none"
 
@@ -417,8 +386,6 @@ ignore_imports = [
     "robinauts.agent_engines.pydantic_ai_engine.** -> *",
     "robinauts.controller.adapters -> *",
     "robinauts.controller.adapters.** -> *",
-    "robinauts.legacy.datastore -> *",
-    "robinauts.legacy.datastore.** -> *",
 ]
 unmatched_ignore_imports_alerting = "none"
 
@@ -435,8 +402,6 @@ ignore_imports = [
     "robinauts.agent_engines.langchain_engine.** -> *",
     "robinauts.agent_engines.pydantic_ai_engine -> *",
     "robinauts.agent_engines.pydantic_ai_engine.** -> *",
-    "robinauts.legacy.adapters -> *",
-    "robinauts.legacy.adapters.** -> *",
 ]
 unmatched_ignore_imports_alerting = "none"
 
@@ -449,9 +414,5 @@ forbidden_modules = ["fastapi", "starlette", "uvicorn", "ag_ui"]
 ignore_imports = [
     "robinauts.web -> *",
     "robinauts.web.** -> *",
-    "robinauts.legacy.api -> *",
-    "robinauts.legacy.api.** -> *",
-    "robinauts.legacy.app -> *",
-    "robinauts.legacy.cli -> *",
 ]
 unmatched_ignore_imports_alerting = "none"

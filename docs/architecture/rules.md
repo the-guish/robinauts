@@ -9,7 +9,6 @@ runs them.
 agent_engines -> nothing from robinauts
 controller -> agent_engines.contract
 web -> controller.contract, controller.composition
-legacy -> nothing of the three above; nothing imports legacy
 
 ## Inside agent_engines
 
@@ -36,5 +35,3 @@ anthropic, openai, mcp -> langchain_engine, pydantic_ai_engine
 asyncpg, sqlite3, aiosqlite -> langchain_engine, pydantic_ai_engine, controller.adapters
 httpx -> web, langchain_engine, pydantic_ai_engine
 fastapi, starlette, uvicorn, ag_ui -> web
-
-Until legacy is removed, each library rule also allows legacy's old home for it.

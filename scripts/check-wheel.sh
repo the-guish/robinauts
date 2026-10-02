@@ -92,12 +92,12 @@ import zipfile
 PACKAGE = "robinauts"
 WANTED = (
     f"{PACKAGE}/ui/index.html",
-    f"{PACKAGE}/legacy/datastore/schema.sql",
+    f"{PACKAGE}/controller/adapters/postgres/schema.sql",
 )
 UI = f"{PACKAGE}/ui/"
 ASSETS = f"{UI}assets/"
 LICENCES = ("LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.txt")
-# The same rule the server caches by (robinauts.legacy.api.ui.HASHED), asked of what
+# The rule hashed assets are cached by, asked of what
 # the build really emitted: a year of `immutable` is honest only while every
 # asset's name carries a digest of its contents.
 HASHED = re.compile(r"-[A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$")

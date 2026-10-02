@@ -1,9 +1,7 @@
 # Plan: auth
 
 Block 7 of `master-plan.md`. Read `docs/specs/sign-in.md` first: it is the design this
-block implements, from neorc's (`docs/legal/ip-clearance.md`), and the legacy code that
-implemented it once is open beside it (`legacy/application/sign_in.py`,
-`legacy/adapters/identity_provider.py`, `legacy/core/claims.py`). `docs/architecture/
+block implements, from neorc's (`docs/legal/ip-clearance.md`). `docs/architecture/
 controller.md` says sign-in is not the controller's; `web.md` lists `sign_in`,
 `sign_out` and `current_user_session` as web's.
 
@@ -33,8 +31,7 @@ session outlives a restart. Happy path only.
   shape does.
 - The stand-in OpenID Connect provider, `tests/standin/provider.py`: three endpoints on
   a loopback port, an unsigned ID token with the claims the test wrote, scripted
-  misbehaviour. It imports nothing of legacy's. The fakes in `tests/fakes/` do, and are
-  not reused.
+  misbehaviour. The fakes in `tests/fakes/` are not reused.
 - The layer rules: `httpx` under web, `asyncpg` under `controller.adapters`, and web
   importing `controller.contract` and `controller.composition` alone.
 
@@ -54,7 +51,7 @@ session outlives a restart. Happy path only.
   `controller.md` says, and it is asked `ensure_user` with the identity the provider
   vouched for. **This is the one new class in a contract this block adds**, and the
   owner approves it by approving this plan; no other.
-- **Every credential operation is one statement**, as legacy's were, because the port
+- **Every credential operation is one statement**, because the port
   promises what a read followed by a write does not keep: a pending sign-in is taken by
   `DELETE … RETURNING`, once; a session is one `INSERT`; a secret is resolved by one
   `SELECT … JOIN users`, judged against the `now` the caller gives, so the store keeps
@@ -83,8 +80,8 @@ session outlives a restart. Happy path only.
 - **Sessions and cookies.** A user session is `(id, user_id, secret_hash, created_at,
   expires_at)`, `expires_at` being `now + session_hours`, never renewed. The cookie is
   `__Host-robinauts_session`: `HttpOnly`, `SameSite=Lax`, `Secure`, `Path=/`; on a
-  loopback `http` `public_url` the prefix and `Secure` are dropped, as legacy did
-  (`legacy/api/cookies.py`), which is what the proof and the stand-in run on. A pending
+  loopback `http` `public_url` the prefix and `Secure` are dropped,
+  which is what the proof and the stand-in run on. A pending
   sign-in is `(state_hash, provider, nonce, verifier, return_to, created_at,
   expires_at)`, ten minutes, taken once; the login cookie `robinauts_login` carries
   `state`, and the callback requires the query's `state` to equal it. `begin` deletes
@@ -150,7 +147,7 @@ session outlives a restart. Happy path only.
 - The layer rules of `docs/architecture/rules.md` hold. `httpx` is imported under web
   alone; `asyncpg` under `controller.adapters`. The contract grows what the first
   decision names and nothing else; another class there, or a new import direction,
-  stops the work and asks the owner. Nothing imports legacy.
+  stops the work and asks the owner.
 - Tests that need a database are marked `database` and take
   `ROBINAUTS_TEST_DATABASE_URL`, each in a schema of its own, as block 6's do. Tests
   that need a provider start the stand-in on a port the operating system picks and are

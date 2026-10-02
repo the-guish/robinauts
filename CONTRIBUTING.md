@@ -181,14 +181,14 @@ No package that starts a PostgreSQL is a dependency of this project;
 
 ### Changing the database schema
 
-`backend/src/robinauts/datastore/schema.sql` is the whole schema, and until
+`backend/src/robinauts/controller/adapters/postgres/schema.sql` is the whole schema, and until
 the first release it is **one definition edited in place**: there are no
 migrations, and a database made from an older definition is recreated rather
-than upgraded ([docs/specs/legacy/backend.md](docs/specs/legacy/backend.md)). So
+than upgraded. So
 `robinauts db init` applies the file to an **empty** database, does nothing
 to one already at this version, and refuses every other database there is.
 Every edit to that file updates the `SCHEMA_SHA256` pinned in
-`datastore/schema.py`; `SCHEMA_VERSION` stays at 1, and a test enforces
+`controller/adapters/postgres/schema.py`; `SCHEMA_VERSION` stays at 1, and a test enforces
 both. That pin is the only thing standing where a migration would otherwise
 be; freezing the released schema comes with the migrations work. After
 pulling a schema change, drop your local database and run

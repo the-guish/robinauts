@@ -31,7 +31,7 @@ Branches `feature/pydantic-ai-engine-1` to `-6`, one commit each, on
 ## Departures from the plan
 
 - `pydantic_ai.mcp` at 2.47.0 has no `MCPServerStreamableHTTP`; the MCP client is
-  `MCPToolset` (what legacy used), built with the URL, `headers`, `init_timeout` and
+  `MCPToolset`, built with the URL, `headers`, `init_timeout` and
   `read_timeout`. A URL ending in `/sse` would make fastmcp pick an SSE transport; not
   guarded.
 - The timeout is one deadline around every await on the framework, as in the LangChain
@@ -52,4 +52,4 @@ Branches `feature/pydantic-ai-engine-1` to `-6`, one commit each, on
 ## Known
 
 - `tests/unit/test_conversation_routes.py::test_a_body_nested_deeper_than_it_can_be_read_is_refused`
-  fails on this machine before and after this block (a legacy recursion-depth test).
+  fails on this machine before and after this block (a recursion-depth test).
