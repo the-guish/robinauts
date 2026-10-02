@@ -441,7 +441,8 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     const resume = opened.resume;
     if (runId !== null && resume !== null) {
       void follow(
-        (watched) => attach(runId, resume.after, { signal: watched }),
+        (watched) =>
+          attach(conversationId, runId, resume.after, { signal: watched }),
         {
           watch: true,
           afterLoss,
