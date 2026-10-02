@@ -51,9 +51,9 @@ id and time and encodes the whole message as a versioned document
 
 `store.start_turn(question, turn)` stores the question and creates a turn with its
 own id, in state `running`, with a `lease_until`, in one operation. If the session
-already has a running turn, or has been deleted, it stores neither and raises
-`TurnActiveError`, which web answers with 409. Today the question is stored first by
-`add_message`, and `start_turn(session, follows)` has no turn id.
+already has a running turn, it stores neither and raises `TurnActiveError`, which web
+answers with 409; a hidden session is not found, 404. Today the question is stored
+first by `add_message`, and `start_turn(session, follows)` has no turn id.
 
 - **PostgreSQL:** one transaction:
   - `SELECT 1 FROM sessions WHERE id = $s AND deleted_at IS NULL FOR SHARE`. No row
@@ -110,8 +110,10 @@ returns without running the engine.
 
 - **PostgreSQL:**
   - The loads are `SELECT`s.
-  - The event is `INSERT INTO turn_events (turn_id, position, document)` plus
-    `NOTIFY robinauts_turns, '<turn> 1'` in the same transaction, delivered on commit.
+  - The event is step 11's conditioned `INSERT … SELECT`, with its `expires_at`, plus
+    `SELECT pg_notify('robinauts_turns', '<turn> 1')` in the same transaction,
+    delivered on commit. The condition is what makes it a claim: a turn a reader has
+    ended, or whose lease has passed, takes no first event.
   - The lease tick is `UPDATE turns SET lease_until = … WHERE id = $turn AND state =
     'running' RETURNING cancel_requested_at`. No row means the turn was ended by a
     reader, and the runner stops.
@@ -165,9 +167,11 @@ The provider streams deltas. LangGraph yields `AIMessageChunk`s, the engine's
 next position. Pieces that arrive within about 50 ms of each other should be merged
 into one event.
 
-- **PostgreSQL:** an `INSERT … SELECT` conditioned on the turn being `running`, and a
-  `NOTIFY`, for each event. No row inserted, or another document at that position, is
-  `TurnLostError`, and the runner stops.
+- **PostgreSQL:** an `INSERT … SELECT … FROM turns WHERE id = $turn AND state =
+  'running' AND lease_until > $now FOR SHARE OF turns`, and a `pg_notify`, for each
+  event. The lock waits on a reader ending the turn and then inserts nothing. No row
+  inserted, or another document at that position, is `TurnLostError`, and the runner
+  stops.
 - **AWS:** a conditional `PutItem` for each event, read back on a failed condition for
   the same reason.
 
@@ -220,10 +224,11 @@ All of that is one store operation. Today it is several calls.
   - `UPDATE sessions SET updated_at = …`;
   - `INSERT` the message and the two events;
   - `UPDATE turns SET state = 'finished', ended_at = … WHERE id = $turn AND state =
-    'running'`. The turn leaves `turns_one_running_per_session` by itself. No row
-    means a reader ended the turn while its lease was out: `TurnLostError`, the
-    transaction rolled back, and the runner has nothing more to write;
-  - `NOTIFY '<turn> end'`.
+    'running' AND lease_until > $ended_at`. The turn leaves
+    `turns_one_running_per_session` by itself. No row means a reader ended the turn,
+    or its lease has passed: `TurnLostError`, the transaction rolled back, and the
+    runner has nothing more to write;
+  - `SELECT pg_notify('robinauts_turns', '<turn> end')`.
 - **AWS:** one `TransactWriteItems`:
   - a `Put` of the message and of the two events;
   - an `Update` of the turn, on condition that it is `running`, which failing is
@@ -255,17 +260,21 @@ the client sees the terminal event and stops.
   turn ends as `cancelled`.
 - **The runner dies**, whether the process crashed or the Lambda was killed. Its lease
   runs out. The next read that finds the turn (`open_session`, `watch_turn`,
-  `start_turn`) ends it as `interrupted` through `end_expired_turn`, in the record
-  alone, and the UI shows it as `ended_badly`. A watcher that finds the turn ended
-  with no `turn_ended` event supplies one from the record. A runner that was slow
-  rather than dead finds its next write refused and stops.
+  `start_turn`, `cancel_turn`, `delete_session`) ends it as `interrupted` through
+  `end_expired_turn`, in the record alone, and the UI shows it as `ended_badly` once
+  stage two serves it. A watcher that finds the turn ended with no `turn_ended` event
+  supplies one from the record. A runner that was slow rather than dead finds its
+  next write refused, by the lease or by the end, and stops.
 - **A second runner is dispatched for the turn**, which an async invocation allows.
   Its `MessageStarted` is refused at position 1 and it returns without running the
   engine. On PostgreSQL the dispatcher is in-process, and it does not happen.
-- **The session is deleted during the turn.** `delete_session` cancels the turn its
-  own process runs and waits for it to end, then hides. A turn running in another
-  process makes the hide refuse with 409, and the owner cancels it first. So no
-  runner, and no engine, writes under a purge, and `forget` is the last word.
+- **The session is deleted during the turn.** `delete_session` ends a turn whose
+  lease has passed, cancels the turn its own process runs and waits for it to end,
+  then hides. A turn running in another process makes the hide refuse with 409 until
+  stage two's cancel through the store. On PostgreSQL the hide locks the session row
+  first and looks for a running turn in a second statement, so a turn starting under
+  it is seen. So no runner, and no engine, writes under a purge, and `forget` is the
+  last word.
 - **A tool returns a NUL**, or half a character. The encoder drops the one and
   replaces the other before the event is written, on both stores alike.
 - **A stream reaches a limit**, such as Lambda's 15 minutes or a proxy's timeout. The

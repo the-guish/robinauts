@@ -44,8 +44,8 @@ ranked them. Findings 1 to 7 were answered in `data-model.md`, the path of one m
 `data-model-plan.md` and `postgres-plan.md`; these are the rest.
 
 8. **The path doc and the lease.** `the-path-of-one-message.md` says it describes the
-   controller after block 5, but its lease tick, its `request_cancel` through the store
-   and its runner-dies step are stage two: mark them so, or move them here. Add
+   controller after block 5, but its lease tick and its `request_cancel` through the
+   store are stage two: mark them so, or move them here. Add
    `cancel_requested_at` to the `Turn` record when cancel goes through the store. Until
    then, with several processes, a cancel that lands on a process not running the turn
    returns 204 and cancels nothing; when it does go through the store, the store
@@ -116,13 +116,14 @@ ranked them. Findings 1 to 7 were answered in `data-model.md`, the path of one m
     sparse listing index hides trashed sessions, and the sweeps for hidden sessions
     and expired leases need a `Scan` or an index. `schema.sql` says, in the present
     tense, that the server refuses a wrong hash, and nothing keeps it: port legacy's
-    schema tests (one row, the hash, a half-applied file, four `db init` at once) and
-    the advisory lock `create_schema` needs against concurrent runs.
+    schema tests (one row, the hash, a half-applied file, four `db init` at once);
+    the advisory lock itself is block 6's step 1.
 17. **Where deferred work lives.** `master-plan.md` and this plan listed "the sweep at
     start", which with two processes on one database would interrupt live turns; the
     lease replaces it (`aws-serverless.md`), and both now say so. `controller.md`'s
     `open` and `close`, and `web.md`'s `cancel_turn` and `watch_turn`, describe the old
-    lifecycle until block 5's step 6 rewrites them. Block 5's steps 1, 3 and 4 cannot
+    lifecycle; block 5's step 6 rewrites `controller.md`, and `web.md` waits for this
+    stage. Block 5's steps 1, 3 and 4 cannot
     each leave the suite green as written: no turn id exists until step 3, web has
     none until step 6, and step 3's port forces step 4's runner; the plan says so, or
     regroups them.
@@ -146,6 +147,56 @@ ranked them. Findings 1 to 7 were answered in `data-model.md`, the path of one m
 20. **`position` as `bigint`**, as legacy had it, and `after` bounded at the edge: with
     an `int4` column asyncpg raises on `?after=3000000000` or a large `Last-Event-ID`,
     a 500 where an empty replay or a 422 is due.
+
+The second round of review, of the answers to the first seven, left these:
+
+21. **The lease margin on a serverless dispatch.** Block 5's margin is a minute past
+    the turn's timeout, counted from `start_turn`; a dispatch that is late eats it, and
+    Lambda's minimum event age is 60 s, Cloud Tasks' dispatch deadline bounds the
+    handler's run and not its delivery, and the GCP note says otherwise. Size the
+    margin for the dispatch, or have the claim write the lease. DynamoDB cannot
+    condition a `PutItem` on another item, so the conditioned append, the hide's check
+    of the `ACTIVE` marker and `end_expired_turn` are `TransactWriteItems` there, at
+    about four times the write units; the sketches in `aws-serverless.md` and the path
+    doc say "one conditional write".
+22. **Text split across pieces, and the engines' own stores.** Block 5 cleans each
+    document alone, so a surrogate pair split across two pieces becomes two U+FFFD in
+    the events and in the answer; legacy's `publishable` held the high half back for
+    the next piece (`legacy/domain/values.py`), and `data-model.md` still promises
+    "what a person watched arrive is what is stored". Pydantic AI's
+    `ModelMessagesTypeAdapter.dump_json` refuses a lone surrogate before `json` can
+    help, and LangGraph's serializer writes `?` for one: the engines clean what they
+    save, with a lone-surrogate case in the engines' contract suite over PostgreSQL.
+23. **Writes fenced by the claimant, and an idempotent finish.** Block 5 fences a
+    runner's writes by the turn's state and its lease; `turns.answer_id`, written by
+    the claim and checked by every append and the finish (item 14), fences them by the
+    claimant too. A `finish_turn` retried after a lost acknowledgement gets
+    `TurnLostError` although the turn finished: accept a matching repeat (same state,
+    same answer id), and decide who retries a write asyncpg reports as a lost
+    connection, since block 6 retries nothing.
+24. **`NOTIFY` once per interval.** A `pg_notify` in every append serialises those
+    commits across the cluster (measured: 16,161 tps without, 3,118 with, at 32
+    clients). Watchers re-read the table anyway, so notify at most once per turn per
+    interval.
+25. **Cancel through the store.** Block 5 refuses a cancel of a turn another process
+    runs (409), and the frontend's 409 copy says "Stop the answer first", the one
+    action that then does nothing. `cancel_requested_at`, read by the runner at each
+    lease renewal, removes both; `Turn` gains the field then.
+26. **A moved agent.** Block 5 runs a session's turns on the engine it records and
+    builds it on demand; `agent-engines.md` and ADR 0005 say a moved conversation
+    starts again on the new engine. Decide which, and if the latter: `create` on the
+    new engine, no checkpoint, the new engine recorded, and `forget` on the old.
+27. **Drift the two rounds of review left.** `aws-serverless.md` still has cancel
+    through the store unqualified and asks block 5 for "cancel and lease through the
+    store"; `azure-serverless.md` says `close` waits where block 5 waits and then
+    interrupts; this section is ordered by review rank, not by what it touches;
+    `wire.md`'s "in these ways and in no others" omits the two 409s block 5 adds and
+    AG-UI's `thread_id`; the position of the supplied `turn_ended` is stated only in
+    the plan; `finish_turn` takes no `expires_at` for its last events; and the nits:
+    text splitting differs between `data-model.md` and the plan, "an id is a uuid"
+    would reject `call_id` and `checkpoint_id`, "(hours, not days)" against 24 hours,
+    `turns_error_only_when_failed` also holds `interrupted`, and "Web builds no
+    engine" against `create` and `forget` running in web.
 
 ## langchain_engine
 

@@ -30,17 +30,21 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
 
 ## Decisions
 
-- **The schema is the file, with one edit block 5 asks for:** `sessions.engine text
-  NOT NULL`, after `agent`, with a comment saying the purge forgets on it. It ships in
-  the package, beside the store. `SCHEMA_VERSION` is 1 and `SCHEMA_SHA256` is the
-  file's hash, pinned by a test, so an edit is deliberate and visible, as legacy did
-  (`legacy/datastore/schema.py`).
+- **The schema is the file, with the edits block 5 asks for:** `sessions.engine text
+  NOT NULL`, after `agent`, with a comment saying a turn runs and the purge forgets
+  on it; and the comments brought to block 5's rules, where they still say `end_turn`,
+  a position offered twice is "two runners", or the runner pushes the lease forward
+  and reads the cancel flag. It ships in the package, beside the store.
+  `SCHEMA_VERSION` is 1 and `SCHEMA_SHA256` is the file's hash, pinned by a test, so
+  an edit is deliberate and visible, as legacy did (`legacy/datastore/schema.py`).
 - **The server never changes the database** (`docs/deployment.md`). `robinauts db init`
   applies `schema.sql` to an empty database in one transaction, records the hash, and
   calls `setup` on **every installed engine**, so adding an agent on another engine
   later needs no second `db init`. `controller.open` on PostgreSQL checks the version
-  and the hash, refuses a database that is not this build's and names the command,
-  and does not call `setup`. On in-memory storage it calls `setup`, as today.
+  and the hash, refuses a database that is not this build's or whose
+  `server_encoding` is not `UTF8` (a cluster made under `LANG=C` is `SQL_ASCII`, and
+  takes no non-ASCII document) and names the command, and does not call `setup`. On
+  in-memory storage it calls `setup`, as today.
 - **One asyncpg pool per process**, opened by the composition from
   `ROBINAUTS_DATABASE_URL`, used by the controller's store and handed to the engines
   as `StorageConfig(POSTGRES, {"pool": pool})`, which `controller/application/engines.py`
@@ -52,29 +56,44 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
 - **Constraint names are the interface** between the database and the store. The
   store translates a violation by name:
   - `turns_one_running_per_session` → `TurnActiveError`;
-  - `turn_events_pkey` → read the row there: the same document is the runner's own
-    write, acknowledged late, and is accepted; another document is `TurnLostError`;
+  - `turn_events_pkey` → after the rollback, read the row there by owner, session,
+    turn and position and compare the documents decoded, `expires_at` aside (`jsonb`
+    reorders keys and re-renders numbers, so never as text): the same document is the
+    runner's own write, acknowledged late, and is accepted; another is
+    `TurnLostError`;
   - `users_provider_subject_key` → the user exists: read it and return it.
 
-  Two refusals are not violations but rows not written: an append is an `INSERT …
-  SELECT` conditioned on `turns.state = 'running'`, and `finish_turn`'s `UPDATE turns`
-  has `WHERE … AND state = 'running'`. Zero rows is `TurnLostError`, and the finish's
-  transaction is rolled back. `hide_session`'s `UPDATE sessions` has `AND NOT EXISTS`
-  a running turn, and zero rows is `TurnActiveError`.
+  Three refusals are not violations but rows not written:
+  - an append is `INSERT INTO turn_events … SELECT … FROM turns WHERE id = $t AND
+    session_id = $s AND state = 'running' AND lease_until > $written_at FOR SHARE OF
+    turns`. The lock makes it wait on a reader ending the turn and read again, which
+    the foreign key's own `KEY SHARE` would not; zero rows is `TurnLostError`;
+  - `finish_turn`'s `UPDATE turns` has `WHERE … AND state = 'running' AND lease_until
+    > $ended_at`; zero rows is `TurnLostError`, and the transaction is rolled back;
+  - `hide_session` is two statements in one transaction: `SELECT … FROM sessions
+    WHERE id = $s AND owner_id = $o AND deleted_at IS NULL FOR NO KEY UPDATE` (no
+    row: `SessionNotFoundError`), then `UPDATE sessions SET deleted_at = $at WHERE id
+    = $s AND NOT EXISTS (SELECT 1 FROM turns WHERE session_id = $s AND state =
+    'running')` (zero rows: `TurnActiveError`). The second statement's snapshot is
+    taken after the lock, so a turn that `start_turn` committed under it is seen; one
+    `UPDATE … AND NOT EXISTS` is not, since PostgreSQL does not re-run a subquery for
+    a row that was only locked.
 - **The session row first.** Every transaction that writes a session and one of its
   turns locks the session row before it touches `turns`: `start_turn` with `SELECT …
   FOR SHARE`, `finish_turn` and `hide_session` with their `UPDATE`. So `finish_turn`
   moves `updated_at` first and ends the turn last. The other way round, a `start_turn`
   waiting on `turns_one_running_per_session` and a `finish_turn` waiting on the
-  session row deadlock, and PostgreSQL kills the finish, which loses the answer and
-  leaves the turn running.
+  session row deadlock, and PostgreSQL kills one of them: a start, which is only
+  refused, or a finish, which loses the answer and leaves the turn running.
 - **A turn ended by its lease is one statement.** `end_expired_turn` is `UPDATE turns
-  SET state = 'interrupted', ended_at = $now, error = 'lease expired' WHERE session_id
-  = $s AND state = 'running' AND lease_until < $now RETURNING …`, with no `NOTIFY`:
-  a watcher reads the record when its wait returns.
+  t SET state = 'interrupted', ended_at = $now, error = 'lease expired' FROM sessions
+  s WHERE s.id = t.session_id AND s.id = $s AND s.owner_id = $o AND s.deleted_at IS
+  NULL AND t.state = 'running' AND t.lease_until < $now RETURNING t.*`, with no
+  `NOTIFY`: a watcher reads the record when its wait returns.
 - **Waking watchers is `LISTEN` and `NOTIFY`.** Channel `robinauts_turns`, payload
-  `<turn> <position>` or `<turn> end`, sent in the transaction that writes the event,
-  so it is delivered on commit. One listening connection per process, held apart from
+  `<turn> <position>` or `<turn> end`, sent as `SELECT pg_notify($1, $2)` (`NOTIFY`
+  takes no bind parameter) in the transaction that writes the event, so it is
+  delivered on commit. One listening connection per process, held apart from
   the pool, wakes every waiter of that process. `wait_for_events(…, timeout)` returns
   when woken, when the turn has ended, or when the timeout passes, and the caller
   reads the store again in every case, so a notification lost with a dropped
@@ -147,13 +166,15 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
 
 ## Steps
 
-1. **The schema in the package.** `schema.sql` gains `sessions.engine`.
-   `controller/adapters/postgres/schema.py`:
-   `SCHEMA_VERSION`, `SCHEMA_SHA256`, `create_schema(connection)` for an empty schema,
-   and `check_schema(connection)`, which refuses a missing version, another version or
-   another hash and names `robinauts db init`. Test: the hash matches the file; the
-   file applied to an empty schema twice leaves one version row; `check_schema`
-   passes on it and refuses a schema with no version row and one with another hash.
+1. **The schema in the package.** `schema.sql` gains `sessions.engine` and the
+   comment edits above. `controller/adapters/postgres/schema.py`: `SCHEMA_VERSION`,
+   `SCHEMA_SHA256`, `create_schema(connection)` for an empty schema, under the
+   advisory lock legacy took (`legacy/datastore/schema.py`), since two `db init` at
+   once otherwise collide, and `check_schema(connection)`, which refuses a missing
+   version, another version, another hash or a `server_encoding` that is not `UTF8`,
+   and names `robinauts db init`. Test: the hash matches the file; the file applied
+   to an empty schema twice leaves one version row; `check_schema` passes on it and
+   refuses a schema with no version row and one with another hash.
 2. **The pool.** `open_pool(url)` with the `jsonb` codec, and the test helper that gives
    each test a schema of its own. Test: a dict written to a `jsonb` column comes back
    equal.
@@ -161,8 +182,8 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
    implements the port's operations on these three, by hand-written SQL: a user by
    identity or created, with the duplicate translated; a session added, read by owner
    and id, renamed, listed a page at a time by `(updated_at, id)`, hidden unless a turn
-   is running, and purged; a session's messages, oldest first. Test: the store's
-   contract suite, for these operations.
+   is running (the row locked first), and purged; a session's messages, oldest first.
+   Test: the store's contract suite, for these operations.
 4. **The store: turns and events.** A question stored with its turn, the duplicate
    running turn translated; an event appended at its position, with its `expires_at`,
    only while the turn runs, the same document accepted again and another refused;
@@ -170,9 +191,12 @@ This block stores what block 5 decides, so it starts only when block 5 is done:
    first; the active turn looked up; `end_expired_turn`. `lease_until` is written as
    block 5's runner gives it and read by `end_expired_turn`; `cancel_requested_at` is
    left empty and read in stage two (`data-model-plan.md`). Test: the store's contract
-   suite, whole; and a `finish_turn` and a `start_turn` on one session raced from two
-   connections, many times over: neither deadlocks, the finish always lands, and the
-   start starts or is refused.
+   suite, whole; and three races on one session from two connections, many times
+   over: a `finish_turn` against a `start_turn`, where neither deadlocks, the finish
+   always lands, and the start starts or is refused; a `hide_session` against a
+   `start_turn`, where the session is never hidden with a running turn; and an
+   `append_event` against an `end_expired_turn`, where no event lands on the ended
+   turn.
 5. **Watchers in other processes.** The listening connection, `NOTIFY` in the
    transactions that append an event and end a turn, and `wait_for_events` with its
    timeout. Test: a store on one pool waits while a store on a second pool appends, and

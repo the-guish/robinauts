@@ -9,8 +9,10 @@ store, outside this repository, holds it by the rules of
 Engines keep their memory apart, in storage of their own, and nothing here references
 it (`docs/specs/agent-engines.md`). The controller keeps only the checkpoint id an
 engine hands back, on the answer, and the engine's name on the session and on the
-answer, so that the purge forgets on the engine that holds the memory and not on the
-one the agent's configuration names today.
+answer. A turn runs on the engine the session records, which holds its memory, and the
+purge forgets on it, whatever the agent's configuration names today; the controller
+builds that engine on demand when the configuration no longer names it. Moving an
+agent to another engine, and what its sessions then do, is stage two.
 
 ## Records
 
@@ -58,8 +60,9 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
 - **At most one running turn per session**, held atomically by `start_turn`.
   PostgreSQL holds it with a partial unique index on `turns (session_id) WHERE state
   = 'running'`. A store without one holds it with a record keyed by the session,
-  written with the turn on condition that it does not exist. There is no pointer to
-  the running turn on the session: what is running is looked up.
+  written with the turn on condition that it does not exist, and removed in the same
+  write as whatever ends the turn, `finish_turn` or `end_expired_turn`. There is no
+  pointer to the running turn on the session: what is running is looked up.
 - **A question and its turn are stored in one operation**, so a question refused a
   turn is not left behind.
 - **A turn finishes in one operation:** its answer, its last events, its state, and
@@ -68,31 +71,36 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   positions commit in order. The store accepts the same document again at a position
   it has, since a write retried after a lost acknowledgement is not a second runner,
   and refuses another document there, or any append or finish on a turn that is no
-  longer running, with `TurnLostError`. A runner refused has lost its turn, to a second
-  runner or to a reader that ended it: it cancels its engine's stream and writes
+  longer running or whose lease has passed at the time of the write, with
+  `TurnLostError`. A runner refused has lost its turn, to a second runner, to a reader
+  that ended it, or to its own lease: it cancels its engine's stream and writes
   nothing more. **The first append is the claim:** a second runner dispatched for the
-  same turn is refused at position 1, before it has run the engine.
+  same turn is refused at position 1, before it has run the engine, because each
+  runner mints the answer's id afresh and so no two claims are the same document.
 - **Deleting hides, then purges.** `deleted_at` makes a session not found and closes
   it to turns. The hide is refused while a turn is running (`TurnActiveError`), so no
-  runner and no engine writes under a purge: the controller cancels the turn it runs
-  itself and waits for it to end first, and a turn run by another process is the
-  owner's to cancel. The purge calls `forget` on the engine the session records, which
-  may no longer be the one its agent's configuration names, then deletes the session
-  with its messages, turns and events.
+  runner and no engine writes under a purge: the controller first ends a turn whose
+  lease has passed, cancels the turn it runs itself and waits for it to end, and a
+  turn run by another process is refused until stage two's cancel through the store.
+  The purge calls `forget` on the engine the session records, which may no longer be
+  the one its agent's configuration names, then deletes the session with its
+  messages, turns and events.
 - **Events expire.** `expires_at` is set when an event is written, as that moment
   plus a retention of hours. Ending a turn touches none of its events. The answer is
   in `messages` and the outcome is in `turns`, so after a turn ends nothing reads its
   events but a late watcher. Until they expire, they are the only copy of a turn's
   reasoning and of what a failed turn streamed.
 - **A turn holds a lease.** `lease_until` is written with the turn, as its start plus
-  its timeout and a margin. A running turn whose lease has passed is ended as
-  `interrupted` by the next reader to find it (`open_session`, `start_turn`,
-  `watch_turn`), through `end_expired_turn`: one conditional write that only a running
-  turn takes, in the record alone. No event is written, since a `turn_ended` event is
-  the runner's; a watcher that finds the turn ended with none supplies it from the
-  record. A runner that outlives its lease has lost the turn, and its next write is
-  refused. Renewing the lease for a long turn, and reading back `cancel_requested_at`
-  with each renewal, are stage two.
+  its timeout and a margin, and the runner's own deadline is set from it. A running
+  turn whose lease has passed is ended as `interrupted` by the next reader to find it
+  (`open_session`, `start_turn`, `watch_turn`, `cancel_turn`, `delete_session`),
+  through `end_expired_turn`: one conditional write that only a running turn takes,
+  on the record alone, and on the marker a store without a partial index keeps. No
+  event is written, since a `turn_ended` event is the runner's; a watcher that finds
+  the turn ended with none supplies it from the record. A runner that outlives its
+  lease has lost the turn whether or not a reader has found it: every write names
+  its time, and the store refuses one past the lease. Renewing the lease for a long
+  turn, and reading back `cancel_requested_at` with each renewal, are stage two.
 - **No clocks and no ids in a store.** The controller mints every id and sets every
   time.
 - **A session and its records are addressed from the owner down.** Every operation on
@@ -129,8 +137,10 @@ same write. The decoder reads the document alone.
 - **A document is JSON.** A store that has no JSON type keeps it as UTF-8 text, never
   as its own map type.
 - **Text holds no NUL and no unpaired surrogate.** The encoder drops the one and
-  replaces the other with U+FFFD in every string it writes, question, pieces, tool
-  arguments and results alike, as legacy's `clean_text` did. PostgreSQL's `text` and
+  replaces the other with U+FFFD in every string it writes, keys and values alike,
+  question, pieces, tool arguments and results, as legacy's `clean_text` did, and
+  writes no NaN or infinity. The controller cleans the same way every text it stores
+  as a column: a title, a name, an email, a turn's error. PostgreSQL's `text` and
   `jsonb` hold neither, a provider or a tool may send either, and a store that
   accepts them would hold what another cannot.
 
@@ -268,7 +278,8 @@ them in line.
   turn's record.
 - An answer records its turn, and web takes the run id from it.
 - The runner builds an answer's parts in stream order.
-- A session records its engine, and the purge forgets on it.
+- A session records its engine; a turn runs on it and the purge forgets on it, built
+  on demand when the configuration no longer names it.
 - The encoder cleans every string it writes.
 - Readers end a turn whose lease has passed; the runner stops on `TurnLostError`; the
   hide refuses a session with a running turn.

@@ -94,9 +94,10 @@ These rules let one logical model fit PostgreSQL, DynamoDB and the in-memory sto
   `2026-10-01T12:00:00.000000Z` and uuids lowercase with hyphens, so that string order
   matches time order in a DynamoDB sort key or a GSI.
 - **The controller assigns positions.** `run_turn` is the only writer of a turn's
-  events, so it counts them itself and appends `(turn, position)`. The store refuses a
-  position it already has, which can only mean two runners, a bug that should surface.
-  This saves a round trip per event, and no store keeps a counter.
+  events, so it counts them itself and appends `(turn, position)`. The store accepts
+  the same document again at a position it has, a write retried after a lost
+  acknowledgement, and refuses another document there, which means two runners, with
+  `TurnLostError`. This saves a round trip per event, and no store keeps a counter.
 - **Waiting is the adapter's business, with a timeout.** `wait_for_events(turn, after,
   timeout)` returns when there is something new, when the turn has ended, or when the
   timeout passes. The memory store waits on a condition, PostgreSQL on `LISTEN`, and
