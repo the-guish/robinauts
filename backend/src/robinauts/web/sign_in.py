@@ -43,6 +43,29 @@ class Matcher(StrEnum):
     GROUP = "group"
 
 
+class SignInErrorCode(StrEnum):
+    """Why a sign-in did not complete, as the browser is told it."""
+
+    EXPIRED = "expired"
+    STATE_MISMATCH = "state_mismatch"
+    NOT_ALLOWED = "not_allowed"
+    UNKNOWN_PROVIDER = "unknown_provider"
+    BUSY = "busy"
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    PROVIDER_REFUSED = "provider_refused"
+    INVALID_ID_TOKEN = "invalid_id_token"
+
+
+class SignInError(Exception):
+    """A sign-in that does not complete. The code is what the browser is told; the detail,
+    which may hold the provider's own words, is for the log alone."""
+
+    def __init__(self, code: SignInErrorCode, detail: str) -> None:
+        super().__init__(f"{code}: {detail}")
+        self.code = code
+        self.detail = detail
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderConfig:
     id: str
