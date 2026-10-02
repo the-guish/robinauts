@@ -1,3 +1,4 @@
+[STALE - NEEDS UPDATING]
 # Robinauts — project layout and architecture
 
 Status: draft v1. Goals and design principles are in
