@@ -27,7 +27,9 @@ from robinauts.controller.contract.domain import (
     TextPart,
     TextPiece,
     TurnEnded,
+    TurnStarted,
     TurnState,
+    User,
 )
 from robinauts.controller.contract.ports import Controller
 
@@ -46,6 +48,12 @@ async def opened() -> Controller:
     return controller
 
 
+async def settled(controller: Controller, user: User, started: TurnStarted) -> None:
+    """Wait for the turn to end, as a watcher would."""
+    async for _ in controller.watch_turn(user, started.session_id, started.turn_id):
+        pass
+
+
 @asyncio_test
 async def test_start_session_stores_the_session_and_the_question() -> None:
     controller = await opened()
@@ -60,7 +68,7 @@ async def test_start_session_stores_the_session_and_the_question() -> None:
     assert session.engine == "echo"
     stored = await controller._store.messages_of(user.id, started.session_id)
     assert [message_from_document(d) for d in stored] == [question]
-    await controller._turns[started.session_id]
+    await settled(controller, user, started)
     await controller.close()
 
 
@@ -70,7 +78,7 @@ async def test_the_turn_stores_its_events_and_the_answer() -> None:
     user = await controller.ensure_user(Identity("local", "me"))
     started = await controller.start_session(user, agent="echo", model="echo", text="hello")
     sid = started.session_id
-    await controller._turns[sid]
+    await settled(controller, user, started)
     turn = await controller._store.get_turn(user.id, sid, started.turn_id)
     assert turn is not None
     assert turn.state is TurnState.FINISHED

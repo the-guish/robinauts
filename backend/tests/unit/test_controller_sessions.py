@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from test_controller_turns import opened
+from test_controller_turns import opened, settled
 
 from aio import asyncio_test
 from robinauts.controller.contract.domain import ActiveTurn, Identity, Role
@@ -17,7 +17,7 @@ async def test_open_session_shows_the_thread_after_the_turn() -> None:
     user = await controller.ensure_user(Identity("local", "me"))
     started = await controller.start_session(user, agent="echo", model="echo", text="hello")
     sid = started.session_id
-    await controller._turns[sid]
+    await settled(controller, user, started)
     opened_session = await controller.open_session(user, sid)
     assert opened_session.session == await controller._store.get_session(user.id, sid)
     question, answer = opened_session.messages
@@ -39,7 +39,7 @@ async def test_open_session_shows_the_active_turn() -> None:
     assert isinstance(opened_session.active, ActiveTurn)
     assert opened_session.active.turn_id == started.turn_id
     assert opened_session.active.follows == started.question.id
-    await controller._turns[sid]
+    await settled(controller, user, started)
     await controller.close()
 
 
@@ -48,9 +48,9 @@ async def test_list_rename_and_delete_sessions() -> None:
     controller = await opened()
     user = await controller.ensure_user(Identity("local", "me"))
     first = await controller.start_session(user, agent="echo", model="echo", text="one")
-    await controller._turns[first.session_id]
+    await settled(controller, user, first)
     second = await controller.start_session(user, agent="echo", model="echo", text="two")
-    await controller._turns[second.session_id]
+    await settled(controller, user, second)
     page = await controller.list_sessions(user, limit=10)
     assert [c.id for c in page.sessions] == [second.session_id, first.session_id]
 

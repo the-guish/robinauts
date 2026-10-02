@@ -5,8 +5,9 @@
 
 The runner numbers its turn's events from 1 and is their only writer. Its first append is
 its claim on the turn: refused, it has lost the turn to another runner and runs no engine.
-On ``TurnLostError`` from any write it closes the engine's stream and writes nothing more:
-the turn is another runner's, a reader ended it, or its lease has passed.
+Its deadline comes from the turn's lease, never more than the model's timeout. On
+``TurnLostError`` from any write it closes the engine's stream and writes nothing more: the
+turn is another runner's, a reader ended it, or its lease has passed.
 """
 
 from __future__ import annotations
@@ -55,10 +56,15 @@ from robinauts.controller.contract.domain import (
     TurnLostError,
     TurnState,
 )
+from robinauts.controller.ports.dispatcher import CLOSE
 from robinauts.controller.ports.store import Store, StoredEvent
 
 RETENTION = timedelta(hours=24)
 """How long a turn's events are kept after they are written, a constant for now."""
+
+DEADLINE_MARGIN = 10.0
+"""Seconds the runner's deadline stays short of the lease, so that a finish lands inside it;
+with less than this left, the runner does not claim the turn."""
 
 
 class _Writer:
@@ -114,6 +120,14 @@ class _Writer:
         )
 
 
+def _with_text(parts: list[MessagePart], text: str) -> None:
+    """Text that arrives in a row is one part, until a tool call comes between."""
+    if parts and isinstance(parts[-1], TextPart):
+        parts[-1] = TextPart(parts[-1].text + text)
+    else:
+        parts.append(TextPart(text))
+
+
 async def run_turn(
     store: Store,
     engine: AgentEngine,
@@ -123,8 +137,11 @@ async def run_turn(
     question: Message,
     agent_config: AgentConfig,
     checkpoint_id: str | None,
-    timeout_seconds: float,
+    model_timeout: float,
 ) -> None:
+    remaining = (turn.lease_until - datetime.now(UTC)).total_seconds() - DEADLINE_MARGIN
+    if remaining <= 0:
+        return
     answer_id = uuid.uuid4()
     prompt = "".join(p.text for p in question.parts if isinstance(p, TextPart))
     definition = AgentDefinition(agent_config.system_prompt, agent_config.tools)
@@ -134,6 +151,7 @@ async def run_turn(
         await writer.append(MessageStarted(answer_id, parent_id=question.id))
     except TurnLostError:
         return
+    finishing: asyncio.Future[None] | None = None
     try:
         stream = engine.stream(
             session.id,
@@ -141,12 +159,13 @@ async def run_turn(
             prompt,
             model=turn.model,
             checkpoint_id=checkpoint_id,
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=min(model_timeout, remaining),
         )
         async with aclosing(stream) as events:
             async for event in events:
                 if isinstance(event, TextDelta):
                     await writer.append(TextPiece(answer_id, event.text))
+                    _with_text(parts, event.text)
                 elif isinstance(event, ReasoningDelta):
                     await writer.append(ReasoningPiece(answer_id, event.text))
                 elif isinstance(event, ToolCall):
@@ -161,12 +180,15 @@ async def run_turn(
                     )
                     parts.append(ToolResultPart(event.call_id, event.output, event.is_error))
                 elif isinstance(event, Done):
+                    # An engine that streamed no text at all still hands the answer over.
+                    if event.text and not any(isinstance(p, TextPart) for p in parts):
+                        parts.append(TextPart(event.text))
                     answer = Message(
                         answer_id,
                         session.id,
                         parent_id=question.id,
                         role=Role.ASSISTANT,
-                        parts=(*parts, TextPart(event.text)),
+                        parts=tuple(parts),
                         created_at=datetime.now(UTC),
                         agent=session.agent,
                         engine=session.engine,
@@ -174,16 +196,23 @@ async def run_turn(
                         checkpoint_id=event.checkpoint_id,
                         turn_id=turn.id,
                     )
-                    await writer.finish(
-                        TurnState.FINISHED,
-                        None,
-                        answer,
-                        writer.last(MessageCompleted(answer_id), TurnEnded(TurnState.FINISHED)),
+                    last = writer.last(MessageCompleted(answer_id), TurnEnded(TurnState.FINISHED))
+                    # Once the engine has handed the answer over, a cancellation must not
+                    # lose it: the finish runs to its end whatever happens to this task.
+                    finishing = asyncio.ensure_future(
+                        writer.finish(TurnState.FINISHED, None, answer, last)
                     )
+                    await asyncio.shield(finishing)
     except TurnLostError:
         return
-    except asyncio.CancelledError:
-        await _end(writer, TurnState.CANCELLED, None)
+    except asyncio.CancelledError as exc:
+        if finishing is not None:
+            await asyncio.wait({finishing})
+            if not finishing.cancelled():
+                finishing.exception()
+        else:
+            state = TurnState.INTERRUPTED if CLOSE in exc.args else TurnState.CANCELLED
+            await _end(writer, state, None)
         raise
     except Exception as exc:
         await _end(writer, TurnState.FAILED, clean_text(str(exc)))
