@@ -19,7 +19,7 @@ from aio import asyncio_test
 from robinauts.agent_engines.contract.domain import Done, Event, TextDelta, ToolCall, ToolResult
 from robinauts.agent_engines.echo_engine.engine import EchoEngine
 from robinauts.controller.adapters.dispatch import InProcessDispatcher
-from robinauts.controller.adapters.memory import MemoryStore
+from robinauts.controller.adapters.memory.store import MemoryStore
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.application.documents import event_from_document
 from robinauts.controller.contract.domain import (

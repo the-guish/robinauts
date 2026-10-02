@@ -8,17 +8,21 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
+from datetime import datetime
 
 from robinauts.controller.contract.domain import (
     AgentListing,
+    ApiToken,
     Identity,
     ModelListing,
     NumberedEvent,
     OpenedSession,
+    PendingLogin,
     Session,
     SessionPage,
     TurnStarted,
     User,
+    UserSession,
 )
 
 
@@ -127,4 +131,61 @@ class Controller(ABC):
 
     @abstractmethod
     async def sweep(self) -> None:
+        raise NotImplementedError
+
+
+class Credentials(ABC):
+    """Where sign-in keeps its records: user sessions, sign-ins in progress and API tokens
+    (``docs/specs/sign-in.md``). A secret never reaches it: a record holds the SHA-256 hex of
+    one, and a lookup is by that hash. Every id and every time comes from the caller, and no
+    clock is read here. Every operation is one statement, so two callers at once never both
+    take what is taken once."""
+
+    @abstractmethod
+    async def add_user_session(self, session: UserSession) -> None:
+        """Its user is one the store has."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def resolve_user_session(self, secret_hash: str, now: datetime) -> User | None:
+        """The user of the session with that hash, or ``None`` when there is none or its
+        ``expires_at`` is not after ``now``."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def delete_user_session(self, secret_hash: str) -> bool:
+        """Delete the session with that hash: true when there was one."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def add_pending_login(self, login: PendingLogin, now: datetime) -> None:
+        """Store it after deleting every pending login whose ``expires_at`` is not after
+        ``now``, so the table holds the last ten minutes and no sweep is needed yet."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def take_pending_login(self, state_hash: str, now: datetime) -> PendingLogin | None:
+        """Delete it and return it, once; ``None`` when it is gone or its ``expires_at`` is not
+        after ``now``, and an expired one is deleted either way."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def add_api_token(self, token: ApiToken) -> None:
+        """Its user is one the store has."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def resolve_api_token(self, secret_hash: str, now: datetime) -> User | None:
+        """The owner of the token with that hash, or ``None`` when there is none or its
+        ``expires_at`` is not after ``now``."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def api_tokens_of(self, user_id: uuid.UUID) -> list[ApiToken]:
+        """The user's tokens, oldest first, ties broken by id."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def delete_api_token(self, user_id: uuid.UUID, token_id: uuid.UUID) -> bool:
+        """Only the owner's: true when that user had that token."""
         raise NotImplementedError

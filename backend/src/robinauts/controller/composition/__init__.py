@@ -18,7 +18,7 @@ from robinauts.agent_engines.contract.ports import StorageKind as EngineStorageK
 from robinauts.agent_engines.contract.ports import installed
 from robinauts.controller.adapters.config_file import read_config
 from robinauts.controller.adapters.dispatch import InProcessDispatcher
-from robinauts.controller.adapters.memory import MemoryStore
+from robinauts.controller.adapters.memory.store import MemoryStore
 from robinauts.controller.adapters.postgres.pool import open_pool
 from robinauts.controller.adapters.postgres.schema import (
     SCHEMA_SHA256,
