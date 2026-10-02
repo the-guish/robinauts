@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from itertools import groupby
@@ -45,9 +46,12 @@ async def test_a_new_conversation_streams_the_turn_as_agui_events() -> None:
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
         run_id = response.headers["x-robinauts-run-id"]
-        assert response.headers["x-robinauts-conversation-id"] == run_id
+        conversation_id = response.headers["x-robinauts-conversation-id"]
+        assert run_id != conversation_id
+        sent = events(response.text)
+        assert (sent[0]["threadId"], sent[0]["runId"]) == (conversation_id, run_id)
         # The echo answers in more than one piece of text.
-        assert [t for t, _ in groupby(e["type"] for e in events(response.text))] == [
+        assert [t for t, _ in groupby(e["type"] for e in sent)] == [
             "RUN_STARTED",
             "TEXT_MESSAGE_START",
             "TOOL_CALL_START",
@@ -83,3 +87,29 @@ async def test_the_conversation_then_shows_the_question_and_the_answer() -> None
         assert events(again.text)[-1]["type"] == "RUN_FINISHED"
         opened = (await http.get(f"/api/conversations/{cid}")).json()
         assert len(opened["messages"]) == 4
+
+
+@asyncio_test
+async def test_a_turn_is_re_attached_to_by_the_conversation_and_the_run() -> None:
+    async with client() as http:
+        started = await http.post("/api/turns", json={"agent_id": "echo", "text": "hello"})
+        cid = started.headers["x-robinauts-conversation-id"]
+        rid = started.headers["x-robinauts-run-id"]
+        last = max(
+            int(b.removeprefix("id: ")) for b in started.text.split("\n") if b.startswith("id: ")
+        )
+        opened = (await http.get(f"/api/conversations/{cid}")).json()
+        assert opened["run_id"] is None
+        assert opened["messages"][1]["provenance"]["run_id"] == rid
+        assert opened["messages"][1]["provenance"]["engine"] == "echo"
+
+        replayed = await http.get(f"/api/conversations/{cid}/runs/{rid}/events?after=0")
+        assert replayed.headers["x-robinauts-run-id"] == rid
+        assert [e["type"] for e in events(replayed.text)][-1] == "RUN_FINISHED"
+        at_the_end = await http.get(
+            f"/api/conversations/{cid}/runs/{rid}/events", headers={"last-event-id": str(last)}
+        )
+        assert [e["type"] for e in events(at_the_end.text)] == ["RUN_STARTED", "RUN_FINISHED"]
+
+        elsewhere = await http.get(f"/api/conversations/{cid}/runs/{uuid.uuid4()}/events")
+        assert elsewhere.status_code == 404

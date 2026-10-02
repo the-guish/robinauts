@@ -202,7 +202,7 @@ test("a dropped connection is picked up with Last-Event-ID", async () => {
     "RUN_FINISHED",
   ]);
   const [url, init] = fetch.mock.calls[1] ?? [];
-  expect(url).toBe(`/api/runs/${RUN}/events`);
+  expect(url).toBe(`/api/conversations/${CONVERSATION}/runs/${RUN}/events`);
   expect(init?.method).toBe("GET");
   expect((init?.headers as Record<string, string>)["last-event-id"]).toBe("3");
 });
@@ -497,10 +497,10 @@ test("attaching asks from where the conversation said to, and says so once", asy
     () =>
       streamed([alreadyOver()], { headers: streamHeaders(RUN, CONVERSATION) }),
   ]);
-  const attached = await attach(RUN, 12);
+  const attached = await attach(CONVERSATION, RUN, 12);
   expect(attached.runId).toBe(RUN);
   const [url, init] = fetch.mock.calls[0] ?? [];
-  expect(url).toBe(`/api/runs/${RUN}/events`);
+  expect(url).toBe(`/api/conversations/${CONVERSATION}/runs/${RUN}/events`);
   const headers = init?.headers as Record<string, string>;
   expect(headers["last-event-id"]).toBe("12");
   // `after` and `Last-Event-ID` are two ways of saying one thing, and the
@@ -514,7 +514,7 @@ test("attaching from the beginning says nothing about a position", async () => {
     () =>
       streamed([finished(9)], { headers: streamHeaders(RUN, CONVERSATION) }),
   ]);
-  await all(await attach(RUN, 0));
+  await all(await attach(CONVERSATION, RUN, 0));
   const headers = fetch.mock.calls[0]?.[1]?.headers as Record<string, string>;
   expect(headers["last-event-id"]).toBeUndefined();
 });
@@ -525,7 +525,7 @@ test("a stream that drops after an attach carries on from where it was", async (
     () =>
       streamed([alreadyOver()], { headers: streamHeaders(RUN, CONVERSATION) }),
   ]);
-  await all(await attach(RUN, 12, at_once));
+  await all(await attach(CONVERSATION, RUN, 12, at_once));
   const headers = fetch.mock.calls[1]?.[1]?.headers as Record<string, string>;
   expect(headers["last-event-id"]).toBe("12");
 });

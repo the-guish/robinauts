@@ -5,9 +5,19 @@
 
 from __future__ import annotations
 
-from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings, StorageConfig
+from robinauts.agent_engines.contract.ports import (
+    AgentEngine,
+    EngineSettings,
+    StorageConfig,
+    StorageKind,
+)
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
+from robinauts.agent_engines.pydantic_ai_engine.memory import InProcessMemory, PostgresMemory
 
 
 async def init_pydantic_ai(settings: EngineSettings, storage: StorageConfig) -> AgentEngine:
-    return PydanticAIEngine(settings, storage)
+    """The engine over the storage asked: its memory in the controller's PostgreSQL, else
+    kept in this process."""
+    if storage.kind is StorageKind.POSTGRES:
+        return PydanticAIEngine(settings, PostgresMemory(storage.options["pool"]))
+    return PydanticAIEngine(settings, InProcessMemory())

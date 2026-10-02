@@ -9,12 +9,12 @@ import asyncio
 from collections.abc import AsyncGenerator
 from typing import Any
 
-import pytest
-from test_controller_turns import opened
+from test_controller_turns import opened, settled
 
 from aio import asyncio_test
 from robinauts.agent_engines.contract.domain import Event
 from robinauts.agent_engines.echo_engine.engine import EchoEngine
+from robinauts.controller.application.documents import event_from_document
 from robinauts.controller.contract.domain import (
     Identity,
     MessageStarted,
@@ -38,13 +38,13 @@ async def test_send_message_runs_a_turn_under_the_answer() -> None:
     user = await controller.ensure_user(Identity("local", "me"))
     started = await controller.start_session(user, agent="echo", model="echo", text="one")
     sid = started.session_id
-    await controller._turns[sid]
+    await settled(controller, user, started)
     first_answer = (await controller.open_session(user, sid)).messages[-1]
     sent = await controller.send_message(
         user, sid, parent_id=first_answer.id, model="echo", text="two"
     )
     assert sent.question.parent_id == first_answer.id
-    await controller._turns[sid]
+    await settled(controller, user, sent)
     thread = (await controller.open_session(user, sid)).messages
     assert len(thread) == 4
     assert thread[:3] == (started.question, first_answer, sent.question)
@@ -61,14 +61,15 @@ async def test_regenerate_answer_runs_a_new_answer_under_the_question() -> None:
     started = await controller.start_session(user, agent="echo", model="echo", text="one")
     sid = started.session_id
     question = started.question
-    await controller._turns[sid]
+    await settled(controller, user, started)
     first_answer = (await controller.open_session(user, sid)).messages[-1]
     regenerated = await controller.regenerate_answer(
         user, sid, question_id=question.id, model="echo"
     )
     assert regenerated.question == question
-    await controller._turns[sid]
-    first_event = (await controller._store.events_after(sid, 0))[0].event
+    await settled(controller, user, regenerated)
+    stored = await controller._store.events_after(user.id, sid, regenerated.turn_id, 0)
+    first_event = event_from_document(stored[0][1]).event
     assert isinstance(first_event, MessageStarted)
     assert first_event.parent_id == question.id
     thread = (await controller.open_session(user, sid)).messages
@@ -86,11 +87,9 @@ async def test_cancel_turn_ends_the_turn_cancelled() -> None:
     user = await controller.ensure_user(Identity("local", "me"))
     started = await controller.start_session(user, agent="echo", model="echo", text="one")
     sid = started.session_id
-    await controller._store.wait_for_events(sid, 0)
-    await controller.cancel_turn(user, sid)
-    with pytest.raises(asyncio.CancelledError):
-        await controller._turns[sid]
-    events = await controller._store.events_after(sid, 0)
-    assert events[-1].event == TurnEnded(TurnState.CANCELLED)
-    assert await controller._store.active_turn(sid) is None
+    await controller._store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
+    await controller.cancel_turn(user, sid, started.turn_id)
+    stored = await controller._store.events_after(user.id, sid, started.turn_id, 0)
+    assert event_from_document(stored[-1][1]).event == TurnEnded(TurnState.CANCELLED)
+    assert await controller._store.active_turn(user.id, sid) is None
     await controller.close()
