@@ -198,6 +198,51 @@ The second round of review, of the answers to the first seven, left these:
     `turns_error_only_when_failed` also holds `interrupted`, and "Web builds no
     engine" against `create` and `forget` running in web.
 
+A third round, of `design/data-model` at the end of block 6, kept what is on the users'
+path or is not undone by a reload, and set the rest aside: an empty session left by a
+first message refused for its model, the stop button racing a turn that is finishing,
+`limit=0` on the listing, the two stores disagreeing on a repeated position, `follows`
+not checked to be a user message, the engines' memory relying on the pool's `json`
+codecs, and the schema hash stamped from the pin rather than from the file applied.
+
+28. **A session on a removed agent breaks the listing and the open.** `web/app.py`'s
+    `list_sessions` builds `defaults` from the agents the configuration names today and
+    indexes it by each session's `agent`, a `KeyError`; `default_model` is a `next()`
+    with no default inside a coroutine, so for an agent that is gone the exhausted
+    generator surfaces as `RuntimeError`. Both are 500s, on every load of the history
+    and on every open of that conversation, for as long as the user has one session on
+    an agent the operator removed; the row never renders, so the user cannot delete it
+    from the interface. `schema.sql` promises the opposite: the operator may remove the
+    agent, and the session keeps its row. In the controller, `run_turn` indexes
+    `self._config.agents[session.agent]` and `self._config.models[turn.model]`
+    unguarded, where `_engine()` already builds an engine the configuration no longer
+    names. Decide what such a session shows (its stored agent id and the model of its
+    last message, or a refusal naming the agent) and apply it to the listing, the open
+    and the runner, with a test over a configuration that lost an agent.
+29. **`watch_turn` reads twice per wake.** After `wait_for_events` returns, the loop
+    queries `events_after` to test for emptiness and then `continue`s to the top, where
+    the same query runs again: two identical SELECTs on `turn_events` per wake of every
+    watcher, on the one path every open conversation sits on. Bind the list the second
+    read fetched and feed it to the `for`, or restructure the loop so the read after the
+    wait is the one iterated.
+30. **The dispatcher discards a runner's exception.** `InProcessDispatcher._settled`
+    calls `task.exception()` only to silence asyncio's "never retrieved" warning. A
+    `run_turn` that raises before the claim (the `KeyError` of item 28, a store error)
+    is logged nowhere; the turn stays `running` until `lease_until`, the timeout plus
+    the minute of margin, the session answers 409 to every new turn meanwhile, and
+    watchers wake every `WAIT_SECONDS` until one's `end_expired_turn` ends it as
+    `interrupted`. Nothing reaches it under normal operation, and it turns every
+    failure that does into a silent lock-out. Log the exception, and end the turn
+    there, as `cancel_turn` does with `_end_if_running`.
+31. **The engines' DDL outside the lock.** `init_database` runs `create_schema` under
+    `pg_advisory_xact_lock`, so two `db init` at once serialise on the schema, and then
+    runs every installed engine's `setup()` outside any lock: both pass the schema and
+    then race `CREATE TABLE IF NOT EXISTS` on the engines' tables, where one fails with
+    `duplicate key value violates unique constraint pg_type_typname_nsp_index` and exits
+    non-zero on a database that is fine. Hold the same lock around the setups. It bites
+    only where init runs concurrently, as two replicas' init containers do; the "four
+    `db init` at once" test item 16 asks for catches it if it covers the engines' tables.
+
 ## langchain_engine
 
 Findings of the review of `feature/langchain-engine-6`, none blocking.
