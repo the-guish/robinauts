@@ -151,12 +151,13 @@ CREATE INDEX IF NOT EXISTS sessions_deleted_at_idx
 -- its turn starts, and an answer when its turn finishes. A turn that fails
 -- leaves no answer.
 --
--- `document` is the message's content in the controller's versioned format:
--- its parts (text, reasoning, tool calls with their arguments, tool results),
--- the agent and the model, the engine's checkpoint id on an answer, and the
--- turn that produced an answer. The columns are what the store orders, joins
--- and checks by. They are not repeated in the document; the decoder reads
--- both.
+-- `document` is the whole message in the controller's versioned format
+-- (docs/architecture/data-model.md): the fields below again, its parts (text,
+-- reasoning, tool calls with their arguments, tool results), the agent and
+-- the model, the engine's checkpoint id on an answer, and the turn that
+-- produced an answer. The columns are what the store orders, joins and checks
+-- by, written from the same record in the same statement; the decoder reads
+-- the document alone.
 --
 -- The id is a primary key, so it is unique across the deployment and not
 -- merely within a session.

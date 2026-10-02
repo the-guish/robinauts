@@ -56,8 +56,9 @@ Users go in a second container partitioned by `/id`.
   sparse index, so the filter on `deleted_at` does that job.
 - **`start_turn` is a transactional batch.** A batch is atomic only within one full
   partition key, and a session's records all share `[owner, session]`. The batch
-  patches the session with `if-match` on its ETag, after checking that
-  `active_turn_id` is empty, and creates the turn. `end_turn` is the same.
+  creates an item with the fixed id `active`, which fails with 409 if it exists,
+  with the question and the turn. `end_turn` deletes it in the batch that ends the
+  turn.
   `ensure_user` is one `create`, with a 409 meaning "read it", as on Firestore.
 - **A logical partition holds at most 20 GB**, which applies to each
   `[owner, session]`. Hierarchical keys let an owner exceed it in total. A batch or a

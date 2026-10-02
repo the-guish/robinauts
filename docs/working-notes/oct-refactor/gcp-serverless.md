@@ -49,9 +49,11 @@ The logical model maps onto paths instead of `PK`/`SK`:
   it, which plays the role of the sparse GSI. The composite index is `list_owner`
   ascending, `updated_at` descending, `__name__` descending, and the cursor is
   `start_after(updated_at, id)`.
-- **`start_turn` and `end_turn` are transactions.** The server client libraries lock
-  the documents they read, so "read the session's `active_turn_id`, write it and the
-  turn" is safe as written.
+- **`start_turn` and `end_turn` are transactions.** `start_turn` creates the marker
+  `sessions/<id>/locks/active`, which fails if it exists, with the question and the
+  turn; `end_turn` deletes it. The server client libraries lock the documents they
+  read, so the check that the session is not deleted is safe in the same
+  transaction.
 - **Deleting a document does not delete its subcollections.** The purge is a
   `recursive_delete` of `sessions/<id>`. As with DynamoDB, "hide, then purge" is the
   only shape that works.

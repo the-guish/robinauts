@@ -41,31 +41,36 @@ Sign-in is block 7; today everyone is the local user. Web calls
   `PK = SESSION#<id>`, which returns the session's record, messages and turns
   together.
 
-### 3. The controller stores the question
+### 3. The controller builds the question
 
 `send_message` checks that the parent belongs to the session. It mints the message's
-id and time, encodes its parts as a versioned document, and calls
-`store.add_message`.
+id and time and encodes the whole message as a versioned document
+(`docs/architecture/data-model.md`).
 
-- **PostgreSQL:** `INSERT INTO messages (id, session_id, parent_id, created_at,
-  document)`, with the document as `jsonb`.
-- **AWS:** `PutItem` with `SK = MSG#<created_at>#<id>` and the document as a string. A
-  document over about 350 KB goes to S3, and the item keeps a pointer to it.
+### 4. The controller stores the question and starts the turn, atomically
 
-### 4. The controller starts the turn, atomically
-
-`store.start_turn(turn)` creates a turn with its own id, in state `running`, with a
-`lease_until`. If the session already has a running turn it raises `TurnActiveError`,
-which web answers with 409. Today it is `start_turn(session, follows)`, with no turn
-id.
+`store.start_turn(question, turn)` stores the question and creates a turn with its
+own id, in state `running`, with a `lease_until`, in one operation. If the session
+already has a running turn, or has been deleted, it stores neither and raises
+`TurnActiveError`, which web answers with 409. Today the question is stored first by
+`add_message`, and `start_turn(session, follows)` has no turn id.
 
 - **PostgreSQL:** one transaction:
-  - `UPDATE sessions SET active_turn_id = $turn WHERE id = $s AND active_turn_id IS
-    NULL AND deleted_at IS NULL`. No row updated means 409.
-  - `INSERT INTO turns …`.
+  - `SELECT 1 FROM sessions WHERE id = $s AND deleted_at IS NULL FOR SHARE`. No row
+    means the session is gone.
+  - `INSERT INTO messages (id, session_id, parent_id, role, created_at, document)`,
+    with the document as `jsonb`.
+  - `INSERT INTO turns (…, state) VALUES (…, 'running')`. A violation of
+    `turns_one_running_per_session` means 409, and the transaction takes the question
+    back with it.
 - **AWS:** one `TransactWriteItems`:
-  - an `Update` on the session item, on condition that `active_turn_id` and
-    `deleted_at` are both absent. A failed condition means 409.
+  - a `ConditionCheck` that the session item exists without `deleted_at`;
+  - a `Put` of the question, with `SK = MSG#<created_at>#<id>` and the document as a
+    string. A document over about 350 KB goes to S3, and the item keeps a pointer to
+    it.
+  - a `Put` of a marker item `SK = ACTIVE`, on condition that it does not exist. A
+    failed condition means 409. It is how a store with no partial unique index holds
+    "one running turn per session".
   - a `Put` of the turn item.
 
 ### 5. The turn is dispatched
@@ -196,21 +201,22 @@ runner then:
 
 - stores the answer, which carries the checkpoint id;
 - appends `MessageCompleted` and `TurnEnded(finished)`;
-- moves the session's `updated_at`, ends the turn, and clears the session's pointer.
+- moves the session's `updated_at` and ends the turn.
 
 All of that is one store operation. Today it is several calls.
 
 - **PostgreSQL:** one transaction:
   - `INSERT` the message and the two events;
-  - `UPDATE turns SET state = 'finished', ended_at = … WHERE state = 'running'`;
-  - `UPDATE sessions SET updated_at = …, active_turn_id = NULL WHERE active_turn_id =
-    $turn`;
+  - `UPDATE turns SET state = 'finished', ended_at = … WHERE id = $turn AND state =
+    'running'`. The turn leaves `turns_one_running_per_session` by itself;
+  - `UPDATE sessions SET updated_at = …`;
   - `NOTIFY '<turn> end'`.
 - **AWS:** one `TransactWriteItems`:
   - a `Put` of the message and of the two events;
   - an `Update` of the turn, on condition that it is `running`;
-  - an `Update` of the session, on condition that its pointer names this turn. The
-    new `updated_at` changes `GSI1SK`, so the session moves to the top of the list.
+  - a `Delete` of the session's `ACTIVE` marker;
+  - an `Update` of the session's `updated_at`. That changes `GSI1SK`, so the session
+    moves to the top of the list.
 
   The worker's invocation then returns, and its billing stops.
 

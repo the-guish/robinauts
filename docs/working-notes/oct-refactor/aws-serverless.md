@@ -110,8 +110,8 @@ everything else is a column (PostgreSQL) or an attribute (DynamoDB).
 | record | key | other columns | document |
 |---|---|---|---|
 | user | `id` | `provider`, `subject` (unique together), `created_at` | — (`name`, `email` as columns; they are few) |
-| session | `id` | `owner_id`, `agent`, `title`, `created_at`, `updated_at`, `deleted_at`, `active_turn_id` | — |
-| message | `(session_id, id)` | `parent_id`, `created_at` | role, parts, agent, model, checkpoint id |
+| session | `id` | `owner_id`, `agent`, `title`, `created_at`, `updated_at`, `deleted_at` | — |
+| message | `(session_id, id)` | `parent_id`, `role`, `created_at` | the whole message (`docs/architecture/data-model.md`) |
 | turn | `(session_id, id)` | `follows`, `state`, `started_at`, `ended_at`, `error`, `cancel_requested_at`, `lease_until` | — |
 | turn event | `(turn_id, position)` | `expires_at` | the event, by kind |
 
@@ -119,13 +119,15 @@ Decisions inside it, each with the reason:
 
 - **A turn is a row**, as `data-model-context.md` proposes. `TurnStarted` and
   `ActiveTurn` carry the turn id, and web uses it as AG-UI's run id.
-- **The running turn is a pointer on the session, `active_turn_id`.** `start_turn`
-  sets it only if it is empty, and writes the turn in the same transaction.
-  `end_turn` clears it only if it still names that turn. DynamoDB has no partial
-  unique index and DSQL has no partial indexes, but a conditional write on one item
-  works in all three stores. `open_session` also learns the active turn from the
-  session it already reads. PostgreSQL may keep the partial unique index on
-  `turns(session_id) where state = 'running'` as a second guard.
+- **The running turn is looked up, not pointed at.** "At most one running turn per
+  session" is held by `start_turn`, and each store holds it its own way. PostgreSQL
+  uses a partial unique index on `turns (session_id) WHERE state = 'running'`. A
+  store with no partial unique index writes a marker keyed by the session (DynamoDB:
+  `SESSION#<id>` / `ACTIVE`) with the turn, on condition that it does not exist, and
+  deletes it when the turn ends. That turns the rule into the uniqueness of a key,
+  which every store guarantees. An earlier draft of this note put an
+  `active_turn_id` pointer on the session instead; it is dropped, since it made two
+  records that had to agree.
 - **Cancelling goes through the store.** `cancel_turn` writes `cancel_requested_at`.
   The runner checks for it and cancels its own engine stream, so the existing
   `CancelledError` path ends the turn as `cancelled`. In one process, the in-process
@@ -177,8 +179,7 @@ suggestions.
 - `start_turn(turn)`: raises `TurnActiveError` if the session already has one.
 - `append_event(turn_id, numbered)`: position given, duplicate refused.
 - `events_after(turn_id, position)`, `get_turn(session, turn_id)`.
-- `end_turn(turn_id, state, ended_at, error)`: only if the turn is running, and it
-  clears the session's pointer.
+- `end_turn(turn_id, state, ended_at, error)`: only if the turn is running.
 - `request_cancel(turn_id, at)`, `renew_lease(turn_id, until) -> bool` (`True` when a
   cancel was requested).
 - `wait_for_events(turn_id, after, timeout)`.
@@ -214,6 +215,7 @@ TTL deletes expired items at no cost, and Streams can drive the purge.
 | session | `SESSION#<id>` | `SESSION` | `OWNER#<owner>` | `<updated_at>#<id>` |
 | message | `SESSION#<id>` | `MSG#<created_at>#<id>` | | |
 | turn | `SESSION#<id>` | `TURN#<id>` | | |
+| running-turn marker | `SESSION#<id>` | `ACTIVE` | | |
 | turn event | `SESSION#<id>` | `EVT#<turn>#<position, zero-padded>` | | |
 | user session (block 7) | `USESS#<hashed secret>` | `USESS` | | |
 | pending login (block 7) | `LOGIN#<state>` | `LOGIN` | | |
@@ -228,8 +230,10 @@ TTL deletes expired items at no cost, and Streams can drive the purge.
   for a list. Opening a session reads the table itself, with consistent reads.
 - **`ensure_user`** is one transaction: put the user and the identity item, each on
   condition that it does not already exist. If that fails, read the identity item.
-- **`start_turn`** is one transaction: update the session on condition
-  `active_turn_id` is absent and `deleted_at` is absent, and put the turn.
+- **`start_turn`** is one transaction: check that the session has no `deleted_at`,
+  put the question, put the `ACTIVE` marker on condition that it does not exist,
+  and put the turn. `end_turn` deletes the marker in the transaction that ends the
+  turn.
 - **Events are written one by one and read with a consistent query.** `SK` is between
   `EVT#<turn>#<after+1>` and `EVT#<turn>#~`. Waiting means polling that query every
   250 ms or so. That costs about four read units a second for each open stream, around
@@ -257,8 +261,8 @@ VPC needed. At the time of writing it has no foreign keys, no JSON column types,
 `LISTEN`/`NOTIFY`, no partial indexes and no triggers. Its concurrency is optimistic,
 so a conflicting transaction fails and is retried. The rules above already avoid
 every one of those. A schema written to the common subset (documents as `text`, no
-foreign keys or cascades the port relies on, polling as the wait, the session pointer
-in place of the partial index) would run on both, with one SQL adapter and a
+foreign keys or cascades the port relies on, polling as the wait, a nullable unique
+column set to the session's id while a turn runs in place of the partial index) would run on both, with one SQL adapter and a
 dialect switch for the wait.
 
 Two things are still open. Does asyncpg work against DSQL's IAM tokens and protocol
