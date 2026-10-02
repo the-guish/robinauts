@@ -44,11 +44,13 @@ session outlives a restart. Happy path only.
   routes are web's: `web/sign_in.py` and `web/oidc.py`. The records are kept through
   one new port in the controller's contract, `Credentials`, beside `Controller` in
   `contract/ports.py`: user sessions, pending sign-ins and API tokens. Its records
-  `UserSession`, `PendingLogin` and `ApiToken` go in `contract/domain.py`.
-  `MemoryCredentials` (`controller/adapters/memory.py`) and `PostgresCredentials`
-  (`controller/adapters/postgres/credentials.py`, over the store's pool) implement it;
-  the composition builds it on the same storage as the controller and hands it to web
-  beside the controller. The controller learns nothing: sign-in is not there, as
+  `UserSession`, `PendingLogin` and `ApiToken` go in `contract/domain.py`. The two
+  adapters have one shape: `controller/adapters/memory.py` becomes the package
+  `controller/adapters/memory/`, its store in `store.py`, and `MemoryCredentials` goes
+  beside it in `credentials.py`, as `PostgresCredentials` goes beside the PostgreSQL
+  store in `controller/adapters/postgres/credentials.py`, over the store's pool. The
+  composition builds the credentials on the same storage as the controller and hands
+  them to web beside the controller. The controller learns nothing: sign-in is not there, as
   `controller.md` says, and it is asked `ensure_user` with the identity the provider
   vouched for. **This is the one new class in a contract this block adds**, and the
   owner approves it by approving this plan; no other.
@@ -173,7 +175,10 @@ session outlives a restart. Happy path only.
    sign-in table refuses; no flag and no provider refuses; `--host 0.0.0.0` with the
    flag refuses.
 2. **The credential port and its memory store.** The records and the `Credentials`
-   port; `MemoryCredentials`; the suite in `tests/contracts/credentials.py`. Test: the
+   port; `adapters/memory.py` moved to `adapters/memory/store.py`, with the package's
+   docstring as `postgres/__init__.py` has one, and its three importers following;
+   `MemoryCredentials` in `adapters/memory/credentials.py`; the suite in
+   `tests/contracts/credentials.py`. Test: the
    suite over the memory store: a session opened is resolved to its user until the
    `now` given passes its expiry and not after; of two callbacks taking one pending
    sign-in, one gets it; a token resolves until revoked; sign-out of a session nobody
