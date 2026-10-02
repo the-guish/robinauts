@@ -14,7 +14,6 @@ from test_controller_turns import opened, settled
 from aio import asyncio_test
 from robinauts.agent_engines.contract.domain import Event
 from robinauts.agent_engines.echo_engine.engine import EchoEngine
-from robinauts.controller.application.documents import event_from_document
 from robinauts.controller.contract.domain import (
     Identity,
     MessageStarted,
@@ -23,6 +22,7 @@ from robinauts.controller.contract.domain import (
     TurnEnded,
     TurnState,
 )
+from robinauts.controller.core.documents import event_from_document
 
 
 class SlowEngine(EchoEngine):

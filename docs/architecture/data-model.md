@@ -120,7 +120,7 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
 
 ### Who writes them
 
-The controller encodes and decodes, in `controller/application`. **The store port
+The controller encodes and decodes, in `controller/core`. **The store port
 passes documents**, with the keys and columns beside them. A store never imports the
 encoder and never reads inside a document. Every store, and every store outside this
 repository, keeps the same bytes, and versions are upgraded in one place.

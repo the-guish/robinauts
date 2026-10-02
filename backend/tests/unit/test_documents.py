@@ -11,14 +11,6 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
-from robinauts.controller.application.documents import (
-    VERSION,
-    clean_text,
-    event_from_document,
-    event_to_document,
-    message_from_document,
-    message_to_document,
-)
 from robinauts.controller.contract.domain import (
     ArgumentsPiece,
     CallCompleted,
@@ -39,6 +31,14 @@ from robinauts.controller.contract.domain import (
     TurnEnded,
     TurnStarted,
     TurnState,
+)
+from robinauts.controller.core.documents import (
+    VERSION,
+    clean_text,
+    event_from_document,
+    event_to_document,
+    message_from_document,
+    message_to_document,
 )
 
 NOW = datetime(2026, 10, 2, 12, 0, 3, 141592, tzinfo=UTC)

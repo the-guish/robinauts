@@ -21,7 +21,6 @@ from robinauts.agent_engines.echo_engine.engine import EchoEngine
 from robinauts.controller.adapters.dispatch import InProcessDispatcher
 from robinauts.controller.adapters.memory.store import MemoryStore
 from robinauts.controller.application.controller import RobinautsController
-from robinauts.controller.application.documents import event_from_document
 from robinauts.controller.contract.domain import (
     AgentConfig,
     Identity,
@@ -36,6 +35,7 @@ from robinauts.controller.contract.domain import (
     TurnEnded,
     TurnState,
 )
+from robinauts.controller.core.documents import event_from_document
 from robinauts.controller.ports.store import Store
 
 FIVE_MINUTES = timedelta(minutes=5)

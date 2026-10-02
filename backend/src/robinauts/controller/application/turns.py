@@ -28,11 +28,6 @@ from robinauts.agent_engines.contract.domain import (
     ToolResult,
 )
 from robinauts.agent_engines.contract.ports import AgentEngine
-from robinauts.controller.application.documents import (
-    clean_text,
-    event_to_document,
-    stored_message,
-)
 from robinauts.controller.contract.domain import (
     AgentConfig,
     ArgumentsPiece,
@@ -55,6 +50,11 @@ from robinauts.controller.contract.domain import (
     TurnEvent,
     TurnLostError,
     TurnState,
+)
+from robinauts.controller.core.documents import (
+    clean_text,
+    event_to_document,
+    stored_message,
 )
 from robinauts.controller.ports.dispatcher import CLOSE
 from robinauts.controller.ports.store import Store, StoredEvent

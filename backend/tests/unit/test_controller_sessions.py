@@ -55,12 +55,15 @@ async def test_list_rename_and_delete_sessions() -> None:
     page = await controller.list_sessions(user, limit=10)
     assert [c.id for c in page.sessions] == [second.session_id, first.session_id]
 
-    renamed = await controller.rename_session(user, first.session_id, "First")
+    page = await controller.list_sessions(user, limit=10)
+    assert [c.title for c in page.sessions] == ["two", "one"]
+
+    renamed = await controller.rename_session(user, first.session_id, "  First\nignored")
     assert renamed.title == "First"
     page = await controller.list_sessions(user, limit=10)
     assert [(c.id, c.title) for c in page.sessions] == [
         (first.session_id, "First"),
-        (second.session_id, ""),
+        (second.session_id, "two"),
     ]
 
     await controller.delete_session(user, first.session_id)

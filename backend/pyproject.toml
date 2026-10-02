@@ -250,6 +250,7 @@ allow_indirect_imports = true
 source_modules = ["robinauts.controller.contract"]
 forbidden_modules = [
     "robinauts.controller.ports",
+    "robinauts.controller.core",
     "robinauts.controller.adapters",
     "robinauts.controller.application",
     "robinauts.controller.composition",
@@ -262,6 +263,7 @@ type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts.controller.ports"]
 forbidden_modules = [
+    "robinauts.controller.core",
     "robinauts.controller.adapters",
     "robinauts.controller.application",
     "robinauts.controller.composition",
@@ -274,9 +276,21 @@ type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts.controller.adapters"]
 forbidden_modules = [
+    "robinauts.controller.core",
     "robinauts.controller.application",
     "robinauts.controller.composition",
     "robinauts.agent_engines",
+]
+
+[[tool.importlinter.contracts]]
+name = "controller.core imports the contract, the ports and the engines' contract"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.controller.core"]
+forbidden_modules = [
+    "robinauts.controller.adapters",
+    "robinauts.controller.application",
+    "robinauts.controller.composition",
 ]
 
 [[tool.importlinter.contracts]]
@@ -293,6 +307,7 @@ allow_indirect_imports = true
 source_modules = [
     "robinauts.controller.contract",
     "robinauts.controller.ports",
+    "robinauts.controller.core",
     "robinauts.controller.adapters",
     "robinauts.controller.application",
     "robinauts.agent_engines",

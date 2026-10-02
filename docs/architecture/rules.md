@@ -23,9 +23,10 @@ no engine imports another
 
 contract -> nothing from robinauts
 ports -> contract
+core -> contract, ports, agent_engines.contract; pure functions, no I/O
 adapters -> contract, ports
-application -> contract, ports, agent_engines.contract
-composition -> contract, ports, adapters, application; imported by web alone
+application -> contract, ports, core, agent_engines.contract
+composition -> contract, ports, core, adapters, application; imported by web alone
 
 ## Third-party libraries, where each may be imported
 

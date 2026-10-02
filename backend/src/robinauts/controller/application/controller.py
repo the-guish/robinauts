@@ -13,17 +13,7 @@ from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime, timedelta
 
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineFactory, installed
-from robinauts.controller.application.documents import (
-    event_from_document,
-    message_from_document,
-    stored_message,
-)
-from robinauts.controller.application.engines import (
-    SecretLookup,
-    build_engines,
-    engine_settings,
-    engine_storage,
-)
+from robinauts.controller.application.engines import build_engines
 from robinauts.controller.application.turns import run_turn
 from robinauts.controller.contract.domain import (
     ActiveTurn,
@@ -54,6 +44,17 @@ from robinauts.controller.contract.domain import (
     User,
 )
 from robinauts.controller.contract.ports import Controller
+from robinauts.controller.core.documents import (
+    event_from_document,
+    message_from_document,
+    stored_message,
+)
+from robinauts.controller.core.engine_settings import (
+    SecretLookup,
+    engine_settings,
+    engine_storage,
+)
+from robinauts.controller.core.titles import title_from_text
 from robinauts.controller.ports.dispatcher import TurnDispatcher
 from robinauts.controller.ports.store import Cursor, Store
 
@@ -174,7 +175,7 @@ class RobinautsController(Controller):
 
     async def rename_session(self, user: User, session_id: uuid.UUID, title: str) -> Session:
         session = await self._store.get_session(user.id, session_id)
-        renamed = dataclasses.replace(session, title=title, updated_at=self._now())
+        renamed = dataclasses.replace(session, title=title_from_text(title), updated_at=self._now())
         await self._store.update_session(renamed)
         return renamed
 
@@ -203,6 +204,7 @@ class RobinautsController(Controller):
             engine=agent_config.engine,
             created_at=now,
             updated_at=now,
+            title=title_from_text(text),
         )
         question = Message(
             uuid.uuid4(),

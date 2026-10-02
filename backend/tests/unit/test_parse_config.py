@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import pytest
 
-from robinauts.controller.application.config import parse_config
 from robinauts.controller.contract.domain import ConfigError, ProviderKind, ToolServerAuth
+from robinauts.controller.core.config import parse_config
 
 AGENT = {"title": "A", "system_prompt": "", "model": "fast"}
 

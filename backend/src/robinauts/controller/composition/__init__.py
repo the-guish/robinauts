@@ -29,11 +29,11 @@ from robinauts.controller.adapters.postgres.schema import (
     create_schema,
 )
 from robinauts.controller.adapters.postgres.store import PostgresStore
-from robinauts.controller.application.config import parse_config
 from robinauts.controller.application.controller import RobinautsController
-from robinauts.controller.application.engines import SecretLookup, engine_settings
 from robinauts.controller.contract.domain import Config, ConfigError, StorageConfig, StorageKind
 from robinauts.controller.contract.ports import Controller, Credentials
+from robinauts.controller.core.config import parse_config
+from robinauts.controller.core.engine_settings import SecretLookup, engine_settings
 from robinauts.controller.ports.store import Store
 
 DATABASE_URL_VARIABLE = "ROBINAUTS_DATABASE_URL"
