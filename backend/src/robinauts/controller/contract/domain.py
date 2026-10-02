@@ -59,6 +59,11 @@ class TurnActiveError(ControllerError):
     """A turn asked for while the session already has one running."""
 
 
+class TurnLostError(ControllerError):
+    """A runner's write refused: the turn is no longer running, its lease has passed, or
+    another runner holds the position. The runner writes nothing more."""
+
+
 class NoActiveTurnError(ControllerError):
     pass
 
@@ -225,8 +230,11 @@ class Message:
     parts: tuple[MessagePart, ...]
     created_at: datetime
     agent: str | None = None
+    engine: str | None = None
     model: str | None = None
     checkpoint_id: str | None = None
+    turn_id: uuid.UUID | None = None
+    """The turn that produced an answer, which web shows as the run id; ``None`` on a question."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,6 +242,9 @@ class Session:
     id: uuid.UUID
     owner_id: uuid.UUID
     agent: str
+    engine: str
+    """The engine that holds the session's memory: the agent's when the session was made."""
+
     created_at: datetime
     updated_at: datetime
     title: str = ""
@@ -254,9 +265,26 @@ class TurnState(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class ActiveTurn:
-    """The turn a session is in the middle of: what it answers, and where its events are."""
+class Turn:
+    """One question, and everything done to answer it. Its id is the run id on the wire."""
 
+    id: uuid.UUID
+    session_id: uuid.UUID
+    follows: uuid.UUID
+    model: str
+    state: TurnState
+    started_at: datetime
+    lease_until: datetime
+    ended_at: datetime | None = None
+    error: str | None = None
+    """For the operator, on a turn that ended badly; never sent to a browser."""
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveTurn:
+    """The turn a session is in the middle of: which, what it answers, and where its events are."""
+
+    turn_id: uuid.UUID
     follows: uuid.UUID
     position: int
 
@@ -276,6 +304,7 @@ class OpenedSession:
 @dataclass(frozen=True, slots=True)
 class TurnStarted:
     session_id: uuid.UUID
+    turn_id: uuid.UUID
     question: Message
 
 
@@ -328,13 +357,16 @@ class ResultLanded:
 
 @dataclass(frozen=True, slots=True)
 class MessageCompleted:
-    message: Message
+    """The answer is stored in the same operation; a copy here would store it twice."""
+
+    message_id: uuid.UUID
 
 
 @dataclass(frozen=True, slots=True)
 class TurnEnded:
+    """The state alone: the error is on the turn's record, for the operator."""
+
     state: TurnState
-    error: str | None = None
 
 
 TurnEvent = (

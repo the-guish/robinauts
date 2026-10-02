@@ -119,7 +119,12 @@ class RobinautsController(Controller):
         agent_config = self._config.agents[agent]
         now = datetime.now(UTC)
         session = Session(
-            uuid.uuid4(), owner_id=user.id, agent=agent, created_at=now, updated_at=now
+            uuid.uuid4(),
+            owner_id=user.id,
+            agent=agent,
+            engine=agent_config.engine,
+            created_at=now,
+            updated_at=now,
         )
         question = Message(
             uuid.uuid4(),
@@ -129,13 +134,14 @@ class RobinautsController(Controller):
             parts=(TextPart(text),),
             created_at=now,
             agent=agent,
+            engine=session.engine,
             model=model,
         )
         await self._store.add_session(session)
         await self._store.add_message(question)
         await self._engines[agent_config.engine].create(session.id)
-        await self._start_turn(session, question, model, None)
-        return TurnStarted(session.id, question)
+        turn_id = await self._start_turn(session, question, model, None)
+        return TurnStarted(session.id, turn_id, question)
 
     async def send_message(
         self,
@@ -157,11 +163,12 @@ class RobinautsController(Controller):
             parts=(TextPart(text),),
             created_at=datetime.now(UTC),
             agent=session.agent,
+            engine=session.engine,
             model=model,
         )
         await self._store.add_message(question)
-        await self._start_turn(session, question, model, parent.checkpoint_id)
-        return TurnStarted(session_id, question)
+        turn_id = await self._start_turn(session, question, model, parent.checkpoint_id)
+        return TurnStarted(session_id, turn_id, question)
 
     async def regenerate_answer(
         self, user: User, session_id: uuid.UUID, *, question_id: uuid.UUID, model: str
@@ -172,21 +179,23 @@ class RobinautsController(Controller):
         checkpoint_id = None
         if question.parent_id is not None:
             checkpoint_id = by_id[question.parent_id].checkpoint_id
-        await self._start_turn(session, question, model, checkpoint_id)
-        return TurnStarted(session_id, question)
+        turn_id = await self._start_turn(session, question, model, checkpoint_id)
+        return TurnStarted(session_id, turn_id, question)
 
     async def cancel_turn(self, user: User, session_id: uuid.UUID) -> None:
         self._turns[session_id].cancel()
 
     async def _start_turn(
         self, session: Session, question: Message, model: str, checkpoint_id: str | None
-    ) -> None:
+    ) -> uuid.UUID:
         agent_config = self._config.agents[session.agent]
         engine = self._engines[agent_config.engine]
-        await self._store.start_turn(session.id, follows=question.id)
+        turn_id = uuid.uuid4()
+        await self._store.start_turn(session.id, follows=question.id, turn_id=turn_id)
         self._turns[session.id] = asyncio.create_task(
             run_turn(self._store, engine, session, question, agent_config, model, checkpoint_id)
         )
+        return turn_id
 
     async def watch_turn(
         self, user: User, session_id: uuid.UUID, *, after: int = 0

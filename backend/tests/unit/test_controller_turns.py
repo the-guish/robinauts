@@ -86,11 +86,13 @@ async def test_the_turn_stores_its_events_and_the_answer() -> None:
     assert events[-1] == TurnEnded(TurnState.FINISHED)
     completed = events[-2]
     assert isinstance(completed, MessageCompleted)
-    answer = completed.message
+    question, answer = await controller._store.messages_of(sid)
+    assert question == started.question
+    assert answer.id == completed.message_id
     assert answer.parts[-1] == TextPart("The tool said: hello")
     assert answer.parent_id == started.question.id
     assert answer.checkpoint_id is not None
-    assert await controller._store.messages_of(sid) == [started.question, answer]
+    assert answer.engine == "echo"
     assert await controller._store.active_turn(sid) is None
     await controller.close()
 

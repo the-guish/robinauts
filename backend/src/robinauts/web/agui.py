@@ -86,8 +86,8 @@ def mapped(run_id: str, event: TurnEvent) -> tuple[BaseEvent, ...]:
                     metadata={"isError": True} if event.is_error else None,
                 ),
             )
-        case MessageCompleted() if event.message.role is Role.ASSISTANT:
-            return (TextMessageEndEvent(message_id=str(event.message.id)),)
+        case MessageCompleted():
+            return (TextMessageEndEvent(message_id=str(event.message_id)),)
         case TurnEnded(state=TurnState.FINISHED):
             return (RunFinishedEvent(thread_id=run_id, run_id=run_id),)
         case TurnEnded(state=TurnState.CANCELLED):

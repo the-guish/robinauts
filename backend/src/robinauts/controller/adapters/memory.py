@@ -25,7 +25,8 @@ class MemoryStore(Store):
         self._sessions: dict[uuid.UUID, Session] = {}
         self._messages: dict[uuid.UUID, list[Message]] = {}
         self._events: dict[uuid.UUID, list[NumberedEvent]] = {}
-        self._follows: dict[uuid.UUID, uuid.UUID] = {}
+        self._turns: dict[uuid.UUID, tuple[uuid.UUID, uuid.UUID]] = {}
+        """A session's running turn: its id and the question it answers."""
         self._changed = asyncio.Condition()
 
     async def user_by_identity(self, provider: str, subject: str) -> User | None:
@@ -49,7 +50,7 @@ class MemoryStore(Store):
         del self._sessions[session_id]
         del self._messages[session_id]
         del self._events[session_id]
-        self._follows.pop(session_id, None)
+        self._turns.pop(session_id, None)
 
     async def sessions_of(self, owner_id: uuid.UUID) -> list[Session]:
         owned = [c for c in self._sessions.values() if c.owner_id == owner_id]
@@ -61,8 +62,10 @@ class MemoryStore(Store):
     async def messages_of(self, session_id: uuid.UUID) -> list[Message]:
         return list(self._messages[session_id])
 
-    async def start_turn(self, session_id: uuid.UUID, follows: uuid.UUID) -> None:
-        self._follows[session_id] = follows
+    async def start_turn(
+        self, session_id: uuid.UUID, follows: uuid.UUID, turn_id: uuid.UUID
+    ) -> None:
+        self._turns[session_id] = (turn_id, follows)
         self._events[session_id] = []
 
     async def append_event(self, session_id: uuid.UUID, event: TurnEvent) -> NumberedEvent:
@@ -77,18 +80,19 @@ class MemoryStore(Store):
         return self._events[session_id][position:]
 
     async def end_turn(self, session_id: uuid.UUID) -> None:
-        del self._follows[session_id]
+        del self._turns[session_id]
         async with self._changed:
             self._changed.notify_all()
 
     async def active_turn(self, session_id: uuid.UUID) -> ActiveTurn | None:
-        follows = self._follows.get(session_id)
-        if follows is None:
+        running = self._turns.get(session_id)
+        if running is None:
             return None
-        return ActiveTurn(follows, len(self._events[session_id]))
+        turn_id, follows = running
+        return ActiveTurn(turn_id, follows, len(self._events[session_id]))
 
     async def wait_for_events(self, session_id: uuid.UUID, after: int) -> None:
         async with self._changed:
             await self._changed.wait_for(
-                lambda: len(self._events[session_id]) > after or session_id not in self._follows
+                lambda: len(self._events[session_id]) > after or session_id not in self._turns
             )

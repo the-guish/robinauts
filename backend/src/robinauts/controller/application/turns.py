@@ -86,17 +86,19 @@ async def run_turn(
                     parts=(*parts, TextPart(event.text)),
                     created_at=datetime.now(UTC),
                     agent=session.agent,
+                    engine=session.engine,
                     model=model,
                     checkpoint_id=event.checkpoint_id,
                 )
                 await store.add_message(answer)
-                await store.append_event(sid, MessageCompleted(answer))
+                await store.append_event(sid, MessageCompleted(answer_id))
                 await store.append_event(sid, TurnEnded(TurnState.FINISHED))
     except asyncio.CancelledError:
         await store.append_event(sid, TurnEnded(TurnState.CANCELLED))
         raise
-    except Exception as exc:
-        await store.append_event(sid, TurnEnded(TurnState.FAILED, error=str(exc)))
+    except Exception:
+        # The error goes on the turn's record once the store keeps turns.
+        await store.append_event(sid, TurnEnded(TurnState.FAILED))
     finally:
         await store.update_session(dataclasses.replace(session, updated_at=datetime.now(UTC)))
         await store.end_turn(sid)

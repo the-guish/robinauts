@@ -39,8 +39,8 @@ async def test_a_user_is_found_by_identity() -> None:
 async def test_sessions_and_messages_read_back() -> None:
     store = MemoryStore()
     owner = uuid.uuid4()
-    older = Session(uuid.uuid4(), owner, "a", NOW, NOW)
-    newer = Session(uuid.uuid4(), owner, "a", NOW, NOW.replace(hour=1))
+    older = Session(uuid.uuid4(), owner, "a", "echo", NOW, NOW)
+    newer = Session(uuid.uuid4(), owner, "a", "echo", NOW, NOW.replace(hour=1))
     await store.add_session(older)
     await store.add_session(newer)
     question = Message(uuid.uuid4(), older.id, None, Role.USER, (TextPart("hi"),), NOW)
@@ -53,14 +53,14 @@ async def test_sessions_and_messages_read_back() -> None:
 @asyncio_test
 async def test_a_turn_numbers_its_events_and_ends() -> None:
     store = MemoryStore()
-    session = Session(uuid.uuid4(), uuid.uuid4(), "a", NOW, NOW)
+    session = Session(uuid.uuid4(), uuid.uuid4(), "a", "echo", NOW, NOW)
     await store.add_session(session)
-    question = uuid.uuid4()
-    await store.start_turn(session.id, question)
+    question, turn = uuid.uuid4(), uuid.uuid4()
+    await store.start_turn(session.id, question, turn)
     piece = TextPiece(uuid.uuid4(), "hello")
     ended = TurnEnded(TurnState.FINISHED)
     assert await store.append_event(session.id, piece) == NumberedEvent(1, piece)
-    assert await store.active_turn(session.id) == ActiveTurn(question, 1)
+    assert await store.active_turn(session.id) == ActiveTurn(turn, question, 1)
     await store.append_event(session.id, ended)
     await store.wait_for_events(session.id, 1)
     assert await store.events_after(session.id, 1) == [NumberedEvent(2, ended)]

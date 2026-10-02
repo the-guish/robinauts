@@ -48,7 +48,9 @@ class Store(ABC):
     async def messages_of(self, session_id: uuid.UUID) -> list[Message]: ...
 
     @abstractmethod
-    async def start_turn(self, session_id: uuid.UUID, follows: uuid.UUID) -> None:
+    async def start_turn(
+        self, session_id: uuid.UUID, follows: uuid.UUID, turn_id: uuid.UUID
+    ) -> None:
         """The turn's events start again at position 1."""
 
     @abstractmethod

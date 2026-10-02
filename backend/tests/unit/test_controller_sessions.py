@@ -37,6 +37,7 @@ async def test_open_session_shows_the_active_turn() -> None:
     opened_session = await controller.open_session(user, sid)
     assert opened_session.messages == (started.question,)
     assert isinstance(opened_session.active, ActiveTurn)
+    assert opened_session.active.turn_id == started.turn_id
     assert opened_session.active.follows == started.question.id
     await controller._turns[sid]
     await controller.close()
