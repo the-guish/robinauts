@@ -14,6 +14,7 @@ from typing import Any
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 
 from robinauts.agent_engines.contract.domain import (
@@ -33,31 +34,61 @@ from robinauts.agent_engines.contract.ports import (
     AgentEngine,
     EngineSettings,
     StorageConfig,
+    StorageKind,
 )
 from robinauts.agent_engines.langchain_engine.clients import chat_model, force_tracing_off
+from robinauts.agent_engines.langchain_engine.saver import PostgresSaver, PostgresSessions
 from robinauts.agent_engines.langchain_engine.tools import tools_for
+
+
+class Sessions:
+    """Which sessions exist, in this process."""
+
+    def __init__(self) -> None:
+        self._known: set[uuid.UUID] = set()
+
+    async def setup(self) -> None:
+        pass
+
+    async def create(self, session_id: uuid.UUID) -> None:
+        if session_id in self._known:
+            raise SessionExistsError(str(session_id))
+        self._known.add(session_id)
+
+    async def exists(self, session_id: uuid.UUID) -> bool:
+        return session_id in self._known
+
+    async def forget(self, session_id: uuid.UUID) -> None:
+        self._known.discard(session_id)
 
 
 class LangChainEngine(AgentEngine):
     def __init__(self, settings: EngineSettings, storage: StorageConfig) -> None:
         self._settings = settings
-        self._saver = InMemorySaver()
-        self._sessions: set[uuid.UUID] = set()
+        self._saver: BaseCheckpointSaver[str]
+        self._sessions: Sessions
+        if storage.kind is StorageKind.POSTGRES:
+            pool = storage.options["pool"]
+            self._saver = PostgresSaver(pool)
+            self._sessions = PostgresSessions(pool)
+        else:
+            self._saver = InMemorySaver()
+            self._sessions = Sessions()
         force_tracing_off()
 
     def kinds(self) -> frozenset[ProviderKind]:
         return frozenset(ProviderKind)
 
     async def setup(self) -> None:
-        pass
+        await self._sessions.setup()
+        if isinstance(self._saver, PostgresSaver):
+            await self._saver.setup()
 
     async def create(self, session_id: uuid.UUID) -> None:
-        if session_id in self._sessions:
-            raise SessionExistsError(str(session_id))
-        self._sessions.add(session_id)
+        await self._sessions.create(session_id)
 
     async def exists(self, session_id: uuid.UUID) -> bool:
-        return session_id in self._sessions
+        return await self._sessions.exists(session_id)
 
     async def stream(
         self,
@@ -70,7 +101,7 @@ class LangChainEngine(AgentEngine):
         timeout_seconds: float,
         resume: bool = False,
     ) -> AsyncGenerator[Event, None]:
-        if session_id not in self._sessions:
+        if not await self._sessions.exists(session_id):
             raise SessionNotFoundError(str(session_id))
         thread: RunnableConfig = {"configurable": {"thread_id": str(session_id)}}
         start: RunnableConfig = thread
@@ -108,7 +139,7 @@ class LangChainEngine(AgentEngine):
         raise NotImplementedError("fork")
 
     async def forget(self, session_id: uuid.UUID) -> None:
-        self._sessions.discard(session_id)
+        await self._sessions.forget(session_id)
         await self._saver.adelete_thread(str(session_id))
 
 

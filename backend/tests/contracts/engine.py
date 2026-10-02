@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Callable, Coroutine
 from enum import Enum
+from typing import Any
 
 import pytest
 
-from aio import asyncio_test
 from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
     CheckpointNotFoundError,
@@ -33,6 +34,24 @@ from robinauts.agent_engines.contract.domain import (
 from robinauts.agent_engines.contract.ports import AgentEngine
 
 AGENT = AgentDefinition(system_prompt="You are a robinaut.")
+
+
+def engine_test(test: Callable[..., Coroutine[Any, Any, None]]) -> Callable[..., None]:
+    """Run the test on a loop of its own, and the suite's `release` after it, on the same
+    loop: what a subclass whose engines hold a database needs."""
+
+    def run(self: Any) -> None:
+        async def go() -> None:
+            try:
+                await test(self)
+            finally:
+                await self.release()
+
+        asyncio.run(go())
+
+    run.__name__, run.__qualname__ = test.__name__, test.__qualname__
+    run.__doc__, run.__module__ = test.__doc__, test.__module__
+    return run
 
 
 async def turn(
@@ -55,7 +74,10 @@ class EngineMemoryContract:
     async def new_engine(self) -> AgentEngine:
         raise NotImplementedError("an EngineMemoryContract subclass overrides `new_engine`")
 
-    @asyncio_test
+    async def release(self) -> None:
+        """Let go of what the engines of this test held; nothing by default."""
+
+    @engine_test
     async def test_a_session_created_twice_is_refused(self) -> None:
         engine = await self.new_engine()
         session = uuid.uuid4()
@@ -64,13 +86,13 @@ class EngineMemoryContract:
             await engine.create(session)
         assert await engine.exists(session)
 
-    @asyncio_test
+    @engine_test
     async def test_a_turn_on_an_unknown_session_is_refused(self) -> None:
         engine = await self.new_engine()
         with pytest.raises(SessionNotFoundError):
             await turn(engine, uuid.uuid4(), self.MODEL)
 
-    @asyncio_test
+    @engine_test
     async def test_a_checkpoint_of_another_session_is_refused(self) -> None:
         engine = await self.new_engine()
         session, other = uuid.uuid4(), uuid.uuid4()
@@ -82,7 +104,7 @@ class EngineMemoryContract:
         with pytest.raises(CheckpointNotFoundError):
             await turn(engine, session, self.MODEL, after="not-one")
 
-    @asyncio_test
+    @engine_test
     async def test_the_next_turn_continues_from_a_handed_out_checkpoint(self) -> None:
         engine = await self.new_engine()
         session = uuid.uuid4()
@@ -92,7 +114,7 @@ class EngineMemoryContract:
         assert second.checkpoint_id != first.checkpoint_id
         await turn(engine, session, self.MODEL, after=first.checkpoint_id)  # an earlier one too
 
-    @asyncio_test
+    @engine_test
     async def test_forget_is_safe_to_repeat(self) -> None:
         engine = await self.new_engine()
         session = uuid.uuid4()
@@ -132,6 +154,9 @@ class EngineTurnContract:
     async def new_engine(self, script: Script) -> AgentEngine:
         raise NotImplementedError("an EngineTurnContract subclass overrides `new_engine`")
 
+    async def release(self) -> None:
+        """Let go of what the engines of this test held; nothing by default."""
+
     async def turn(self, script: Script, timeout_seconds: float = 10.0) -> list[Event]:
         engine = await self.new_engine(script)
         session = uuid.uuid4()
@@ -146,7 +171,7 @@ class EngineTurnContract:
         )
         return [event async for event in stream]
 
-    @asyncio_test
+    @engine_test
     async def test_a_streamed_answer_is_its_pieces_and_done_once_last(self) -> None:
         events = await self.turn(Script.ANSWER)
         pieces = [event.text for event in events if isinstance(event, TextDelta)]
@@ -155,7 +180,7 @@ class EngineTurnContract:
         assert events[-1] == Done(text=ANSWER, checkpoint_id=events[-1].checkpoint_id)
         assert "".join(pieces) == ANSWER
 
-    @asyncio_test
+    @engine_test
     async def test_a_tool_round_is_the_call_then_its_result_before_done(self) -> None:
         events = await self.turn(Script.TOOL_ROUND)
         call = events.index(ToolCall(CALL_ID, "add", ARGUMENTS))
@@ -164,12 +189,12 @@ class EngineTurnContract:
         assert isinstance(events[-1], Done)
         assert events[-1].text == ANSWER
 
-    @asyncio_test
+    @engine_test
     async def test_a_failure_of_the_model_is_raised(self) -> None:
         with pytest.raises(ModelFailure):
             await self.turn(Script.FAIL)
 
-    @asyncio_test
+    @engine_test
     async def test_a_cancellation_is_let_through(self) -> None:
         running = asyncio.create_task(self.turn(Script.HANG))
         await asyncio.sleep(0.2)
@@ -177,7 +202,7 @@ class EngineTurnContract:
         with pytest.raises(asyncio.CancelledError):
             await running
 
-    @asyncio_test
+    @engine_test
     async def test_a_turn_past_its_timeout_ends_with_timeout_error(self) -> None:
         with pytest.raises(TimeoutError):
             await self.turn(Script.HANG, timeout_seconds=0.2)

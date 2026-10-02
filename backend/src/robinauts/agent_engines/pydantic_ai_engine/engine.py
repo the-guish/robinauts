@@ -32,7 +32,6 @@ from robinauts.agent_engines.contract.domain import (
     Event,
     ProviderKind,
     ReasoningDelta,
-    SessionExistsError,
     SessionNotFoundError,
     TextDelta,
     ToolCall,
@@ -44,28 +43,27 @@ from robinauts.agent_engines.contract.ports import (
     StorageConfig,
 )
 from robinauts.agent_engines.pydantic_ai_engine.clients import chat_model, force_tracing_off
+from robinauts.agent_engines.pydantic_ai_engine.memory import memory_for
 from robinauts.agent_engines.pydantic_ai_engine.tools import toolsets_for
 
 
 class PydanticAIEngine(AgentEngine):
     def __init__(self, settings: EngineSettings, storage: StorageConfig) -> None:
         self._settings = settings
-        self._sessions: dict[uuid.UUID, dict[str, list[ModelMessage]]] = {}
+        self._memory = memory_for(storage)
         force_tracing_off()
 
     def kinds(self) -> frozenset[ProviderKind]:
         return frozenset(ProviderKind)
 
     async def setup(self) -> None:
-        pass
+        await self._memory.setup()
 
     async def create(self, session_id: uuid.UUID) -> None:
-        if session_id in self._sessions:
-            raise SessionExistsError(str(session_id))
-        self._sessions[session_id] = {}
+        await self._memory.create(session_id)
 
     async def exists(self, session_id: uuid.UUID) -> bool:
-        return session_id in self._sessions
+        return await self._memory.exists(session_id)
 
     async def stream(
         self,
@@ -78,12 +76,11 @@ class PydanticAIEngine(AgentEngine):
         timeout_seconds: float,
         resume: bool = False,
     ) -> AsyncGenerator[Event, None]:
-        checkpoints = self._sessions.get(session_id)
-        if checkpoints is None:
+        if not await self._memory.exists(session_id):
             raise SessionNotFoundError(str(session_id))
         history = None
         if checkpoint_id is not None:
-            history = checkpoints.get(checkpoint_id)
+            history = await self._memory.history(session_id, checkpoint_id)
             if history is None:
                 raise CheckpointNotFoundError(checkpoint_id)
 
@@ -104,7 +101,7 @@ class PydanticAIEngine(AgentEngine):
                     break
                 if isinstance(item, AgentRunResult):
                     new = str(uuid.uuid4())
-                    checkpoints[new] = item.all_messages()
+                    await self._memory.save(session_id, new, item.all_messages())
                     yield Done(text=item.output, checkpoint_id=new)
                 else:
                     for event in events_of(item):
@@ -114,7 +111,7 @@ class PydanticAIEngine(AgentEngine):
         raise NotImplementedError("fork")
 
     async def forget(self, session_id: uuid.UUID) -> None:
-        self._sessions.pop(session_id, None)
+        await self._memory.forget(session_id)
 
 
 async def run_of(
