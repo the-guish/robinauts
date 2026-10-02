@@ -23,7 +23,8 @@ path, minimal code.
    check, `LISTEN` and `NOTIFY` for watchers in other processes, and both engines'
    PostgreSQL storage. Planned: `postgres-plan.md`.
 7. **Auth.** The OIDC flow, sessions and cookies, the allow list, sign-out, API tokens,
-   and `ensure_user` called from the real identity. Planned: `auth-plan.md`.
+   and `ensure_user` called from the real identity. Done: `auth-progress.md`.
+   Planned: `auth-plan.md`.
 8. **The plan for stage two.** A detailed plan capturing every learning still held in
    legacy's code, tests and specs: the refusals, the edge cases, the bounds, the
    protections, the operations, so that nothing is lost when legacy goes.

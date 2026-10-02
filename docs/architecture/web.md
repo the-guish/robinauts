@@ -7,6 +7,7 @@ The operations the web shell offers the frontend.
 - `sign_in`: start the sign-in with a provider, and finish it when the provider answers.
 - `sign_out`
 - `current_user_session`: who is signed in, if anyone.
+- `mint_api_token`, `list_api_tokens`, `revoke_api_token`: the API tokens of the person signed in, sent as a bearer.
 
 ## Catalogue
 
