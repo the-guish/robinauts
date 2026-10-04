@@ -9,6 +9,8 @@ since it is the one other thing that names the store and the engines together.""
 
 from __future__ import annotations
 
+import os
+import socket
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +40,10 @@ from robinauts.controller.ports.store import Store
 
 DATABASE_URL_VARIABLE = "ROBINAUTS_DATABASE_URL"
 
+WORKER_ID_VARIABLE = "ROBINAUTS_WORKER_ID"
+"""The pod's name, which a Deployment sets to the pod's own: what a turn records as its
+runner, and every runner's write names."""
+
 CONTROLLER_TABLES = frozenset({"model_providers", "models", "tool_servers", "agents", "work"})
 """The file's tables that are the controller's, the ones `parse_config` reads."""
 
@@ -54,6 +60,12 @@ def storage_from(environ: Mapping[str, str]) -> StorageConfig:
     return StorageConfig(StorageKind.IN_MEMORY)
 
 
+def worker_id_from(environ: Mapping[str, str]) -> str:
+    """`ROBINAUTS_WORKER_ID` when set, else this host and process: unique among the replicas
+    either way."""
+    return environ.get(WORKER_ID_VARIABLE) or f"{socket.gethostname()}:{os.getpid()}"
+
+
 @dataclass(frozen=True, slots=True)
 class Composed:
     """The controller, and the credentials on its storage. The credentials open nothing: on
@@ -63,7 +75,13 @@ class Composed:
     credentials: Credentials
 
 
-def compose(config: Config, *, storage: StorageConfig, secret_for: SecretLookup) -> Composed:
+def compose(
+    config: Config,
+    *,
+    storage: StorageConfig,
+    secret_for: SecretLookup,
+    worker_id: str | None = None,
+) -> Composed:
     store: Store
     credentials: Credentials
     if storage.kind is StorageKind.POSTGRES:
@@ -78,7 +96,12 @@ def compose(config: Config, *, storage: StorageConfig, secret_for: SecretLookup)
         raise NotImplementedError(f"{storage.kind} storage")
     dispatcher = InProcessDispatcher()
     controller = RobinautsController(
-        config, store=store, storage=storage, secret_for=secret_for, dispatcher=dispatcher
+        config,
+        store=store,
+        storage=storage,
+        secret_for=secret_for,
+        dispatcher=dispatcher,
+        worker_id=worker_id or worker_id_from({}),
     )
     # Handed over here, so that no adapter imports the application.
     dispatcher.run = controller.run_turn

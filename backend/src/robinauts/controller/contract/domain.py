@@ -139,6 +139,11 @@ class WorkConfig:
     """A turn's deadline, from its start: ``turns.deadline_at``."""
     max_model_calls: int = 100
     """The model calls one turn may make, its tool loop included."""
+    lease_seconds: float = 90.0
+    """How long a turn stays its runner's without a heartbeat: a dead pod's turns are found
+    this long after its last one."""
+    heartbeat_seconds: float = 30.0
+    """How often a pod renews the leases of the turns it runs, in one write for all of them."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -353,6 +358,14 @@ class Turn:
     """The failed answer this turn tries again, which the model is told about."""
     deadline_at: datetime | None = None
     """When the turn must have ended: its start plus ``WorkConfig.max_turn_seconds``."""
+    worker_id: str | None = None
+    """The pod that runs the turn, or ran it last."""
+    attempt: int = 0
+    """Which run of the turn holds it: every write of its runner names it."""
+    heartbeat_at: datetime | None = None
+    """When its runner last renewed the lease."""
+    cancel_requested_at: datetime | None = None
+    """When a cancel was asked for, from any pod; the runner's pod acts on it."""
 
 
 @dataclass(frozen=True, slots=True)

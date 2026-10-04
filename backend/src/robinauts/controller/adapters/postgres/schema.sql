@@ -240,13 +240,15 @@ CREATE INDEX IF NOT EXISTS messages_session_id_parent_id_idx
 -- `max_turn_seconds`, apart from the timeout of each call to a vendor. The
 -- runner ends the turn by it.
 --
--- `lease_until` is written with the turn, as its deadline plus a margin.
--- Every write of the runner's is refused past it, and a running turn
--- whose lease has passed was left by a runner that went away: the next reader
--- to find it ends it as `interrupted`, with no event. Renewing the lease for a
--- long turn, and `cancel_requested_at`, which a cancel from another process
--- will set and the runner read back, are stage two. Both are set by the
--- application's clock.
+-- `worker_id` is the pod that runs the turn (the last one, once it has
+-- ended), and `attempt` which run of the turn holds it. `lease_until` is short,
+-- and the pod's heartbeat renews it, with `heartbeat_at`, for every turn it
+-- runs in one write. Every write of the runner's names its pod and attempt and
+-- is refused past the lease, and a running turn whose lease has passed was
+-- left by a runner that went away: the next reader to find it ends it as
+-- `interrupted`, with no event. `cancel_requested_at`, which a cancel from any
+-- pod will set and the runner's pod read back, is not written yet. All the
+-- times are set by the application's clock.
 CREATE TABLE IF NOT EXISTS turns (
     id uuid
         CONSTRAINT turns_pkey PRIMARY KEY,
@@ -268,6 +270,10 @@ CREATE TABLE IF NOT EXISTS turns (
     error text,
     lease_until timestamptz NOT NULL,
     deadline_at timestamptz,
+    worker_id text,
+    attempt integer NOT NULL DEFAULT 0
+        CONSTRAINT turns_attempt_not_negative CHECK (attempt >= 0),
+    heartbeat_at timestamptz,
     cancel_requested_at timestamptz,
     -- The failed answer a retry tries again: the model is told about it
     -- (docs/specs/ui.md). Null on every other turn.

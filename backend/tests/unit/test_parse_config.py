@@ -153,3 +153,11 @@ def test_a_tool_server_reports_its_errors_unless_told_to_retry() -> None:
     )
     with pytest.raises(ConfigError, match="tool_servers.a"):
         parse_config({"tool_servers": {"a": {"url": "https://a", "tool_errors": "ignore"}}})
+
+
+def test_a_heartbeat_slower_than_half_the_lease_is_refused() -> None:
+    assert parse_config({"work": {"lease_seconds": 60, "heartbeat_seconds": 30}}).work == (
+        WorkConfig(lease_seconds=60, heartbeat_seconds=30)
+    )
+    with pytest.raises(ConfigError, match="heartbeat_seconds must be at most half"):
+        parse_config({"work": {"lease_seconds": 90, "heartbeat_seconds": 60}})

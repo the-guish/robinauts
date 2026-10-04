@@ -28,10 +28,12 @@ from robinauts.controller.contract.domain import (
     TurnState,
     User,
 )
-from robinauts.controller.ports.store import Store, StoredEvent, StoredMessage
+from robinauts.controller.ports.store import Holder, Store, StoredEvent, StoredMessage
+from robinauts.controller.ports.work import Held, WorkQueue
 
 NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
 MINUTE = timedelta(minutes=1)
+SECOND = timedelta(seconds=1)
 EXPIRY = NOW + timedelta(hours=24)
 
 
@@ -53,10 +55,26 @@ def answer(session_id: uuid.UUID, parent: uuid.UUID, at: datetime = NOW) -> Stor
     )
 
 
+WORKER = "pod-a"
+HOLDER = Holder(WORKER, 1)
+
+
 def turn(
     session_id: uuid.UUID, follows: uuid.UUID, lease_until: datetime = NOW + 3 * MINUTE
 ) -> Turn:
-    return Turn(uuid.uuid4(), session_id, follows, "m", TurnState.RUNNING, NOW, lease_until)
+    """A running turn, held by ``HOLDER``."""
+    return Turn(
+        uuid.uuid4(),
+        session_id,
+        follows,
+        "m",
+        TurnState.RUNNING,
+        NOW,
+        lease_until,
+        worker_id=WORKER,
+        attempt=1,
+        heartbeat_at=NOW,
+    )
 
 
 def piece(position: int, text: str = "x") -> StoredEvent:
@@ -356,3 +374,101 @@ class StoreContract:
             me.id, one.id, running.id, TurnState.FINISHED, NOW, None, None, [piece(2)], NOW
         )
         assert await store.wait_for_events(me.id, one.id, running.id, 9, 0.05) is True
+
+    # --- leases -------------------------------------------------------------
+
+    @store_test
+    async def test_only_the_holder_of_a_turn_appends_and_finishes_it(self, store: Store) -> None:
+        me, one, _, running = await self.started(store)
+        for other in (Holder("pod-b", 1), Holder(WORKER, 2)):
+            with pytest.raises(TurnLostError):
+                await store.append_event(
+                    me.id, one.id, running.id, 1, piece(1).document, NOW, EXPIRY, holder=other
+                )
+            with pytest.raises(TurnLostError):
+                await store.finish_turn(
+                    me.id,
+                    one.id,
+                    running.id,
+                    TurnState.FINISHED,
+                    NOW,
+                    None,
+                    None,
+                    [],
+                    NOW,
+                    holder=other,
+                )
+        await store.append_event(
+            me.id, one.id, running.id, 1, piece(1).document, NOW, EXPIRY, holder=HOLDER
+        )
+        await store.finish_turn(
+            me.id,
+            one.id,
+            running.id,
+            TurnState.FINISHED,
+            NOW,
+            None,
+            None,
+            [piece(2)],
+            NOW,
+            holder=HOLDER,
+        )
+        finished = await store.get_turn(me.id, one.id, running.id)
+        assert finished is not None
+        assert finished.state is TurnState.FINISHED
+
+    @store_test
+    async def test_a_heartbeat_renews_the_leases_it_holds_and_names_the_ones_it_lost(
+        self, store: Store
+    ) -> None:
+        assert isinstance(store, WorkQueue)
+        me, one, _, running = await self.started(store)
+        later = NOW + 2 * MINUTE
+        beat = await store.heartbeat(WORKER, [Held(running.id, 1)], later, 90 * SECOND)
+        assert (beat.lost, beat.cancelled) == (frozenset(), frozenset())
+        renewed = await store.get_turn(me.id, one.id, running.id)
+        assert renewed is not None
+        assert (renewed.lease_until, renewed.heartbeat_at) == (later + 90 * SECOND, later)
+        # Past the old lease, the renewed one still lets the runner write.
+        await store.append_event(
+            me.id,
+            one.id,
+            running.id,
+            1,
+            piece(1).document,
+            NOW + 3 * MINUTE,
+            EXPIRY,
+            holder=HOLDER,
+        )
+        stale = Held(running.id, 2)
+        elsewhere = await store.heartbeat("pod-b", [Held(running.id, 1)], later, 90 * SECOND)
+        assert elsewhere.lost == {running.id}
+        assert (await store.heartbeat(WORKER, [stale], later, 90 * SECOND)).lost == {running.id}
+        past = renewed.lease_until + SECOND
+        assert (await store.heartbeat(WORKER, [Held(running.id, 1)], past, 90 * SECOND)).lost == {
+            running.id
+        }
+        unrenewed = await store.get_turn(me.id, one.id, running.id)
+        assert unrenewed is not None
+        assert unrenewed.lease_until == renewed.lease_until
+
+    @store_test
+    async def test_a_heartbeat_loses_an_ended_turn_and_renews_the_rest_in_one_go(
+        self, store: Store
+    ) -> None:
+        assert isinstance(store, WorkQueue)
+        me, one, _, running = await self.started(store)
+        two = session(me.id)
+        await store.add_session(two)
+        asked = question(two.id)
+        other = turn(two.id, asked.id)
+        await store.start_turn(me.id, other, asked)
+        await store.finish_turn(
+            me.id, one.id, running.id, TurnState.CANCELLED, NOW, None, None, [], NOW
+        )
+        held = [Held(running.id, 1), Held(other.id, 1)]
+        beat = await store.heartbeat(WORKER, held, NOW + MINUTE, 90 * SECOND)
+        assert beat.lost == {running.id}
+        renewed = await store.get_turn(me.id, two.id, other.id)
+        assert renewed is not None
+        assert renewed.lease_until == NOW + MINUTE + 90 * SECOND

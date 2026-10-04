@@ -3,11 +3,13 @@
 
 """The turn runner: the engine's stream, stored as numbered turn events and an answer.
 
-The runner numbers its turn's events from 1 and is their only writer. Its first append is
-its claim on the turn: refused, it has lost the turn to another runner and runs no engine.
-Its deadline is the turn's ``deadline_at``, kept inside its lease. On
-``TurnLostError`` from any write it closes the engine's stream and writes nothing more: the
-turn is another runner's, a reader ended it, or its lease has passed.
+The runner numbers its turn's events from 1 and is their only writer. Every write names its
+holder, the pod and the attempt, and its first append is its claim on the turn: refused, it
+has lost the turn to another runner and runs no engine. Its deadline is the turn's
+``deadline_at``; its lease is renewed by the pod's heartbeat meanwhile. On ``TurnLostError``
+from any write, or when the heartbeat stops it as ``LOST``, it closes the engine's stream and
+writes nothing more: the turn is another runner's, a reader ended it, or its lease has
+passed.
 """
 
 from __future__ import annotations
@@ -56,24 +58,21 @@ from robinauts.controller.core.documents import (
     event_to_document,
     stored_message,
 )
-from robinauts.controller.ports.dispatcher import CLOSE
-from robinauts.controller.ports.store import Store, StoredEvent
+from robinauts.controller.ports.dispatcher import CLOSE, LOST
+from robinauts.controller.ports.store import Holder, Store, StoredEvent
 
 RETENTION = timedelta(hours=24)
 """How long a turn's events are kept after they are written, a constant for now."""
 
-DEADLINE_MARGIN = 10.0
-"""Seconds the runner's deadline stays short of the lease, so that a finish lands inside it;
-with less than this left, the runner does not claim the turn."""
-
 
 class _Writer:
-    """The turn's events, numbered and written one at a time."""
+    """The turn's events, numbered and written one at a time, in its holder's name."""
 
-    def __init__(self, store: Store, owner: uuid.UUID, turn: Turn) -> None:
+    def __init__(self, store: Store, owner: uuid.UUID, turn: Turn, holder: Holder) -> None:
         self._store = store
         self._owner = owner
         self._turn = turn
+        self._holder = holder
         self.position = 0
 
     async def append(self, event: TurnEvent) -> None:
@@ -87,6 +86,7 @@ class _Writer:
             event_to_document(self._turn.id, self.position, event),
             now,
             now + RETENTION,
+            holder=self._holder,
         )
 
     def last(self, *events: TurnEvent) -> list[StoredEvent]:
@@ -117,6 +117,7 @@ class _Writer:
             None if answer is None else stored_message(answer),
             events,
             now,
+            holder=self._holder,
         )
 
 
@@ -139,17 +140,16 @@ async def run_turn(
     agent_config: AgentConfig,
     checkpoint_id: str | None,
     max_model_calls: int,
+    holder: Holder,
 ) -> None:
     now = datetime.now(UTC)
-    remaining = (turn.lease_until - now).total_seconds() - DEADLINE_MARGIN
-    if turn.deadline_at is not None:
-        remaining = min(remaining, (turn.deadline_at - now).total_seconds())
-    if remaining <= 0:
+    if turn.lease_until <= now or turn.deadline_at is None or turn.deadline_at <= now:
         return
+    remaining = (turn.deadline_at - now).total_seconds()
     answer_id = uuid.uuid4()
     definition = AgentDefinition(agent_config.system_prompt, agent_config.tools)
     parts: list[MessagePart] = []
-    writer = _Writer(store, owner, turn)
+    writer = _Writer(store, owner, turn, holder)
     try:
         await writer.append(MessageStarted(answer_id, parent_id=question.id))
     except TurnLostError:
@@ -214,6 +214,8 @@ async def run_turn(
             await asyncio.wait({finishing})
             if not finishing.cancelled():
                 finishing.exception()
+        elif LOST in exc.args:
+            pass  # the turn is not this pod's any more: nothing is written in its name
         else:
             state = TurnState.INTERRUPTED if CLOSE in exc.args else TurnState.CANCELLED
             await _end(writer, state, None)

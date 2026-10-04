@@ -30,6 +30,7 @@ from robinauts.controller.contract.domain import (
     User,
 )
 from robinauts.controller.ports.store import Store, StoredMessage
+from robinauts.controller.ports.work import Held
 
 pytestmark = requires_postgres
 
@@ -37,6 +38,7 @@ NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
 LEASE = NOW + timedelta(minutes=3)
 EXPIRY = NOW + timedelta(hours=24)
 DOCUMENT = {"v": 1, "kind": "text_piece", "position": 1, "text": "x"}
+WORKER = "pod-a"
 
 
 class TestPostgresStore(StoreContract):
@@ -45,6 +47,7 @@ class TestPostgresStore(StoreContract):
         pool = await schema.open()
         await create_schema(pool)
         store = PostgresStore(pool, dsn=url())
+        await store.open()
         self.__dict__.setdefault("schemas", {})[id(store)] = schema
         return store
 
@@ -60,7 +63,17 @@ async def seeded(store: Store) -> tuple[User, Session, StoredMessage, Turn]:
     one = Session(uuid.uuid4(), me.id, "a", "echo", NOW, NOW)
     await store.add_session(one)
     asked = StoredMessage(uuid.uuid4(), one.id, None, Role.USER, NOW, {"v": 1, "text": "hi"})
-    running = Turn(uuid.uuid4(), one.id, asked.id, "m", TurnState.RUNNING, NOW, LEASE)
+    running = Turn(
+        uuid.uuid4(),
+        one.id,
+        asked.id,
+        "m",
+        TurnState.RUNNING,
+        NOW,
+        LEASE,
+        worker_id=WORKER,
+        attempt=1,
+    )
     await store.start_turn(me.id, running, asked)
     return me, one, asked, running
 
@@ -212,3 +225,30 @@ async def test_a_watcher_on_one_pool_is_woken_by_an_append_on_another() -> None:
             await watcher.close()
             await writer.close()
             await other_pool.close()
+
+
+@asyncio_test
+async def test_the_heartbeat_has_a_connection_of_its_own_and_a_busy_pool_does_not_delay_it() -> (
+    None
+):
+    async with temporary_schema(size=2) as schema:
+        store = PostgresStore(schema.pool, dsn=url())
+        await store.open()
+        _, _, _, running = await seeded(store)
+        held = [Held(running.id, running.attempt)]
+        try:
+            # Every connection of the pool is taken, as by requests that hold on to them.
+            async with schema.pool.acquire(), schema.pool.acquire():
+                started = time.monotonic()
+                beat = await asyncio.wait_for(
+                    store.heartbeat(WORKER, held, NOW, timedelta(seconds=90)), 5.0
+                )
+                assert time.monotonic() - started < 5.0
+            assert beat.lost == frozenset()
+            # A dropped work connection is opened again by the next heartbeat.
+            assert store._work is not None
+            await store._work.close()
+            again = await store.heartbeat(WORKER, held, NOW, timedelta(seconds=90))
+            assert again.lost == frozenset()
+        finally:
+            await store.close()

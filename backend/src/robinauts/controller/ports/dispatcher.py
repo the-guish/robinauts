@@ -9,19 +9,36 @@ import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 
+from robinauts.controller.ports.work import Held
+
 CLOSE = "close"
 """The reason a closing dispatcher cancels a turn with. The runner ends such a turn as
 ``interrupted``, the deployment having stopped with the turn in it, not ``cancelled``."""
 
-TurnRunner = Callable[[uuid.UUID, uuid.UUID, uuid.UUID], Awaitable[None]]
-"""What a dispatcher runs: the controller's ``run_turn``, given the owner, the session and
-the turn, which loads everything else by those ids."""
+LOST = "lost"
+"""The reason a turn whose lease the heartbeat could not renew is stopped with. The turn is
+no longer this pod's, so its runner writes nothing more."""
+
+TurnRunner = Callable[[uuid.UUID, uuid.UUID, uuid.UUID, int], Awaitable[None]]
+"""What a dispatcher runs: the controller's ``run_turn``, given the owner, the session, the
+turn and the attempt, which loads everything else by those ids."""
 
 
 class TurnDispatcher(ABC):
     @abstractmethod
-    async def dispatch(self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID) -> None:
-        """Run the turn, somewhere, and return at once."""
+    async def dispatch(
+        self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, attempt: int
+    ) -> None:
+        """Run that attempt of the turn, somewhere, and return at once."""
+
+    @abstractmethod
+    def held(self) -> list[Held]:
+        """The turns this pod runs, whose leases its heartbeat renews."""
+
+    @abstractmethod
+    async def stop(self, turn: uuid.UUID, reason: str) -> bool:
+        """Cancel the turn naming ``reason`` if this pod runs it, and wait for it to end: true
+        when it did, false when the turn is not this pod's."""
 
     @abstractmethod
     async def cancel(self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID) -> bool:

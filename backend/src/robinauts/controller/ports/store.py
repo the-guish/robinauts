@@ -43,6 +43,15 @@ class StoredMessage:
 
 
 @dataclass(frozen=True, slots=True)
+class Holder:
+    """Who writes for a turn: the pod, and which run of the turn. A write that names a holder
+    is refused unless the turn is still that holder's."""
+
+    worker_id: str
+    attempt: int
+
+
+@dataclass(frozen=True, slots=True)
 class StoredEvent:
     """One of a turn's events: its position, its document, and when it expires."""
 
@@ -119,10 +128,12 @@ class Store(ABC):
         document: Document,
         written_at: datetime,
         expires_at: datetime,
+        *,
+        holder: Holder | None = None,
     ) -> None:
         """The same document again at a position it has is accepted. Another document there,
-        or any append on a turn that is not running or whose lease has passed ``written_at``,
-        is ``TurnLostError``."""
+        or any append on a turn that is not running, whose lease has passed ``written_at``, or
+        that is not ``holder``'s when one is named, is ``TurnLostError``."""
 
     @abstractmethod
     async def events_after(
@@ -142,10 +153,13 @@ class Store(ABC):
         answer: StoredMessage | None,
         events: Sequence[StoredEvent],
         updated_at: datetime,
+        *,
+        holder: Holder | None = None,
     ) -> None:
         """The answer, the last events, the turn's state and the session's ``updated_at``, in
-        one operation, only while the turn is running and its lease has not passed
-        ``ended_at``: else ``TurnLostError``."""
+        one operation, only while the turn is running, its lease has not passed ``ended_at``,
+        and it is ``holder``'s when one is named: else ``TurnLostError``. Without a holder it
+        is whoever ends a turn in place, not its runner."""
 
     @abstractmethod
     async def end_expired_turn(

@@ -109,4 +109,10 @@ def _work(raw: Mapping[str, Any], problems: list[str]) -> WorkConfig:
         kind = (int, float) if fields[key].type == "float" else int
         if _positive("work", key, value, kind, problems):
             values[key] = value
-    return WorkConfig(**values)
+    work = WorkConfig(**values)
+    if work.heartbeat_seconds * 2 > work.lease_seconds:
+        problems.append(
+            "work: heartbeat_seconds must be at most half of lease_seconds, so that one late"
+            " heartbeat does not lose a turn"
+        )
+    return work

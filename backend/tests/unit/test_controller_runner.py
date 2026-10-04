@@ -39,8 +39,8 @@ from robinauts.controller.contract.domain import (
 from robinauts.controller.core.documents import event_from_document
 from robinauts.controller.ports.store import Store
 
-PAST_THE_LEASE = timedelta(minutes=30)
-"""Past the lease of a turn started now: its deadline, `max_turn_seconds`, and a margin."""
+PAST_THE_LEASE = timedelta(minutes=5)
+"""Past the lease of a turn started now, which the heartbeat has not renewed."""
 
 
 class ScriptedEngine(EchoEngine):
@@ -142,7 +142,7 @@ async def test_a_runner_whose_claim_is_refused_runs_no_engine_and_never_finishes
     sid = started.session_id
     await controller._store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
     # A second runner for the same turn, as a duplicate dispatch would be.
-    await controller.run_turn(user.id, sid, started.turn_id)
+    await controller.run_turn(user.id, sid, started.turn_id, 1)
     assert engine.streams == 1
     turn = await controller._store.get_turn(user.id, sid, started.turn_id)
     assert turn is not None
@@ -328,9 +328,68 @@ async def test_a_turn_runs_to_the_works_deadline_not_to_the_models_call_timeout(
     turn = await store.get_turn(user.id, started.session_id, started.turn_id)
     assert turn is not None
     assert turn.deadline_at - turn.started_at == timedelta(hours=3)
-    assert turn.lease_until > turn.deadline_at
+    # The lease is the heartbeat's, short, whatever the deadline.
+    assert turn.lease_until - turn.started_at == timedelta(seconds=90)
+    assert (turn.worker_id, turn.attempt) == ("robinauts", 1)
     (limits,) = engine.limits
     assert limits["max_model_calls"] == 7
     # What is left of three hours, and nothing to do with the model's 120 s per call.
     assert 3 * 3600 - 60 < limits["timeout_seconds"] <= 3 * 3600
+    await controller.close()
+
+
+@asyncio_test
+async def test_a_turn_the_heartbeat_finds_lost_is_stopped_and_written_to_no_more() -> None:
+    store = MemoryStore()
+    controller = await over(store)
+    engine = GatedEngine()
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    await store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
+    task = controller._dispatcher._tasks[started.turn_id]
+    # Another run of the turn holds it now, as after a re-claim elsewhere.
+    taken = store._turns[started.turn_id]
+    store._turns[started.turn_id] = dataclasses.replace(taken, worker_id="pod-b", attempt=2)
+    beat = await controller._work.beat()
+    assert beat.lost == {started.turn_id}
+    assert task.done()
+    assert controller._dispatcher.held() == []
+    engine.gate.set()
+    assert [p for p, _ in await store.events_after(user.id, sid, started.turn_id, 0)] == [1]
+    still = await store.get_turn(user.id, sid, started.turn_id)
+    assert still is not None
+    assert (still.state, still.attempt) == (TurnState.RUNNING, 2)
+    await controller.close()
+
+
+@asyncio_test
+async def test_the_heartbeat_keeps_a_turn_its_runners_past_its_first_lease() -> None:
+    work = WorkConfig(lease_seconds=0.6, heartbeat_seconds=0.1)
+    store = MemoryStore()
+    controller = RobinautsController(
+        dataclasses.replace(CONFIG, work=work),
+        store=store,
+        storage=StorageConfig(StorageKind.IN_MEMORY),
+        secret_for={}.get,
+        dispatcher=(dispatcher := InProcessDispatcher()),
+    )
+    dispatcher.run = controller.run_turn
+    await controller.open()
+    engine = GatedEngine()
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    first = await store.get_turn(user.id, started.session_id, started.turn_id)
+    await asyncio.sleep(1.2)
+    engine.gate.set()
+    await settled(controller, user, started)
+    ended = await store.get_turn(user.id, started.session_id, started.turn_id)
+    assert first is not None
+    assert ended is not None
+    assert ended.state is TurnState.FINISHED
+    assert ended.heartbeat_at is not None
+    assert first.heartbeat_at is not None
+    assert ended.heartbeat_at > first.heartbeat_at + timedelta(seconds=0.6)
     await controller.close()

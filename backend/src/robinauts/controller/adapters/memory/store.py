@@ -9,7 +9,8 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import uuid
-from datetime import datetime
+from collections.abc import Sequence
+from datetime import datetime, timedelta
 
 from robinauts.controller.contract.domain import (
     Session,
@@ -23,13 +24,19 @@ from robinauts.controller.contract.domain import (
 from robinauts.controller.ports.store import (
     Cursor,
     Document,
+    Holder,
     Store,
     StoredEvent,
     StoredMessage,
 )
+from robinauts.controller.ports.work import HeartbeatResult, Held, WorkQueue
 
 
-class MemoryStore(Store):
+def _held_by(turn: Turn, holder: Holder | None) -> bool:
+    return holder is None or (turn.worker_id, turn.attempt) == (holder.worker_id, holder.attempt)
+
+
+class MemoryStore(Store, WorkQueue):
     def __init__(self) -> None:
         self._users: dict[tuple[str, str], User] = {}
         self._sessions: dict[uuid.UUID, Session] = {}
@@ -152,10 +159,17 @@ class MemoryStore(Store):
         document: Document,
         written_at: datetime,
         expires_at: datetime,
+        *,
+        holder: Holder | None = None,
     ) -> None:
         self._visible(owner, session)
         found = self._turn_of(session, turn)
-        if found is None or found.state is not TurnState.RUNNING or found.lease_until <= written_at:
+        if (
+            found is None
+            or found.state is not TurnState.RUNNING
+            or found.lease_until <= written_at
+            or not _held_by(found, holder)
+        ):
             raise TurnLostError(f"turn {turn} is not running")
         events = self._events[turn]
         taken = next((e for e in events if e.position == position), None)
@@ -186,10 +200,17 @@ class MemoryStore(Store):
         answer: StoredMessage | None,
         events: list[StoredEvent] | tuple[StoredEvent, ...],
         updated_at: datetime,
+        *,
+        holder: Holder | None = None,
     ) -> None:
         self._visible(owner, session)
         found = self._turn_of(session, turn)
-        if found is None or found.state is not TurnState.RUNNING or found.lease_until <= ended_at:
+        if (
+            found is None
+            or found.state is not TurnState.RUNNING
+            or found.lease_until <= ended_at
+            or not _held_by(found, holder)
+        ):
             raise TurnLostError(f"turn {turn} is not running")
         if answer is not None:
             self._messages[session].append(answer)
@@ -226,6 +247,29 @@ class MemoryStore(Store):
     async def get_turn(self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID) -> Turn | None:
         self._visible(owner, session)
         return self._turn_of(session, turn)
+
+    # --- work ---------------------------------------------------------------
+
+    async def heartbeat(
+        self, worker: str, held: Sequence[Held], now: datetime, lease: timedelta
+    ) -> HeartbeatResult:
+        lost, cancelled = set(), set()
+        for each in held:
+            found = self._turns.get(each.turn_id)
+            if (
+                found is None
+                or found.state is not TurnState.RUNNING
+                or (found.worker_id, found.attempt) != (worker, each.attempt)
+                or found.lease_until <= now
+            ):
+                lost.add(each.turn_id)
+                continue
+            self._turns[found.id] = dataclasses.replace(
+                found, lease_until=now + lease, heartbeat_at=now
+            )
+            if found.cancel_requested_at is not None:
+                cancelled.add(found.id)
+        return HeartbeatResult(frozenset(lost), frozenset(cancelled))
 
     async def wait_for_events(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, after: int, timeout: float

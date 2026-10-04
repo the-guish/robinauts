@@ -21,7 +21,7 @@ agent to another engine, and what its sessions then do, is stage two.
 | user | `id` | `provider` and `subject` (unique together), `name`, `email`, `created_at` | no |
 | session | `id` | `owner_id`, `agent`, `engine`, `title`, `created_at`, `updated_at`, `deleted_at` | no |
 | message | `id` | `session_id`, `parent_id`, `role`, `created_at` | **yes** |
-| turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `lease_until`, `deadline_at`, `cancel_requested_at`, `retries` | no |
+| turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `lease_until`, `deadline_at`, `worker_id`, `attempt`, `heartbeat_at`, `cancel_requested_at`, `retries` | no |
 | turn event | `(turn_id, position)` | `expires_at` | **yes** |
 | user session | `id` | `user_id`, `secret_hash` (unique), `created_at`, `expires_at` | no |
 | pending login | `state_hash` | `provider`, `nonce`, `verifier`, `return_to`, `created_at`, `expires_at` | no |
@@ -102,17 +102,22 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
 - **A turn has a deadline.** `deadline_at` is written with the turn, as its start plus
   the work's `max_turn_seconds`, and the runner ends the turn by it. It is not the
   timeout of a call to the vendor, which is the model's.
-- **A turn holds a lease.** `lease_until` is written with the turn, as its deadline
-  plus a margin. A running
-  turn whose lease has passed is ended as `interrupted` by the next reader to find it
+- **A turn holds a lease, and its pod renews it.** `lease_until` is written with the
+  turn, as its start plus the work's `lease_seconds` (90 s), with `worker_id`, the pod
+  that runs it, and `attempt`, which run of it holds it. Every `heartbeat_seconds`
+  (30 s) the pod renews the lease of every turn it runs in one write, on a connection
+  of its own apart from the pool, and sets `heartbeat_at`; a turn that write did not
+  renew is lost, and its runner stops and writes nothing more. Every append and finish
+  of a runner names its pod and attempt beside the lease, and is refused with
+  `TurnLostError` when the turn is no longer theirs. A running turn whose lease has passed is ended as `interrupted` by the next reader to find it
   (`open_session`, `start_turn`, `watch_turn`, `cancel_turn`, `delete_session`),
   through `end_expired_turn`: one conditional write that only a running turn takes,
   on the record alone, and on the marker a store without a partial index keeps. No
   event is written, since a `turn_ended` event is the runner's; a watcher that finds
   the turn ended with none supplies it from the record. A runner that outlives its
   lease has lost the turn whether or not a reader has found it: every write names
-  its time, and the store refuses one past the lease. Renewing the lease for a long
-  turn, and reading back `cancel_requested_at` with each renewal, are stage two.
+  its time, and the store refuses one past the lease. A dead pod's turns are therefore
+  found within a lease of its last heartbeat.
 - **No clocks and no ids in a store.** The controller mints every id and sets every
   time.
 - **A session and its records are addressed from the owner down.** Every operation on
