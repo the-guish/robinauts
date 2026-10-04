@@ -63,6 +63,10 @@ class Store(ABC):
         """Release what ``open`` took."""
         raise NotImplementedError
 
+    @abstractmethod
+    async def ping(self, timeout: float) -> None:
+        """Return once the storage answers, or raise within ``timeout`` seconds."""
+
     # --- users --------------------------------------------------------------
 
     @abstractmethod

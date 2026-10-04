@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import importlib.metadata
 import logging
 import os
@@ -29,6 +30,7 @@ import sys
 from collections.abc import Mapping, Sequence
 from importlib import resources
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 import uvicorn
@@ -49,6 +51,22 @@ from robinauts.web.app import create_app
 from robinauts.web.sign_in import SIGN_IN_KEYS, SignInConfig, is_loopback, parse_sign_in
 
 REPO = Path(__file__).resolve().parents[4]
+
+
+class DrainingServer(uvicorn.Server):
+    """uvicorn's server, which also sets ``draining`` on the signal to stop: the app is then
+    not ready, starts no turn, and ends its streams so that their clients go elsewhere."""
+
+    def __init__(self, config: uvicorn.Config, draining: asyncio.Event) -> None:
+        super().__init__(config)
+        self.draining = draining
+
+    def handle_exit(self, sig: int, frame: FrameType | None) -> None:
+        # A signal handler, between two bytecodes of the loop's thread: scheduled, not set.
+        with contextlib.suppress(RuntimeError):
+            asyncio.get_running_loop().call_soon_threadsafe(self.draining.set)
+        super().handle_exit(sig, frame)
+
 
 GRACEFUL_SHUTDOWN_SECONDS = 20
 """How long uvicorn waits for open streams on a stop before it closes them, so that the
@@ -130,18 +148,19 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     logging.basicConfig(level=logging.INFO)
     if dev_no_sign_in:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
-    uvicorn.run(
-        create_app(
-            composed.controller,
-            credentials=composed.credentials,
-            sign_in=sign_in,
-            secret_for=secret_for,
-            ui_dir=ui_dir,
-        ),
-        host=host,
-        port=port,
-        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
+    draining = asyncio.Event()
+    app = create_app(
+        composed.controller,
+        credentials=composed.credentials,
+        sign_in=sign_in,
+        secret_for=secret_for,
+        ui_dir=ui_dir,
+        draining=draining,
     )
+    config = uvicorn.Config(
+        app, host=host, port=port, timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS
+    )
+    DrainingServer(config, draining).run()
     return 0
 
 

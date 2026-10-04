@@ -17,11 +17,17 @@ What an internal platform team deploys and controls.
   Until the first release the schema is edited in place and the database
   is recreated; after that, migrations upgrade it in place.
 - A restart ends the runs that are in flight: each is marked interrupted,
-  and its author retries it by sending the message again. Letting them
-  **drain** for a bounded time first is planned; the bounded window a
-  shutdown has today is for ending them and giving back what the process
-  holds, not for finishing them. Several backend processes may run against
-  the one database.
+  and its author retries it by sending the message again. On `SIGTERM` a
+  process **drains**: `/ready` answers 503, it starts no new turn (503, try
+  again), and its open streams end with SSE's `retry:` so that their
+  clients attach again, to another process. Its running turns then get a
+  bounded window to finish (about ten seconds) and are ended as
+  interrupted. A process killed outright leaves its turns to their leases:
+  they are found expired, and ended, within about two minutes. `/ready`
+  also answers 503 when the database does not answer `SELECT 1` within a
+  second; `/health` says only that the process answers. Several backend
+  processes may run against the one database
+  ([deployment.md](../deployment.md)).
 - Outbound traffic: the identity providers at sign-in, the model providers
   the operator configured, and the MCP tool servers the operator configured.
   Nothing else.

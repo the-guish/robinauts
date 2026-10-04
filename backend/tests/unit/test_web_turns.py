@@ -189,3 +189,38 @@ async def test_a_re_attach_to_a_quiet_turn_has_its_headers_at_once() -> None:
         assert sent[0]["status"] == 200
         engine.gate.set()
         await asyncio.wait_for(serving, 5.0)
+
+
+@asyncio_test
+async def test_a_stopping_process_ends_its_streams_with_a_reconnect_hint() -> None:
+    async def endless() -> AsyncIterator[str]:
+        yield "a"
+        await asyncio.Event().wait()
+        yield "never"
+
+    stopping = asyncio.Event()
+    asyncio.get_running_loop().call_later(0.05, stopping.set)
+    said = [chunk async for chunk in agui.kept_alive(endless(), stopping, every=10.0)]
+    assert said == ["a", agui.RECONNECT]
+
+
+@asyncio_test
+async def test_a_stopping_process_is_not_ready_and_starts_no_turn() -> None:
+    composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
+    draining = asyncio.Event()
+    app = create_app(
+        composed.controller,
+        credentials=composed.credentials,
+        sign_in=None,
+        secret_for={}.get,
+        draining=draining,
+    )
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+            assert (await http.get("/ready")).status_code == 200
+            draining.set()
+            assert (await http.get("/ready")).status_code == 503
+            assert (await http.get("/health")).status_code == 200
+            refused = await http.post("/api/turns", json={"agent_id": "echo", "text": "hello"})
+            assert refused.status_code == 503

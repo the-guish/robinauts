@@ -141,6 +141,9 @@ class RobinautsController(Controller):
         self._engines = {}
         await self._store.close()
 
+    async def ready(self, timeout: float) -> None:
+        await self._store.ping(timeout)
+
     async def _engine(self, name: str) -> AgentEngine:
         """The engine of that name: built at `open` for the agents, or on demand for a session
         whose engine the configuration no longer names."""

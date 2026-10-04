@@ -36,6 +36,11 @@ class Controller(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def ready(self, timeout: float) -> None:
+        """Return once the storage answers; raise when it does not within ``timeout``."""
+        raise NotImplementedError
+
+    @abstractmethod
     async def ensure_user(self, identity: Identity) -> User:
         raise NotImplementedError
 

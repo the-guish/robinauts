@@ -48,6 +48,9 @@ class MemoryStore(Store):
     async def close(self) -> None:
         """Nothing to release."""
 
+    async def ping(self, timeout: float) -> None:
+        """Always here."""
+
     # --- helpers ------------------------------------------------------------
 
     def _visible(self, owner: uuid.UUID, session: uuid.UUID) -> Session:

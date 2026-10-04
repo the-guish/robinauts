@@ -156,6 +156,9 @@ class PostgresStore(Store):
             pool, self._pool = self._pool, None  # type: ignore[assignment]
             await pool.close()
 
+    async def ping(self, timeout: float) -> None:
+        await self._pool.fetchval("SELECT 1", timeout=timeout)
+
     # --- users --------------------------------------------------------------
 
     async def add_user_if_absent(self, user: User) -> User:

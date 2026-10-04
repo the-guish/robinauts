@@ -114,6 +114,10 @@ class StoreContract:
     ) -> None:
         await store.append_events(me.id, one.id, running.id, [event], at)
 
+    @store_test
+    async def test_a_store_that_is_open_answers_a_ping(self, store: Store) -> None:
+        await store.ping(1.0)
+
     # --- users --------------------------------------------------------------
 
     @store_test

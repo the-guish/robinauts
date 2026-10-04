@@ -5,7 +5,9 @@
 
 The run id is the turn's id, and the thread id the session's: each turn is a run of its own.
 A stream that has said nothing for ``KEEP_ALIVE_SECONDS`` says an SSE comment, so that a load
-balancer or a proxy does not close it as idle while a tool runs.
+balancer or a proxy does not close it as idle while a tool runs. A stream of a process that is
+stopping ends with SSE's ``retry:`` instead of the turn's end, so its client attaches again,
+to another process.
 """
 
 from __future__ import annotations
@@ -54,6 +56,9 @@ ENCODER = EventEncoder()
 KEEP_ALIVE_SECONDS = 15.0
 KEEP_ALIVE = ": keep-alive\n\n"
 """An SSE comment: bytes on the connection, and nothing a client reads as an event."""
+
+RECONNECT = "retry: 1000\n\n"
+"""How a stream of a stopping process ends: attach again, in a second, elsewhere."""
 
 ENDED_BADLY = {
     TurnState.FAILED: "the agent could not finish this answer",
@@ -132,16 +137,22 @@ async def stream(
 
 
 async def kept_alive(
-    chunks: AsyncIterator[str], every: float = KEEP_ALIVE_SECONDS
+    chunks: AsyncIterator[str],
+    stopping: asyncio.Event | None = None,
+    every: float = KEEP_ALIVE_SECONDS,
 ) -> AsyncIterator[str]:
-    """``chunks``, with ``KEEP_ALIVE`` after every ``every`` seconds in which none came."""
+    """``chunks``, with ``KEEP_ALIVE`` after every ``every`` seconds in which none came, until
+    ``stopping`` is set: then ``RECONNECT``, and the end."""
+    stopped = asyncio.ensure_future((stopping or asyncio.Event()).wait())
     waiting: asyncio.Task[str] | None = None
     try:
         while True:
             waiting = waiting or asyncio.ensure_future(anext(chunks))
-            done, _ = await asyncio.wait({waiting}, timeout=every)
-            if not done:
-                yield KEEP_ALIVE
+            await asyncio.wait({waiting, stopped}, timeout=every, return_when="FIRST_COMPLETED")
+            if not waiting.done():
+                yield RECONNECT if stopped.done() else KEEP_ALIVE
+                if stopped.done():
+                    return
                 continue
             try:
                 chunk = waiting.result()
@@ -151,7 +162,8 @@ async def kept_alive(
                 waiting = None
             yield chunk
     finally:
-        if waiting is not None:
-            waiting.cancel()
-            with contextlib.suppress(BaseException):
-                await waiting
+        for pending in (stopped, waiting):
+            if pending is not None:
+                pending.cancel()
+                with contextlib.suppress(BaseException):
+                    await pending

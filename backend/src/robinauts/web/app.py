@@ -92,6 +92,8 @@ NOT_SIGNED_IN = "nobody is signed in: sign in at /ui/"
 NOT_SAME_ORIGIN = "a write that carries the session cookie must carry Origin equal to public_url"
 UNKNOWN_TOKEN = "the API token is unknown, revoked or expired"
 NO_SUCH_TOKEN = "you have no API token of that id"
+STOPPING = "this process is stopping: try again, and another will answer"
+READY_TIMEOUT = 1.0
 
 LOCAL_IDENTITY = Identity(provider=LOCAL_PROVIDER, subject="developer", name="Local development")
 """The one user of the local development mode, under a provider no configuration can name
@@ -354,10 +356,13 @@ def ended_badly_view(turn: Turn | None) -> EndedBadlyView | None:
 
 
 def event_stream(
-    session_id: uuid.UUID, turn_id: uuid.UUID, events: AsyncIterator[NumberedEvent]
+    session_id: uuid.UUID,
+    turn_id: uuid.UUID,
+    events: AsyncIterator[NumberedEvent],
+    draining: asyncio.Event,
 ) -> StreamingResponse:
     return StreamingResponse(
-        agui.kept_alive(agui.stream(str(session_id), str(turn_id), events)),
+        agui.kept_alive(agui.stream(str(session_id), str(turn_id), events), draining),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-store",
@@ -375,8 +380,11 @@ def create_app(
     sign_in: SignInConfig | None,
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
+    draining: asyncio.Event | None = None,
 ) -> FastAPI:
-    """``sign_in`` is ``None`` in the local development mode."""
+    """``sign_in`` is ``None`` in the local development mode. ``draining`` is set when the
+    process begins to stop: it is then not ready, starts no turn, and ends its streams."""
+    draining = draining or asyncio.Event()
     exchange: Exchange | None = None
     flow: SignIn | None = None
     if sign_in is not None:
@@ -433,6 +441,10 @@ def create_app(
 
     asking = Depends(current_user)
 
+    def not_draining() -> None:
+        if draining.is_set():
+            raise Refused(503, "Unavailable", STOPPING)
+
     app = FastAPI(
         lifespan=lifespan,
         title="Robinauts",
@@ -479,7 +491,7 @@ def create_app(
             async for event in events:
                 yield event
 
-        return event_stream(session_id, turn_id, chained())
+        return event_stream(session_id, turn_id, chained(), draining)
 
     # --- sign-in -----------------------------------------------------------------
 
@@ -657,7 +669,7 @@ def create_app(
 
     # --- turns: AG-UI over SSE, outside the OpenAPI document -------------------
 
-    @app.post("/api/turns", include_in_schema=False)
+    @app.post("/api/turns", include_in_schema=False, dependencies=[Depends(not_draining)])
     async def start_session(body: NewChatRequest, user: User = asking) -> StreamingResponse:
         model = body.model_id or await default_model(body.agent_id)
         started = await controller.start_session(
@@ -665,7 +677,11 @@ def create_app(
         )
         return await watched(user, started.session_id, started.turn_id, 0)
 
-    @app.post("/api/conversations/{conversation_id}/turns", include_in_schema=False)
+    @app.post(
+        "/api/conversations/{conversation_id}/turns",
+        include_in_schema=False,
+        dependencies=[Depends(not_draining)],
+    )
     async def send_message(
         conversation_id: uuid.UUID, body: TurnRequest, user: User = asking
     ) -> StreamingResponse:
@@ -724,6 +740,18 @@ def create_app(
     async def health() -> dict[str, str]:
         # That this process answers, and nothing about the database or the providers.
         return {"status": "ok"}
+
+    @app.get("/ready", include_in_schema=False)
+    async def ready() -> JSONResponse:
+        # Whether to send this process requests: not while it stops, nor without a database.
+        if draining.is_set():
+            return JSONResponse({"status": "stopping"}, status_code=503)
+        try:
+            await controller.ready(READY_TIMEOUT)
+        except Exception:
+            log.warning("not ready: the database did not answer", exc_info=True)
+            return JSONResponse({"status": "no database"}, status_code=503)
+        return JSONResponse({"status": "ok"})
 
     # --- the interface ---------------------------------------------------------
 

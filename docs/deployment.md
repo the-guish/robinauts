@@ -425,12 +425,12 @@ root of the origin. Three things matter:
   `X-Forwarded-*` headers below are good practice and reach the access log;
   they are not what makes the deployment https.
 - **No buffering on the event stream**, and a read timeout longer than a
-  whole turn. A stream sends a heartbeat comment every 15 s and a turn may
-  run for 600 s by default. Every stream also carries
+  whole turn. A stream sends a keep-alive comment after 15 s of silence and
+  a turn may run for 1200 s by default (`[work] max_turn_seconds`). Every stream also carries
   `X-Accel-Buffering: no`, which nginx obeys — the setting below is there
   for the proxies that do not.
 - The paths are `/ui/` (the interface), `/api/` (the API and the streams),
-  `/auth/` (the sign-in navigations), `/health` and `/openapi.json`. All
+  `/auth/` (the sign-in navigations), `/health`, `/ready` and `/openapi.json`. All
   of them are under `/`, so one location is enough.
 
 nginx:
