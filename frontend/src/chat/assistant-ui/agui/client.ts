@@ -99,11 +99,21 @@ export class Wake {
     for (const done of waiting) done();
   }
 
-  /** A promise that `now` resolves. */
-  next(): Promise<void> {
-    return new Promise<void>((done) => {
-      this.waiters.add(done);
-    });
+  /**
+   * Have `now` call `done`, until the function handed back is called: a wait
+   * that ended some other way lets go of it, so that nothing gathers here
+   * over a long run's many reconnections.
+   */
+  listen(done: () => void): () => void {
+    this.waiters.add(done);
+    return () => {
+      this.waiters.delete(done);
+    };
+  }
+
+  /** How many waits are listening: for the tests. */
+  get listening(): number {
+    return this.waiters.size;
   }
 }
 
@@ -455,13 +465,11 @@ async function waitOrWake(
   }
   // The watcher going away ends the wait too, and the loop then stops.
   signal?.addEventListener("abort", back, { once: true });
+  const unlisten = wake?.listen(back);
   try {
-    await Promise.race([
-      waiting,
-      browser,
-      ...(wake === undefined ? [] : [wake.next()]),
-    ]);
+    await Promise.race([waiting, browser]);
   } finally {
+    unlisten?.();
     signal?.removeEventListener("abort", back);
     if (hasWindow) {
       window.removeEventListener("online", back);

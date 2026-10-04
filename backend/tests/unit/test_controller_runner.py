@@ -845,3 +845,36 @@ async def test_a_cancel_from_another_process_before_the_runner_began_ends_the_tu
     assert ended.state is TurnState.CANCELLED
     await first.close()
     await second.close()
+
+
+@asyncio_test
+async def test_a_turn_too_late_to_run_fails_at_once_rather_than_wait_for_its_lease() -> None:
+    # A deadline the configuration would refuse, as a runner that began late would find.
+    store = MemoryStore()
+    config = dataclasses.replace(CONFIG, work=WorkConfig(max_turn_seconds=5.0))
+    controller = await over(store, config=config)
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    watched = [e async for e in controller.watch_turn(user, started.session_id, started.turn_id)]
+    assert watched[-1].event == TurnEnded(TurnState.FAILED)
+    turn = await store.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert (turn.state, turn.error) == (TurnState.FAILED, "its deadline had passed before it began")
+    await controller.close()
+
+
+@asyncio_test
+async def test_a_conversation_the_sweep_cannot_purge_does_not_stop_the_others() -> None:
+    store = MemoryStore()
+    controller = await over(store)
+    user = await controller.ensure_user(Identity("local", "me"))
+    now = datetime.now(UTC)
+    gone = Session(uuid.uuid4(), user.id, "echo", "an-engine-no-longer-here", now, now)
+    kept = Session(uuid.uuid4(), user.id, "echo", "echo", now, now)
+    for each in (gone, kept):
+        await store.add_session(each)
+        await store.hide_session(user.id, each.id, now - timedelta(hours=1))
+    swept = await controller.sweep()
+    assert swept.sessions_purged == 1
+    assert set(store._sessions) == {gone.id}
+    await controller.close()

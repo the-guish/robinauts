@@ -64,7 +64,8 @@ turns `[work] drain_seconds`, has to fit inside the deployment's grace period.""
 class DrainingServer(uvicorn.Server):
     """uvicorn, beginning the drain on the first ``SIGTERM`` or ``SIGINT`` before it stops
     taking connections: ``/ready`` answers 503, new turns are refused, and every stream ends
-    with a reconnect hint. A second signal is uvicorn's own: it stops at once."""
+    with a reconnect hint. Later signals are uvicorn's own: a second ``SIGINT`` stops it at
+    once, a second ``SIGTERM`` changes nothing."""
 
     def __init__(self, config: uvicorn.Config, drain: Callable[[], None]) -> None:
         super().__init__(config)

@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -75,6 +76,12 @@ from robinauts.web.sign_in import (
 )
 
 DEFAULT_PAGE = 30
+
+POSITION = re.compile(r"[0-9]{1,10}")
+"""A position as this deployment writes one: ASCII digits, and no more than an int holds."""
+
+LAST_POSITION = 2**31 - 1
+"""The highest position a turn's event can have: PostgreSQL's `integer`."""
 
 FIRST_EVENT_WAIT = 0.5
 """How long a stream waits for its turn's first event, and so for a refusal, before its
@@ -788,10 +795,12 @@ def create_app(
             position = after
         elif not last_event_id:
             position = 0
-        elif last_event_id.isdigit():
+        elif POSITION.fullmatch(last_event_id):
             position = int(last_event_id)
         else:
             raise InvalidValueError("Last-Event-ID is a position this deployment wrote, or none")
+        if not 0 <= position <= LAST_POSITION:
+            raise InvalidValueError("a position is a whole number from 0 to 2147483647")
         return await watched(user, conversation_id, run_id, position)
 
     @app.post(

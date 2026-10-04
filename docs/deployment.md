@@ -382,8 +382,9 @@ RestartPreventExitStatus=2
 KillSignal=SIGTERM
 # A stop drains: streams are told to reconnect and open requests get 5 s,
 # then the runs in flight get [work] drain_seconds (30 s) to finish, the rest
-# end as interrupted within 10 s, and the connections close within 5 s more
-# -- some 50 s at most. Anything under a minute here would SIGKILL the tail.
+# end as interrupted within 10 s, and the connections and the pool close
+# together within 5 s more -- 50 s at most. Anything under a minute here would
+# SIGKILL the tail.
 TimeoutStopSec=90
 NoNewPrivileges=yes
 PrivateTmp=yes
@@ -684,8 +685,10 @@ or is stopped leaves every conversation usable.
   `livenessProbe` on `/health`, which reads nothing.
 - **Stopping.** A `preStop` hook of `sleep 5` lets the pod leave the
   Service's endpoints before `SIGTERM`; then the drain (§10) takes at most
-  `[work] drain_seconds` (30) and about 20 s more. Set
-  `terminationGracePeriodSeconds: 60`.
+  5 s for open requests, `[work] drain_seconds` (30) for the running turns,
+  10 s for the rest to write their end and 5 s to close the connections:
+  55 s at most, counting the `preStop`, which the grace period includes. Set
+  `terminationGracePeriodSeconds: 75`, and raise it with `drain_seconds`.
 - **Connections.** `N × (pool_max + 2) + 2` below the server's
   `max_connections` (§4, "Connections").
 - **The load balancer** keeps no affinity (none is needed), passes `Host`
@@ -715,7 +718,7 @@ spec:
   template:
     metadata: {labels: {app: robinauts}}
     spec:
-      terminationGracePeriodSeconds: 60
+      terminationGracePeriodSeconds: 75
       containers:
         - name: robinauts
           image: registry.example.com/robinauts:0.1.0   # the wheel, installed

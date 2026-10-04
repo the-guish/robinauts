@@ -188,7 +188,11 @@ async def test_a_last_event_id_that_is_not_a_position_is_refused() -> None:
         started = await http.post("/api/turns", json={"agent_id": "echo", "text": "hello"})
         cid = started.headers["x-robinauts-conversation-id"]
         rid = started.headers["x-robinauts-run-id"]
-        refused = await http.get(
-            f"/api/conversations/{cid}/runs/{rid}/events", headers={"last-event-id": '"}'}
-        )
-        assert refused.status_code == 422
+        url = f"/api/conversations/{cid}/runs/{rid}/events"
+        for said in ('"}', "\u00b2", "\u0661", "9" * 5000, "2147483648", "-1"):
+            refused = await http.get(url, headers={"last-event-id": said.encode()})
+            assert refused.status_code == 422, said
+        for after in ("2147483648", "-1"):
+            assert (await http.get(url, params={"after": after})).status_code == 422
+        top = await http.get(url, headers={"last-event-id": "2147483647"})
+        assert top.status_code == 200

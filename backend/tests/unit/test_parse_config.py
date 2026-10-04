@@ -175,3 +175,8 @@ def test_the_database_table_sizes_the_pool_and_bounds_the_wait_for_it() -> None:
     message = str(raised.value)
     assert "database.pool_max: 0 is not a whole number above zero" in message
     assert "database: unknown key(s) url" in message
+
+
+def test_a_turn_too_short_to_run_is_refused() -> None:
+    with pytest.raises(ConfigError, match="max_turn_seconds 5 is shorter than a turn can be"):
+        parse_config({"work": {"max_turn_seconds": 5}})

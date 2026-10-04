@@ -713,3 +713,23 @@ test("a stream a stopping server ends with a reconnect hint is attached to again
   const again = fetch.mock.calls[1]?.[1]?.headers as Record<string, string>;
   expect(again["last-event-id"]).toBe("4");
 });
+
+test("a wait that ends on its own stops listening for Reconnect", async () => {
+  const wake = new Wake();
+  answering([
+    ...Array.from(
+      { length: 5 },
+      () => () => streamed([], { headers: streamHeaders(RUN, CONVERSATION) }),
+    ),
+    () =>
+      streamed([finished(9)], { headers: streamHeaders(RUN, CONVERSATION) }),
+  ]);
+  const seen = await all(
+    await startNewConversation("helper", null, "x", {
+      wait: () => Promise.resolve(),
+      wake,
+    }),
+  );
+  expect(seen.map((each) => each.event.type)).toEqual(["RUN_FINISHED"]);
+  expect(wake.listening).toBe(0);
+});

@@ -28,6 +28,11 @@ ENGINES = ("langchain", "pydantic-ai", "echo")
 HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 
 
+SHORTEST_TURN_SECONDS = 30.0
+"""The least `[work] max_turn_seconds` may be: a runner needs some of a deadline to claim a
+turn at all, and a turn shorter than this would mostly fail before its first word."""
+
+
 def seconds(value: Any) -> float:
     """A number of seconds above zero."""
     if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
@@ -115,6 +120,11 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
         pool_max=count,
         acquire_timeout_seconds=seconds,
     )
+    if work.max_turn_seconds < SHORTEST_TURN_SECONDS:
+        problems.append(
+            f"work: max_turn_seconds {work.max_turn_seconds:g} is shorter than a turn can be"
+            f" ({SHORTEST_TURN_SECONDS:g} s at least)"
+        )
     if work.heartbeat_seconds * 2 > work.lease_seconds:
         problems.append(
             f"work: heartbeat_seconds {work.heartbeat_seconds:g} is more than half of"

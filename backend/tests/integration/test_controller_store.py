@@ -360,3 +360,28 @@ async def test_a_work_connection_that_hangs_is_dropped_and_opened_again(
             assert renewed.lost(held) == []
         finally:
             await store.close()
+
+
+@asyncio_test
+async def test_closing_a_store_whose_database_hangs_takes_one_bounded_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(store_module, "CLOSE_SECONDS", 0.3)
+    store = PostgresStore(dsn=url())
+
+    class Hanging:
+        terminated = False
+
+        async def close(self) -> None:
+            await asyncio.sleep(3600)
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    work, listener = Hanging(), Hanging()
+    store._work, store._listener = work, listener  # type: ignore[assignment]
+    before = time.monotonic()
+    await store.close()
+    assert time.monotonic() - before < 1.0
+    assert work.terminated
+    assert listener.terminated

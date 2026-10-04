@@ -211,24 +211,29 @@ class PostgresStore(Store, WorkQueue):
 
     async def close(self) -> None:
         # Bounded: a database that does not answer must not hold a stopping process until
-        # it is killed. What does not close in time is terminated.
+        # it is killed. The connections and the pool close together, within one
+        # `CLOSE_SECONDS`, and what has not closed by then is terminated.
+        closing: list[tuple[Awaitable[None], Callable[[], None]]] = []
         for name in ("_work", "_listener"):
             connection = getattr(self, name)
             setattr(self, name, None)
             if connection is not None:
-                try:
-                    await asyncio.wait_for(connection.close(), CLOSE_SECONDS)
-                except (TimeoutError, OSError, asyncpg.InterfaceError):
-                    connection.terminate()
+                closing.append((connection.close(), connection.terminate))
         if self._owns_pool and self._pool is not None:
             pool, self._pool = self._pool, None  # type: ignore[assignment]
-            try:
-                await asyncio.wait_for(pool.close(), CLOSE_SECONDS)
-            except TimeoutError:
-                log.warning(
-                    "the pool did not close in %ss; its connections are dropped", CLOSE_SECONDS
-                )
-                pool.terminate()
+            closing.append((pool.close(), pool.terminate))
+        if not closing:
+            return
+        tasks = [asyncio.ensure_future(close) for close, _ in closing]
+        _, late = await asyncio.wait(tasks, timeout=CLOSE_SECONDS)
+        for task, (_, terminate) in zip(tasks, closing, strict=True):
+            if task in late:
+                task.cancel()
+                terminate()
+            elif not task.cancelled() and task.exception() is not None:
+                terminate()
+        if late:
+            log.warning("the database did not close in %ss; dropped", CLOSE_SECONDS)
 
     async def readiness(self) -> tuple[str, ...]:
         problems = []

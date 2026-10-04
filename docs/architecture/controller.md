@@ -59,8 +59,9 @@ Run by the process that holds the controller, on a schedule of its own, never by
   turn events, user sessions, API tokens and pending logins past their expiry, a thousand at
   a time; ends the turns whose lease has passed, storing what each had answered (as a reader
   would); and finishes the purge of sessions hidden more than ten minutes ago, whose delete
-  died between the hide and the purge, forgetting their memory first. Each of the three is
-  taken by one process at a time, under a transaction-level advisory lock
-  (`pg_try_advisory_xact_lock`) of its own, which another process finding taken leaves the
-  task to; every task is safe to repeat, so the lock saves work and is not what keeps it
-  right.
+  died between the hide and the purge, forgetting their memory first. Each of the three takes
+  a transaction-level advisory lock (`pg_try_advisory_xact_lock`) of its own while it deletes,
+  or while it reads what it will end or purge, and a process that finds it taken leaves the
+  task. Ending and purging come after that read, so two processes rarely do the same work but
+  may: every task is safe to repeat, and the lock saves work rather than keeping it right. A
+  turn or a conversation that cannot be ended or purged is logged and skipped.

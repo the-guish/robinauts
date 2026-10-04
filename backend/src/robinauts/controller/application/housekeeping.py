@@ -4,9 +4,11 @@
 """The housekeeper: the controller's sweep, on a schedule of this process's own.
 
 Every process runs one. The first sweep comes at a random moment of the first interval, so a
-fleet started together does not sweep together; each task of a sweep is taken by one process
-at a time, under a lock of its own, and the others leave it. A sweep that fails is logged and
-the next one goes on.
+fleet started together does not sweep together. Each task takes a lock of its own while it
+deletes, or while it reads what it will end or purge, and a process that finds the lock
+taken leaves the task: so two processes rarely do the same work, but may, since ending and
+purging come after the read. Nothing depends on the lock: every task is safe to repeat. A
+sweep that fails is logged and the next one goes on, and a row that fails is skipped.
 """
 
 from __future__ import annotations

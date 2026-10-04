@@ -709,14 +709,23 @@ class RobinautsController(Controller, Operations):
                     ended += 1
             except SessionNotFoundError:
                 continue  # hidden meanwhile: the purge takes it
+            except Exception:
+                # One turn that cannot be ended must not stop the others, sweep after sweep.
+                with logs.about(session=turn.session_id, turn=turn.id):
+                    log.exception("the sweep could not end this turn; the next sweep tries")
         purged = 0
         hidden = await self._store.hidden_sessions(now - PURGE_AFTER, SWEEP_BATCH)
         if hidden is None:
             skipped.append("purge")
         for session in hidden or ():
-            await (await self._engine(session.engine)).forget(session.id)
-            await self._store.purge_session(session.owner_id, session.id)
-            purged += 1
+            try:
+                await (await self._engine(session.engine)).forget(session.id)
+                await self._store.purge_session(session.owner_id, session.id)
+                purged += 1
+            except Exception:
+                # As an engine this build no longer has: the others are purged all the same.
+                with logs.about(session=session.id):
+                    log.exception("the sweep could not purge this conversation")
         counts = deleted or {}
         return Swept(
             events=counts.get("turn_events", 0),

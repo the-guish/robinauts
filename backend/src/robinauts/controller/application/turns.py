@@ -84,6 +84,9 @@ BUSY_TRIES = 5
 BUSY_BACKOFF = 0.5
 """Seconds before the next try of a batch, times the tries so far."""
 
+DEADLINE_PASSED = "its deadline had passed before it began"
+"""The error of a turn too late to run, for the operator."""
+
 DEADLINE_MARGIN = 10.0
 """Seconds of its deadline a turn must have left for the runner to claim it."""
 
@@ -263,14 +266,18 @@ async def run_turn(
 ) -> None:
     now = datetime.now(UTC)
     if turn.deadline_at is None or turn.lease_until <= now:
-        return
+        return  # nothing it writes would be taken: its lease ends it
+    writer = _Writer(store, owner, turn, fence)
     remaining = (turn.deadline_at - now).total_seconds()
     if remaining <= DEADLINE_MARGIN:
+        # Too little of its deadline left to run at all: it fails now, rather than sit
+        # running until its lease runs out.
+        log.warning("turn not run: %.1fs of its deadline left", remaining)
+        await _end(writer, TurnState.FAILED, DEADLINE_PASSED)
         return
     answer_id = uuid.uuid4()
     definition = AgentDefinition(agent_config.system_prompt, agent_config.tools)
     parts: list[MessagePart] = []
-    writer = _Writer(store, owner, turn, fence)
     try:
         # The claim: alone, so that a runner refused writes nothing and runs no engine.
         await writer.append(MessageStarted(answer_id, parent_id=question.id))
