@@ -68,6 +68,14 @@ class NoActiveTurnError(ControllerError):
     pass
 
 
+class DrainingError(ControllerError):
+    """A turn asked of a process that is stopping: another one takes it."""
+
+
+class BusyError(ControllerError):
+    """The database had no connection free in time: try again."""
+
+
 # --- configuration ------------------------------------------------------------
 
 
@@ -92,9 +100,12 @@ class ModelConfig:
     provider: str
     name: str
     timeout_seconds: float = 120.0
+    """One call to the vendor, never the turn: ``WorkConfig.max_turn_seconds`` bounds that."""
     max_output_tokens: int | None = None
     context_window: int | None = None
     title: str = ""
+    max_retries: int = 2
+    """Retries of one call by the vendor's SDK, with its backoff."""
 
 
 class ToolServerAuth(StrEnum):
@@ -126,12 +137,57 @@ class AgentConfig:
     tools: tuple[str, ...] = ()
 
 
+class ToolErrorBehavior(StrEnum):
+    FAILED = "failed"
+    RETRY = "retry"
+    ERROR = "error"
+
+
+@dataclass(frozen=True, slots=True)
+class WorkConfig:
+    """The ``[work]`` table: how this process runs turns."""
+
+    max_turn_seconds: float = 1200.0
+    """A turn's deadline, from its start: the whole run, whatever its calls take."""
+    lease_seconds: float = 90.0
+    """How long a turn is this process's without a heartbeat: a process that went away
+    leaves its turns for this long at most."""
+    heartbeat_seconds: float = 30.0
+    """How often this process renews the leases of the turns it runs, all in one write."""
+    drain_seconds: float = 30.0
+    """How long a stopping process gives the turns it runs to finish, before it ends the rest
+    as interrupted."""
+    max_model_calls: int = 100
+    """Calls to the model in one turn, past which the engine ends it."""
+    tool_error_behavior: ToolErrorBehavior = ToolErrorBehavior.FAILED
+    """What a tool's error does where the engine's framework leaves it open: back to the
+    model as a failed result (``failed``), as a retry prompt that spends the tool's retries
+    (``retry``), or the end of the turn (``error``)."""
+
+
+@dataclass(frozen=True, slots=True)
+class DatabaseConfig:
+    """The ``[database]`` table: what one process takes of PostgreSQL. Beside the pool, a
+    process holds two connections of its own, the listener and the work connection, so a
+    fleet of N processes needs ``N × (pool_max + 2)`` connections, and a few more for
+    ``robinauts db init`` and an operator."""
+
+    pool_max: int = 10
+    """The pool's connections at most: requests, turn events, finishes and the engines'
+    checkpoints share them."""
+    acquire_timeout_seconds: float = 5.0
+    """How long an operation waits for a connection of the pool: a request then answers
+    503, and a turn's runner tries its write again."""
+
+
 @dataclass(frozen=True, slots=True)
 class Config:
     providers: Mapping[str, ProviderConfig] = field(default_factory=dict)
     models: Mapping[str, ModelConfig] = field(default_factory=dict)
     tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
     agents: Mapping[str, AgentConfig] = field(default_factory=dict)
+    work: WorkConfig = field(default_factory=WorkConfig)
+    database: DatabaseConfig = field(default_factory=DatabaseConfig)
 
 
 class StorageKind(StrEnum):
@@ -147,6 +203,31 @@ class StorageConfig:
     kind: StorageKind
     url: str | None = None
     path: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Swept:
+    """What one sweep did. A task another process was sweeping at the time is named in
+    ``skipped``, and left to it."""
+
+    events: int = 0
+    user_sessions: int = 0
+    api_tokens: int = 0
+    pending_logins: int = 0
+    turns_ended: int = 0
+    sessions_purged: int = 0
+    skipped: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class Readiness:
+    """Whether this process should be sent requests, and if not, why not."""
+
+    problems: tuple[str, ...] = ()
+
+    @property
+    def ready(self) -> bool:
+        return not self.problems
 
 
 # --- users --------------------------------------------------------------------
@@ -325,6 +406,16 @@ class Turn:
     """For the operator, on a turn that ended badly; never sent to a browser."""
     retries: uuid.UUID | None = None
     """The failed answer this turn tries again, which the model is told about."""
+    deadline_at: datetime | None = None
+    """When the run must have ended, whatever its lease: its start plus ``max_turn_seconds``."""
+    worker_id: str | None = None
+    """The process that holds the turn while it runs, and held it last once it has ended."""
+    attempt: int = 1
+    """Which holding of the turn this is; every write of its runner names it."""
+    heartbeat_at: datetime | None = None
+    """When its holder last renewed its lease."""
+    cancel_requested_at: datetime | None = None
+    """When somebody asked for it to stop, through any process: its holder stops it."""
 
 
 @dataclass(frozen=True, slots=True)

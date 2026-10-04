@@ -7,7 +7,8 @@ Subclass ``EngineMemoryContract`` and override ``new_engine``, which returns an 
 and ready, whose ``MODEL`` answers without reaching anything.
 
 Subclass ``EngineTurnContract`` and override ``new_engine(script)``, which returns an engine set
-up and ready whose ``MODEL`` behaves as the ``Script`` says and is handed ``add`` as its tool.
+up and ready whose ``MODEL`` behaves as the ``Script`` says and is handed ``add`` as its tool,
+with the settings of ``engine_settings.settings_for``.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from typing import Any
 
 import pytest
 
+from engine_settings import MAX_MODEL_CALLS
 from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
     CheckpointNotFoundError,
@@ -146,6 +148,7 @@ class Script(Enum):
     TOOL_ROUND = "calls add(**ARGUMENTS) as CALL_ID, then, given its result, streams ANSWER"
     FAIL = "raises ModelFailure"
     HANG = "never answers"
+    TOOL_LOOP = "calls add(**ARGUMENTS) again after every result, for ever"
 
 
 class EngineTurnContract:
@@ -201,6 +204,27 @@ class EngineTurnContract:
         running.cancel()
         with pytest.raises(asyncio.CancelledError):
             await running
+
+    @engine_test
+    async def test_a_turn_past_its_model_calls_ends_with_an_error(self) -> None:
+        engine = await self.new_engine(Script.TOOL_LOOP)
+        session = uuid.uuid4()
+        await engine.create(session)
+        events: list[Event] = []
+        with pytest.raises(Exception) as raised:  # the framework's own error
+            async for event in engine.stream(
+                session,
+                AGENT,
+                "What are two and three?",
+                model=self.MODEL,
+                checkpoint_id=None,
+                timeout_seconds=10.0,
+            ):
+                events.append(event)
+        assert not isinstance(raised.value, TimeoutError | asyncio.CancelledError)
+        calls = [event for event in events if isinstance(event, ToolCall)]
+        assert 0 < len(calls) <= MAX_MODEL_CALLS
+        assert not any(isinstance(event, Done) for event in events)
 
     @engine_test
     async def test_a_turn_past_its_timeout_ends_with_timeout_error(self) -> None:

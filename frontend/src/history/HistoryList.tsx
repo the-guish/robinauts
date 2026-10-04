@@ -36,14 +36,17 @@ import { formatRoute, navigate, NEW_CHAT } from "../router";
 import type { History } from "./history";
 
 /**
- * What a conversation that is still answering is told when it is deleted.
+ * What a conversation whose answer did not stop in time is told when it is
+ * deleted.
  *
- * The API refuses with 409 (`RunAlreadyActiveError`), and its detail names
- * the run and its state for an operator's log. What a person needs to know
- * is what to do next (`docs/specs/conversations.md`, "Deletion").
+ * A delete stops the answer first, whichever server runs it, and waits for
+ * it to end. The API refuses with 409 when it has not ended in time -- its
+ * server went away, and the answer ends when its lease runs out -- and its
+ * detail names the run for an operator's log. What a person needs to know is
+ * what to do next (`docs/specs/conversations.md`, "Deletion").
  */
 export const STILL_ANSWERING =
-  "This conversation is still answering. Stop the answer first, then delete it.";
+  "This conversation's answer has not stopped yet. Try deleting it again in a minute.";
 
 /**
  * How long a title may be, and what is said of one that is longer.

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import pathlib
 import uuid
@@ -21,6 +22,7 @@ from robinauts.controller.contract.domain import (
     AgentConfig,
     Config,
     ConfigError,
+    DatabaseConfig,
     Identity,
     ModelConfig,
     ProviderConfig,
@@ -121,3 +123,23 @@ def test_db_init_without_a_database_url_is_refused(
         run(["db", "init"])
     assert left.value.code == 2
     assert "ROBINAUTS_DATABASE_URL is not set" in capsys.readouterr().err
+
+
+@asyncio_test
+async def test_the_pool_is_sized_by_the_database_table() -> None:
+    async with temporary_schema() as schema:
+        dsn = dsn_in(schema.name)
+        config = dataclasses.replace(
+            CONFIG, database=DatabaseConfig(pool_max=3, acquire_timeout_seconds=2.0)
+        )
+        composed = compose(
+            config, storage=StorageConfig(StorageKind.POSTGRES, url=dsn), secret_for={}.get
+        )
+        await composed.controller.open()
+        try:
+            store = composed.controller._store  # type: ignore[attr-defined]
+            assert store.pool.get_max_size() == 3
+            assert store._acquire_timeout == 2.0
+            assert (await composed.operations.readiness()).ready
+        finally:
+            await composed.controller.close()

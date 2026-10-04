@@ -13,10 +13,13 @@ signed in is web's own concern, the user session.
 ## Lifecycle
 
 - `open`: build the stores on the given storage, build the engines the configuration names, and
-  run their setup. A turn a process that went away left running is ended by its lease, by the
-  next reader to find it.
-- `close`: wait for the turns this process runs, bounded, interrupt the rest, and release the
-  storage.
+  run their setup, and start the heartbeat that renews the leases of the turns this process
+  runs. A turn a process that went away left running is ended by its lease, by the next reader
+  to find it.
+- `drain` (operations): take no new turn and answer not ready; `readiness` says whether to send
+  this process requests.
+- `close`: wait for the turns this process runs, `[work] drain_seconds` at most, interrupt the
+  rest, wait a bounded time for them to write their end, and release the storage, bounded too.
 
 ## Users
 
@@ -33,7 +36,8 @@ signed in is web's own concern, the user session.
 - `list_sessions`: most recently updated first, a page at a time.
 - `open_session`: one moment of a session, its messages and its active turn if any.
 - `rename_session`
-- `delete_session`: the records, and the engine's memory with them; refused while a turn runs.
+- `delete_session`: the records, and the engine's memory with them; a running turn is stopped
+  first, wherever it runs, and the delete is refused only when it has not ended in time.
 - `fork_session`: a new session from a message of another, independent from then on.
 
 ## Turns
@@ -42,7 +46,8 @@ signed in is web's own concern, the user session.
 - `send_message`: a message under a chosen parent, with the model. An edit is this under an
   earlier parent.
 - `regenerate_answer`: the answer to a question again, under the same question.
-- `cancel_turn`: stop the turn named, if this process runs it.
+- `cancel_turn`: stop the turn named, whichever process runs it, through the store; says
+  whether it has ended yet.
 - `watch_turn`: the events of the turn named, from a position, as they happen, ending with how
   it ended.
 
@@ -50,4 +55,13 @@ signed in is web's own concern, the user session.
 
 Run by the process that holds the controller, on a schedule of its own, never by a shell.
 
-- `sweep`: delete what has expired, and forget its memory.
+- `sweep`: every process, every five minutes, the first at a random moment. It deletes the
+  turn events, user sessions, API tokens and pending logins past their expiry, a thousand at
+  a time; ends the turns whose lease has passed, storing what each had answered (as a reader
+  would); and finishes the purge of sessions hidden more than ten minutes ago, whose delete
+  died between the hide and the purge, forgetting their memory first. Each of the three takes
+  a transaction-level advisory lock (`pg_try_advisory_xact_lock`) of its own while it deletes,
+  or while it reads what it will end or purge, and a process that finds it taken leaves the
+  task. Ending and purging come after that read, so two processes rarely do the same work but
+  may: every task is safe to repeat, and the lock saves work rather than keeping it right. A
+  turn or a conversation that cannot be ended or purged is logged and skipped.

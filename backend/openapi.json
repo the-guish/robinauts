@@ -1033,8 +1033,11 @@
           }
         ],
         "responses": {
+          "202": {
+            "description": "The stop is recorded, and the run's end is on its way"
+          },
           "204": {
-            "description": "Successful Response"
+            "description": "The run has ended"
           },
           "default": {
             "content": {

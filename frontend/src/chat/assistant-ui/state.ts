@@ -153,6 +153,11 @@ export interface ChatState {
    */
   notice: string | null;
   /**
+   * The wait, in milliseconds, before the next try at a stream whose
+   * connection dropped, while the run lives; `null` while it is connected.
+   */
+  reconnecting: number | null;
+  /**
    * The thread as it was before the turn on its way changed it.
    *
    * A turn the server refuses is one that never happened, so what it did to
@@ -175,6 +180,7 @@ export const EMPTY: ChatState = {
   thinking: null,
   ended: null,
   notice: null,
+  reconnecting: null,
   before: null,
 };
 
@@ -192,10 +198,7 @@ export const ENDED_BADLY = new Map<string, string>([
     "failed",
     "This answer did not finish: something went wrong while it was being produced.",
   ],
-  [
-    "interrupted",
-    "This answer was interrupted when the server stopped. Sending the message again is how it is retried.",
-  ],
+  ["interrupted", "This answer was interrupted when the server stopped."],
 ]);
 
 /**
@@ -221,6 +224,12 @@ export const RUN_ERRORS = new Map<string, string>([
 ]);
 
 const ENDED_SOMEHOW = "This answer did not finish.";
+
+/**
+ * The `RUN_ERROR` codes whose turn stores what it had written as an answer
+ * that failed (`docs/specs/wire.md`): the only ones a Retry can name.
+ */
+const STORED_FAILED = new Set(["failed", "interrupted"]);
 
 /**
  * What a second turn asked for while one is on its way is told.
@@ -377,6 +386,8 @@ export type ChatAction =
   | { kind: "lost"; detail: string }
   /** Something to say, and nothing else about the conversation changes. */
   | { kind: "told"; detail: string }
+  /** The stream's connection dropped, and is tried again in that long. */
+  | { kind: "reconnecting"; inMs: number | null }
   /**
    * The turn was refused before it began, so nothing about the run changed.
    *
@@ -430,6 +441,7 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
         sending: false,
         writing: null,
         thinking: null,
+        reconnecting: null,
         // Said once: by the failed answer when there is one at the end.
         ended: messages.at(-1)?.state === "failed" ? null : action.endedBadly,
         before: null,
@@ -485,11 +497,14 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
         conversationId: action.conversationId,
         runId: action.runId,
         sending: false,
+        reconnecting: null,
         before: null,
         ended: null,
       };
     case "told":
       return { ...state, notice: action.detail };
+    case "reconnecting":
+      return { ...state, reconnecting: action.inMs };
     case "event":
       return applied(state, action.event);
     case "lost":
@@ -759,7 +774,13 @@ function applied(state: ChatState, event: AguiEvent): ChatState {
     case "RUN_ERROR": {
       if (state.runId === null && !anyRunning(state)) return state;
       const said = saidFor(event.code);
-      const after = ending(state, "failed", said);
+      // **Failed only where the server keeps a failed answer behind it**: a
+      // failed or interrupted turn stores what it had written as an answer
+      // that failed, under the id it streamed with, and that is what Retry
+      // names. Any other ending stored nothing, and a Retry on it would be
+      // refused, so it is drawn as over and not as failed.
+      const how = STORED_FAILED.has(event.code) ? "failed" : "cancelled";
+      const after = ending(state, how, said);
       // A run that failed before it announced anything has no message to put
       // the sentence on, so the thread says it instead.
       return state.writing === null ? { ...after, ended: said } : after;
@@ -921,6 +942,7 @@ function ending(
     sending: false,
     writing: null,
     thinking: null,
+    reconnecting: null,
     // **Every message still open, not only the one being written.** One
     // answer at a time is the rule and the platform keeps it, so there is
     // never more than one; a run that ends leaving two would leave the second
@@ -1050,23 +1072,28 @@ function folded(
     thread[thread.length - 1] = answered(answer, message);
   }
   return thread.map((message, at) => {
-    if (message.role !== "assistant" || message.state === "failed") {
-      return message;
+    const last = at === thread.length - 1;
+    if (message.role !== "assistant") return message;
+    if (message.state === "failed") {
+      // A turn interrupted when the server stopped stores its answer as
+      // failed too, and the answer says how it ended.
+      return last && endedState === "interrupted" && endedBadly !== null
+        ? { ...message, detail: endedBadly }
+        : message;
     }
     if (!unanswered(message)) return message;
-    if (at === thread.length - 1 && runId !== null) {
+    if (last && runId !== null) {
       return { ...message, state: "running" };
     }
-    const failed =
-      at === thread.length - 1 &&
-      (endedState === "failed" || endedState === "interrupted");
-    return failed
-      ? {
-          ...message,
-          state: "failed",
-          ...(endedBadly === null ? {} : { detail: endedBadly }),
-        }
-      : { ...message, state: "cancelled" };
+    // **Never failed unless it is stored failed**: Retry names a failed
+    // answer, and one the server does not hold as failed would be refused.
+    const badly =
+      last && (endedState === "failed" || endedState === "interrupted");
+    return {
+      ...message,
+      state: "cancelled",
+      ...(badly && endedBadly !== null ? { detail: endedBadly } : {}),
+    };
   });
 }
 

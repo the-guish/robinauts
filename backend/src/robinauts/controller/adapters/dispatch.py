@@ -6,43 +6,66 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 
-from robinauts.controller.ports.dispatcher import CLOSE, TurnDispatcher, TurnRunner
+from robinauts.controller.ports.dispatcher import CLOSE, StopReason, TurnDispatcher, TurnRunner
+from robinauts.controller.ports.work import Held
+
+log = logging.getLogger(__name__)
 
 
 class InProcessDispatcher(TurnDispatcher):
     def __init__(self, run: TurnRunner | None = None) -> None:
         self.run = run
         """The controller's ``run_turn``, handed over by the composition."""
-        self._tasks: dict[uuid.UUID, asyncio.Task[None]] = {}
+        self._tasks: dict[uuid.UUID, tuple[int, asyncio.Task[None]]] = {}
+        self._stopped: set[asyncio.Task[None]] = set()
 
-    async def dispatch(self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID) -> None:
+    async def dispatch(
+        self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, attempt: int
+    ) -> None:
         if self.run is None:
             raise RuntimeError("the dispatcher has nothing to run turns with")
-        task = asyncio.create_task(self.run(owner, session, turn))
-        self._tasks[turn] = task
+        task = asyncio.create_task(self.run(owner, session, turn, attempt))
+        self._tasks[turn] = (attempt, task)
         task.add_done_callback(lambda done: self._settled(turn, done))
 
     def _settled(self, turn: uuid.UUID, task: asyncio.Task[None]) -> None:
-        self._tasks.pop(turn, None)
-        if not task.cancelled():
-            task.exception()
+        held = self._tasks.get(turn)
+        if held is not None and held[1] is task:
+            del self._tasks[turn]
+        self._stopped.discard(task)
+        if not task.cancelled() and (error := task.exception()) is not None:
+            # The runner ends its own turn on every failure it can: this is one it could not.
+            log.error("the runner of turn %s ended with an error", turn, exc_info=error)
 
-    async def cancel(self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID) -> bool:
-        task = self._tasks.get(turn)
-        if task is None:
+    def held(self) -> list[Held]:
+        return [Held(turn, attempt) for turn, (attempt, _) in self._tasks.items()]
+
+    async def stop(self, turn: uuid.UUID, reason: StopReason) -> bool:
+        held = self._tasks.get(turn)
+        if held is None:
             return False
-        task.cancel()
+        _, task = held
+        # Once: a second cancel would cut short the write with which the runner ends the turn.
+        if task not in self._stopped:
+            self._stopped.add(task)
+            task.cancel(reason)
         await asyncio.wait({task})
         return True
 
-    async def close(self, timeout: float) -> None:
-        tasks = set(self._tasks.values())
+    async def close(self, timeout: float, final: float) -> None:
+        tasks = {task for _, task in self._tasks.values()}
         if not tasks:
             return
         _, pending = await asyncio.wait(tasks, timeout=timeout)
-        for task in pending:
+        for task in pending - self._stopped:
+            self._stopped.add(task)
             task.cancel(CLOSE)
         if pending:
-            await asyncio.wait(pending)
+            _, left = await asyncio.wait(pending, timeout=final)
+            if left:
+                log.warning(
+                    "%d turn(s) did not end in time and are left to their leases", len(left)
+                )

@@ -12,8 +12,9 @@ refused. ``start`` needs a sign-in configuration that names an identity provider
 provider, every ``/api/`` route answers for the person signed in through it; in the local
 development mode, for the mode's one local user. The interface is the directory
 ``ROBINAUTS_UI_DIR`` names, or the build an installed wheel carries, or ``frontend/dist`` of
-this checkout when it is built. Storage is PostgreSQL when ``ROBINAUTS_DATABASE_URL`` is set,
-and in memory otherwise; the sign-in records are kept on the same storage. The server never
+this checkout when it is built. Storage is PostgreSQL, which ``ROBINAUTS_DATABASE_URL`` names
+and a start with sign-in refuses to go without; the local development mode keeps its records
+in memory when it is unset. The sign-in records are kept on the same storage. The server never
 changes the database: it refuses one that is not this build's and names the command.
 """
 
@@ -25,9 +26,10 @@ import importlib.metadata
 import logging
 import os
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from importlib import resources
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 import uvicorn
@@ -42,17 +44,48 @@ from robinauts.controller.composition import (
     load,
     read_tables,
     storage_from,
+    worker_from,
 )
 from robinauts.controller.contract.domain import Config, ConfigError
 from robinauts.web.app import create_app
+from robinauts.web.logs import FORMAT_VARIABLE, FORMATS
+from robinauts.web.logs import configure as configure_logging
 from robinauts.web.sign_in import SIGN_IN_KEYS, SignInConfig, is_loopback, parse_sign_in
 
 REPO = Path(__file__).resolve().parents[4]
 
-GRACEFUL_SHUTDOWN_SECONDS = 20
-"""How long uvicorn waits for open streams on a stop before it closes them, so that the
-controller's `close`, which runs after, still runs inside a service's stop timeout."""
+GRACEFUL_SHUTDOWN_SECONDS = 5
+"""How long uvicorn waits for open connections on a stop before it closes them. Short: the
+drain has already ended every stream with a reconnect hint, so what is left is requests
+that end on their own, and the controller's `close`, which runs after and gives the running
+turns `[work] drain_seconds`, has to fit inside the deployment's grace period."""
 
+
+class DrainingServer(uvicorn.Server):
+    """uvicorn, beginning the drain on the first ``SIGTERM`` or ``SIGINT`` before it stops
+    taking connections: ``/ready`` answers 503, new turns are refused, and every stream ends
+    with a reconnect hint. Later signals are uvicorn's own: a second ``SIGINT`` stops it at
+    once, a second ``SIGTERM`` changes nothing."""
+
+    def __init__(self, config: uvicorn.Config, drain: Callable[[], None]) -> None:
+        super().__init__(config)
+        self._drain = drain
+        self._drained = False
+
+    def handle_exit(self, sig: int, frame: FrameType | None) -> None:
+        if not self._drained:
+            self._drained = True
+            try:
+                asyncio.get_running_loop().call_soon_threadsafe(self._drain)
+            except RuntimeError:
+                pass  # no loop is running: nothing is being served, so nothing to drain
+        super().handle_exit(sig, frame)
+
+
+NO_DATABASE = (
+    f"no database: set {DATABASE_URL_VARIABLE} to the PostgreSQL this deployment uses;"
+    " only --dev-no-sign-in keeps its records in memory"
+)
 NO_PROVIDER = (
     "no identity provider is configured: name one in [providers], or start with"
     " --dev-no-sign-in to develop on this machine with sign-in off"
@@ -103,6 +136,10 @@ def serving(
         else:
             if sign_in is None or not sign_in.providers:
                 problems.append(NO_PROVIDER)
+        # One replica without the variable would keep a private store of its own in memory,
+        # and answer for the others' conversations with nothing.
+        if not environ.get(DATABASE_URL_VARIABLE):
+            problems.append(NO_DATABASE)
     try:
         config, secret_for = configure(tables, environ)
     except ConfigError as refused:
@@ -122,22 +159,32 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     except ConfigError as refused:
         print(refused, file=sys.stderr)
         return 1
-    composed = compose(config, storage=storage_from(os.environ), secret_for=secret_for)
-    logging.basicConfig(level=logging.INFO)
+    form = os.environ.get(FORMAT_VARIABLE) or "text"
+    if form not in FORMATS:
+        print(f"{FORMAT_VARIABLE} is {form!r}, not one of {', '.join(FORMATS)}", file=sys.stderr)
+        return 1
+    pod = worker_from(os.environ)
+    composed = compose(config, storage=storage_from(os.environ), secret_for=secret_for, worker=pod)
+    configure_logging(pod, form)
     if dev_no_sign_in:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
-    uvicorn.run(
-        create_app(
-            composed.controller,
-            credentials=composed.credentials,
-            sign_in=sign_in,
-            secret_for=secret_for,
-            ui_dir=ui_dir,
-        ),
+    app = create_app(
+        composed.controller,
+        credentials=composed.credentials,
+        sign_in=sign_in,
+        secret_for=secret_for,
+        ui_dir=ui_dir,
+        operations=composed.operations,
+    )
+    config = uvicorn.Config(
+        app,
         host=host,
         port=port,
         timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
+        # The process's own handler, which every line goes through: `configure_logging`.
+        log_config=None,
     )
+    DrainingServer(config, app.state.drain).run()
     return 0
 
 

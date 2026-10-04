@@ -485,6 +485,8 @@ test("opened, an answer whose calls were never answered is shown as the run left
     endedState: "cancelled",
   });
   expect(cancelled.messages[1]?.state).toBe("cancelled");
+  // Over, and saying how, but never failed: the server does not hold it as a
+  // failed answer, so a Retry on it would be refused.
   const failed = after({
     kind: "opened",
     conversationId: CONVERSATION,
@@ -493,8 +495,19 @@ test("opened, an answer whose calls were never answered is shown as the run left
     endedBadly: "went wrong",
     endedState: "failed",
   });
-  expect(failed.messages[1]?.state).toBe("failed");
+  expect(failed.messages[1]?.state).toBe("cancelled");
   expect(failed.messages[1]?.detail).toBe("went wrong");
+  // An answer stored as failed, by a turn that was interrupted, says that.
+  const interrupted = after({
+    kind: "opened",
+    conversationId: CONVERSATION,
+    messages: [stored[0]!, { ...stored[1]!, failed: true }],
+    runId: null,
+    endedBadly: "interrupted",
+    endedState: "interrupted",
+  });
+  expect(interrupted.messages[1]?.state).toBe("failed");
+  expect(interrupted.messages[1]?.detail).toBe("interrupted");
   // Earlier in the thread, whatever the last run did: that batch is over.
   const earlier = after({
     kind: "opened",
@@ -744,7 +757,10 @@ test("a run that failed says so on the answer, one sentence per code", () => {
       sent({ type: "RUN_ERROR", code, message: "whatever the backend said" }),
     );
     const failed = state.messages.find((each) => each.id === ANSWER);
-    expect(failed?.state).toBe("failed");
+    // Failed, which is what Retry is offered on, only where the server keeps
+    // the answer as failed: a failed or an interrupted turn.
+    const stored = code === "failed" || code === "interrupted";
+    expect(failed?.state).toBe(stored ? "failed" : "cancelled");
     expect(failed?.detail).toBe(saidFor(code));
     // Never the backend's own sentence, and never the run's stored error.
     expect(failed?.detail).not.toContain("whatever");
@@ -2175,6 +2191,55 @@ test("a first message refused as not there is about its agent, and keeps the tex
   expect(result.current.runtime.thread.composer.getState().text).toBe("why?");
   expect(onModelRefused).not.toHaveBeenCalled();
 });
+
+for (const [status, answer] of [
+  [202, () => new Response(null, { status: 202 })],
+  [404, () => refusal(404, "NoActiveTurnError", "nothing runs")],
+  [409, () => refusal(409, "TurnActiveError", "runs in another process")],
+] as const) {
+  test(`a stop the server had (${status}) says nothing and leaves the ending to the stream`, async () => {
+    const { response, write, close } = writable({
+      headers: streamHeaders(RUN, CONVERSATION),
+    });
+    stub((call) => {
+      if (call.url === `/api/conversations/${CONVERSATION}`) {
+        return json(opened(conversation(1), TREE));
+      }
+      if (call.url.endsWith("/cancel")) return answer();
+      if (call.url === `/api/conversations/${CONVERSATION}/turns`)
+        return response;
+      return undefined;
+    });
+    const { result } = chatting({ conversationId: CONVERSATION });
+    await waitFor(() => {
+      expect(result.current.state.messages).toHaveLength(2);
+    });
+    await act(async () => {
+      void result.current.runtime.thread.append("and then?");
+      await settle();
+    });
+    write(
+      event("TEXT_MESSAGE_START", { messageId: "m4", role: "assistant" }, 2),
+    );
+    await settle();
+    await act(async () => {
+      result.current.runtime.thread.cancelRun();
+      await settle();
+    });
+    expect(result.current.state.notice).not.toBe(STOP_DID_NOT_ARRIVE);
+    write(
+      event(
+        "RUN_FINISHED",
+        { threadId: CONVERSATION, runId: RUN, outcome: { type: "cancelled" } },
+        3,
+      ),
+    );
+    close();
+    await waitFor(() => {
+      expect(result.current.state.runId).toBeNull();
+    });
+  });
+}
 
 test("a stop that does not reach the server leaves the answer alone", async () => {
   const { response, write, close } = writable({

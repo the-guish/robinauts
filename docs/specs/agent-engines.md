@@ -120,9 +120,15 @@ anything else.
 - **create** a session by id. Creating one that already exists is an error.
 - **exists**: whether the engine has that session.
 - **stream** a turn: the session id, the agent definition, the question, the
-  model, the checkpoint id to continue from (none for the first turn), a
-  timeout in seconds after which the engine ends the turn with an error,
-  and whether to resume. Yields the events as they happen and ends with
+  model, the checkpoint id to continue from (none for the first turn), what
+  is left of the turn's deadline in seconds, after which the engine ends the
+  turn with an error, and whether to resume. The deadline bounds the whole
+  run; each call to the vendor is bounded by the model's own timeout and
+  retried by the vendor's SDK, with its backoff, as many times as the
+  model's `max_retries` says. The settings also carry the turn's limits: the
+  number of calls to the model, past which the engine ends the turn with its
+  framework's error, and what a tool's error does where the framework leaves
+  it open (back to the model by default, never the end of the turn). Yields the events as they happen and ends with
   the answer and a new checkpoint id.
 - **fork** a session into a new one, at a checkpoint of the source. The new
   session has the memory as it was at that checkpoint and nothing after it.

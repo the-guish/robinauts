@@ -15,13 +15,16 @@ AG-UI over SSE, its run id is the turn's id, and its thread id the session's.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Header, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -29,9 +32,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from robinauts.controller.composition import SecretLookup
+from robinauts.controller.contract import logs
 from robinauts.controller.contract.domain import (
     ApiToken,
+    BusyError,
     ControllerError,
+    DrainingError,
     Identity,
     InvalidValueError,
     Message,
@@ -52,7 +58,7 @@ from robinauts.controller.contract.domain import (
     UnknownModelError,
     User,
 )
-from robinauts.controller.contract.ports import Controller, Credentials
+from robinauts.controller.contract.ports import Controller, Credentials, Operations
 from robinauts.web import agui
 from robinauts.web.cookies import Cookies
 from robinauts.web.logs import loggable
@@ -71,6 +77,19 @@ from robinauts.web.sign_in import (
 
 DEFAULT_PAGE = 30
 
+POSITION = re.compile(r"[0-9]{1,10}")
+"""A position as this deployment writes one: ASCII digits, and no more than an int holds."""
+
+LAST_POSITION = 2**31 - 1
+"""The highest position a turn's event can have: PostgreSQL's `integer`."""
+
+FIRST_EVENT_WAIT = 0.5
+"""How long a stream waits for its turn's first event, and so for a refusal, before its
+response begins."""
+
+KEEP_ALIVE_SECONDS = 15.0
+"""The longest a turn's stream goes without a byte: a `: keep-alive` comment follows."""
+
 STATUS_OF: dict[type[ControllerError], int] = {
     InvalidValueError: 422,
     SessionNotFoundError: 404,
@@ -79,6 +98,8 @@ STATUS_OF: dict[type[ControllerError], int] = {
     UnknownModelError: 422,
     TurnActiveError: 409,
     NoActiveTurnError: 404,
+    DrainingError: 503,
+    BusyError: 503,
 }
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -349,11 +370,42 @@ def ended_badly_view(turn: Turn | None) -> EndedBadlyView | None:
     return EndedBadlyView(run_id=turn.id, state=turn.state.value, ended_at=turn.ended_at)
 
 
+class About:
+    """Plain ASGI, so a stream goes through untouched: a request about a conversation, or one
+    of its turns, says so in every line logged while it is answered."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        ids = scope["path"].split("/")
+        conversation = ids[3] if ids[1:3] == ["api", "conversations"] and len(ids) > 3 else None
+        run = ids[5] if conversation is not None and len(ids) > 5 and ids[4] == "runs" else None
+        with logs.about(session=_uuid_or_none(conversation), turn=_uuid_or_none(run)):
+            await self.app(scope, receive, send)
+
+
+def _uuid_or_none(value: str | None) -> uuid.UUID | None:
+    """A uuid from a path, or ``None``: what a log line names is never a request's raw text."""
+    try:
+        return None if value is None else uuid.UUID(value)
+    except ValueError:
+        return None
+
+
 def event_stream(
-    session_id: uuid.UUID, turn_id: uuid.UUID, events: AsyncIterator[NumberedEvent]
+    session_id: uuid.UUID,
+    turn_id: uuid.UUID,
+    events: AsyncIterator[NumberedEvent],
+    drained: asyncio.Event | None = None,
 ) -> StreamingResponse:
     return StreamingResponse(
-        agui.stream(str(session_id), str(turn_id), events),
+        agui.kept_alive(
+            agui.stream(str(session_id), str(turn_id), events), KEEP_ALIVE_SECONDS, drained
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-store",
@@ -371,8 +423,31 @@ def create_app(
     sign_in: SignInConfig | None,
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
+    operations: Operations | None = None,
 ) -> FastAPI:
-    """``sign_in`` is ``None`` in the local development mode."""
+    """``sign_in`` is ``None`` in the local development mode. ``operations`` is what
+    ``/ready`` asks and what a stop drains; the controller, when it is that too.
+
+    ``app.state.drain`` begins the drain, and is what ``robinauts start`` calls on
+    ``SIGTERM``: ``/ready`` answers 503, a new turn is refused (503), and every stream ends
+    with a reconnect hint, so its client attaches again through another process and the
+    server has no long connection left to wait for. The turns running here go on, and the
+    controller's ``close`` gives them their time."""
+    if operations is None and isinstance(controller, Operations):
+        operations = controller
+    drained = asyncio.Event()
+    draining_tasks: set[asyncio.Task[None]] = set()
+
+    def drain() -> None:
+        if drained.is_set():
+            return
+        log.info("draining: not ready, no new turn, streams told to reconnect elsewhere")
+        drained.set()
+        if operations is not None:
+            task = asyncio.ensure_future(operations.drain())
+            draining_tasks.add(task)
+            task.add_done_callback(draining_tasks.discard)
+
     exchange: Exchange | None = None
     flow: SignIn | None = None
     if sign_in is not None:
@@ -438,6 +513,9 @@ def create_app(
         responses={"default": {"model": ErrorResponse, "description": "A refusal"}},
         dependencies=[Depends(same_origin)],
     )
+    app.state.drain = drain
+
+    app.add_middleware(About)
 
     @app.exception_handler(Refused)
     async def not_let_in(request: Request, exc: Refused) -> JSONResponse:
@@ -453,24 +531,40 @@ def create_app(
         return JSONResponse({"error": type(exc).__name__, "detail": str(exc)}, status_code=status)
 
     async def default_model(agent: str) -> str:
-        return next(a.default_model for a in await controller.list_agents() if a.id == agent)
+        """The agent's default model; "" for an agent this process's configuration does not
+        name, which a turn on it then refuses, as a rolling change of configuration can leave
+        one replica behind the others."""
+        return next((a.default_model for a in await controller.list_agents() if a.id == agent), "")
 
     async def watched(
         user: User, session_id: uuid.UUID, turn_id: uuid.UUID, after: int
     ) -> StreamingResponse:
         events = controller.watch_turn(user, session_id, turn_id, after=after)
-        # The refusals happen inside the generator: ask for the first event here, so that
-        # they answer with a status rather than a broken stream.
-        first = await anext(events, None)
+        # The refusals happen inside the generator, in its first reads: wait a moment for
+        # the first event, so that they answer with a status rather than a broken stream.
+        # Not for the event itself, which may be minutes away behind a long tool call: the
+        # stream begins anyway, and its keep-alives and the drain cover the wait.
+        first: asyncio.Future[NumberedEvent | None] = asyncio.ensure_future(anext(events, None))
+        await asyncio.wait({first}, timeout=FIRST_EVENT_WAIT)
+        if first.done():
+            first.result()
 
         async def chained() -> AsyncIterator[NumberedEvent]:
-            if first is None:
-                return
-            yield first
-            async for event in events:
-                yield event
+            try:
+                head = await first
+                if head is None:
+                    return
+                yield head
+                async for event in events:
+                    yield event
+            finally:
+                if not first.done():
+                    first.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+                        await first
+                await events.aclose()
 
-        return event_stream(session_id, turn_id, chained())
+        return event_stream(session_id, turn_id, chained(), drained)
 
     # --- sign-in -----------------------------------------------------------------
 
@@ -606,7 +700,7 @@ def create_app(
         page = await controller.list_sessions(user, limit=limit, cursor=cursor)
         defaults = {a.id: a.default_model for a in await controller.list_agents()}
         return ConversationListResponse(
-            items=[summary(c, defaults[c.agent]) for c in page.sessions],
+            items=[summary(c, defaults.get(c.agent, "")) for c in page.sessions],
             next_cursor=page.cursor,
         )
 
@@ -651,6 +745,8 @@ def create_app(
     @app.post("/api/turns", include_in_schema=False)
     async def start_session(body: NewChatRequest, user: User = asking) -> StreamingResponse:
         model = body.model_id or await default_model(body.agent_id)
+        if not model:
+            raise UnknownAgentError(body.agent_id)
         started = await controller.start_session(
             user, agent=body.agent_id, model=model, text=body.text
         )
@@ -695,14 +791,33 @@ def create_app(
         last_event_id: Annotated[str | None, Header()] = None,
         user: User = asking,
     ) -> StreamingResponse:
-        position = after if after is not None else int(last_event_id or 0)
+        if after is not None:
+            position = after
+        elif not last_event_id:
+            position = 0
+        elif POSITION.fullmatch(last_event_id):
+            position = int(last_event_id)
+        else:
+            raise InvalidValueError("Last-Event-ID is a position this deployment wrote, or none")
+        if not 0 <= position <= LAST_POSITION:
+            raise InvalidValueError("a position is a whole number from 0 to 2147483647")
         return await watched(user, conversation_id, run_id, position)
 
-    @app.post("/api/conversations/{conversation_id}/runs/{run_id}/cancel", status_code=204)
+    @app.post(
+        "/api/conversations/{conversation_id}/runs/{run_id}/cancel",
+        status_code=204,
+        response_class=Response,
+        responses={
+            204: {"description": "The run has ended"},
+            202: {"description": "The stop is recorded, and the run's end is on its way"},
+        },
+    )
     async def cancel_turn(
         conversation_id: uuid.UUID, run_id: uuid.UUID, user: User = asking
-    ) -> None:
-        await controller.cancel_turn(user, conversation_id, run_id)
+    ) -> Response:
+        # Whichever process runs it: the ask goes through the store to its holder.
+        ended = await controller.cancel_turn(user, conversation_id, run_id)
+        return Response(status_code=204 if ended else 202)
 
     # --- liveness --------------------------------------------------------------
 
@@ -710,6 +825,19 @@ def create_app(
     async def health() -> dict[str, str]:
         # That this process answers, and nothing about the database or the providers.
         return {"status": "ok"}
+
+    @app.get("/ready", include_in_schema=False)
+    async def ready() -> JSONResponse:
+        # Whether to send this process requests: the database answers, the connections
+        # that hold leases and listen for signals are up, and it is not stopping.
+        problems: tuple[str, ...] = ()
+        if operations is not None:
+            problems = (await operations.readiness()).problems
+        if drained.is_set() and "this process is stopping" not in problems:
+            problems = ("this process is stopping", *problems)
+        if problems:
+            return JSONResponse({"status": "unready", "problems": list(problems)}, 503)
+        return JSONResponse({"status": "ready"})
 
     # --- the interface ---------------------------------------------------------
 

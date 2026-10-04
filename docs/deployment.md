@@ -189,8 +189,23 @@ api_key_env = "ROBINAUTS_ANTHROPIC_KEY"
 provider = "anthropic"
 name = "claude-sonnet-5"
 title = "Claude Sonnet 5"
-timeout_seconds = 120
+timeout_seconds = 120     # one call to the vendor, never the whole turn
+max_retries = 2           # the vendor SDK's retries of one call, with backoff
 max_output_tokens = 8192
+
+# How turns run. Every key is optional; these are the defaults.
+# [work]
+# max_turn_seconds = 1200        # a turn's deadline, from its start
+# max_model_calls = 100          # calls to the model in one turn
+# tool_error_behavior = "failed" # a tool's error goes back to the model
+# lease_seconds = 90             # a turn of a process that went away, at most
+# heartbeat_seconds = 30         # renews them all, at most half the lease
+# drain_seconds = 30             # what a stop gives the turns running here
+#
+# What one process takes of PostgreSQL. Optional; these are the defaults.
+# [database]
+# pool_max = 10                  # the pool's connections at most
+# acquire_timeout_seconds = 5    # a request waits this long, then answers 503
 
 [agents.assistant]
 title = "Assistant"
@@ -250,6 +265,17 @@ Notes on what is and is not there:
   answering with another model; the log names the model.
 - A file with no `[agents]` table is a deployment with no agents: it
   starts, the picker is empty, and the log says so.
+- **Connections.** Each process holds a pool of at most
+  `[database] pool_max` connections (10), shared by requests, turn events
+  and the engines' checkpoints, and two of its own beside it: the listener
+  (`LISTEN robinauts_turns, robinauts_cancel`) and the work connection, which
+  renews the leases of its turns so that a busy pool never delays one. So
+  `N` processes need `N × (pool_max + 2)` connections, and two more for
+  `robinauts db init` and an operator: keep that below the server's
+  `max_connections` (100 by default, which is 8 processes at the default
+  `pool_max`). An operation that finds no connection of the pool free within
+  `acquire_timeout_seconds` answers 503 rather than queueing for ever, and a
+  turn's runner writes its batch again.
 
 ## 5. Register the redirect URI
 
@@ -303,6 +329,15 @@ Four kinds of variable, and three of them are secrets. Put them in
     ROBINAUTS_OKTA_SECRET=...
     ROBINAUTS_ANTHROPIC_KEY=...
 
+`ROBINAUTS_LOG_FORMAT` is `text`, one line per entry (the default), or
+`json`, one object per line, for a log collector.
+
+`ROBINAUTS_WORKER_ID` names the process as the holder of the turns it runs,
+which every write of a turn's runner names; it is not a secret. Left out it is
+`<host name>:<pid>`, which is unique on one machine; where processes come and
+go under the same host name, set it to something unique per process, as a
+Kubernetes Deployment does with the pod's name.
+
 `ROBINAUTS_AUTH_CONFIG` is the old name of `ROBINAUTS_CONFIG`. It is still
 read, with a warning at start-up; if both are set the new one wins and the
 log says so. Rename it.
@@ -345,9 +380,11 @@ RestartSec=5
 # for ever and a log nobody can read.
 RestartPreventExitStatus=2
 KillSignal=SIGTERM
-# A stop lets open connections finish for 10 s, then ends the runs in flight
-# and gives back what the process holds, bounded at about 35 s more -- some
-# 45 s in all. Anything under a minute here would SIGKILL the tail of that.
+# A stop drains: streams are told to reconnect and open requests get 5 s,
+# then the runs in flight get [work] drain_seconds (30 s) to finish, the rest
+# end as interrupted within 10 s, and the connections and the pool close
+# together within 5 s more -- 50 s at most. Anything under a minute here would
+# SIGKILL the tail.
 TimeoutStopSec=90
 NoNewPrivileges=yes
 PrivateTmp=yes
@@ -419,9 +456,11 @@ root of the origin. Three things matter:
   gives that name a platform that will not keep a session. The
   `X-Forwarded-*` headers below are good practice and reach the access log;
   they are not what makes the deployment https.
-- **No buffering on the event stream**, and a read timeout longer than a
-  whole turn. A stream sends a heartbeat comment every 15 s and a turn may
-  run for 600 s by default. Every stream also carries
+- **No buffering on the event stream**, and a read timeout well above
+  15 s. A stream sends a `: keep-alive` comment after every 15 s of
+  silence, and the interface re-attaches to a stream that drops, so the
+  timeout bounds a quiet moment, not the turn, which may run for
+  `[work] max_turn_seconds` (1200 s by default). Every stream also carries
   `X-Accel-Buffering: no`, which nginx obeys — the setting below is there
   for the proxies that do not.
 - The paths are `/ui/` (the interface), `/api/` (the API and the streams),
@@ -472,7 +511,8 @@ server {
         proxy_set_header X-Forwarded-Host  $host;
 
         # Server-sent events: nothing held back, nothing rewritten, and a
-        # read timeout past the longest turn.
+        # read timeout past the 15 s keep-alive (the interface re-attaches to
+        # a stream that is cut, so it need not outlast the turn).
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 900s;
@@ -521,10 +561,12 @@ intersection of the two, which is usually a blank page.
     sudo systemctl start robinauts
     journalctl -u robinauts -f
 
-A good start says five lines at `info` and no more: "Started server
-process", "Waiting for application startup", "the start-up sweep ended
-N run(s) left going by a process that went away", "Application startup
-complete", "Uvicorn running on http://127.0.0.1:8000". The log goes to
+A good start says four lines at `info` and no more: "Started server
+process", "Waiting for application startup", "Application startup
+complete", "Uvicorn running on http://127.0.0.1:8000". Every five minutes
+each process sweeps, and logs a line when the sweep did something: events,
+sign-in records and tokens past their expiry deleted, turns a process that
+went away left running ended, and conversations whose delete died purged. The log goes to
 **stdout**, one line each, with every query string cut off — one of this
 platform's paths carries an authorization code in one.
 
@@ -557,6 +599,9 @@ command could not do what it was asked.
 
 1. `curl -fsS https://robinauts.example.com/health` → `{"status":"ok"}`.
    It reads no database: it answers "this process is up and serving".
+   `/ready` → `{"status":"ready"}` also needs the database to answer; it is
+   503, naming what is wrong, while the process stops or the database is
+   away.
 2. Open `https://robinauts.example.com/` in a browser. It redirects to
    `/ui/` and shows the sign-in page with one button per provider.
 3. Sign in as somebody the allow list has, through Google. Then as
@@ -582,9 +627,10 @@ client secret or an API key. Turning a **vendor's** logger up in your own
 logging configuration would print request bodies, which is why the
 platform pins those loggers and removes `ANTHROPIC_LOG` at start-up.
 
-**Restart.** `systemctl restart robinauts`. Runs still in flight are ended
-and marked `interrupted`; their authors retry by sending the message
-again. A configuration change — an agent's engine, an agent's default
+**Restart.** `systemctl restart robinauts`. Runs in flight get
+`[work] drain_seconds` to finish; those still running are then ended and
+marked `interrupted`, with what they had written kept as a failed answer,
+and their authors press Retry. A configuration change — an agent's engine, an agent's default
 model (for new conversations only), the allow list, a new agent — takes
 effect at the next restart, because the file is read once at start-up.
 
@@ -616,9 +662,79 @@ without:
   proxy in front is the rate limit until per-client limits arrive.
 - **Migrations.** As above.
 - **Usage reporting**, token budgets, audit export, retention and purge.
-- **Several backend processes.** One process, one machine.
-- **Draining runs on shutdown.** A restart interrupts them.
 - **A container image**, an SBOM and signed releases.
+
+## 11. Several processes, and Kubernetes
+
+Any number of identical processes may serve one deployment, behind a load
+balancer, against the one database: every one serves the web and runs
+turns, and none holds anything the others need. A turn runs in the process
+that took its request; its stream, its Stop and its conversation's delete
+work through whichever process a request lands on, and a process that dies
+or is stopped leaves every conversation usable.
+
+- **The same wheel, configuration and environment everywhere**, but for
+  `ROBINAUTS_WORKER_ID`, which names each process as the holder of its
+  turns: on Kubernetes, the pod's name.
+- **`robinauts db init` runs once, as a Job before the rollout**, never in
+  every pod. Until the first release a change of schema is a stop-all
+  rollout (`strategy: Recreate`) and a new database; any other is a rolling
+  update with `maxUnavailable: 0`.
+- **Probes on the one port.** `readinessProbe` on `/ready`, which is 503
+  while the process stops or the database or its own connections are away;
+  `livenessProbe` on `/health`, which reads nothing.
+- **Stopping.** A `preStop` hook of `sleep 5` lets the pod leave the
+  Service's endpoints before `SIGTERM`; then the drain (§10) takes at most
+  5 s for open requests, `[work] drain_seconds` (30) for the running turns,
+  10 s for the rest to write their end and 5 s to close the connections:
+  55 s at most, counting the `preStop`, which the grace period includes. Set
+  `terminationGracePeriodSeconds: 75`, and raise it with `drain_seconds`.
+- **Connections.** `N × (pool_max + 2) + 2` below the server's
+  `max_connections` (§4, "Connections").
+- **The load balancer** keeps no affinity (none is needed), passes `Host`
+  and `Origin` through untouched (the `Origin` of every write is compared
+  with `public_url`), does not buffer `text/event-stream`, and allows a
+  minute of silence on a connection: a stream says something every 15 s.
+- **A process that dies** leaves its turns running until their lease
+  passes (`[work] lease_seconds`, 90 s). The first reader to find one, or
+  the next sweep of any process (every five minutes), ends it as
+  interrupted, with what it had written kept as a failed answer; Retry
+  starts it over.
+- **Logs.** `ROBINAUTS_LOG_FORMAT=json` writes one JSON object per line,
+  with `pod`, and `session_id` and `turn_id` where a line is about a
+  conversation or a turn; the default is one line of text with the same.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: robinauts
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate          # Recreate when schema.sql changed
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector: {matchLabels: {app: robinauts}}
+  template:
+    metadata: {labels: {app: robinauts}}
+    spec:
+      terminationGracePeriodSeconds: 75
+      containers:
+        - name: robinauts
+          image: registry.example.com/robinauts:0.1.0   # the wheel, installed
+          args: ["robinauts", "start", "--host", "0.0.0.0", "--port", "8000"]
+          ports: [{containerPort: 8000}]
+          envFrom: [{secretRef: {name: robinauts-environment}}]
+          env:
+            - name: ROBINAUTS_WORKER_ID
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: ROBINAUTS_LOG_FORMAT
+              value: json
+          readinessProbe: {httpGet: {path: /ready, port: 8000}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /health, port: 8000}, periodSeconds: 10}
+          lifecycle:
+            preStop: {exec: {command: ["sleep", "5"]}}
+```
 
 ## The local development mode
 
@@ -627,7 +743,9 @@ as one fixed local user, on the loopback interface only — for developing
 on one's own machine. It refuses any bind address that is not loopback, it
 logs a warning at start-up, and the interface shows a permanent banner.
 It may be given a configuration file, and then only its model tables are
-read; a file that also holds sign-in tables is a start-up refusal.
+read; a file that also holds sign-in tables is a start-up refusal. Without
+`ROBINAUTS_DATABASE_URL` it keeps its records in memory, which no start with
+sign-in does: there, a missing database is a start-up refusal.
 
 ```toml
 [model_providers.anthropic]
@@ -679,6 +797,6 @@ engine = "pydantic-ai"
 | `?error=provider_unavailable` | the discovery document or the token endpoint could not be reached | outbound https, and the `issuer` spelling |
 | `?error=invalid_id_token` | `issuer`, `client_id` or the clock | the discovery document's `issuer` must equal the configured one; check the clock (60 s of skew is allowed) |
 | an answer streams nowhere, then arrives all at once at the end | the proxy is buffering | `proxy_buffering off` / `flush_interval -1` |
-| a stream dies after a fixed number of seconds | the proxy's read timeout | raise it past the longest turn |
+| the interface keeps saying it is reconnecting | the proxy's read timeout is below the 15 s keep-alive, or it buffers the stream | a read timeout of a minute or more, and no buffering |
 | a write is refused with a `403` | the browser's `Origin` header does not equal `public_url`, string for string | the same cause as the sign-in loop: one origin, and `public_url` spelt as the browser spells it |
 | the interface shows "not built" | a wheel without the interface, which cannot be built — so this is a source checkout, not a wheel | install the wheel |

@@ -75,7 +75,7 @@ def test_an_anthropic_model_is_built_from_the_settings(
     assert model.model == "vendor-name"
     assert model.anthropic_api_key.get_secret_value() == "key-of-p"
     assert model.anthropic_api_url == endpoint
-    assert (model.max_retries, model.default_request_timeout, model.max_tokens) == (0, 7.0, 321)
+    assert (model.max_retries, model.default_request_timeout, model.max_tokens) == (3, 7.0, 321)
 
 
 @pytest.mark.parametrize(
@@ -94,7 +94,7 @@ def test_an_openai_model_is_built_from_the_settings(
     assert model.openai_api_key is not None
     assert model.openai_api_key.get_secret_value() == "key-of-p"
     assert model.openai_api_base == endpoint
-    assert (model.max_retries, model.request_timeout, model.max_tokens) == (0, 7.0, 321)
+    assert (model.max_retries, model.request_timeout, model.max_tokens) == (3, 7.0, 321)
 
 
 def test_a_model_not_in_the_settings_is_refused() -> None:
@@ -219,8 +219,12 @@ class ScriptedChatModel(BaseChatModel):
             raise ModelFailure()
         if self.script is Script.HANG:
             await asyncio.sleep(3600)
-        if self.script is Script.TOOL_ROUND and not isinstance(messages[-1], ToolMessage):
-            call = tool_call_chunk(name="add", args=json.dumps(ARGUMENTS), id=CALL_ID, index=0)
+        looping = self.script is Script.TOOL_LOOP
+        if looping or (
+            self.script is Script.TOOL_ROUND and not isinstance(messages[-1], ToolMessage)
+        ):
+            call_id = f"{CALL_ID}-{len(messages)}" if looping else CALL_ID
+            call = tool_call_chunk(name="add", args=json.dumps(ARGUMENTS), id=call_id, index=0)
             yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_call_chunks=[call]))
             return
         for piece in re.split(r"(\s)", ANSWER):

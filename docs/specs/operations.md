@@ -4,8 +4,12 @@ What an internal platform team deploys and controls.
 
 ## Deployment
 
-- One backend process, which also serves the frontend; one PostgreSQL.
-  Nothing else (goal 6).
+- One or more identical backend processes, each of which serves the
+  frontend and runs turns; one PostgreSQL. Nothing else (goal 6). Any
+  process serves any conversation: a turn's stream, its Stop and its
+  conversation's delete work whichever process a request lands on, and no
+  load balancer affinity is needed ([deployment.md](../deployment.md),
+  "Several processes, and Kubernetes").
 - Installed from one Python wheel. A container image is planned.
 - PostgreSQL is always required. A documented one-command local Postgres
   covers development and demos.
@@ -16,12 +20,19 @@ What an internal platform team deploys and controls.
 - Upgrades: install the new wheel, bring the schema up to date, restart.
   Until the first release the schema is edited in place and the database
   is recreated; after that, migrations upgrade it in place.
-- A restart ends the runs that are in flight: each is marked interrupted,
-  and its author retries it by sending the message again. Letting them
-  **drain** for a bounded time first is planned; the bounded window a
-  shutdown has today is for ending them and giving back what the process
-  holds, not for finishing them. Several backend processes may run against
-  the one database.
+- **A stop drains.** On `SIGTERM` the process stops being ready (`/ready`
+  answers 503), refuses new turns (503, which another process takes), and
+  ends every open stream with a hint to reconnect, so its clients attach
+  again through another process and nothing long is left to wait for. The
+  turns it runs get `[work] drain_seconds` (30 s) to finish; those still
+  running then end as interrupted, each keeping what it had answered as a
+  failed answer that Retry starts over. The wait for them to write their
+  end, and the closing of the database connections, are bounded too, so a
+  database that does not answer never holds a stop until it is killed.
+  `/health` answers while the process does; `/ready` also needs the
+  database to answer within a second and the connections that hold leases
+  and listen for signals to be up. Several backend processes may run
+  against the one database.
 - Outbound traffic: the identity providers at sign-in, the model providers
   the operator configured, and the MCP tool servers the operator configured.
   Nothing else.
@@ -77,9 +88,10 @@ All optional, all set by the operator:
 
 - requests per minute per user;
 - a maximum attachment size;
-- timeouts for a model call, a tool call and a whole run; the bound on the
-  tool rounds one turn may take is each agent adapter's own default and is
-  not a setting;
+- timeouts for a model call (`models.<id>.timeout_seconds`, with the vendor
+  SDK's `max_retries`), a tool call (`tool_servers.<id>.timeout_seconds`) and
+  a whole turn (`[work] max_turn_seconds`), and the bound on the calls to
+  the model one turn may make (`[work] max_model_calls`);
 - a model's `context_window`, in tokens, which is what the frameworks keep
   a conversation's history within
   ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)):
@@ -143,4 +155,7 @@ is settled:
   command line: a url holds a password, and a command line is a shell
   history. A database that cannot be opened — no server there, no such
   database, credentials refused — is one line naming what the driver said,
-  and never the url it was given.
+  and never the url it was given. A start with sign-in and no
+  `ROBINAUTS_DATABASE_URL` is refused: a replica that kept its records in
+  memory would answer for the others' conversations with nothing. Only the
+  local development mode keeps them in memory.

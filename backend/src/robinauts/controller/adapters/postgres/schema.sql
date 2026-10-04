@@ -118,8 +118,9 @@ CREATE TABLE IF NOT EXISTS users (
 -- a purge. From the moment it is set, every read treats the session as not
 -- found and no turn may start on it. The purge then calls `forget` on the
 -- engine the row names and deletes the row, and the cascade takes its
--- messages and turns with it. Trash, in stage two, is a delay before the
--- purge, not a change of schema.
+-- messages and turns with it. A purge that died after the hide is finished
+-- by the sweep (`sessions_deleted_at_idx`). Trash, in stage two, is a delay
+-- before the purge, not a change of schema.
 --
 -- `owner_id` cascades: a user's sessions are private to them, and there is
 -- nobody else for them to belong to once the user is gone.
@@ -155,7 +156,9 @@ CREATE INDEX IF NOT EXISTS sessions_deleted_at_idx
 
 -- One message of a session: a node of its tree. A question is stored before
 -- its turn starts, and an answer when its turn ends: a failed turn's is marked
--- failed in its document. A cancelled or interrupted turn leaves none.
+-- failed in its document. An interrupted turn's is marked failed too, stored
+-- by its runner or, when the runner went away, by whoever ended the turn,
+-- from its events. A cancelled turn leaves none.
 --
 -- `document` is the whole message in the controller's versioned format
 -- (docs/architecture/data-model.md): the fields below again, its parts (text,
@@ -236,13 +239,26 @@ CREATE INDEX IF NOT EXISTS messages_session_id_parent_id_idx
 -- asked with, but a regeneration answers the same question on another model,
 -- so the turn records its own.
 --
--- `lease_until` is written with the turn, as its start plus its timeout and a
--- margin. Every write of the runner's is refused past it, and a running turn
--- whose lease has passed was left by a runner that went away: the next reader
--- to find it ends it as `interrupted`, with no event. Renewing the lease for a
--- long turn, and `cancel_requested_at`, which a cancel from another process
--- will set and the runner read back, are stage two. Both are set by the
--- application's clock.
+-- `deadline_at` is when the run must have ended, written with the turn as its
+-- start plus `[work] max_turn_seconds`. It is the turn's alone: the model's
+-- `timeout_seconds` bounds each call to the vendor, never the turn.
+--
+-- A running turn is held by one process, `worker_id` (the pod's name),
+-- under an `attempt`, and every write of its runner names both: the store
+-- refuses a write whose turn is held by another or under another attempt.
+-- `worker_id` stays on an ended turn, naming its last holder.
+--
+-- `lease_until` is written with the turn, as its start plus `[work]
+-- lease_seconds`, and the holder renews it every `heartbeat_seconds`, with
+-- `heartbeat_at`, in one statement for every turn it holds. A lease that has
+-- passed is never renewed. Every write of the runner's is refused past it,
+-- and a running turn whose lease has passed was left by a runner that went
+-- away: the next reader to find it ends it as `interrupted`, storing the
+-- answer it had begun and its last event.
+-- `cancel_requested_at` is set, once, by a cancel through any process, with
+-- `NOTIFY robinauts_cancel` in the same transaction: the holder stops the
+-- turn on the signal, or at its next heartbeat, which reads it back. All are
+-- set by the application's clock.
 CREATE TABLE IF NOT EXISTS turns (
     id uuid
         CONSTRAINT turns_pkey PRIMARY KEY,
@@ -263,6 +279,11 @@ CREATE TABLE IF NOT EXISTS turns (
     -- sentence (docs/specs/wire.md).
     error text,
     lease_until timestamptz NOT NULL,
+    deadline_at timestamptz,
+    worker_id text,
+    attempt integer NOT NULL DEFAULT 1
+        CONSTRAINT turns_attempt_from_one CHECK (attempt >= 1),
+    heartbeat_at timestamptz,
     cancel_requested_at timestamptz,
     -- The failed answer a retry tries again: the model is told about it
     -- (docs/specs/ui.md). Null on every other turn.
@@ -299,6 +320,10 @@ CREATE INDEX IF NOT EXISTS turns_session_id_started_at_idx
 CREATE INDEX IF NOT EXISTS turns_lease_until_idx
     ON turns (lease_until) WHERE state = 'running';
 
+-- The running turns of one holder.
+CREATE INDEX IF NOT EXISTS turns_worker_idx
+    ON turns (worker_id) WHERE state = 'running';
+
 
 -- ---------------------------------------------------------------------------
 -- Turn events.
@@ -326,9 +351,10 @@ CREATE INDEX IF NOT EXISTS turns_lease_until_idx
 --
 -- There is no `kind` column. "A turn ends once" is held by `finish_turn`, which
 -- changes only a running turn whose lease has not passed, in the same
--- transaction that writes its last events; a turn ended by its lease
--- (`end_expired_turn`) writes no event at all, and a watcher reads the record.
--- So no index on the event's kind is needed to hold it.
+-- transaction that writes its last events, and by `end_expired_turn`, which
+-- changes only a running turn whose lease has passed, in the same transaction
+-- that writes its `turn_ended` event. So no index on the event's kind is
+-- needed to hold it.
 CREATE TABLE IF NOT EXISTS turn_events (
     turn_id uuid NOT NULL
         CONSTRAINT turn_events_turn_id_fkey REFERENCES turns (id) ON DELETE CASCADE,
@@ -370,7 +396,7 @@ CREATE TABLE IF NOT EXISTS user_sessions (
 CREATE INDEX IF NOT EXISTS user_sessions_user_id_idx
     ON user_sessions (user_id);
 
--- What stage two's sweep deletes by: the sessions past their expiry.
+-- What the sweep deletes by: the sessions past their expiry.
 CREATE INDEX IF NOT EXISTS user_sessions_expires_at_idx
     ON user_sessions (expires_at);
 
@@ -399,7 +425,7 @@ CREATE TABLE IF NOT EXISTS pending_logins (
     expires_at timestamptz NOT NULL
 );
 
--- What beginning a sign-in deletes by, and stage two's sweep.
+-- What beginning a sign-in deletes by, and the sweep.
 CREATE INDEX IF NOT EXISTS pending_logins_expires_at_idx
     ON pending_logins (expires_at);
 
@@ -432,7 +458,7 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 CREATE INDEX IF NOT EXISTS api_tokens_user_id_idx
     ON api_tokens (user_id);
 
--- What stage two's sweep deletes by: the tokens past their expiry.
+-- What the sweep deletes by: the tokens past their expiry.
 CREATE INDEX IF NOT EXISTS api_tokens_expires_at_idx
     ON api_tokens (expires_at);
 

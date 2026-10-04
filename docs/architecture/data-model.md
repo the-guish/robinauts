@@ -21,7 +21,7 @@ agent to another engine, and what its sessions then do, is stage two.
 | user | `id` | `provider` and `subject` (unique together), `name`, `email`, `created_at` | no |
 | session | `id` | `owner_id`, `agent`, `engine`, `title`, `created_at`, `updated_at`, `deleted_at` | no |
 | message | `id` | `session_id`, `parent_id`, `role`, `created_at` | **yes** |
-| turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `lease_until`, `cancel_requested_at`, `retries` | no |
+| turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `lease_until`, `deadline_at`, `worker_id`, `attempt`, `heartbeat_at`, `cancel_requested_at`, `retries` | no |
 | turn event | `(turn_id, position)` | `expires_at` | **yes** |
 | user session | `id` | `user_id`, `secret_hash` (unique), `created_at`, `expires_at` | no |
 | pending login | `state_hash` | `provider`, `nonce`, `verifier`, `return_to`, `created_at`, `expires_at` | no |
@@ -60,8 +60,12 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   message, whose `parent_id` is the question and whose document names the turn.
   A failed turn stores what it streamed before it failed, as an answer marked
   `failed`, with no checkpoint; a reply hangs under it, and the next turn continues
-  from the nearest answer above it that has a checkpoint. A cancelled or interrupted
-  turn stores none. Every answer comes from exactly one turn.
+  from the nearest answer above it that has a checkpoint. An interrupted turn does
+  the same: what it streamed is stored as an answer marked `failed`, by its runner
+  when its process stops with it, or, when its runner went away, by whoever ends it,
+  rebuilt from its events (`controller.core.transcript`) under the id it streamed
+  with. Retry then starts it over, and the prompt lists the calls it made. A
+  cancelled turn stores none. Every answer comes from exactly one turn.
 - **A turn has its events**, numbered from 1.
 
 ## Rules every store keeps
@@ -89,27 +93,49 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
 - **Deleting hides, then purges.** `deleted_at` makes a session not found and closes
   it to turns. The hide is refused while a turn is running (`TurnActiveError`), so no
   runner and no engine writes under a purge: the controller first ends a turn whose
-  lease has passed, cancels the turn it runs itself and waits for it to end, and a
-  turn run by another process is refused until stage two's cancel through the store.
+  lease has passed, and asks for a running one to stop, wherever it runs, and waits
+  for it to end; one that has not ended in time refuses the delete.
   The purge calls `forget` on the engine the session records, which may no longer be
   the one its agent's configuration names, then deletes the session with its
   messages, turns and events.
+- **A cancel goes through the store.** `request_cancel` sets `cancel_requested_at`,
+  once, on a running turn, and sends `NOTIFY robinauts_cancel '<turn>'` in the same
+  transaction. Every process listens, and the one that holds the turn stops it,
+  and its runner ends it `cancelled`. The heartbeat reads every ask back with the
+  leases it renews, so an ask whose signal was lost is acted on within one
+  heartbeat. A turn whose holder went away ends `cancelled`, with no answer, when
+  its lease has passed and somebody finds it.
 - **Events expire.** `expires_at` is set when an event is written, as that moment
   plus a retention of hours. Ending a turn touches none of its events. The answer is
   in `messages` and the outcome is in `turns`, so after a turn ends nothing reads its
   events but a late watcher. Until they expire, they are the only copy of a turn's
   reasoning, and of what a cancelled or interrupted turn streamed.
-- **A turn holds a lease.** `lease_until` is written with the turn, as its start plus
-  its timeout and a margin, and the runner's own deadline is set from it. A running
+- **A turn has a deadline.** `deadline_at` is written with the turn, as its start plus
+  `[work] max_turn_seconds`, and bounds the whole run. A model's `timeout_seconds`
+  bounds one call to the vendor, which the vendor's SDK retries `max_retries` times,
+  and is never the turn's.
+- **A running turn has one holder.** `worker_id` is the process that runs it (the
+  pod's name), and `attempt` which holding of the turn this is. Every write of its
+  runner names both, and the store refuses, with `TurnLostError`, a write on a turn
+  held by another or under another attempt. `worker_id` stays on an ended turn,
+  naming its last holder.
+- **A turn holds a lease, which its holder renews.** `lease_until` is written with
+  the turn, as its start plus `[work] lease_seconds` (90 s), and the holder renews it
+  every `heartbeat_seconds` (30 s), with `heartbeat_at`, in one write for every turn
+  it holds, on a connection of its own outside the pool. A lease that has passed is
+  never renewed, and a turn a heartbeat did not renew is lost to its runner, which is
+  stopped and writes nothing more. A running
   turn whose lease has passed is ended as `interrupted` by the next reader to find it
   (`open_session`, `start_turn`, `watch_turn`, `cancel_turn`, `delete_session`),
-  through `end_expired_turn`: one conditional write that only a running turn takes,
-  on the record alone, and on the marker a store without a partial index keeps. No
-  event is written, since a `turn_ended` event is the runner's; a watcher that finds
-  the turn ended with none supplies it from the record. A runner that outlives its
+  through `end_expired_turn`: one conditional operation that only a running turn
+  whose lease has passed takes, which stores the answer it had begun, as failed, and
+  its `turn_ended` event, numbered after the last event it holds. A runner whose
+  clock is behind may land one more event meanwhile; the end is then refused on that
+  position, and the reader reads the events again. A watcher that finds a turn ended
+  with no `turn_ended` event supplies it from the record. A runner that outlives its
   lease has lost the turn whether or not a reader has found it: every write names
-  its time, and the store refuses one past the lease. Renewing the lease for a long
-  turn, and reading back `cancel_requested_at` with each renewal, are stage two.
+  its time, and the store refuses one past the lease. A process that went away
+  leaves its turns running for one lease at most.
 - **No clocks and no ids in a store.** The controller mints every id and sets every
   time.
 - **A session and its records are addressed from the owner down.** Every operation on

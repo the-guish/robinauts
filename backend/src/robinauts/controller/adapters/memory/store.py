@@ -9,7 +9,8 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import uuid
-from datetime import datetime
+from collections.abc import AsyncIterator, Mapping, Sequence
+from datetime import datetime, timedelta
 
 from robinauts.controller.contract.domain import (
     Session,
@@ -27,9 +28,10 @@ from robinauts.controller.ports.store import (
     StoredEvent,
     StoredMessage,
 )
+from robinauts.controller.ports.work import Fence, Held, Renewed, WorkQueue
 
 
-class MemoryStore(Store):
+class MemoryStore(Store, WorkQueue):
     def __init__(self) -> None:
         self._users: dict[tuple[str, str], User] = {}
         self._sessions: dict[uuid.UUID, Session] = {}
@@ -38,12 +40,17 @@ class MemoryStore(Store):
         self._turns: dict[uuid.UUID, Turn] = {}
         self._events: dict[uuid.UUID, list[StoredEvent]] = {}
         self._changed = asyncio.Condition()
+        self._cancels: set[asyncio.Queue[uuid.UUID]] = set()
 
     async def open(self) -> None:
         """Nothing to open: the engines keep their memory in this process too."""
 
     async def close(self) -> None:
         """Nothing to release."""
+
+    async def readiness(self) -> tuple[str, ...]:
+        """Always ready: everything is in this process."""
+        return ()
 
     # --- helpers ------------------------------------------------------------
 
@@ -66,6 +73,18 @@ class MemoryStore(Store):
     def _turn_of(self, session: uuid.UUID, turn: uuid.UUID) -> Turn | None:
         found = self._turns.get(turn)
         return found if found is not None and found.session_id == session else None
+
+    def _held(self, session: uuid.UUID, turn: uuid.UUID, fence: Fence, at: datetime) -> Turn:
+        """The turn, while it runs under ``fence`` and its lease has not passed ``at``."""
+        found = self._turn_of(session, turn)
+        if (
+            found is None
+            or found.state is not TurnState.RUNNING
+            or found.lease_until <= at
+            or (found.worker_id, found.attempt) != (fence.worker, fence.attempt)
+        ):
+            raise TurnLostError(f"turn {turn} is not running under this holder")
+        return found
 
     async def _notify(self) -> None:
         async with self._changed:
@@ -143,28 +162,34 @@ class MemoryStore(Store):
         self._events[turn.id] = []
         await self._notify()
 
-    async def append_event(
+    async def append_events(
         self,
         owner: uuid.UUID,
         session: uuid.UUID,
         turn: uuid.UUID,
-        position: int,
-        document: Document,
+        fence: Fence,
+        events: Sequence[StoredEvent],
         written_at: datetime,
-        expires_at: datetime,
     ) -> None:
         self._visible(owner, session)
-        found = self._turn_of(session, turn)
-        if found is None or found.state is not TurnState.RUNNING or found.lease_until <= written_at:
-            raise TurnLostError(f"turn {turn} is not running")
-        events = self._events[turn]
-        taken = next((e for e in events if e.position == position), None)
-        if taken is not None:
-            if taken.document == document:
-                return
-            raise TurnLostError(f"position {position} of turn {turn} holds another event")
-        events.append(StoredEvent(position, document, expires_at))
-        await self._notify()
+        self._held(session, turn, fence, written_at)
+        held = {e.position: e for e in self._events[turn]}
+        fresh = []
+        for event in events:
+            taken = held.get(event.position)
+            if taken is None:
+                fresh.append(event)
+            elif taken.document != event.document:
+                raise TurnLostError(f"position {event.position} of turn {turn} holds another")
+        if fresh:
+            self._events[turn].extend(fresh)
+            await self._notify()
+
+    async def last_position(self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID) -> int:
+        self._visible(owner, session)
+        if self._turn_of(session, turn) is None:
+            return 0
+        return max((e.position for e in self._events[turn]), default=0)
 
     async def events_after(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, position: int
@@ -180,17 +205,16 @@ class MemoryStore(Store):
         owner: uuid.UUID,
         session: uuid.UUID,
         turn: uuid.UUID,
+        fence: Fence,
         state: TurnState,
         ended_at: datetime,
         error: str | None,
         answer: StoredMessage | None,
-        events: list[StoredEvent] | tuple[StoredEvent, ...],
+        events: Sequence[StoredEvent],
         updated_at: datetime,
     ) -> None:
         self._visible(owner, session)
-        found = self._turn_of(session, turn)
-        if found is None or found.state is not TurnState.RUNNING or found.lease_until <= ended_at:
-            raise TurnLostError(f"turn {turn} is not running")
+        found = self._held(session, turn, fence, ended_at)
         if answer is not None:
             self._messages[session].append(answer)
         self._events[turn].extend(events)
@@ -201,18 +225,54 @@ class MemoryStore(Store):
         await self._notify()
 
     async def end_expired_turn(
-        self, owner: uuid.UUID, session: uuid.UUID, now: datetime
+        self,
+        owner: uuid.UUID,
+        session: uuid.UUID,
+        turn: uuid.UUID,
+        state: TurnState,
+        now: datetime,
+        error: str | None,
+        answer: StoredMessage | None,
+        events: Sequence[StoredEvent],
     ) -> Turn | None:
         self._visible(owner, session)
-        running = self._running(session)
-        if running is None or running.lease_until >= now:
+        running = self._turn_of(session, turn)
+        if running is None or running.state is not TurnState.RUNNING or running.lease_until >= now:
             return None
-        ended = dataclasses.replace(
-            running, state=TurnState.INTERRUPTED, ended_at=now, error="lease expired"
-        )
-        self._turns[running.id] = ended
+        taken = {e.position for e in self._events[turn]}
+        if any(e.position in taken for e in events):
+            raise TurnLostError(f"turn {turn} wrote an event meanwhile")
+        if answer is not None:
+            self._messages[session].append(answer)
+        self._events[turn].extend(events)
+        ended = dataclasses.replace(running, state=state, ended_at=now, error=error)
+        self._turns[turn] = ended
+        self._sessions[session] = dataclasses.replace(self._sessions[session], updated_at=now)
         await self._notify()
         return ended
+
+    async def request_cancel(
+        self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, now: datetime
+    ) -> Turn | None:
+        self._visible(owner, session)
+        found = self._turn_of(session, turn)
+        if found is None or found.state is not TurnState.RUNNING:
+            return found
+        if found.cancel_requested_at is None:
+            found = dataclasses.replace(found, cancel_requested_at=now)
+            self._turns[turn] = found
+        for signals in self._cancels:
+            signals.put_nowait(turn)
+        return found
+
+    async def cancel_signals(self) -> AsyncIterator[uuid.UUID]:
+        signals: asyncio.Queue[uuid.UUID] = asyncio.Queue()
+        self._cancels.add(signals)
+        try:
+            while True:
+                yield await signals.get()
+        finally:
+            self._cancels.discard(signals)
 
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:
         self._visible(owner, session)
@@ -226,6 +286,53 @@ class MemoryStore(Store):
     async def get_turn(self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID) -> Turn | None:
         self._visible(owner, session)
         return self._turn_of(session, turn)
+
+    async def heartbeat(
+        self, worker: str, held: Sequence[Held], now: datetime, lease: timedelta
+    ) -> Renewed:
+        renewed = {}
+        for h in held:
+            found = self._turns.get(h.turn)
+            if (
+                found is not None
+                and found.state is TurnState.RUNNING
+                and (found.worker_id, found.attempt) == (worker, h.attempt)
+                and found.lease_until > now
+            ):
+                self._turns[h.turn] = dataclasses.replace(
+                    found, lease_until=now + lease, heartbeat_at=now
+                )
+                renewed[h.turn] = found.cancel_requested_at
+        return Renewed(renewed)
+
+    async def delete_expired(self, now: datetime, batch: int) -> Mapping[str, int] | None:
+        """The turn events alone: sign-in's records in memory are the credentials' own."""
+        deleted = 0
+        for turn, events in self._events.items():
+            kept = [e for e in events if e.expires_at > now]
+            deleted += len(events) - len(kept)
+            self._events[turn] = kept
+        return {"turn_events": deleted}
+
+    async def expired_turns(self, now: datetime, limit: int) -> list[tuple[uuid.UUID, Turn]] | None:
+        expired = sorted(
+            (
+                t
+                for t in self._turns.values()
+                if t.state is TurnState.RUNNING
+                and t.lease_until < now
+                and t.session_id in self._sessions
+                and t.session_id not in self._hidden
+            ),
+            key=lambda t: (t.lease_until, t.id),
+        )
+        return [(self._sessions[t.session_id].owner_id, t) for t in expired[:limit]]
+
+    async def hidden_sessions(self, before: datetime, limit: int) -> list[Session] | None:
+        hidden = sorted(
+            (at, s) for s, at in self._hidden.items() if at < before and s in self._sessions
+        )
+        return [self._sessions[s] for _, s in hidden[:limit]]
 
     async def wait_for_events(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, after: int, timeout: float

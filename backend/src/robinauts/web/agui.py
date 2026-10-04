@@ -8,10 +8,14 @@ The run id is the turn's id, and the thread id the session's: each turn is a run
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator
+from typing import Any
 
 from ag_ui.core import (
     BaseEvent,
+    CustomEvent,
     ReasoningMessageContentEvent,
     ReasoningMessageEndEvent,
     ReasoningMessageStartEvent,
@@ -46,6 +50,13 @@ from robinauts.controller.contract.domain import (
 )
 
 ENCODER = EventEncoder()
+
+RECONNECT_AFTER_MS = 1000
+"""What a stream closed by a stopping process tells its client to wait before it attaches
+again."""
+
+KEEP_ALIVE = ": keep-alive\n\n"
+"""An SSE comment: bytes on a quiet stream, which every client reads as nothing."""
 
 ENDED_BADLY = {
     TurnState.FAILED: "the agent could not finish this answer",
@@ -99,6 +110,62 @@ def mapped(thread_id: str, run_id: str, event: TurnEvent) -> list[BaseEvent]:
         case TurnEnded():
             return [RunErrorEvent(message=ENDED_BADLY[event.state], code=event.state.value)]
     return []
+
+
+def reconnect_hint(after_ms: int = RECONNECT_AFTER_MS) -> str:
+    """How a stream that this process closes as it stops ends: an SSE ``retry:`` field, then
+    ``CUSTOM robinauts.reconnect``. The turn goes on; a client attaches again, through
+    another process, after the last ``id:`` it saw. A client that does not know the event
+    reads it as nothing, and attaches again all the same, its stream having ended without
+    the turn's end."""
+    hint = CustomEvent(name="robinauts.reconnect", value={"after_ms": after_ms})
+    return f"retry: {after_ms}\n\n" + sse(hint)
+
+
+async def kept_alive(
+    chunks: AsyncIterator[str], every: float, drained: asyncio.Event | None = None
+) -> AsyncIterator[str]:
+    """The chunks, with a ``: keep-alive`` comment after every ``every`` seconds of silence,
+    so that a proxy or a load balancer between here and the browser does not close a stream
+    that is waiting on a long tool call. The next chunk is awaited in a task of its own and
+    never cancelled by the timer: the watcher behind it is waiting on the store. Once
+    ``drained`` is set, the stream ends with the reconnect hint."""
+    pending: asyncio.Future[str] | None = None
+    stopping: asyncio.Future[bool] | None = None
+    if drained is not None:
+        stopping = asyncio.ensure_future(drained.wait())
+    try:
+        while True:
+            if pending is None:
+                pending = asyncio.ensure_future(anext(chunks))
+            waiting: set[asyncio.Future[Any]] = {pending}
+            if stopping is not None:
+                waiting.add(stopping)
+            done, _ = await asyncio.wait(
+                waiting, timeout=every, return_when=asyncio.FIRST_COMPLETED
+            )
+            if pending not in done:
+                if stopping is not None and stopping in done:
+                    yield reconnect_hint()
+                    return
+                yield KEEP_ALIVE
+                continue
+            finished, pending = pending, None
+            try:
+                chunk = finished.result()
+            except StopAsyncIteration:
+                return
+            yield chunk
+    finally:
+        if stopping is not None:
+            stopping.cancel()
+        if pending is not None:
+            pending.cancel()
+            with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+                await pending
+        aclose = getattr(chunks, "aclose", None)
+        if aclose is not None:
+            await aclose()
 
 
 async def stream(

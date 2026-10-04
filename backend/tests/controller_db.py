@@ -55,6 +55,13 @@ class TemporarySchema:
         self._pool: asyncpg.Pool | None = None
 
     @property
+    def dsn(self) -> str:
+        """The test database, with the search path on this schema: what a connection of the
+        store's own, outside the pool, opens."""
+        joiner = "&" if "?" in url() else "?"
+        return f"{url()}{joiner}search_path={self.name}"
+
+    @property
     def pool(self) -> asyncpg.Pool:
         if self._pool is None:
             raise RuntimeError("this schema is not open")

@@ -18,6 +18,7 @@ from robinauts.agent_engines.contract.domain import (
     Event,
     ModelsConfig,
     ProviderKind,
+    RunLimits,
 )
 
 
@@ -44,6 +45,7 @@ class EngineSettings:
     models: ModelsConfig
     keys: ProviderKeyLookup
     tool_secrets: ToolSecretLookup
+    limits: RunLimits = RunLimits()
 
 
 class StorageKind(Enum):
@@ -89,7 +91,11 @@ class AgentEngine(ABC):
     ) -> AsyncGenerator[Event, None]:
         """Not a coroutine: everything, the refusals included, happens inside the generator.
 
-        Past ``timeout_seconds`` the engine ends the turn by raising ``TimeoutError``.
+        ``timeout_seconds`` is what is left of the turn's deadline, which bounds the whole run;
+        each call to the vendor is bounded by the model's own ``timeout_seconds`` and retried
+        ``max_retries`` times. Past the deadline the engine ends the turn by raising
+        ``TimeoutError``; past ``limits.max_model_calls`` calls to the model, by raising the
+        framework's own error.
         Raised where iterated: ``SessionNotFoundError`` for a session not created,
         ``CheckpointNotFoundError`` for a checkpoint not held for it, ``UnknownModelError`` for
         a model the settings do not have, ``ResumeMismatchError`` for a resume of another prompt.

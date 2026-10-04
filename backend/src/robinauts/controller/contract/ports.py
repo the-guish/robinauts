@@ -18,8 +18,10 @@ from robinauts.controller.contract.domain import (
     NumberedEvent,
     OpenedSession,
     PendingLogin,
+    Readiness,
     Session,
     SessionPage,
+    Swept,
     TurnStarted,
     User,
     UserSession,
@@ -66,7 +68,9 @@ class Controller(ABC):
 
     @abstractmethod
     async def delete_session(self, user: User, session_id: uuid.UUID) -> None:
-        """``SessionNotFoundError``. The engine's memory goes with the records."""
+        """``SessionNotFoundError``. The engine's memory goes with the records. A running turn
+        is stopped first, whichever process runs it; ``TurnActiveError`` when it has not
+        ended in time."""
         raise NotImplementedError
 
     @abstractmethod
@@ -136,9 +140,11 @@ class Controller(ABC):
     @abstractmethod
     async def cancel_turn(
         self, user: User, session_id: uuid.UUID, turn_id: uuid.UUID | None = None
-    ) -> None:
-        """``SessionNotFoundError``; ``NoActiveTurnError`` when nothing runs. ``turn_id``
-        ``None`` names the session's running turn."""
+    ) -> bool:
+        """Stop the turn, whichever process runs it: true when it has ended, false when the
+        ask is recorded and its end is on its way. ``SessionNotFoundError``;
+        ``NoActiveTurnError`` when nothing runs. ``turn_id`` ``None`` names the session's
+        running turn."""
         raise NotImplementedError
 
     @abstractmethod
@@ -159,7 +165,29 @@ class Controller(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def sweep(self) -> None:
+    async def sweep(self) -> Swept:
+        """Delete what has expired (turn events, user sessions, API tokens, pending logins),
+        end the turns whose lease has passed, storing what each had answered, and finish
+        the purge of hidden sessions whose purge died. Run by every process on a schedule
+        of its own; a task another process is at is left to it, as a saving of work rather
+        than a guarantee, since every task is safe to repeat."""
+        raise NotImplementedError
+
+
+class Operations(ABC):
+    """What the process running a controller is asked by whatever runs it, and not by people:
+    whether to send it requests, and to stop."""
+
+    @abstractmethod
+    async def readiness(self) -> Readiness:
+        """Ready when the database answers within a second, the connections that hold the
+        turns' leases and listen for their signals are up, and the process is not draining."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def drain(self) -> None:
+        """Begin to stop: take no new turn (``DrainingError``) and answer not ready. The turns
+        already running go on; ``close`` gives them ``[work] drain_seconds`` to finish."""
         raise NotImplementedError
 
 

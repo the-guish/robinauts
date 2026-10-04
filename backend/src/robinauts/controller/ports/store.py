@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any
 
 from robinauts.controller.contract.domain import Role, Session, Turn, TurnState, User
+from robinauts.controller.ports.work import Fence
 
 Document = Mapping[str, Any]
 """A message or an event, whole, as the encoder wrote it."""
@@ -60,8 +61,14 @@ class Store(ABC):
 
     @abstractmethod
     async def close(self) -> None:
-        """Release what ``open`` took."""
+        """Release what ``open`` took, within a bounded time whatever the database does."""
         raise NotImplementedError
+
+    @abstractmethod
+    async def readiness(self) -> tuple[str, ...]:
+        """What keeps the store from serving now, each said in a few words; nothing when it
+        can: the database answering within a second, and the connections apart from the pool
+        up."""
 
     # --- users --------------------------------------------------------------
 
@@ -110,19 +117,25 @@ class Store(ABC):
         ``TurnActiveError`` while the session has a running turn."""
 
     @abstractmethod
-    async def append_event(
+    async def append_events(
         self,
         owner: uuid.UUID,
         session: uuid.UUID,
         turn: uuid.UUID,
-        position: int,
-        document: Document,
+        fence: Fence,
+        events: Sequence[StoredEvent],
         written_at: datetime,
-        expires_at: datetime,
     ) -> None:
-        """The same document again at a position it has is accepted. Another document there,
-        or any append on a turn that is not running or whose lease has passed ``written_at``,
-        is ``TurnLostError``."""
+        """A batch of the turn's events, in one operation, announced to its watchers once.
+        The same documents again at positions they have are accepted. Another document at
+        one of them, or any append on a turn that is not running, is not held under
+        ``fence``, or whose lease has passed ``written_at``, is ``TurnLostError``, and
+        nothing of the batch is kept."""
+
+    @abstractmethod
+    async def last_position(self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID) -> int:
+        """The highest position of the turn's events, 0 when it has none: what opening a
+        session reads, without the events themselves."""
 
     @abstractmethod
     async def events_after(
@@ -136,6 +149,7 @@ class Store(ABC):
         owner: uuid.UUID,
         session: uuid.UUID,
         turn: uuid.UUID,
+        fence: Fence,
         state: TurnState,
         ended_at: datetime,
         error: str | None,
@@ -144,15 +158,35 @@ class Store(ABC):
         updated_at: datetime,
     ) -> None:
         """The answer, the last events, the turn's state and the session's ``updated_at``, in
-        one operation, only while the turn is running and its lease has not passed
-        ``ended_at``: else ``TurnLostError``."""
+        one operation, only while the turn is running, held under ``fence``, and its lease
+        has not passed ``ended_at``: else ``TurnLostError``."""
 
     @abstractmethod
     async def end_expired_turn(
-        self, owner: uuid.UUID, session: uuid.UUID, now: datetime
+        self,
+        owner: uuid.UUID,
+        session: uuid.UUID,
+        turn: uuid.UUID,
+        state: TurnState,
+        now: datetime,
+        error: str | None,
+        answer: StoredMessage | None,
+        events: Sequence[StoredEvent],
     ) -> Turn | None:
-        """The session's running turn ended as ``interrupted`` if its lease has passed
-        ``now``, by one conditional write, with no event; ``None`` otherwise."""
+        """End the turn as ``state``, with the answer and the last events, and the session's
+        ``updated_at``, in one operation that only a running turn whose lease has passed
+        ``now`` takes: the turn as ended, or ``None`` when it is not such a turn.
+        ``TurnLostError`` when a position of ``events`` was taken meanwhile, by a runner
+        whose clock is behind: the caller reads the events again."""
+
+    @abstractmethod
+    async def request_cancel(
+        self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, now: datetime
+    ) -> Turn | None:
+        """Record that a cancel of the turn was asked for at ``now``, unless one was already,
+        while it runs, and signal its holder, whichever process that is
+        (``WorkQueue.cancel_signals``), in one operation: the turn as it then is, running or
+        not, or ``None`` when the session has no such turn."""
 
     @abstractmethod
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None: ...
@@ -173,3 +207,22 @@ class Store(ABC):
         """Wait until the turn has an event past ``after`` or has ended, or ``timeout``
         seconds have passed: true in the first two cases, false in the last. The caller reads
         the store again in every case."""
+
+    # --- housekeeping -------------------------------------------------------
+
+    @abstractmethod
+    async def delete_expired(self, now: datetime, batch: int) -> Mapping[str, int] | None:
+        """Delete, ``batch`` rows at a time, the turn events, user sessions, API tokens and
+        pending logins whose expiry has passed ``now``: how many of each, by table, or
+        ``None`` when another process is deleting them."""
+
+    @abstractmethod
+    async def expired_turns(self, now: datetime, limit: int) -> list[tuple[uuid.UUID, Turn]] | None:
+        """Up to ``limit`` running turns of visible sessions whose lease has passed ``now``,
+        oldest lease first, each with its session's owner; ``None`` when another process is
+        ending them."""
+
+    @abstractmethod
+    async def hidden_sessions(self, before: datetime, limit: int) -> list[Session] | None:
+        """Up to ``limit`` sessions hidden before ``before``, whose purge has not happened:
+        ``None`` when another process is purging them."""

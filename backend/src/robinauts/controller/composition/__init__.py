@@ -9,6 +9,8 @@ since it is the one other thing that names the store and the engines together.""
 
 from __future__ import annotations
 
+import os
+import socket
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,14 +33,16 @@ from robinauts.controller.adapters.postgres.schema import (
 from robinauts.controller.adapters.postgres.store import PostgresStore
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.contract.domain import Config, ConfigError, StorageConfig, StorageKind
-from robinauts.controller.contract.ports import Controller, Credentials
+from robinauts.controller.contract.ports import Controller, Credentials, Operations
 from robinauts.controller.core.config import parse_config
 from robinauts.controller.core.engine_settings import SecretLookup, engine_settings
-from robinauts.controller.ports.store import Store
 
 DATABASE_URL_VARIABLE = "ROBINAUTS_DATABASE_URL"
+WORKER_ID_VARIABLE = "ROBINAUTS_WORKER_ID"
 
-CONTROLLER_TABLES = frozenset({"model_providers", "models", "tool_servers", "agents"})
+CONTROLLER_TABLES = frozenset(
+    {"model_providers", "models", "tool_servers", "agents", "work", "database"}
+)
 """The file's tables that are the controller's, the ones `parse_config` reads."""
 
 SCHEMA_READY = "the database is at schema version {version} (schema.sql {digest})"
@@ -54,6 +58,12 @@ def storage_from(environ: Mapping[str, str]) -> StorageConfig:
     return StorageConfig(StorageKind.IN_MEMORY)
 
 
+def worker_from(environ: Mapping[str, str]) -> str:
+    """This process's name as the holder of its turns: `ROBINAUTS_WORKER_ID` when set, as a
+    Deployment sets it to the pod's name, else `<host>:<pid>`."""
+    return environ.get(WORKER_ID_VARIABLE) or f"{socket.gethostname()}:{os.getpid()}"
+
+
 @dataclass(frozen=True, slots=True)
 class Composed:
     """The controller, and the credentials on its storage. The credentials open nothing: on
@@ -61,15 +71,26 @@ class Composed:
 
     controller: Controller
     credentials: Credentials
+    operations: Operations
 
 
-def compose(config: Config, *, storage: StorageConfig, secret_for: SecretLookup) -> Composed:
-    store: Store
+def compose(
+    config: Config,
+    *,
+    storage: StorageConfig,
+    secret_for: SecretLookup,
+    worker: str | None = None,
+) -> Composed:
+    store: PostgresStore | MemoryStore
     credentials: Credentials
     if storage.kind is StorageKind.POSTGRES:
         if not storage.url:
             raise ConfigError(f"{DATABASE_URL_VARIABLE} is not set")
-        postgres = PostgresStore(dsn=storage.url)
+        postgres = PostgresStore(
+            dsn=storage.url,
+            pool_max=config.database.pool_max,
+            acquire_timeout=config.database.acquire_timeout_seconds,
+        )
         store, credentials = postgres, PostgresCredentials(postgres)
     elif storage.kind is StorageKind.IN_MEMORY:
         memory = MemoryStore()
@@ -78,11 +99,17 @@ def compose(config: Config, *, storage: StorageConfig, secret_for: SecretLookup)
         raise NotImplementedError(f"{storage.kind} storage")
     dispatcher = InProcessDispatcher()
     controller = RobinautsController(
-        config, store=store, storage=storage, secret_for=secret_for, dispatcher=dispatcher
+        config,
+        store=store,
+        storage=storage,
+        secret_for=secret_for,
+        dispatcher=dispatcher,
+        work=store,
+        worker=worker or worker_from(os.environ),
     )
     # Handed over here, so that no adapter imports the application.
     dispatcher.run = controller.run_turn
-    return Composed(controller, credentials)
+    return Composed(controller, credentials, controller)
 
 
 def build(config: Config, *, storage: StorageConfig, secret_for: SecretLookup) -> Controller:

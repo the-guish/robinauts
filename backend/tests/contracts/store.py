@@ -29,10 +29,14 @@ from robinauts.controller.contract.domain import (
     User,
 )
 from robinauts.controller.ports.store import Store, StoredEvent, StoredMessage
+from robinauts.controller.ports.work import Fence, Held, Renewed, WorkQueue
 
 NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
 MINUTE = timedelta(minutes=1)
+SECOND = timedelta(seconds=1)
 EXPIRY = NOW + timedelta(hours=24)
+WORKER = "pod-a"
+FENCE = Fence(WORKER, 1)
 
 
 def user(subject: str = "me") -> User:
@@ -56,7 +60,19 @@ def answer(session_id: uuid.UUID, parent: uuid.UUID, at: datetime = NOW) -> Stor
 def turn(
     session_id: uuid.UUID, follows: uuid.UUID, lease_until: datetime = NOW + 3 * MINUTE
 ) -> Turn:
-    return Turn(uuid.uuid4(), session_id, follows, "m", TurnState.RUNNING, NOW, lease_until)
+    return Turn(
+        uuid.uuid4(),
+        session_id,
+        follows,
+        "m",
+        TurnState.RUNNING,
+        NOW,
+        lease_until,
+        deadline_at=NOW + 20 * MINUTE,
+        worker_id=WORKER,
+        attempt=1,
+        heartbeat_at=NOW,
+    )
 
 
 def piece(position: int, text: str = "x") -> StoredEvent:
@@ -111,9 +127,29 @@ class StoreContract:
         running: Turn,
         event: StoredEvent,
         at: datetime = NOW,
+        fence: Fence = FENCE,
     ) -> None:
-        await store.append_event(
-            me.id, one.id, running.id, event.position, event.document, at, event.expires_at
+        await store.append_events(me.id, one.id, running.id, fence, [event], at)
+
+    async def end_expired(
+        self,
+        store: Store,
+        me: User,
+        one: Session,
+        running: Turn,
+        now: datetime,
+        partial: StoredMessage | None = None,
+        events: list[StoredEvent] | None = None,
+    ) -> Turn | None:
+        return await store.end_expired_turn(
+            me.id,
+            one.id,
+            running.id,
+            TurnState.INTERRUPTED,
+            now,
+            "lease expired",
+            partial,
+            events or [],
         )
 
     # --- users --------------------------------------------------------------
@@ -175,7 +211,7 @@ class StoreContract:
         with pytest.raises(TurnActiveError):
             await store.hide_session(me.id, one.id, NOW)
         await store.finish_turn(
-            me.id, one.id, running.id, TurnState.CANCELLED, NOW, None, None, [piece(1)], NOW
+            me.id, one.id, running.id, FENCE, TurnState.CANCELLED, NOW, None, None, [piece(1)], NOW
         )
         await store.hide_session(me.id, one.id, NOW)
         with pytest.raises(SessionNotFoundError):
@@ -230,6 +266,7 @@ class StoreContract:
             me.id,
             one.id,
             running.id,
+            FENCE,
             TurnState.FINISHED,
             later,
             None,
@@ -255,14 +292,14 @@ class StoreContract:
     async def test_an_append_or_a_finish_on_an_ended_turn_is_refused(self, store: Store) -> None:
         me, one, _, running = await self.started(store)
         await store.finish_turn(
-            me.id, one.id, running.id, TurnState.FAILED, NOW, "boom", None, [piece(1)], NOW
+            me.id, one.id, running.id, FENCE, TurnState.FAILED, NOW, "boom", None, [piece(1)], NOW
         )
         too_late = piece(2)
         with pytest.raises(TurnLostError):
             await self.append(store, me, one, running, too_late)
         with pytest.raises(TurnLostError):
             await store.finish_turn(
-                me.id, one.id, running.id, TurnState.FINISHED, NOW, None, None, [], NOW
+                me.id, one.id, running.id, FENCE, TurnState.FINISHED, NOW, None, None, [], NOW
             )
         failed = await store.get_turn(me.id, one.id, running.id)
         assert failed is not None
@@ -282,7 +319,16 @@ class StoreContract:
             await self.append(store, me, one, running, expired, at=NOW + 2 * MINUTE)
         with pytest.raises(TurnLostError):
             await store.finish_turn(
-                me.id, one.id, running.id, TurnState.FINISHED, NOW + 2 * MINUTE, None, None, [], NOW
+                me.id,
+                one.id,
+                running.id,
+                FENCE,
+                TurnState.FINISHED,
+                NOW + 2 * MINUTE,
+                None,
+                None,
+                [],
+                NOW,
             )
         assert await store.active_turn(me.id, one.id) == running
 
@@ -296,18 +342,44 @@ class StoreContract:
         asked = question(one.id)
         running = turn(one.id, asked.id, lease_until=NOW + MINUTE)
         await store.start_turn(me.id, running, asked)
-        assert await store.end_expired_turn(me.id, one.id, NOW + MINUTE / 2) is None
+        await self.append(store, me, one, running, piece(1))
+        partial = answer(one.id, asked.id, NOW + 2 * MINUTE)
+        assert await self.end_expired(store, me, one, running, NOW + MINUTE / 2) is None
         assert await store.active_turn(me.id, one.id) == running
-        ended = await store.end_expired_turn(me.id, one.id, NOW + 2 * MINUTE)
+        later = NOW + 2 * MINUTE
+        ended = await self.end_expired(store, me, one, running, later, partial, [piece(2)])
         assert ended is not None
-        assert (ended.id, ended.state, ended.ended_at) == (
+        assert (ended.id, ended.state, ended.ended_at, ended.error) == (
             running.id,
             TurnState.INTERRUPTED,
-            NOW + 2 * MINUTE,
+            later,
+            "lease expired",
         )
         assert await store.get_turn(me.id, one.id, running.id) == ended
         assert await store.active_turn(me.id, one.id) is None
-        assert await store.end_expired_turn(me.id, one.id, NOW + 3 * MINUTE) is None
+        assert await store.messages_of(me.id, one.id) == [asked.document, partial.document]
+        positions = [p for p, _ in await store.events_after(me.id, one.id, running.id, 0)]
+        assert positions == [1, 2]
+        assert (await store.get_session(me.id, one.id)).updated_at == later
+        again = NOW + 3 * MINUTE
+        assert await self.end_expired(store, me, one, running, again) is None
+
+    @store_test
+    async def test_an_expired_end_is_refused_on_a_position_its_runner_took(
+        self, store: Store
+    ) -> None:
+        me = await store.add_user_if_absent(user())
+        one = session(me.id)
+        await store.add_session(one)
+        asked = question(one.id)
+        running = turn(one.id, asked.id, lease_until=NOW + MINUTE)
+        await store.start_turn(me.id, running, asked)
+        await self.append(store, me, one, running, piece(1))
+        partial = answer(one.id, asked.id)
+        with pytest.raises(TurnLostError):
+            await self.end_expired(store, me, one, running, NOW + 2 * MINUTE, partial, [piece(1)])
+        assert await store.active_turn(me.id, one.id) == running
+        assert await store.messages_of(me.id, one.id) == [asked.document]
 
     @store_test
     async def test_a_start_and_a_hide_succeed_after_an_expired_turn_is_ended(
@@ -317,12 +389,13 @@ class StoreContract:
         one = session(me.id)
         await store.add_session(one)
         asked = question(one.id)
-        await store.start_turn(me.id, turn(one.id, asked.id, lease_until=NOW + MINUTE), asked)
-        assert await store.end_expired_turn(me.id, one.id, NOW + 2 * MINUTE) is not None
+        first = turn(one.id, asked.id, lease_until=NOW + MINUTE)
+        await store.start_turn(me.id, first, asked)
+        assert await self.end_expired(store, me, one, first, NOW + 2 * MINUTE) is not None
         again = turn(one.id, asked.id, lease_until=NOW + 5 * MINUTE)
         await store.start_turn(me.id, again, None)
         assert await store.active_turn(me.id, one.id) == again
-        assert await store.end_expired_turn(me.id, one.id, NOW + 6 * MINUTE) is not None
+        assert await self.end_expired(store, me, one, again, NOW + 6 * MINUTE) is not None
         await store.hide_session(me.id, one.id, NOW + 6 * MINUTE)
         with pytest.raises(SessionNotFoundError):
             await store.get_session(me.id, one.id)
@@ -353,6 +426,156 @@ class StoreContract:
         await appending
         assert await store.wait_for_events(me.id, one.id, running.id, 1, 0.05) is False
         await store.finish_turn(
-            me.id, one.id, running.id, TurnState.FINISHED, NOW, None, None, [piece(2)], NOW
+            me.id, one.id, running.id, FENCE, TurnState.FINISHED, NOW, None, None, [piece(2)], NOW
         )
         assert await store.wait_for_events(me.id, one.id, running.id, 9, 0.05) is True
+
+    # --- holders and their heartbeat ----------------------------------------
+
+    @store_test
+    async def test_a_write_is_refused_to_another_holder_or_another_attempt(
+        self, store: Store
+    ) -> None:
+        me, one, _, running = await self.started(store)
+        for fence in (Fence("pod-b", 1), Fence(WORKER, 2)):
+            with pytest.raises(TurnLostError):
+                await self.append(store, me, one, running, piece(1), fence=fence)
+            with pytest.raises(TurnLostError):
+                await store.finish_turn(
+                    me.id, one.id, running.id, fence, TurnState.FINISHED, NOW, None, None, [], NOW
+                )
+        assert await store.events_after(me.id, one.id, running.id, 0) == []
+        await self.append(store, me, one, running, piece(1))
+        assert await store.active_turn(me.id, one.id) == running
+
+    @store_test
+    async def test_a_heartbeat_renews_the_leases_its_holder_holds_in_one_write(
+        self, store: Store
+    ) -> None:
+        assert isinstance(store, WorkQueue)
+        me, one, _, running = await self.started(store)
+        two = session(me.id)
+        await store.add_session(two)
+        asked = question(two.id)
+        other = turn(two.id, asked.id)
+        await store.start_turn(me.id, other, asked)
+        later = NOW + 2 * MINUTE
+        renewed = await store.heartbeat(
+            WORKER, [Held(running.id, 1), Held(other.id, 1)], later, 90 * SECOND
+        )
+        assert renewed == Renewed({running.id: None, other.id: None})
+        kept = await store.get_turn(me.id, one.id, running.id)
+        assert kept is not None
+        assert (kept.lease_until, kept.heartbeat_at) == (later + 90 * SECOND, later)
+        # Past the lease it started with, and inside the one it was given.
+        await self.append(store, me, one, running, piece(1), at=NOW + 3 * MINUTE + 15 * SECOND)
+        assert await store.heartbeat(WORKER, [], later, 90 * SECOND) == Renewed({})
+
+    @store_test
+    async def test_a_heartbeat_renews_nothing_of_another_attempt_holder_or_ended_turn(
+        self, store: Store
+    ) -> None:
+        assert isinstance(store, WorkQueue)
+        me, one, _, running = await self.started(store)
+        held = [Held(running.id, 1)]
+        assert await store.heartbeat("pod-b", held, NOW, 90 * SECOND) == Renewed({})
+        stale = [Held(running.id, 2)]
+        assert await store.heartbeat(WORKER, stale, NOW, 90 * SECOND) == Renewed({})
+        assert (await store.heartbeat(WORKER, held, NOW, MINUTE)).lost(held) == []
+        # A lease that has passed is never renewed: the turn is lost, whoever ends it.
+        lapsed = await store.heartbeat(WORKER, held, NOW + 2 * MINUTE, 90 * SECOND)
+        assert lapsed.lost(held) == [running.id]
+        unchanged = await store.get_turn(me.id, one.id, running.id)
+        assert unchanged is not None
+        assert unchanged.lease_until == NOW + MINUTE
+
+    @store_test
+    async def test_a_heartbeat_does_not_renew_an_ended_turn(self, store: Store) -> None:
+        assert isinstance(store, WorkQueue)
+        me, one, _, running = await self.started(store)
+        await store.finish_turn(
+            me.id, one.id, running.id, FENCE, TurnState.FINISHED, NOW, None, None, [], NOW
+        )
+        held = [Held(running.id, 1)]
+        assert (await store.heartbeat(WORKER, held, NOW, 90 * SECOND)).lost(held) == [running.id]
+
+    # --- cancels through the store ------------------------------------------
+
+    @store_test
+    async def test_a_cancel_is_recorded_once_and_signalled_to_whoever_listens(
+        self, store: Store
+    ) -> None:
+        assert isinstance(store, WorkQueue)
+        me, one, _, running = await self.started(store)
+        signals = store.cancel_signals()
+        listening = asyncio.ensure_future(anext(signals))
+        await asyncio.sleep(0.2)
+        asked = await store.request_cancel(me.id, one.id, running.id, NOW + MINUTE)
+        assert asked is not None
+        assert (asked.state, asked.cancel_requested_at) == (TurnState.RUNNING, NOW + MINUTE)
+        assert await asyncio.wait_for(listening, 5.0) == running.id
+        await signals.aclose()
+        again = await store.request_cancel(me.id, one.id, running.id, NOW + 2 * MINUTE)
+        assert again is not None
+        assert again.cancel_requested_at == NOW + MINUTE
+        held = [Held(running.id, 1)]
+        renewed = await store.heartbeat(WORKER, held, NOW + MINUTE, 90 * SECOND)
+        assert renewed == Renewed({running.id: NOW + MINUTE})
+
+    @store_test
+    async def test_a_cancel_of_an_ended_or_unknown_turn_changes_nothing(self, store: Store) -> None:
+        me, one, _, running = await self.started(store)
+        await store.finish_turn(
+            me.id, one.id, running.id, FENCE, TurnState.FINISHED, NOW, None, None, [], NOW
+        )
+        ended = await store.request_cancel(me.id, one.id, running.id, NOW + MINUTE)
+        assert ended is not None
+        assert (ended.state, ended.cancel_requested_at) == (TurnState.FINISHED, None)
+        assert await store.request_cancel(me.id, one.id, uuid.uuid4(), NOW) is None
+        with pytest.raises(SessionNotFoundError):
+            await store.request_cancel(user("you").id, one.id, running.id, NOW)
+
+    # --- batches ------------------------------------------------------------
+
+    @store_test
+    async def test_a_batch_is_kept_whole_or_not_at_all_and_its_last_position_is_read(
+        self, store: Store
+    ) -> None:
+        me, one, _, running = await self.started(store)
+        assert await store.last_position(me.id, one.id, running.id) == 0
+        batch = [piece(1, "a"), piece(2, "b"), piece(3, "c")]
+        await store.append_events(me.id, one.id, running.id, FENCE, batch, NOW)
+        assert await store.last_position(me.id, one.id, running.id) == 3
+        # The same batch again is the runner's own write, acknowledged late.
+        await store.append_events(me.id, one.id, running.id, FENCE, batch, NOW)
+        clash = [piece(4, "d"), piece(3, "other")]
+        with pytest.raises(TurnLostError):
+            await store.append_events(me.id, one.id, running.id, FENCE, clash, NOW)
+        stored = await store.events_after(me.id, one.id, running.id, 0)
+        assert [p for p, _ in stored] == [1, 2, 3]
+        assert await store.last_position(me.id, one.id, running.id) == 3
+        assert await store.last_position(me.id, one.id, uuid.uuid4()) == 0
+
+    # --- housekeeping -------------------------------------------------------
+
+    @store_test
+    async def test_the_sweep_deletes_expired_events_and_finds_expired_turns_and_hidden(
+        self, store: Store
+    ) -> None:
+        me, one, _, running = await self.started(store)
+        old = StoredEvent(1, piece(1).document, NOW - MINUTE)
+        await store.append_events(me.id, one.id, running.id, FENCE, [old, piece(2)], NOW)
+        deleted = await store.delete_expired(NOW, 1)
+        assert deleted is not None
+        assert deleted["turn_events"] == 1
+        assert [p for p, _ in await store.events_after(me.id, one.id, running.id, 0)] == [2]
+        assert await store.expired_turns(NOW, 10) == []
+        assert await store.expired_turns(NOW + 4 * MINUTE, 10) == [(me.id, running)]
+        await store.finish_turn(
+            me.id, one.id, running.id, FENCE, TurnState.FINISHED, NOW, None, None, [], NOW
+        )
+        assert await store.expired_turns(NOW + 4 * MINUTE, 10) == []
+        assert await store.hidden_sessions(NOW + MINUTE, 10) == []
+        await store.hide_session(me.id, one.id, NOW)
+        assert await store.hidden_sessions(NOW, 10) == []
+        assert await store.hidden_sessions(NOW + MINUTE, 10) == [one]
