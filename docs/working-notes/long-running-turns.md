@@ -52,6 +52,9 @@ are:
   watermark). Once a turn can wait, it must outlive the process that accepted it. So
   the concurrency limit *is* the worker: you get the worker without a new service
   and without a new dependency (§4).
+- **Long external jobs** (submit, then poll by id). Park them as rows that the
+  same workers poll, and call the agent back with a new turn when all have ended
+  or the limit passes. No process waits, and the conversation stays usable (§7).
 - **Separate worker container.** It then becomes the *same image* started with
   `--role worker`, a small delta worth doing for operational reasons. A worker that
   polls the HTTP API for work is not worth it here: higher cost, no gain while the
@@ -60,7 +63,7 @@ are:
 Rough size: Phases 0–3 of the roadmap, about **4–6 developer-weeks**, take 1–3 hour
 turns from "fragile" to "survive deploys, crashes and scale-downs, with a queue".
 Full scope with visibility, Pydantic AI parity and a role split is about
-**8–12 weeks** (§9).
+**8–12 weeks** (§10).
 
 ---
 
@@ -168,7 +171,7 @@ Verified in the locked versions (langgraph 1.2.12, langchain 1.4):
   `create_agent` recomputes the stop step from the current step, and the counters
   of `ModelCallLimitMiddleware` and `ToolCallLimitMiddleware` are `UntrackedValue`s,
   never checkpointed (`model_call_limit.py:34`, `tool_call_limit.py:50`). A cap on
-  a turn's total calls has to live in the controller (the turn's `progress`, §7),
+  a turn's total calls has to live in the controller (the turn's `progress`, §8),
   not in middleware.
 
 What to change:
@@ -501,7 +504,7 @@ says several "may run". The table below is what stands between the two.
 | Schema upgrades | Needs work | There are no migrations, and a hash must match. Until migrations exist, every schema change is a stop-all (`Recreate`) rollout |
 | Config drift during a rolling change | Needs work | `default_model` raises `StopIteration` (500) for an agent one replica does not know (`app.py:455-456`). Answer 404/422 instead, and roll config with the image |
 | Rate limiting | Not there | At the ingress for now. A future per-user limit must live in the database, not in process memory (`docs/layout.md:196`) |
-| Logs and metrics | Not there | Plain-text logs (`cli.py:126`), no request, turn or replica ids, no metrics (§7). The default uvicorn access log also records `/auth/callback?code=…`, against `docs/deployment.md:528` ("every query string cut off") |
+| Logs and metrics | Not there | Plain-text logs (`cli.py:126`), no request, turn or replica ids, no metrics (§8). The default uvicorn access log also records `/auth/callback?code=…`, against `docs/deployment.md:528` ("every query string cut off") |
 | Docs drift | Needs work | One process versus several, shutdown timings (`deployment.md:348-350` against the code), CLI flags that do not exist (`--forwarded-allow-ips`, `--log-level`), a "start-up sweep" log line that does not exist. `docs/working-notes/` was referenced but absent until this note |
 
 Already fine: sign-in callbacks on any replica (`pending_logins` taken with
@@ -580,7 +583,175 @@ those of the Hatchet engine and the Restate server were not verified.
 
 ---
 
-## 7. Visibility
+## 7. Long-running external jobs: submit, poll, call back
+
+The case: an MCP server offers `submit_job` (returns an id) and a way to ask for
+that job's status. The agent starts job 1 and job 2, about 40 minutes each, and
+asks to be called back within 60 minutes. The platform polls both in parallel and
+calls the agent **once**: when both have ended, successfully or not, or when the
+60 minutes are up, whichever comes first.
+
+### 7.1 The principle: a wait holds no process
+
+Nothing should sit in memory for 40 minutes. Not an engine, not a turn, not an
+asyncio task. The jobs and the wait become **rows**. Polling is a small,
+periodic piece of work that the worker claim loop of §4 picks up like a turn. The
+callback is a turn that enters the same queue. A thousand conversations waiting
+on jobs cost a thousand rows and a poll every few minutes each, and **no** turn
+slots and no memory. This also *shortens* turns: a "3-hour turn" that is mostly
+waiting becomes a few short turns with parked waits between them, which takes
+pressure off everything in §3.
+
+### 7.2 What the agent sees
+
+Submit tools stay ordinary MCP tools: they return a job id at once. The platform
+adds one **built-in tool** to agents that use job-capable servers:
+
+```text
+call_me_back(jobs: [job_id, ...], by_minutes: int) -> "callback scheduled"
+```
+
+- The platform checks that every id was **returned by a configured submit tool in
+  this conversation**. It records them from the submit tool's result, so a
+  hallucinated or foreign id is refused. Each id's server is therefore known, and
+  the agent never names it.
+- `by_minutes` is clamped to the configured bounds, for example 1 minute to 24
+  hours.
+- The agent ends its turn as it would anyway ("I've started both jobs; I'll
+  report back"). **The conversation stays free.** The person can keep talking,
+  ask for a status (a `job_status` built-in reads the rows, so no vendor call is
+  needed), or cancel.
+
+### 7.3 How the platform polls
+
+Two ways to poll, chosen per tool server:
+
+1. **Configured submit/status pair**, which works with any server today:
+
+   ```toml
+   [tool_servers.ci.jobs]
+   submit_tool       = "submit_job"
+   id_from           = "job_id"            # field of the submit result
+   status_tool       = "get_job"
+   id_argument       = "job_id"
+   status_field      = "status"            # in the status tool's structuredContent
+   succeeded         = ["succeeded"]
+   failed            = ["failed", "cancelled"]
+   poll_every_seconds = 300                 # with jitter, and backoff on errors
+   cancel_tool       = "cancel_job"         # optional, best effort
+   idempotency_argument = "request_id"      # optional: tool_call_id is passed here
+   ```
+
+2. **MCP tasks (SEP-1686)**, where the server declares `execution.taskSupport`.
+   The platform calls the tool in task mode and gets a task id. It polls
+   `tasks/get`, respecting the server's `pollInterval`, then fetches
+   `tasks/result`, and cancels with `tasks/cancel` (`mcp/types.py:526-640`,
+   `1296-1310`). That is the standard form of this pattern, so the configuration
+   above is not needed. It is **experimental** in the locked `mcp` 1.30, and few
+   servers support it yet, so add it second.
+
+Either way the poller is a third kind of work item in the claim loop (§4.2),
+alongside queued turns and expired leases:
+
+```sql
+CREATE TABLE tool_jobs (
+  id            uuid PRIMARY KEY,
+  session_id    uuid NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+  origin_turn   uuid NOT NULL,          -- the turn whose submit created it
+  submit_call   text NOT NULL,          -- the tool_call_id of the submit
+  server_id     text NOT NULL,
+  external_id   text NOT NULL,          -- the vendor's job or task id
+  state         text NOT NULL,          -- running | succeeded | failed | unknown | cancelled
+  last_status   jsonb,  result jsonb,
+  next_poll_at  timestamptz, poll_failures integer NOT NULL DEFAULT 0,
+  lease_until   timestamptz, worker_id text,
+  created_at    timestamptz NOT NULL, ended_at timestamptz
+);
+CREATE INDEX tool_jobs_due_idx ON tool_jobs (next_poll_at) WHERE state = 'running';
+
+CREATE TABLE job_waits (
+  id            uuid PRIMARY KEY,
+  session_id    uuid NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+  origin_turn   uuid NOT NULL,
+  deadline_at   timestamptz NOT NULL,   -- now + by_minutes
+  state         text NOT NULL,          -- waiting | fired | cancelled
+  fired_because text,                   -- all_ended | deadline
+  callback_turn uuid
+);
+CREATE INDEX job_waits_deadline_idx ON job_waits (deadline_at) WHERE state = 'waiting';
+CREATE TABLE job_wait_members (wait_id uuid REFERENCES job_waits, job_id uuid REFERENCES tool_jobs,
+                               PRIMARY KEY (wait_id, job_id));
+```
+
+- **Poll:** claim due jobs with `FOR UPDATE SKIP LOCKED`, take a short lease,
+  call the status tool, and write the new state and the next `next_poll_at`. A
+  status read is idempotent, so a poll lost to a crash is simply done again.
+  After N failed polls in a row the job ends as `unknown`. That counts as ended,
+  as an error, so a broken status endpoint cannot hold the agent past its
+  deadline anyway.
+- **Fire:** whenever a job ends, and whenever a wait's `deadline_at` passes
+  (claimed through its own index), check the wait. If every member has ended, or
+  the deadline has passed, then **in one transaction** set the wait to `fired`
+  and insert the callback turn as `queued`. The transaction makes the callback
+  exactly-once whatever the number of replicas.
+
+### 7.4 The callback turn
+
+- **Its message** is a platform-authored *notification*, a new message kind in
+  the transcript. The UI shows it as a card, and the model receives it as user
+  text built by `core` (like `prompt_after_failures` today), for example:
+  "Callback (all ended): job 1 succeeded: <result>; job 2 failed: <error>". Or:
+  "Callback (60 min limit reached): job 1 succeeded: <result>; job 2 still
+  running, 60 min elapsed, id …". At the limit the agent decides: report, or call
+  `call_me_back` again for job 2.
+- **Its place in the tree:** under the newest message of the branch that holds
+  the turn that called `call_me_back`. If the person branched away meanwhile,
+  the callback continues the job's branch, not theirs.
+- **Its place in the queue.** If a turn is running in that conversation when the
+  wait fires, the callback waits behind it. So the turn index changes again: one
+  *running* turn per conversation, with the queued ones kept in order. The claim
+  takes a conversation's oldest queued turn only when none of its turns runs.
+  Callback turns go before brand-new conversations' turns, so work already
+  started finishes first.
+- **Engines need nothing new.** For them a callback is an ordinary turn with a
+  prompt, on the same checkpoint chain.
+
+### 7.5 The alternative: suspend the same turn
+
+Both frameworks can park a run until external results arrive. In LangGraph,
+`interrupt()` inside the tool parks the run, and `Command(resume=results)`
+continues it (`langgraph/types.py:827, 880`). In Pydantic AI, the tool raises
+`CallDeferred`, the run ends with `DeferredToolRequests`, and a later run takes
+`DeferredToolResults` (`pydantic_ai/exceptions.py:150`, `_deferred.py:27, 158`).
+The results then arrive as the **tool result** of the waiting call, which is
+neater for the model. The cost: the conversation is **locked** for the whole
+wait, because a new message on a LangGraph thread with a pending interrupt
+discards the interrupted tasks. It also means engine-specific suspend and resume
+paths in both adapters. Keep it as an option for agents that must not end their
+turn without the results. The rows, poller and fire logic above are the same;
+only the last step differs (resume the parked turn instead of queueing a new
+one).
+
+### 7.6 How it fits the rest
+
+| Area | Effect |
+|---|---|
+| Concurrency limit (§4) | Waiting costs no slot and no memory. Polls are tiny work items, rate-limited per server. Callback turns are admitted like any turn, ahead of new ones |
+| Horizontal scaling (§5) | Any replica polls and fires (`SKIP LOCKED`, transactional fire). No affinity |
+| Crash, deploy, rebalancing | Nothing in memory to lose. A poll in flight is repeated, and a fire happens exactly once. The **submit** is still at-least-once if the process dies between the call and recording the id: pass `tool_call_id` as the idempotency key where the server accepts one |
+| Resume (§3) | Not needed for the wait itself, because the callback is a fresh turn. Turns get shorter |
+| Cancel and delete | Cancelling a conversation's waits calls `cancel_tool` or `tasks/cancel`, best effort. A delete does that before the purge |
+| Visibility (§8) | A jobs panel per conversation: state, elapsed, last and next poll, deadline. A history badge, "waiting on 2 jobs · by 14:32". A card when the callback fires. Today events are per turn and nothing streams between turns, so the panel reads a `GET …/jobs` endpoint the UI refreshes, and the history list shows the badge |
+| Limits | Jobs per wait, open jobs per user, `by_minutes` bounds, and callbacks in a row per conversation, so a model that keeps saying "call me back again" is stopped |
+| Cost | A 40–60 minute wait outlives Anthropic's prompt cache (5 min, or 1 h). The callback turn pays one full prefix write, which is small |
+| Credentials | The poller uses the tool server's configured credential, the same identity the agent's own calls use today (operations spec) |
+
+**Effort.** About 8–12 days on top of Phase 2 of the roadmap: the poller, waits,
+callback turns, the per-conversation queue order, the built-in tools, the UI card,
+panel and badge. MCP tasks support adds about 3–5 days. The suspended-turn
+variant, for both engines, adds about 5–8 days.
+
+## 8. Visibility
 
 What a person needs during a 2-hour turn:
 
@@ -618,7 +789,7 @@ What an operator needs:
 
 ---
 
-## 8. Resilience matrix (after the recommended work)
+## 9. Resilience matrix (after the recommended work)
 
 | Event | Today | After phases 0–3 |
 |---|---|---|
@@ -631,10 +802,11 @@ What an operator needs:
 | PostgreSQL failover | Writes fail and turns fail | Writes fail, and runners stop on `TurnLostError`. After failover the leases expire and turns resume. A queued turn just waits |
 | Context window full | The model call fails | Summarisation or context editing keeps the turn going |
 | Cancel or delete on another replica | 409 | Works from any replica, through `cancel_requested_at` and `NOTIFY` |
+| A 40-minute external job | The turn must stay running, holding a slot, and dies with the process | The turn ends. Jobs are polled from rows by any replica. The agent is called back once, when all have ended or at its limit |
 
 ---
 
-## 9. Roadmap
+## 10. Roadmap
 
 Effort is in developer-days for someone who knows the codebase, tests and docs
 included. It is rough, for ordering, not for commitments.
@@ -649,12 +821,14 @@ included. It is rough, for ordering, not for commitments.
 | **5. Visibility** | `progress` and partial snapshot (B9), history badges, notifications, structured logs, `/metrics`, running-turns admin view | 6–10 |
 | **6. Role split** | `--role web\|worker\|all`, worker-only `/health` and `/metrics`, deployment docs with two Deployments and queue-depth autoscaling. Reconcile the deployment docs for several processes (§5.2) | 2–4 |
 | **7. Housekeeping** | `sweep()`: retention of `turn_events`, expired sign-in rows, purge of hidden sessions, checkpoint pruning, under `pg_try_advisory_lock` so one replica runs it (B12). Load test behind a load balancer (README "Planned") | 4–6 |
+| **8. External jobs** | Submit, poll and call back (§7): `tool_jobs`, `job_waits`, the poller in the claim loop, transactional fire, callback turns and notification messages, the `call_me_back` and `job_status` built-ins, the UI card, panel and badge. Then MCP tasks | 8–12 (+3–5) |
 
 Phases 0–3 ≈ **22–33 days** (about 4–6 weeks): long turns survive crashes,
-deploys and scale-downs, with a queue and limits. All phases ≈ **39–60 days**.
+deploys and scale-downs, with a queue and limits. Phases 0–7 ≈ **39–60 days**.
+External jobs (phase 8) need Phase 2 and add 8–12 days.
 Phases 0 and 1 are worth doing whatever is decided about the rest.
 
-## 10. Open questions
+## 11. Open questions
 
 1. **Delivery of a finished long turn to someone who left.** Is a badge and a
    browser notification enough, or is email, Slack or a webhook wanted? That ties
@@ -669,7 +843,10 @@ Phases 0 and 1 are worth doing whatever is decided about the rest.
    rate-limited one.
 5. **Memory accounting.** Pick the per-process limits from a load test, not from
    the 1000/80% example. The event loop, not RAM, may be the first limit.
-6. **The AWS layout** (`the-path-of-one-message.md`). Everything here is behind the
+6. **Callback turn or suspended turn** for external jobs (§7.4–7.5)? The
+   callback turn keeps the conversation usable and needs nothing new from the
+   engines. Is a suspended turn needed for any agent?
+7. **The AWS layout** (`the-path-of-one-message.md`). Everything here is behind the
    existing ports (store, dispatcher, engine storage). The claim loop is the
    PostgreSQL dispatcher's business. A Lambda dispatcher would keep "invoke the
    worker", with leases and resume unchanged.
