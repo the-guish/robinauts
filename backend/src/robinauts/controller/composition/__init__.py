@@ -9,6 +9,8 @@ since it is the one other thing that names the store and the engines together.""
 
 from __future__ import annotations
 
+import os
+import socket
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,9 +36,9 @@ from robinauts.controller.contract.domain import Config, ConfigError, StorageCon
 from robinauts.controller.contract.ports import Controller, Credentials
 from robinauts.controller.core.config import TABLES, parse_config
 from robinauts.controller.core.engine_settings import SecretLookup, engine_settings
-from robinauts.controller.ports.store import Store
 
 DATABASE_URL_VARIABLE = "ROBINAUTS_DATABASE_URL"
+WORKER_ID_VARIABLE = "ROBINAUTS_WORKER_ID"
 
 CONTROLLER_TABLES = frozenset(TABLES)
 """The file's tables that are the controller's, the ones `parse_config` reads."""
@@ -44,6 +46,12 @@ CONTROLLER_TABLES = frozenset(TABLES)
 SCHEMA_READY = "the database is at schema version {version} (schema.sql {digest})"
 """What `db init` says whether it created the schema or found it there: the command's
 promise is the state of the database, not the work it did."""
+
+
+def worker_id_from(environ: Mapping[str, str]) -> str:
+    """This process's name among the deployment's: `ROBINAUTS_WORKER_ID`, which a Deployment
+    sets to the pod's name, or `<hostname>:<pid>`."""
+    return environ.get(WORKER_ID_VARIABLE) or f"{socket.gethostname()}:{os.getpid()}"
 
 
 def storage_from(environ: Mapping[str, str]) -> StorageConfig:
@@ -63,8 +71,14 @@ class Composed:
     credentials: Credentials
 
 
-def compose(config: Config, *, storage: StorageConfig, secret_for: SecretLookup) -> Composed:
-    store: Store
+def compose(
+    config: Config,
+    *,
+    storage: StorageConfig,
+    secret_for: SecretLookup,
+    worker_id: str | None = None,
+) -> Composed:
+    store: PostgresStore | MemoryStore
     credentials: Credentials
     if storage.kind is StorageKind.POSTGRES:
         if not storage.url:
@@ -78,7 +92,13 @@ def compose(config: Config, *, storage: StorageConfig, secret_for: SecretLookup)
         raise NotImplementedError(f"{storage.kind} storage")
     dispatcher = InProcessDispatcher()
     controller = RobinautsController(
-        config, store=store, storage=storage, secret_for=secret_for, dispatcher=dispatcher
+        config,
+        store=store,
+        storage=storage,
+        secret_for=secret_for,
+        dispatcher=dispatcher,
+        work=store,
+        worker_id=worker_id or worker_id_from(os.environ),
     )
     # Handed over here, so that no adapter imports the application.
     dispatcher.run = controller.run_turn

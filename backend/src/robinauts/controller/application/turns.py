@@ -3,12 +3,15 @@
 
 """The turn runner: the engine's stream, stored as numbered turn events and an answer.
 
-The runner numbers its turn's events from 1 and is their only writer. Its first append is
-its claim on the turn: refused, it has lost the turn to another runner and runs no engine.
+The runner numbers its turn's events from 1 and is their only writer. Every write names the
+process holding the turn and the attempt it holds, from the turn's record (``Fence``). Its
+first append is its claim on the turn: refused, it has lost the turn to another runner and
+runs no engine.
 Its deadline is the turn's ``deadline_at``, which bounds the engine's run; each vendor call
 has the model's own timeout, inside the engine. On
 ``TurnLostError`` from any write it closes the engine's stream and writes nothing more: the
-turn is another runner's, a reader ended it, or its lease has passed.
+turn is another runner's, a reader ended it, or its lease has passed. Stopped naming
+``LOST``, by the heartbeat that found the same, it writes nothing more either.
 """
 
 from __future__ import annotations
@@ -57,8 +60,8 @@ from robinauts.controller.core.documents import (
     event_to_document,
     stored_message,
 )
-from robinauts.controller.ports.dispatcher import CLOSE
-from robinauts.controller.ports.store import Store, StoredEvent
+from robinauts.controller.ports.dispatcher import CLOSE, LOST
+from robinauts.controller.ports.store import Fence, Store, StoredEvent
 
 RETENTION = timedelta(hours=24)
 """How long a turn's events are kept after they are written, a constant for now."""
@@ -78,6 +81,7 @@ class _Writer:
         self._store = store
         self._owner = owner
         self._turn = turn
+        self._fence = Fence(turn.worker_id or "", turn.attempt)
         self.position = 0
 
     async def append(self, event: TurnEvent) -> None:
@@ -91,6 +95,7 @@ class _Writer:
             event_to_document(self._turn.id, self.position, event),
             now,
             now + RETENTION,
+            fence=self._fence,
         )
 
     def last(self, *events: TurnEvent) -> list[StoredEvent]:
@@ -121,6 +126,7 @@ class _Writer:
             None if answer is None else stored_message(answer),
             events,
             now,
+            fence=self._fence,
         )
 
 
@@ -216,7 +222,7 @@ async def run_turn(
             await asyncio.wait({finishing})
             if not finishing.cancelled():
                 finishing.exception()
-        else:
+        elif LOST not in exc.args:
             state = TurnState.INTERRUPTED if CLOSE in exc.args else TurnState.CANCELLED
             await _end(writer, state, None)
         raise

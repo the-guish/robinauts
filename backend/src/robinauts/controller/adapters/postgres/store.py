@@ -10,7 +10,10 @@ turns: ``start_turn`` with ``FOR SHARE``, ``finish_turn`` and ``hide_session`` w
 are the interface with the database: a violation is translated by name. Watchers are
 woken by ``NOTIFY`` on one listening connection per store, held apart from the pool, and
 read the store again in every case, so a notification lost with a dropped connection
-costs a timeout and nothing else.
+costs a timeout and nothing else. Every write of a turn's runner is fenced: it names the
+process holding the turn and the attempt it holds (``Fence``), and is refused for any other.
+The heartbeat renews the leases of a process's turns in one statement, on the work
+connection, also apart from the pool.
 """
 
 from __future__ import annotations
@@ -18,12 +21,13 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import asyncpg
 
 from robinauts.controller.adapters.postgres.pool import open_pool
 from robinauts.controller.adapters.postgres.schema import check_schema
+from robinauts.controller.adapters.postgres.work import WorkConnection
 from robinauts.controller.contract.domain import (
     Role,
     Session,
@@ -37,10 +41,12 @@ from robinauts.controller.contract.domain import (
 from robinauts.controller.ports.store import (
     Cursor,
     Document,
+    Fence,
     Store,
     StoredEvent,
     StoredMessage,
 )
+from robinauts.controller.ports.work import HeartbeatResult, Held, WorkQueue
 
 CHANNEL = "robinauts_turns"
 """Where a turn's writes are announced: ``<turn> <position>``, or ``<turn> end``."""
@@ -52,7 +58,7 @@ USER_EXISTS = "users_provider_subject_key"
 _SESSION_COLUMNS = "id, owner_id, agent, engine, title, created_at, updated_at"
 _TURN_COLUMNS = (
     "id, session_id, follows, model, state, started_at, ended_at, error, lease_until, retries,"
-    " deadline_at"
+    " deadline_at, worker_id, attempt, heartbeat_at"
 )
 
 _VISIBLE = "SELECT 1 FROM sessions WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL"
@@ -63,8 +69,17 @@ SELECT t.id, $4, $5, $6
 FROM turns AS t
 JOIN sessions AS s ON s.id = t.session_id
 WHERE t.id = $3 AND t.session_id = $2 AND s.owner_id = $1 AND s.deleted_at IS NULL
-  AND t.state = 'running' AND t.lease_until > $7
+  AND t.state = 'running' AND t.lease_until > $7 AND t.worker_id = $8 AND t.attempt = $9
 FOR SHARE OF t
+"""
+
+_HEARTBEAT = """
+UPDATE turns AS t
+SET lease_until = $3, heartbeat_at = $2
+FROM unnest($4::uuid[], $5::integer[]) AS h(id, attempt)
+WHERE t.id = h.id AND t.attempt = h.attempt AND t.worker_id = $1
+  AND t.state = 'running' AND t.lease_until > $2
+RETURNING t.id
 """
 
 _END_EXPIRED = f"""
@@ -102,6 +117,9 @@ def _turn(row: asyncpg.Record) -> Turn:
         row["error"],
         row["retries"],
         row["deadline_at"],
+        row["worker_id"],
+        row["attempt"],
+        row["heartbeat_at"],
     )
 
 
@@ -116,7 +134,7 @@ def _rows(status: str) -> int:
     return int(status.rsplit(" ", 1)[-1])
 
 
-class PostgresStore(Store):
+class PostgresStore(Store, WorkQueue):
     """Over a pool it is given, which the giver closes, or over a dsn, from which ``open``
     makes its own pool, checks the schema, and ``close`` closes it."""
 
@@ -127,6 +145,7 @@ class PostgresStore(Store):
         self._listener: asyncpg.Connection | None = None
         self._waiters: dict[uuid.UUID, set[asyncio.Future[None]]] = {}
         self._opening: asyncio.Lock | None = None
+        self._work: WorkConnection | None = None
 
     @property
     def pool(self) -> asyncpg.Pool:
@@ -139,9 +158,13 @@ class PostgresStore(Store):
                 raise RuntimeError("a store opened from nothing needs the database's dsn")
             self._pool = await open_pool(self._dsn)
         await check_schema(self._pool)
+        await self._work_connection().connect()
         return self._pool
 
     async def close(self) -> None:
+        if self._work is not None:
+            work, self._work = self._work, None
+            await work.close()
         if self._listener is not None:
             listener, self._listener = self._listener, None
             await listener.close()
@@ -267,7 +290,7 @@ class PostgresStore(Store):
                     await self._insert_message(connection, question)
                 await connection.execute(
                     f"INSERT INTO turns ({_TURN_COLUMNS})"
-                    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
                     turn.id,
                     turn.session_id,
                     turn.follows,
@@ -279,6 +302,9 @@ class PostgresStore(Store):
                     turn.lease_until,
                     turn.retries,
                     turn.deadline_at,
+                    turn.worker_id,
+                    turn.attempt,
+                    turn.heartbeat_at,
                 )
         except asyncpg.UniqueViolationError as violated:
             if violated.constraint_name == ONE_RUNNING:
@@ -294,11 +320,22 @@ class PostgresStore(Store):
         document: Document,
         written_at: datetime,
         expires_at: datetime,
+        *,
+        fence: Fence,
     ) -> None:
         try:
             async with self._pool.acquire() as connection, connection.transaction():
                 status = await connection.execute(
-                    _APPEND, owner, session, turn, position, document, expires_at, written_at
+                    _APPEND,
+                    owner,
+                    session,
+                    turn,
+                    position,
+                    document,
+                    expires_at,
+                    written_at,
+                    fence.worker,
+                    fence.attempt,
                 )
                 if _rows(status) == 0:
                     raise TurnLostError(f"turn {turn} is not running")
@@ -351,6 +388,8 @@ class PostgresStore(Store):
         answer: StoredMessage | None,
         events: Sequence[StoredEvent],
         updated_at: datetime,
+        *,
+        fence: Fence,
     ) -> None:
         try:
             async with self._pool.acquire() as connection, connection.transaction():
@@ -368,12 +407,14 @@ class PostgresStore(Store):
                 status = await connection.execute(
                     "UPDATE turns SET state = $3, ended_at = $4, error = $5"
                     " WHERE id = $1 AND session_id = $2 AND state = 'running'"
-                    "   AND lease_until > $4",
+                    "   AND lease_until > $4 AND worker_id = $6 AND attempt = $7",
                     turn,
                     session,
                     state.value,
                     ended_at,
                     error,
+                    fence.worker,
+                    fence.attempt,
                 )
                 if _rows(status) == 0:
                     raise TurnLostError(f"turn {turn} is not running")
@@ -455,7 +496,30 @@ class PostgresStore(Store):
                     if not waiting:
                         del self._waiters[turn]
 
+    # --- work ---------------------------------------------------------------
+
+    async def heartbeat(
+        self, worker: str, held: Sequence[Held], now: datetime, lease: timedelta
+    ) -> HeartbeatResult:
+        if not held:
+            return HeartbeatResult()
+        rows = await self._work_connection().fetch(
+            _HEARTBEAT,
+            worker,
+            now,
+            now + lease,
+            [h.turn for h in held],
+            [h.attempt for h in held],
+        )
+        renewed = {row["id"] for row in rows}
+        return HeartbeatResult(lost=frozenset(h.turn for h in held if h.turn not in renewed))
+
     # --- helpers ------------------------------------------------------------
+
+    def _work_connection(self) -> WorkConnection:
+        if self._work is None:
+            self._work = WorkConnection(self._dsn, self._pool)
+        return self._work
 
     async def _ready(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, after: int

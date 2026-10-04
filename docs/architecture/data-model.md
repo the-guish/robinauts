@@ -21,7 +21,7 @@ agent to another engine, and what its sessions then do, is stage two.
 | user | `id` | `provider` and `subject` (unique together), `name`, `email`, `created_at` | no |
 | session | `id` | `owner_id`, `agent`, `engine`, `title`, `created_at`, `updated_at`, `deleted_at` | no |
 | message | `id` | `session_id`, `parent_id`, `role`, `created_at` | **yes** |
-| turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `deadline_at`, `lease_until`, `cancel_requested_at`, `retries` | no |
+| turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `deadline_at`, `lease_until`, `worker_id`, `attempt`, `heartbeat_at`, `cancel_requested_at`, `retries` | no |
 | turn event | `(turn_id, position)` | `expires_at` | **yes** |
 | user session | `id` | `user_id`, `secret_hash` (unique), `created_at`, `expires_at` | no |
 | pending login | `state_hash` | `provider`, `nonce`, `verifier`, `return_to`, `created_at`, `expires_at` | no |
@@ -102,8 +102,12 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
 - **A turn has a deadline.** `deadline_at` is its start plus `[work]
   max_turn_seconds`, and bounds the engine's run. It is not the lease, and not the
   timeout of a vendor call, which is the model's `timeout_seconds`.
-- **A turn holds a lease.** `lease_until` is written with the turn, past its
-  deadline by a margin. A running
+- **A turn holds a lease.** `lease_until` is written with the turn, `[work]
+  lease_seconds` ahead, and the process running it renews it every `[work]
+  heartbeat_seconds`, for all of its turns in one write that also sets
+  `heartbeat_at`. The turn is held by that process (`worker_id`) at an `attempt`, and
+  every write of its runner names both: a write under any other is refused, as one
+  past the lease is (fencing). A running
   turn whose lease has passed is ended as `interrupted` by the next reader to find it
   (`open_session`, `start_turn`, `watch_turn`, `cancel_turn`, `delete_session`),
   through `end_expired_turn`: one conditional write that only a running turn takes,
@@ -111,8 +115,9 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   event is written, since a `turn_ended` event is the runner's; a watcher that finds
   the turn ended with none supplies it from the record. A runner that outlives its
   lease has lost the turn whether or not a reader has found it: every write names
-  its time, and the store refuses one past the lease. Renewing the lease for a long
-  turn, and reading back `cancel_requested_at` with each renewal, are stage two.
+  its time, and the store refuses one past the lease. A heartbeat that finds a turn
+  not renewed stops its runner, which writes nothing more. Reading back
+  `cancel_requested_at` with each renewal is not done yet.
 - **No clocks and no ids in a store.** The controller mints every id and sets every
   time.
 - **A session and its records are addressed from the owner down.** Every operation on

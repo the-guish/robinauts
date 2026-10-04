@@ -138,6 +138,10 @@ class WorkConfig:
     """A turn's deadline, from its start (``turns.deadline_at``), apart from its lease."""
     max_model_calls: int = 100
     """How many model calls one turn may make: the engines' own limits come from it."""
+    lease_seconds: float = 90.0
+    """How long a running turn's lease lasts past its last renewal."""
+    heartbeat_seconds: float = 30.0
+    """How often this process renews the leases of the turns it runs, in one write."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -342,6 +346,12 @@ class Turn:
     """The failed answer this turn tries again, which the model is told about."""
     deadline_at: datetime | None = None
     """When the turn must have ended, from ``max_turn_seconds``; the lease is apart from it."""
+    worker_id: str | None = None
+    """The process that runs the turn; the last one, once it has ended."""
+    attempt: int = 0
+    """Which run of the turn holds it: every write of its runner names it."""
+    heartbeat_at: datetime | None = None
+    """When the holder last renewed the lease."""
 
 
 @dataclass(frozen=True, slots=True)

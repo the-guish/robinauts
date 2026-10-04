@@ -43,6 +43,15 @@ class StoredMessage:
 
 
 @dataclass(frozen=True, slots=True)
+class Fence:
+    """Who writes for a running turn: the process holding it, at the attempt it holds. A
+    write that names another is refused, as one past the lease is."""
+
+    worker: str
+    attempt: int
+
+
+@dataclass(frozen=True, slots=True)
 class StoredEvent:
     """One of a turn's events: its position, its document, and when it expires."""
 
@@ -119,10 +128,12 @@ class Store(ABC):
         document: Document,
         written_at: datetime,
         expires_at: datetime,
+        *,
+        fence: Fence,
     ) -> None:
         """The same document again at a position it has is accepted. Another document there,
-        or any append on a turn that is not running or whose lease has passed ``written_at``,
-        is ``TurnLostError``."""
+        or any append on a turn that is not running, is not held under ``fence``, or whose
+        lease has passed ``written_at``, is ``TurnLostError``."""
 
     @abstractmethod
     async def events_after(
@@ -142,10 +153,12 @@ class Store(ABC):
         answer: StoredMessage | None,
         events: Sequence[StoredEvent],
         updated_at: datetime,
+        *,
+        fence: Fence,
     ) -> None:
         """The answer, the last events, the turn's state and the session's ``updated_at``, in
-        one operation, only while the turn is running and its lease has not passed
-        ``ended_at``: else ``TurnLostError``."""
+        one operation, only while the turn is running, held under ``fence``, and its lease has
+        not passed ``ended_at``: else ``TurnLostError``."""
 
     @abstractmethod
     async def end_expired_turn(

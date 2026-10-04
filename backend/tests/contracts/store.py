@@ -28,11 +28,14 @@ from robinauts.controller.contract.domain import (
     TurnState,
     User,
 )
-from robinauts.controller.ports.store import Store, StoredEvent, StoredMessage
+from robinauts.controller.ports.store import Fence, Store, StoredEvent, StoredMessage
+from robinauts.controller.ports.work import HeartbeatResult, Held, WorkQueue
 
 NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
 MINUTE = timedelta(minutes=1)
 EXPIRY = NOW + timedelta(hours=24)
+WORKER = "pod-a"
+FENCE = Fence(WORKER, 1)
 
 
 def user(subject: str = "me") -> User:
@@ -56,7 +59,18 @@ def answer(session_id: uuid.UUID, parent: uuid.UUID, at: datetime = NOW) -> Stor
 def turn(
     session_id: uuid.UUID, follows: uuid.UUID, lease_until: datetime = NOW + 3 * MINUTE
 ) -> Turn:
-    return Turn(uuid.uuid4(), session_id, follows, "m", TurnState.RUNNING, NOW, lease_until)
+    return Turn(
+        uuid.uuid4(),
+        session_id,
+        follows,
+        "m",
+        TurnState.RUNNING,
+        NOW,
+        lease_until,
+        worker_id=WORKER,
+        attempt=1,
+        heartbeat_at=NOW,
+    )
 
 
 def piece(position: int, text: str = "x") -> StoredEvent:
@@ -113,7 +127,14 @@ class StoreContract:
         at: datetime = NOW,
     ) -> None:
         await store.append_event(
-            me.id, one.id, running.id, event.position, event.document, at, event.expires_at
+            me.id,
+            one.id,
+            running.id,
+            event.position,
+            event.document,
+            at,
+            event.expires_at,
+            fence=FENCE,
         )
 
     # --- users --------------------------------------------------------------
@@ -175,7 +196,16 @@ class StoreContract:
         with pytest.raises(TurnActiveError):
             await store.hide_session(me.id, one.id, NOW)
         await store.finish_turn(
-            me.id, one.id, running.id, TurnState.CANCELLED, NOW, None, None, [piece(1)], NOW
+            me.id,
+            one.id,
+            running.id,
+            TurnState.CANCELLED,
+            NOW,
+            None,
+            None,
+            [piece(1)],
+            NOW,
+            fence=FENCE,
         )
         await store.hide_session(me.id, one.id, NOW)
         with pytest.raises(SessionNotFoundError):
@@ -236,6 +266,7 @@ class StoreContract:
             said,
             [piece(2, "completed"), piece(3, "ended")],
             later,
+            fence=FENCE,
         )
         assert await store.messages_of(me.id, one.id) == [asked.document, said.document]
         positions = [p for p, _ in await store.events_after(me.id, one.id, running.id, 0)]
@@ -255,14 +286,23 @@ class StoreContract:
     async def test_an_append_or_a_finish_on_an_ended_turn_is_refused(self, store: Store) -> None:
         me, one, _, running = await self.started(store)
         await store.finish_turn(
-            me.id, one.id, running.id, TurnState.FAILED, NOW, "boom", None, [piece(1)], NOW
+            me.id,
+            one.id,
+            running.id,
+            TurnState.FAILED,
+            NOW,
+            "boom",
+            None,
+            [piece(1)],
+            NOW,
+            fence=FENCE,
         )
         too_late = piece(2)
         with pytest.raises(TurnLostError):
             await self.append(store, me, one, running, too_late)
         with pytest.raises(TurnLostError):
             await store.finish_turn(
-                me.id, one.id, running.id, TurnState.FINISHED, NOW, None, None, [], NOW
+                me.id, one.id, running.id, TurnState.FINISHED, NOW, None, None, [], NOW, fence=FENCE
             )
         failed = await store.get_turn(me.id, one.id, running.id)
         assert failed is not None
@@ -282,7 +322,16 @@ class StoreContract:
             await self.append(store, me, one, running, expired, at=NOW + 2 * MINUTE)
         with pytest.raises(TurnLostError):
             await store.finish_turn(
-                me.id, one.id, running.id, TurnState.FINISHED, NOW + 2 * MINUTE, None, None, [], NOW
+                me.id,
+                one.id,
+                running.id,
+                TurnState.FINISHED,
+                NOW + 2 * MINUTE,
+                None,
+                None,
+                [],
+                NOW,
+                fence=FENCE,
             )
         assert await store.active_turn(me.id, one.id) == running
 
@@ -353,6 +402,81 @@ class StoreContract:
         await appending
         assert await store.wait_for_events(me.id, one.id, running.id, 1, 0.05) is False
         await store.finish_turn(
-            me.id, one.id, running.id, TurnState.FINISHED, NOW, None, None, [piece(2)], NOW
+            me.id,
+            one.id,
+            running.id,
+            TurnState.FINISHED,
+            NOW,
+            None,
+            None,
+            [piece(2)],
+            NOW,
+            fence=FENCE,
         )
         assert await store.wait_for_events(me.id, one.id, running.id, 9, 0.05) is True
+
+    # --- fencing and the heartbeat ------------------------------------------
+
+    @store_test
+    async def test_a_write_under_another_fence_is_refused(self, store: Store) -> None:
+        me, one, _, running = await self.started(store)
+        for fence in (Fence("pod-b", 1), Fence(WORKER, 2)):
+            with pytest.raises(TurnLostError):
+                await store.append_event(
+                    me.id, one.id, running.id, 1, piece(1).document, NOW, EXPIRY, fence=fence
+                )
+            with pytest.raises(TurnLostError):
+                await store.finish_turn(
+                    me.id,
+                    one.id,
+                    running.id,
+                    TurnState.FINISHED,
+                    NOW,
+                    None,
+                    None,
+                    [],
+                    NOW,
+                    fence=fence,
+                )
+        assert await store.events_after(me.id, one.id, running.id, 0) == []
+        await self.append(store, me, one, running, piece(1))
+
+    @store_test
+    async def test_a_heartbeat_renews_the_lease_of_the_turns_held(self, store: Store) -> None:
+        assert isinstance(store, WorkQueue)
+        me, one, _, running = await self.started(store)
+        later = NOW + 2 * MINUTE
+        beat = await store.heartbeat(WORKER, [Held(running.id, 1)], later, 3 * MINUTE)
+        assert beat.lost == frozenset()
+        renewed = await store.get_turn(me.id, one.id, running.id)
+        assert renewed is not None
+        assert (renewed.lease_until, renewed.heartbeat_at) == (later + 3 * MINUTE, later)
+        # Past the lease it was first written with, the runner still writes.
+        await self.append(store, me, one, running, piece(1), at=NOW + 4 * MINUTE)
+        assert await store.heartbeat(WORKER, [], later, MINUTE) == HeartbeatResult()
+
+    @store_test
+    async def test_a_heartbeat_names_the_turns_this_process_holds_no_more(
+        self, store: Store
+    ) -> None:
+        assert isinstance(store, WorkQueue)
+        me, one, _, running = await self.started(store)
+        two = session(me.id)
+        await store.add_session(two)
+        asked = question(two.id)
+        ended = turn(two.id, asked.id)
+        await store.start_turn(me.id, ended, asked)
+        await store.finish_turn(
+            me.id, two.id, ended.id, TurnState.FINISHED, NOW, None, None, [], NOW, fence=FENCE
+        )
+        unknown = uuid.uuid4()
+        held = [Held(running.id, 2), Held(ended.id, 1), Held(unknown, 1)]
+        beat = await store.heartbeat(WORKER, held, NOW + MINUTE, MINUTE)
+        assert beat.lost == {running.id, ended.id, unknown}
+        other = await store.heartbeat("pod-b", [Held(running.id, 1)], NOW + MINUTE, MINUTE)
+        assert other.lost == {running.id}
+        # A lease that has passed is not renewed: the turn is lost, whoever finds it.
+        late = await store.heartbeat(WORKER, [Held(running.id, 1)], NOW + 4 * MINUTE, MINUTE)
+        assert late.lost == {running.id}
+        unchanged = await store.get_turn(me.id, one.id, running.id)
+        assert unchanged == running

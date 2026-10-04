@@ -37,7 +37,6 @@ from robinauts.controller.contract.domain import (
     WorkConfig,
 )
 from robinauts.controller.core.documents import event_from_document
-from robinauts.controller.ports.store import Store
 
 PAST_THE_LEASE = timedelta(hours=1)
 
@@ -77,7 +76,7 @@ class SlowFinishStore(MemoryStore):
         await super().finish_turn(*args, **kwargs)
 
 
-async def over(store: Store, **options: Any) -> RobinautsController:
+async def over(store: MemoryStore, **options: Any) -> RobinautsController:
     """A controller over that store, wired as the composition wires one."""
     dispatcher = InProcessDispatcher()
     controller = RobinautsController(
@@ -86,6 +85,8 @@ async def over(store: Store, **options: Any) -> RobinautsController:
         storage=StorageConfig(StorageKind.IN_MEMORY),
         secret_for={}.get,
         dispatcher=dispatcher,
+        work=store,
+        worker_id=options.pop("worker_id", "pod-" + uuid.uuid4().hex[:8]),
         **options,
     )
     dispatcher.run = controller.run_turn
@@ -161,7 +162,7 @@ async def test_a_runner_refused_mid_stream_writes_nothing_more() -> None:
     started = await controller.start_session(user, agent="echo", model="echo", text="one")
     sid = started.session_id
     await controller._store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
-    task = controller._dispatcher._tasks[started.turn_id]
+    task, _ = controller._dispatcher._tasks[started.turn_id]
     controller._now = jumped(PAST_THE_LEASE)
     assert (await controller.open_session(user, sid)).active is None
     engine.gate.set()
@@ -328,6 +329,8 @@ async def test_the_engine_is_bounded_by_the_turns_deadline_not_the_vendor_timeou
         storage=StorageConfig(StorageKind.IN_MEMORY),
         secret_for={}.get,
         dispatcher=dispatcher,
+        work=store,
+        worker_id="pod-a",
     )
     dispatcher.run = controller.run_turn
     await controller.open()
@@ -340,7 +343,7 @@ async def test_the_engine_is_bounded_by_the_turns_deadline_not_the_vendor_timeou
     assert turn is not None
     assert turn.deadline_at is not None
     assert turn.deadline_at - turn.started_at == timedelta(hours=1)
-    assert turn.lease_until > turn.deadline_at
+    assert turn.lease_until - turn.started_at == timedelta(seconds=90)
     assert 3500 < engine.asked["timeout_seconds"] <= 3600
     assert engine.asked["max_model_calls"] == 7
     await controller.close()
@@ -356,4 +359,95 @@ async def test_a_turn_the_engine_ended_at_its_deadline_fails_saying_so() -> None
     turn = await controller._store.get_turn(user.id, started.session_id, started.turn_id)
     assert turn is not None
     assert (turn.state, turn.error) == (TurnState.FAILED, "deadline passed")
+    await controller.close()
+
+
+class SlowEngine(EchoEngine):
+    """Takes ``seconds`` before it answers."""
+
+    def __init__(self, seconds: float) -> None:
+        super().__init__()
+        self.seconds = seconds
+
+    async def stream(self, *args: Any, **kwargs: Any) -> AsyncGenerator[Event, None]:
+        await asyncio.sleep(self.seconds)
+        async for event in super().stream(*args, **kwargs):
+            yield event
+
+
+def beating(lease: float, every: float) -> Any:
+    work = WorkConfig(lease_seconds=lease, heartbeat_seconds=every)
+    return dataclasses.replace(CONFIG, work=work)
+
+
+async def over_config(config: Any, store: MemoryStore) -> RobinautsController:
+    dispatcher = InProcessDispatcher()
+    controller = RobinautsController(
+        config,
+        store=store,
+        storage=StorageConfig(StorageKind.IN_MEMORY),
+        secret_for={}.get,
+        dispatcher=dispatcher,
+        work=store,
+        worker_id="pod-a",
+    )
+    dispatcher.run = controller.run_turn
+    await controller.open()
+    return controller
+
+
+@asyncio_test
+async def test_the_heartbeat_keeps_a_turn_longer_than_its_lease() -> None:
+    store = MemoryStore()
+    controller = await over_config(beating(lease=0.3, every=0.05), store)
+    controller._engines["echo"] = SlowEngine(1.0)
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    await settled(controller, user, started)
+    turn = await store.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert turn.state is TurnState.FINISHED
+    assert turn.heartbeat_at is not None
+    assert turn.heartbeat_at > turn.started_at + timedelta(seconds=0.5)
+    await controller.close()
+
+
+@asyncio_test
+async def test_without_a_heartbeat_the_lease_passes_and_the_runner_writes_nothing() -> None:
+    store = MemoryStore()
+    controller = await over_config(beating(lease=0.3, every=3600), store)
+    controller._engines["echo"] = SlowEngine(0.6)
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    task, _ = controller._dispatcher._tasks[started.turn_id]
+    await task
+    turn = await store.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert turn.state is TurnState.RUNNING
+    assert len(await store.events_after(user.id, started.session_id, started.turn_id, 0)) == 1
+    await controller.close()
+
+
+@asyncio_test
+async def test_a_turn_the_heartbeat_finds_lost_is_stopped_and_writes_nothing() -> None:
+    store = MemoryStore()
+    controller = await over_config(beating(lease=60, every=3600), store)
+    engine = GatedEngine()
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    await store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
+    # Taken from under it: another attempt holds the turn now.
+    taken = await store.get_turn(user.id, sid, started.turn_id)
+    assert taken is not None
+    store._turns[taken.id] = dataclasses.replace(taken, attempt=2)
+    await controller._work_loop.beat()
+    assert controller._dispatcher.held() == []
+    assert engine.streams == 1
+    stored = await store.events_after(user.id, sid, started.turn_id, 0)
+    assert len(stored) == 1
+    turn = await store.get_turn(user.id, sid, started.turn_id)
+    assert turn is not None
+    assert turn.state is TurnState.RUNNING
     await controller.close()

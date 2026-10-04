@@ -155,6 +155,8 @@ async def test_a_turn_this_process_cannot_run_ends_failed_at_once() -> None:
         TurnState.RUNNING,
         turn.started_at,
         turn.started_at + timedelta(hours=1),
+        worker_id=turn.worker_id,
+        attempt=1,
     )
     await controller._store.start_turn(user.id, third, None)
     await controller.run_turn(user.id, started.session_id, third.id)

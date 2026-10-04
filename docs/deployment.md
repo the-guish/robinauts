@@ -197,6 +197,8 @@ max_output_tokens = 8192
 [work]
 max_turn_seconds = 1200   # a turn's deadline, from its start
 max_model_calls = 100     # the model calls one turn may make
+lease_seconds = 90        # a running turn's lease, past its last renewal
+heartbeat_seconds = 30    # how often a process renews the leases of its turns
 
 [agents.assistant]
 title = "Assistant"
@@ -308,6 +310,10 @@ Four kinds of variable, and three of them are secrets. Put them in
     ROBINAUTS_GOOGLE_SECRET=...
     ROBINAUTS_OKTA_SECRET=...
     ROBINAUTS_ANTHROPIC_KEY=...
+
+`ROBINAUTS_WORKER_ID` is optional: the name of this process among the
+deployment's, which every turn it runs records as its holder. Left out it is
+`<hostname>:<pid>`; under Kubernetes, set it to the pod's name.
 
 `ROBINAUTS_AUTH_CONFIG` is the old name of `ROBINAUTS_CONFIG`. It is still
 read, with a warning at start-up; if both are set the new one wins and the
