@@ -475,26 +475,18 @@ test("opened, an answer whose calls were never answered is shown as the run left
     endedBadly: null,
   });
   expect(running.messages[1]?.state).toBe("running");
-  // No run: the batch was cancelled, or the run failed and says so.
-  const cancelled = after({
+  // No run: the batch was cut off, and the thread says how. It is never
+  // drawn as failed, which would offer a retry of an answer that was never
+  // stored as failed, and that the server refuses.
+  const interrupted = after({
     kind: "opened",
     conversationId: CONVERSATION,
     messages: stored,
     runId: null,
-    endedBadly: "stopped",
-    endedState: "cancelled",
+    endedBadly: "interrupted",
   });
-  expect(cancelled.messages[1]?.state).toBe("cancelled");
-  const failed = after({
-    kind: "opened",
-    conversationId: CONVERSATION,
-    messages: stored,
-    runId: null,
-    endedBadly: "went wrong",
-    endedState: "failed",
-  });
-  expect(failed.messages[1]?.state).toBe("failed");
-  expect(failed.messages[1]?.detail).toBe("went wrong");
+  expect(interrupted.messages[1]?.state).toBe("cancelled");
+  expect(interrupted.ended).toBe("interrupted");
   // Earlier in the thread, whatever the last run did: that batch is over.
   const earlier = after({
     kind: "opened",
@@ -743,11 +735,18 @@ test("a run that failed says so on the answer, one sentence per code", () => {
       }),
       sent({ type: "RUN_ERROR", code, message: "whatever the backend said" }),
     );
-    const failed = state.messages.find((each) => each.id === ANSWER);
-    expect(failed?.state).toBe("failed");
-    expect(failed?.detail).toBe(saidFor(code));
+    const ended = state.messages.find((each) => each.id === ANSWER);
+    if (code === "failed") {
+      // Stored by the server as a failed answer: drawn so, and retried.
+      expect(ended?.state).toBe("failed");
+      expect(ended?.detail).toBe(saidFor(code));
+    } else {
+      // Nothing stored behind it, so nothing to retry: the thread says it.
+      expect(ended?.state).toBe("cancelled");
+      expect(state.ended).toBe(saidFor(code));
+    }
     // Never the backend's own sentence, and never the run's stored error.
-    expect(failed?.detail).not.toContain("whatever");
+    expect(JSON.stringify(state)).not.toContain("whatever");
     expect(state.runId).toBeNull();
   }
   // A code this build does not know still says that something went wrong.

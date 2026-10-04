@@ -351,11 +351,6 @@ export type ChatAction =
       runId: string | null;
       /** How the last run ended, when it ended badly. */
       endedBadly: string | null;
-      /**
-       * The state it ended in, when it ended badly: what an answer whose
-       * calls were never answered is shown as (`folded`).
-       */
-      endedState?: string | null;
     }
   /** It could not be read. */
   | { kind: "unopened"; detail: string; missing: boolean }
@@ -409,12 +404,7 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
       // object on the read that ends a turn would convert a whole
       // conversation again -- and move every `createdAt` -- over one answer.
       const before = new Map(state.messages.map((each) => [each.id, each]));
-      const messages = folded(
-        action.messages,
-        action.runId,
-        action.endedState ?? null,
-        action.endedBadly,
-      ).map((fresh) => {
+      const messages = folded(action.messages, action.runId).map((fresh) => {
         const already = before.get(fresh.id);
         return already !== undefined && unchanged(already, fresh)
           ? already
@@ -759,6 +749,12 @@ function applied(state: ChatState, event: AguiEvent): ChatState {
     case "RUN_ERROR": {
       if (state.runId === null && !anyRunning(state)) return state;
       const said = saidFor(event.code);
+      // **Only a failed turn stores its answer**, marked failed, and only that
+      // one can be retried; any other ending leaves the question unanswered,
+      // and the thread says how.
+      if (event.code !== "failed") {
+        return { ...ending(state, "cancelled"), ended: said };
+      }
       const after = ending(state, "failed", said);
       // A run that failed before it announced anything has no message to put
       // the sentence on, so the thread says it instead.
@@ -1027,15 +1023,13 @@ function sameData(one: unknown, other: unknown): boolean {
  * **An answer whose calls were never answered** is the store's record of a
  * batch that did not finish: still running when it is the last message and
  * a run is in flight (its results are what the stream will bring), and
- * otherwise over the way the run was -- interrupted, with the sentence that
- * says so, or cancelled -- so that its calls are drawn as what they are. An
- * answer whose turn failed says so itself (`held`).
+ * otherwise cut off, so that its calls are drawn as what they are; the thread
+ * says how the run ended. Only an answer whose turn failed is drawn as failed,
+ * and offered a retry, because only that one is stored as failed (`held`).
  */
 function folded(
   messages: readonly Message[],
   runId: string | null,
-  endedState: string | null,
-  endedBadly: string | null,
 ): ChatMessage[] {
   const thread: ChatMessage[] = [];
   for (const message of messages) {
@@ -1054,18 +1048,8 @@ function folded(
       return message;
     }
     if (!unanswered(message)) return message;
-    if (at === thread.length - 1 && runId !== null) {
-      return { ...message, state: "running" };
-    }
-    const failed =
-      at === thread.length - 1 &&
-      (endedState === "failed" || endedState === "interrupted");
-    return failed
-      ? {
-          ...message,
-          state: "failed",
-          ...(endedBadly === null ? {} : { detail: endedBadly }),
-        }
+    return at === thread.length - 1 && runId !== null
+      ? { ...message, state: "running" }
       : { ...message, state: "cancelled" };
   });
 }

@@ -433,7 +433,6 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
         opened.ended_badly === null
           ? null
           : (ENDED_BADLY.get(opened.ended_badly.state) ?? null),
-      endedState: opened.ended_badly === null ? null : opened.ended_badly.state,
     });
     // Every complete message has just been loaded, so attaching at
     // `resume.after` replays exactly the one still being produced and none
