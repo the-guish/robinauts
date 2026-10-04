@@ -5,6 +5,10 @@
 
 from __future__ import annotations
 
+import dataclasses
+
+import pytest
+
 from aio import asyncio_test
 from robinauts.controller.composition import build
 from robinauts.controller.contract.domain import (
@@ -28,6 +32,7 @@ from robinauts.controller.contract.domain import (
     TurnEnded,
     TurnStarted,
     TurnState,
+    UnknownAgentError,
     User,
 )
 from robinauts.controller.contract.ports import Controller
@@ -126,4 +131,19 @@ async def test_watch_turn_follows_the_turn_to_its_end() -> None:
         e async for e in controller.watch_turn(user, sid, started.turn_id, after=len(watched) - 1)
     ]
     assert again == [watched[-1]]
+    await controller.close()
+
+
+@asyncio_test
+async def test_a_session_whose_agent_this_configuration_lacks_starts_no_turn() -> None:
+    controller = await opened()
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="hello")
+    await settled(controller, user, started)
+    controller._config = dataclasses.replace(controller._config, agents={})
+    shown = await controller.open_session(user, started.session_id)
+    with pytest.raises(UnknownAgentError):
+        await controller.send_message(
+            user, started.session_id, parent_id=shown.messages[-1].id, model="echo", text="again"
+        )
     await controller.close()

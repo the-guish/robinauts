@@ -16,6 +16,7 @@ from robinauts.controller.application.engines import build_engines
 from robinauts.controller.application.turns import run_turn
 from robinauts.controller.contract.domain import (
     ActiveTurn,
+    AgentConfig,
     AgentListing,
     Config,
     Identity,
@@ -38,6 +39,7 @@ from robinauts.controller.contract.domain import (
     TurnLostError,
     TurnStarted,
     TurnState,
+    UnknownAgentError,
     UnknownEngineError,
     UnknownModelError,
     User,
@@ -205,8 +207,16 @@ class RobinautsController(Controller):
     ) -> Session:
         raise NotImplementedError("fork_session")
 
+    def _agent(self, agent: str) -> AgentConfig:
+        """``UnknownAgentError`` for an agent this configuration does not name: a session may
+        have been made on a replica configured apart from this one."""
+        found = self._config.agents.get(agent)
+        if found is None:
+            raise UnknownAgentError(agent)
+        return found
+
     async def start_session(self, user: User, *, agent: str, model: str, text: str) -> TurnStarted:
-        agent_config = self._config.agents[agent]
+        agent_config = self._agent(agent)
         now = self._now()
         session = Session(
             uuid.uuid4(),
@@ -341,6 +351,7 @@ class RobinautsController(Controller):
         new_question: bool,
         retries: uuid.UUID | None = None,
     ) -> Turn:
+        self._agent(session.agent)
         model_config = self._config.models.get(model)
         if model_config is None:
             raise UnknownModelError(model)
@@ -377,7 +388,7 @@ class RobinautsController(Controller):
         while above is not None and checkpoint_id is None:
             checkpoint_id = by_id[above].checkpoint_id
             above = by_id[above].parent_id
-        agent_config = self._config.agents[session.agent]
+        agent_config = self._agent(session.agent)
         engine = await self._engine(session.engine)
         model_timeout = self._config.models[turn.model].timeout_seconds
         # The failed exchanges between the last answer that finished and this question,

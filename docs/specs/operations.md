@@ -141,6 +141,8 @@ is settled:
   widened who may connect, and says `--forwarded-allow-ips` for itself.
 - The database is named by `ROBINAUTS_DATABASE_URL` and by nothing on a
   command line: a url holds a password, and a command line is a shell
-  history. A database that cannot be opened — no server there, no such
+  history. A start with sign-in refuses to go without it, rather than keep
+  its users and conversations in the memory of one process; only
+  `--dev-no-sign-in` keeps its records in memory. A database that cannot be opened — no server there, no such
   database, credentials refused — is one line naming what the driver said,
   and never the url it was given.

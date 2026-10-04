@@ -138,3 +138,15 @@ async def test_an_edit_names_the_message_and_a_reply_its_parent() -> None:
             f"/api/conversations/{cid}/turns", json={"text": "x", "edit": answer["id"]}
         )
         assert not_a_question.status_code == 404
+
+
+@asyncio_test
+async def test_an_agent_this_replica_does_not_know_is_not_found() -> None:
+    async with client() as http:
+        response = await http.post("/api/turns", json={"agent_id": "gone", "text": "hello"})
+        assert response.status_code == 404
+        assert response.json()["error"] == "UnknownAgentError"
+        named = await http.post(
+            "/api/turns", json={"agent_id": "gone", "model_id": "echo", "text": "hello"}
+        )
+        assert named.status_code == 404

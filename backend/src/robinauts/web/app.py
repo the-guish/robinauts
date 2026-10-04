@@ -453,7 +453,17 @@ def create_app(
         return JSONResponse({"error": type(exc).__name__, "detail": str(exc)}, status_code=status)
 
     async def default_model(agent: str) -> str:
-        return next(a.default_model for a in await controller.list_agents() if a.id == agent)
+        """``UnknownAgentError`` for an agent this configuration does not name: a replica may
+        be configured apart from the one that made a session."""
+        found = next((a for a in await controller.list_agents() if a.id == agent), None)
+        if found is None:
+            raise UnknownAgentError(agent)
+        return found.default_model
+
+    async def shown_model(agent: str) -> str:
+        """The agent's default, or nothing for an agent no longer configured."""
+        agents = await controller.list_agents()
+        return next((a.default_model for a in agents if a.id == agent), "")
 
     async def watched(
         user: User, session_id: uuid.UUID, turn_id: uuid.UUID, after: int
@@ -606,7 +616,7 @@ def create_app(
         page = await controller.list_sessions(user, limit=limit, cursor=cursor)
         defaults = {a.id: a.default_model for a in await controller.list_agents()}
         return ConversationListResponse(
-            items=[summary(c, defaults[c.agent]) for c in page.sessions],
+            items=[summary(c, defaults.get(c.agent, "")) for c in page.sessions],
             next_cursor=page.cursor,
         )
 
@@ -615,14 +625,14 @@ def create_app(
         conversation_id: uuid.UUID, user: User = asking
     ) -> OpenedConversationResponse:
         opened = await controller.open_session(user, conversation_id)
-        return opened_view(opened, await default_model(opened.session.agent))
+        return opened_view(opened, await shown_model(opened.session.agent))
 
     @app.patch("/api/conversations/{conversation_id}")
     async def rename_session(
         conversation_id: uuid.UUID, body: RenameRequest, user: User = asking
     ) -> ConversationSummary:
         renamed = await controller.rename_session(user, conversation_id, body.title)
-        return summary(renamed, await default_model(renamed.agent))
+        return summary(renamed, await shown_model(renamed.agent))
 
     @app.delete("/api/conversations/{conversation_id}", status_code=204)
     async def delete_session(conversation_id: uuid.UUID, user: User = asking) -> None:
@@ -644,7 +654,7 @@ def create_app(
         conversation_id: uuid.UUID, body: ForkRequest, user: User = asking
     ) -> ConversationSummary:
         forked = await controller.fork_session(user, conversation_id, at_message=body.at_message)
-        return summary(forked, await default_model(forked.agent))
+        return summary(forked, await shown_model(forked.agent))
 
     # --- turns: AG-UI over SSE, outside the OpenAPI document -------------------
 
