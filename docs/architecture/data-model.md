@@ -60,8 +60,11 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   message, whose `parent_id` is the question and whose document names the turn.
   A failed turn stores what it streamed before it failed, as an answer marked
   `failed`, with no checkpoint; a reply hangs under it, and the next turn continues
-  from the nearest answer above it that has a checkpoint. A cancelled or interrupted
-  turn stores none. Every answer comes from exactly one turn.
+  from the nearest answer above it that has a checkpoint. An interrupted turn stores
+  what it had answered the same way, marked `failed`, so that Retry starts it over: its
+  runner when the deployment stopped it, or whoever ended it when its runner went away,
+  from the turn's events. A cancelled turn stores none. Every answer comes from exactly
+  one turn.
 - **A turn has its events**, numbered from 1.
 
 ## Rules every store keeps
@@ -112,9 +115,11 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   `TurnLostError` when the turn is no longer theirs. A running turn whose lease has passed is ended as `interrupted` by the next reader to find it
   (`open_session`, `start_turn`, `watch_turn`, `cancel_turn`, `delete_session`),
   through `end_expired_turn`: one conditional write that only a running turn takes,
-  on the record alone, and on the marker a store without a partial index keeps. No
-  event is written, since a `turn_ended` event is the runner's; a watcher that finds
-  the turn ended with none supplies it from the record. A runner that outlives its
+  on the record alone, and on the marker a store without a partial index keeps. The
+  answer the turn had begun is rebuilt from its events (`core.transcript`) and stored
+  as a failed answer in the same operation, so only the reader whose write ended the
+  turn stores it. No event is written, since a `turn_ended` event is the runner's; a
+  watcher that finds the turn ended with none supplies it from the record. A runner that outlives its
   lease has lost the turn whether or not a reader has found it: every write names
   its time, and the store refuses one past the lease. A dead pod's turns are therefore
   found within a lease of its last heartbeat.

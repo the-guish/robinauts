@@ -472,3 +472,23 @@ class StoreContract:
         renewed = await store.get_turn(me.id, two.id, other.id)
         assert renewed is not None
         assert renewed.lease_until == NOW + MINUTE + 90 * SECOND
+
+    @store_test
+    async def test_ending_an_expired_turn_keeps_the_answer_given_once_and_only_then(
+        self, store: Store
+    ) -> None:
+        me, one, asked, running = await self.started(store)
+        left = answer(one.id, asked.id, NOW + MINUTE)
+        assert (
+            await store.end_expired_turn(me.id, one.id, NOW + MINUTE, turn=running.id, answer=left)
+            is None
+        )
+        assert await store.messages_of(me.id, one.id) == [asked.document]
+        later = NOW + 4 * MINUTE
+        assert await store.end_expired_turn(me.id, one.id, later, turn=uuid.uuid4()) is None
+        ended = await store.end_expired_turn(me.id, one.id, later, turn=running.id, answer=left)
+        assert ended is not None
+        assert ended.state is TurnState.INTERRUPTED
+        again = await store.end_expired_turn(me.id, one.id, later, turn=running.id, answer=left)
+        assert again is None
+        assert await store.messages_of(me.id, one.id) == [asked.document, left.document]

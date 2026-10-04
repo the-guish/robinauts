@@ -27,6 +27,8 @@ import {
 } from "./runtime";
 import {
   EMPTY,
+  ENDED_BADLY,
+  INTERRUPTED_ANSWER,
   reduce,
   ONE_AT_A_TIME,
   ONE_AT_A_TIME_ANSWER,
@@ -485,16 +487,45 @@ test("opened, an answer whose calls were never answered is shown as the run left
     endedState: "cancelled",
   });
   expect(cancelled.messages[1]?.state).toBe("cancelled");
+  // A run that failed or was interrupted without a failed answer stored: the
+  // answer is not one the backend could retry, so it is not marked failed --
+  // no Retry is offered on it -- and the run's sentence is said under it.
+  for (const endedState of ["failed", "interrupted"]) {
+    const ended = after({
+      kind: "opened",
+      conversationId: CONVERSATION,
+      messages: stored,
+      runId: null,
+      endedBadly: "went wrong",
+      endedState,
+    });
+    expect(ended.messages[1]?.state).toBe("cancelled");
+    expect(ended.ended).toBe("went wrong");
+  }
+  // The answer a stopped or dead pod's run left, kept as failed: Retry is
+  // offered, and it says it was interrupted rather than that it went wrong.
+  const kept = { ...stored[1]!, failed: true };
+  const interrupted = after({
+    kind: "opened",
+    conversationId: CONVERSATION,
+    messages: [stored[0]!, kept],
+    runId: null,
+    endedBadly: "stopped",
+    endedState: "interrupted",
+  });
+  expect(interrupted.messages[1]?.state).toBe("failed");
+  expect(interrupted.messages[1]?.detail).toBe(INTERRUPTED_ANSWER);
+  expect(interrupted.ended).toBeNull();
   const failed = after({
     kind: "opened",
     conversationId: CONVERSATION,
-    messages: stored,
+    messages: [stored[0]!, kept],
     runId: null,
     endedBadly: "went wrong",
     endedState: "failed",
   });
   expect(failed.messages[1]?.state).toBe("failed");
-  expect(failed.messages[1]?.detail).toBe("went wrong");
+  expect(failed.messages[1]?.detail).toBe(ENDED_BADLY.get("failed"));
   // Earlier in the thread, whatever the last run did: that batch is over.
   const earlier = after({
     kind: "opened",

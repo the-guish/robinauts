@@ -36,7 +36,8 @@ from robinauts.controller.contract.domain import (
     TurnState,
     WorkConfig,
 )
-from robinauts.controller.core.documents import event_from_document
+from robinauts.controller.core.documents import event_from_document, message_from_document
+from robinauts.controller.ports.dispatcher import LOST
 from robinauts.controller.ports.store import Store
 
 PAST_THE_LEASE = timedelta(minutes=5)
@@ -171,7 +172,10 @@ async def test_a_runner_refused_mid_stream_writes_nothing_more() -> None:
     assert turn is not None
     assert turn.state is TurnState.INTERRUPTED
     assert len(await controller._store.events_after(user.id, sid, started.turn_id, 0)) == 1
-    assert len(await controller._store.messages_of(user.id, sid)) == 1
+    # The reader that ended it kept the answer it had begun, empty and marked failed, and the
+    # runner added nothing to it.
+    question, left = await controller._messages(user.id, sid)
+    assert (left.parent_id, left.failed, left.parts) == (question.id, True, ())
     await controller.close()
 
 
@@ -393,3 +397,75 @@ async def test_the_heartbeat_keeps_a_turn_its_runners_past_its_first_lease() -> 
     assert first.heartbeat_at is not None
     assert ended.heartbeat_at > first.heartbeat_at + timedelta(seconds=0.6)
     await controller.close()
+
+
+class HalfwayEngine(EchoEngine):
+    """Says something, calls its tool, and then waits, for ever unless let go."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.halfway = asyncio.Event()
+        self.gate = asyncio.Event()
+
+    async def stream(self, *args: Any, **kwargs: Any) -> AsyncGenerator[Event, None]:
+        yield TextDelta("Let me look. ")
+        yield ToolCall(call_id="c1", name="echo", arguments={"text": "x"})
+        yield ToolResult(call_id="c1", name="echo", output="x")
+        self.halfway.set()
+        await self.gate.wait()
+        yield Done(text="done", checkpoint_id=str(uuid.uuid4()))
+
+
+HALFWAY = (
+    TextPart("Let me look. "),
+    ToolCallPart("c1", "echo", {"text": "x"}),
+    ToolResultPart("c1", "x", False),
+)
+
+
+@asyncio_test
+async def test_a_turn_whose_pod_died_is_shown_with_what_it_did_and_can_be_retried() -> None:
+    store = MemoryStore()
+    controller = await over(store)
+    engine = HalfwayEngine()
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    await engine.halfway.wait()
+    # The pod is gone: its heartbeat stops, and its runner with it.
+    await controller._work.stop()
+    controller._dispatcher._tasks[started.turn_id].cancel(LOST)
+    controller._now = jumped(PAST_THE_LEASE)
+    opened_session = await controller.open_session(user, sid)
+    assert opened_session.active is None
+    assert opened_session.ended_badly is not None
+    assert opened_session.ended_badly.state is TurnState.INTERRUPTED
+    left = opened_session.messages[-1]
+    assert (left.failed, left.parts, left.turn_id) == (True, HALFWAY, started.turn_id)
+    retried = await controller.retry_answer(user, sid, answer_id=left.id, model="echo")
+    engine.gate.set()
+    controller._now = lambda: datetime.now(UTC)
+    await settled(controller, user, retried)
+    turn = await store.get_turn(user.id, sid, retried.turn_id)
+    assert turn is not None
+    assert (turn.state, turn.retries) == (TurnState.FINISHED, left.id)
+    await controller.close()
+
+
+@asyncio_test
+async def test_a_turn_the_deployment_stops_keeps_what_it_did_as_a_failed_answer() -> None:
+    store = MemoryStore()
+    controller = await over(store, close_timeout=0.05)
+    engine = HalfwayEngine()
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    await engine.halfway.wait()
+    await controller.close()
+    turn = await store.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert turn.state is TurnState.INTERRUPTED
+    documents = await store.messages_of(user.id, started.session_id)
+    left = message_from_document(documents[-1])
+    assert (left.failed, left.parts) == (True, HALFWAY)

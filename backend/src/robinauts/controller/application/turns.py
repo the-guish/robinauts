@@ -15,6 +15,7 @@ passed.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import uuid
 from collections.abc import Sequence
@@ -37,7 +38,6 @@ from robinauts.controller.contract.domain import (
     CallStarted,
     Message,
     MessageCompleted,
-    MessagePart,
     MessageStarted,
     ReasoningPiece,
     ResultLanded,
@@ -45,8 +45,6 @@ from robinauts.controller.contract.domain import (
     Session,
     TextPart,
     TextPiece,
-    ToolCallPart,
-    ToolResultPart,
     Turn,
     TurnEnded,
     TurnEvent,
@@ -58,6 +56,7 @@ from robinauts.controller.core.documents import (
     event_to_document,
     stored_message,
 )
+from robinauts.controller.core.transcript import parts_of
 from robinauts.controller.ports.dispatcher import CLOSE, LOST
 from robinauts.controller.ports.store import Holder, Store, StoredEvent
 
@@ -121,14 +120,6 @@ class _Writer:
         )
 
 
-def _with_text(parts: list[MessagePart], text: str) -> None:
-    """Text that arrives in a row is one part, until a tool call comes between."""
-    if parts and isinstance(parts[-1], TextPart):
-        parts[-1] = TextPart(parts[-1].text + text)
-    else:
-        parts.append(TextPart(text))
-
-
 async def run_turn(
     store: Store,
     engine: AgentEngine,
@@ -148,8 +139,30 @@ async def run_turn(
     remaining = (turn.deadline_at - now).total_seconds()
     answer_id = uuid.uuid4()
     definition = AgentDefinition(agent_config.system_prompt, agent_config.tools)
-    parts: list[MessagePart] = []
+    said: list[TurnEvent] = []
     writer = _Writer(store, owner, turn, holder)
+
+    async def say(event: TurnEvent) -> None:
+        await writer.append(event)
+        said.append(event)
+
+    def kept(failed: bool, checkpoint_id: str | None = None) -> Message:
+        """The answer, of the parts what was said spells."""
+        return Message(
+            answer_id,
+            session.id,
+            parent_id=question.id,
+            role=Role.ASSISTANT,
+            parts=parts_of(said),
+            created_at=datetime.now(UTC),
+            agent=session.agent,
+            engine=session.engine,
+            model=turn.model,
+            checkpoint_id=checkpoint_id,
+            turn_id=turn.id,
+            failed=failed,
+        )
+
     try:
         await writer.append(MessageStarted(answer_id, parent_id=question.id))
     except TurnLostError:
@@ -168,38 +181,23 @@ async def run_turn(
         async with aclosing(stream) as events:
             async for event in events:
                 if isinstance(event, TextDelta):
-                    await writer.append(TextPiece(answer_id, event.text))
-                    _with_text(parts, event.text)
+                    await say(TextPiece(answer_id, event.text))
                 elif isinstance(event, ReasoningDelta):
-                    await writer.append(ReasoningPiece(answer_id, event.text))
+                    await say(ReasoningPiece(answer_id, event.text))
                 elif isinstance(event, ToolCall):
-                    await writer.append(CallStarted(answer_id, event.call_id, event.name))
+                    await say(CallStarted(answer_id, event.call_id, event.name))
                     arguments = json.dumps(dict(event.arguments))
-                    await writer.append(ArgumentsPiece(answer_id, event.call_id, arguments))
-                    await writer.append(CallCompleted(answer_id, event.call_id))
-                    parts.append(ToolCallPart(event.call_id, event.name, event.arguments))
+                    await say(ArgumentsPiece(answer_id, event.call_id, arguments))
+                    await say(CallCompleted(answer_id, event.call_id))
                 elif isinstance(event, ToolResult):
-                    await writer.append(
-                        ResultLanded(answer_id, event.call_id, event.output, event.is_error)
-                    )
-                    parts.append(ToolResultPart(event.call_id, event.output, event.is_error))
+                    await say(ResultLanded(answer_id, event.call_id, event.output, event.is_error))
                 elif isinstance(event, Done):
+                    answer = kept(False, event.checkpoint_id)
                     # An engine that streamed no text at all still hands the answer over.
-                    if event.text and not any(isinstance(p, TextPart) for p in parts):
-                        parts.append(TextPart(event.text))
-                    answer = Message(
-                        answer_id,
-                        session.id,
-                        parent_id=question.id,
-                        role=Role.ASSISTANT,
-                        parts=tuple(parts),
-                        created_at=datetime.now(UTC),
-                        agent=session.agent,
-                        engine=session.engine,
-                        model=turn.model,
-                        checkpoint_id=event.checkpoint_id,
-                        turn_id=turn.id,
-                    )
+                    if event.text and not any(isinstance(p, TextPart) for p in answer.parts):
+                        answer = dataclasses.replace(
+                            answer, parts=(*answer.parts, TextPart(event.text))
+                        )
                     last = writer.last(MessageCompleted(answer_id), TurnEnded(TurnState.FINISHED))
                     # Once the engine has handed the answer over, a cancellation must not
                     # lose it: the finish runs to its end whatever happens to this task.
@@ -216,27 +214,17 @@ async def run_turn(
                 finishing.exception()
         elif LOST in exc.args:
             pass  # the turn is not this pod's any more: nothing is written in its name
+        elif CLOSE in exc.args:
+            # Stopped by the deployment, not by anyone: what it did is kept, as an answer
+            # marked failed, which the thread shows and Retry starts over from.
+            await _end(writer, TurnState.INTERRUPTED, None, kept(True))
         else:
-            state = TurnState.INTERRUPTED if CLOSE in exc.args else TurnState.CANCELLED
-            await _end(writer, state, None)
+            await _end(writer, TurnState.CANCELLED, None)
         raise
     except Exception as exc:
         # What it streamed before it failed is kept, as an answer marked failed: the
         # thread shows it, and a reply hangs under it.
-        failed = Message(
-            answer_id,
-            session.id,
-            parent_id=question.id,
-            role=Role.ASSISTANT,
-            parts=tuple(parts),
-            created_at=datetime.now(UTC),
-            agent=session.agent,
-            engine=session.engine,
-            model=turn.model,
-            turn_id=turn.id,
-            failed=True,
-        )
-        await _end(writer, TurnState.FAILED, clean_text(str(exc)), failed)
+        await _end(writer, TurnState.FAILED, clean_text(str(exc)), kept(True))
 
 
 async def _end(

@@ -58,6 +58,7 @@ from robinauts.controller.core.engine_settings import (
 )
 from robinauts.controller.core.failures import prompt_after_failures
 from robinauts.controller.core.titles import title_from_text
+from robinauts.controller.core.transcript import left_answer
 from robinauts.controller.ports.dispatcher import TurnDispatcher
 from robinauts.controller.ports.store import Cursor, Holder, Store
 from robinauts.controller.ports.work import WorkQueue
@@ -185,7 +186,7 @@ class RobinautsController(Controller):
 
     async def open_session(self, user: User, session_id: uuid.UUID) -> OpenedSession:
         session = await self._store.get_session(user.id, session_id)
-        await self._store.end_expired_turn(user.id, session_id, self._now())
+        await self._end_expired(user.id, session_id)
         messages = await self._messages(user.id, session_id)
         by_id = {m.id: m for m in messages}
         thread = [messages[-1]]
@@ -210,7 +211,7 @@ class RobinautsController(Controller):
 
     async def delete_session(self, user: User, session_id: uuid.UUID) -> None:
         session = await self._store.get_session(user.id, session_id)
-        await self._store.end_expired_turn(user.id, session_id, self._now())
+        await self._end_expired(user.id, session_id)
         running = await self._store.active_turn(user.id, session_id)
         if running is not None and await self._dispatcher.cancel(user.id, session_id, running.id):
             await self._end_if_running(user, running, TurnState.CANCELLED)
@@ -339,7 +340,7 @@ class RobinautsController(Controller):
         self, user: User, session_id: uuid.UUID, turn_id: uuid.UUID | None = None
     ) -> None:
         await self._store.get_session(user.id, session_id)
-        await self._store.end_expired_turn(user.id, session_id, self._now())
+        await self._end_expired(user.id, session_id)
         running = await self._store.active_turn(user.id, session_id)
         if running is None or (turn_id is not None and running.id != turn_id):
             raise NoActiveTurnError(str(session_id))
@@ -347,6 +348,25 @@ class RobinautsController(Controller):
             raise TurnActiveError(f"turn {running.id} runs in another process")
         # A runner that never claimed the turn wrote nothing: the turn is ended here.
         await self._end_if_running(user, running, TurnState.CANCELLED)
+
+    async def _end_expired(self, owner: uuid.UUID, session_id: uuid.UUID) -> Turn | None:
+        """End the session's running turn if its lease has passed, keeping what it answered,
+        rebuilt from its events, as an answer marked failed: the runner that left it is gone."""
+        now = self._now()
+        running = await self._store.active_turn(owner, session_id)
+        if running is None or running.lease_until >= now:
+            return None
+        session = await self._store.get_session(owner, session_id)
+        stored = await self._store.events_after(owner, session_id, running.id, 0)
+        events = [event_from_document(document).event for _, document in stored]
+        answer = left_answer(session, running, events, now)
+        return await self._store.end_expired_turn(
+            owner,
+            session_id,
+            now,
+            turn=running.id,
+            answer=None if answer is None else stored_message(answer),
+        )
 
     async def _end_if_running(self, user: User, turn: Turn, state: TurnState) -> None:
         now = self._now()
@@ -371,8 +391,8 @@ class RobinautsController(Controller):
         model_config = self._config.models.get(model)
         if model_config is None:
             raise UnknownModelError(model)
+        await self._end_expired(user.id, session.id)
         now = self._now()
-        await self._store.end_expired_turn(user.id, session.id, now)
         work = self._config.work
         # The turn's deadline is the work's, apart from the timeout of each call to the vendor,
         # and its lease is short and renewed by this pod's heartbeat while it runs here.
@@ -467,7 +487,7 @@ class RobinautsController(Controller):
             await self._store.wait_for_events(user.id, session_id, turn.id, after, WAIT_SECONDS)
             if await self._store.events_after(user.id, session_id, turn.id, after):
                 continue
-            await self._store.end_expired_turn(user.id, session_id, self._now())
+            await self._end_expired(user.id, session_id)
             current = await self._store.get_turn(user.id, session_id, turn.id)
             if current is None or current.state is not TurnState.RUNNING:
                 # Ended with no `turn_ended` event of its own, by a reader: the record says

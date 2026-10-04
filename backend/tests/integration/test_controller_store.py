@@ -252,3 +252,22 @@ async def test_the_heartbeat_has_a_connection_of_its_own_and_a_busy_pool_does_no
             assert again.lost == frozenset()
         finally:
             await store.close()
+
+
+@asyncio_test
+async def test_two_readers_ending_one_expired_turn_keep_its_answer_once() -> None:
+    async with temporary_schema() as schema:
+        store = PostgresStore(schema.pool, dsn=url())
+        me, one, asked, running = await seeded(store)
+        left = StoredMessage(
+            uuid.uuid4(), one.id, asked.id, Role.ASSISTANT, LEASE, {"v": 1, "text": "partial"}
+        )
+        later = LEASE + timedelta(minutes=1)
+        ended = await asyncio.gather(
+            *(
+                store.end_expired_turn(me.id, one.id, later, turn=running.id, answer=left)
+                for _ in range(4)
+            )
+        )
+        assert len([e for e in ended if e is not None]) == 1
+        assert await store.messages_of(me.id, one.id) == [{"v": 1, "text": "hi"}, left.document]

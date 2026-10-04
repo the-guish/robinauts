@@ -223,6 +223,14 @@ export const RUN_ERRORS = new Map<string, string>([
 const ENDED_SOMEHOW = "This answer did not finish.";
 
 /**
+ * What a kept answer of a run that was interrupted says: the server stopped
+ * or went away while it was being produced, what it had done is shown, and
+ * Retry starts it over.
+ */
+export const INTERRUPTED_ANSWER =
+  "This answer was interrupted when the server stopped. What it had done is shown, and Retry starts it over.";
+
+/**
  * What a second turn asked for while one is on its way is told.
  *
  * **One run at a time** (`docs/specs/runs.md`). It says that the message was
@@ -413,7 +421,6 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
         action.messages,
         action.runId,
         action.endedState ?? null,
-        action.endedBadly,
       ).map((fresh) => {
         const already = before.get(fresh.id);
         return already !== undefined && unchanged(already, fresh)
@@ -1027,15 +1034,18 @@ function sameData(one: unknown, other: unknown): boolean {
  * **An answer whose calls were never answered** is the store's record of a
  * batch that did not finish: still running when it is the last message and
  * a run is in flight (its results are what the stream will bring), and
- * otherwise over the way the run was -- interrupted, with the sentence that
- * says so, or cancelled -- so that its calls are drawn as what they are. An
- * answer whose turn failed says so itself (`held`).
+ * otherwise stopped, its calls drawn as what they are. **Only an answer the
+ * store keeps as failed is failed** (`held`): that is the one Retry is
+ * offered on and the backend retries, so an answer that is not is never
+ * marked so here, whatever the run that left it says; the run's sentence is
+ * said under the thread instead (`ended`). A failed answer at the end of a
+ * run that was interrupted -- what a pod that stopped or died left, kept
+ * from what it had streamed -- says that, rather than that it went wrong.
  */
 function folded(
   messages: readonly Message[],
   runId: string | null,
   endedState: string | null,
-  endedBadly: string | null,
 ): ChatMessage[] {
   const thread: ChatMessage[] = [];
   for (const message of messages) {
@@ -1050,23 +1060,18 @@ function folded(
     thread[thread.length - 1] = answered(answer, message);
   }
   return thread.map((message, at) => {
-    if (message.role !== "assistant" || message.state === "failed") {
-      return message;
+    const last = at === thread.length - 1;
+    if (message.role !== "assistant") return message;
+    if (message.state === "failed") {
+      return last && endedState === "interrupted"
+        ? { ...message, detail: INTERRUPTED_ANSWER }
+        : message;
     }
     if (!unanswered(message)) return message;
-    if (at === thread.length - 1 && runId !== null) {
+    if (last && runId !== null) {
       return { ...message, state: "running" };
     }
-    const failed =
-      at === thread.length - 1 &&
-      (endedState === "failed" || endedState === "interrupted");
-    return failed
-      ? {
-          ...message,
-          state: "failed",
-          ...(endedBadly === null ? {} : { detail: endedBadly }),
-        }
-      : { ...message, state: "cancelled" };
+    return { ...message, state: "cancelled" };
   });
 }
 
