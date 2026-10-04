@@ -5,7 +5,13 @@ from __future__ import annotations
 
 import pytest
 
-from robinauts.controller.contract.domain import ConfigError, ProviderKind, ToolServerAuth
+from robinauts.controller.contract.domain import (
+    ConfigError,
+    ProviderKind,
+    ToolErrors,
+    ToolServerAuth,
+    WorkConfig,
+)
 from robinauts.controller.core.config import parse_config
 
 AGENT = {"title": "A", "system_prompt": "", "model": "fast"}
@@ -95,3 +101,55 @@ def test_a_header_on_another_auth_is_refused() -> None:
     message = str(raised.value)
     assert "tool_servers.gh: `header` is for auth \"header\" alone, not auth 'bearer'" in message
     assert "tool_servers.wiki: `header` is for auth \"header\" alone, not auth 'basic'" in message
+
+
+def test_the_work_table_has_defaults_and_takes_numbers() -> None:
+    assert parse_config({}).work == WorkConfig(max_turn_seconds=1200, max_model_calls=100)
+    work = parse_config({"work": {"max_turn_seconds": 10800, "max_model_calls": 7}}).work
+    assert (work.max_turn_seconds, work.max_model_calls) == (10800, 7)
+
+
+def test_the_work_table_names_every_problem() -> None:
+    with pytest.raises(ConfigError) as raised:
+        parse_config({"work": {"max_turn_seconds": 0, "max_model_calls": 2.5, "pace": 1}})
+    message = str(raised.value)
+    assert "work: unknown key(s) pace" in message
+    assert "work: max_turn_seconds must be a number more than 0" in message
+    assert "work: max_model_calls must be a number more than 0, not 2.5" in message
+
+
+def test_a_model_retries_twice_unless_told_otherwise() -> None:
+    config = parse_config(
+        {
+            "model_providers": {"p": {"kind": "anthropic", "api_key_env": "P_KEY"}},
+            "models": {
+                "fast": {"provider": "p", "name": "fast-1"},
+                "patient": {"provider": "p", "name": "slow-1", "max_retries": 5},
+            },
+        }
+    )
+    assert (config.models["fast"].max_retries, config.models["patient"].max_retries) == (2, 5)
+    with pytest.raises(ConfigError, match="models.fast: max_retries must be a whole number"):
+        parse_config(
+            {
+                "model_providers": {"p": {"kind": "anthropic", "api_key_env": "P_KEY"}},
+                "models": {"fast": {"provider": "p", "name": "fast-1", "max_retries": -1}},
+            }
+        )
+
+
+def test_a_tool_server_reports_its_errors_unless_told_to_retry() -> None:
+    servers = parse_config(
+        {
+            "tool_servers": {
+                "a": {"url": "https://a", "auth": "none"},
+                "b": {"url": "https://b", "auth": "none", "tool_errors": "retry"},
+            }
+        }
+    ).tool_servers
+    assert (servers["a"].tool_errors, servers["b"].tool_errors) == (
+        ToolErrors.REPORT,
+        ToolErrors.RETRY,
+    )
+    with pytest.raises(ConfigError, match="tool_servers.a"):
+        parse_config({"tool_servers": {"a": {"url": "https://a", "tool_errors": "ignore"}}})

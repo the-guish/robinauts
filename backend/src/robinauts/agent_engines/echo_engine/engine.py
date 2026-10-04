@@ -77,6 +77,7 @@ class EchoEngine(AgentEngine):
         checkpoint_id: str | None,
         timeout_seconds: float,
         resume: bool = False,
+        max_model_calls: int | None = None,
     ) -> AsyncGenerator[Event, None]:
         checkpoints = self._sessions.get(session_id)
         if checkpoints is None:

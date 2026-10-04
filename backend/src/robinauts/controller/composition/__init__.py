@@ -38,7 +38,7 @@ from robinauts.controller.ports.store import Store
 
 DATABASE_URL_VARIABLE = "ROBINAUTS_DATABASE_URL"
 
-CONTROLLER_TABLES = frozenset({"model_providers", "models", "tool_servers", "agents"})
+CONTROLLER_TABLES = frozenset({"model_providers", "models", "tool_servers", "agents", "work"})
 """The file's tables that are the controller's, the ones `parse_config` reads."""
 
 SCHEMA_READY = "the database is at schema version {version} (schema.sql {digest})"

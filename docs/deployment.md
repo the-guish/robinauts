@@ -189,8 +189,14 @@ api_key_env = "ROBINAUTS_ANTHROPIC_KEY"
 provider = "anthropic"
 name = "claude-sonnet-5"
 title = "Claude Sonnet 5"
-timeout_seconds = 120
+timeout_seconds = 120     # one call to the vendor, not the turn
+max_retries = 2           # the client's own retries of a call, with backoff
 max_output_tokens = 8192
+
+# How turns run, the same in every replica. Both keys have these defaults.
+[work]
+max_turn_seconds = 1200   # a turn's deadline, from its start
+max_model_calls = 100     # the model calls one turn may make
 
 [agents.assistant]
 title = "Assistant"
@@ -250,6 +256,18 @@ Notes on what is and is not there:
   answering with another model; the log names the model.
 - A file with no `[agents]` table is a deployment with no agents: it
   starts, the picker is empty, and the log says so.
+- **Three limits, kept apart.** A model's `timeout_seconds` bounds one call
+  to the vendor, and `max_retries` (2 unless set) is how many times the
+  vendor's client tries that call again, with backoff, on a rate limit, an
+  overload or a dropped connection. `[work] max_turn_seconds` is the deadline
+  of the whole turn, and `max_model_calls` the number of model calls one
+  turn may make, its tool loop included; past either, the turn fails and
+  keeps what it streamed.
+- **A tool's error** goes back to the model as the call's result, and the
+  turn goes on. `tool_errors = "retry"` on a `[tool_servers.<id>]` table
+  makes the Pydantic AI engine ask the model to correct the call instead,
+  within its retries, after which the turn fails; the LangGraph engine always
+  reports.
 
 ## 5. Register the redirect URI
 

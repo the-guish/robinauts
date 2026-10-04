@@ -92,9 +92,23 @@ class ModelConfig:
     provider: str
     name: str
     timeout_seconds: float = 120.0
+    """One call to the vendor, never the turn: the turn's is ``WorkConfig.max_turn_seconds``."""
     max_output_tokens: int | None = None
     context_window: int | None = None
     title: str = ""
+    max_retries: int = 2
+    """How many times the vendor's client tries a call again, with backoff, on a rate limit,
+    an overload or a dropped connection."""
+
+
+class ToolErrors(StrEnum):
+    """What a tool's error does to the turn."""
+
+    REPORT = "report"
+    """The error is the call's result: the model reads it and the turn goes on."""
+    RETRY = "retry"
+    """Pydantic AI asks the model to correct the call, within its retries, and then fails the
+    turn. The LangGraph engine always reports."""
 
 
 class ToolServerAuth(StrEnum):
@@ -114,6 +128,17 @@ class ToolServerConfig:
     timeout_seconds: float = 60.0
     # The header `auth = "header"` sends the secret in, as it is; set for that mode alone.
     header: str = ""
+    tool_errors: ToolErrors = ToolErrors.REPORT
+
+
+@dataclass(frozen=True, slots=True)
+class WorkConfig:
+    """How turns run, the ``[work]`` table: the same in every replica."""
+
+    max_turn_seconds: float = 1200.0
+    """A turn's deadline, from its start: ``turns.deadline_at``."""
+    max_model_calls: int = 100
+    """The model calls one turn may make, its tool loop included."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +157,7 @@ class Config:
     models: Mapping[str, ModelConfig] = field(default_factory=dict)
     tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
     agents: Mapping[str, AgentConfig] = field(default_factory=dict)
+    work: WorkConfig = field(default_factory=WorkConfig)
 
 
 class StorageKind(StrEnum):
@@ -325,6 +351,8 @@ class Turn:
     """For the operator, on a turn that ended badly; never sent to a browser."""
     retries: uuid.UUID | None = None
     """The failed answer this turn tries again, which the model is told about."""
+    deadline_at: datetime | None = None
+    """When the turn must have ended: its start plus ``WorkConfig.max_turn_seconds``."""
 
 
 @dataclass(frozen=True, slots=True)

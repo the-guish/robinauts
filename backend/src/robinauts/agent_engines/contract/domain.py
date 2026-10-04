@@ -63,6 +63,13 @@ class ModelConfig:
     max_output_tokens: int | None = None
     context_window: int | None = None
     title: str = ""
+    max_retries: int = 2
+    """The vendor client's own retries of one call, with backoff."""
+
+
+class ToolErrors(StrEnum):
+    REPORT = "report"
+    RETRY = "retry"
 
 
 class ToolServerAuth(StrEnum):
@@ -82,6 +89,7 @@ class ToolServerConfig:
     timeout_seconds: float = 60.0
     # The header `auth = "header"` sends the secret in, as it is; set for that mode alone.
     header: str = ""
+    tool_errors: ToolErrors = ToolErrors.REPORT
 
 
 @dataclass(frozen=True, slots=True)

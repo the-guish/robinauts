@@ -65,6 +65,7 @@ class LangChainEngine(AgentEngine):
         checkpoint_id: str | None,
         timeout_seconds: float,
         resume: bool = False,
+        max_model_calls: int | None = None,
     ) -> AsyncGenerator[Event, None]:
         if not await self._memory.exists(session_id):
             raise SessionNotFoundError(str(session_id))
@@ -81,6 +82,10 @@ class LangChainEngine(AgentEngine):
             system_prompt=agent.system_prompt,
             checkpointer=self._memory.saver,
         )
+        if max_model_calls is not None:
+            # A step is a model call or a batch of tool calls, so n model calls take 2n - 1
+            # steps; `create_agent`'s own bound is 9 999.
+            start = {**start, "recursion_limit": 2 * max_model_calls + 1}
         stream = graph.astream(
             {"messages": [HumanMessage(prompt)]}, start, stream_mode=["messages", "updates"]
         )

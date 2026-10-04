@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import json
 import re
 from collections.abc import AsyncIterator
@@ -41,6 +42,7 @@ from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
     ModelsConfig,
     ProviderKind,
+    ToolErrors,
     ToolServerAuth,
     ToolServerConfig,
     UnknownModelError,
@@ -77,7 +79,7 @@ def test_an_anthropic_model_is_built_from_the_settings(
     assert isinstance(client, AsyncAnthropic)
     assert client.api_key == "key-of-p"
     assert str(client.base_url).rstrip("/") == endpoint
-    assert (client.max_retries, client.timeout) == (0, 7.0)
+    assert (client.max_retries, client.timeout) == (3, 7.0)
     assert model_settings == {"timeout": 7.0, "max_tokens": 321}
 
 
@@ -98,7 +100,7 @@ def test_an_openai_model_is_built_from_the_settings(
     assert isinstance(client, AsyncOpenAI)
     assert client.api_key == "key-of-p"
     assert str(client.base_url).rstrip("/") == endpoint
-    assert (client.max_retries, client.timeout) == (0, 7.0)
+    assert (client.max_retries, client.timeout) == (3, 7.0)
     assert model_settings == {"timeout": 7.0, "max_tokens": 321}
 
 
@@ -135,6 +137,13 @@ def test_a_bearer_server_is_reached_with_its_secret_as_a_bearer_token() -> None:
     assert client._init_timeout == 9.0
     assert client._session_kwargs["read_timeout_seconds"] == timedelta(seconds=9)
     assert secrets.asked == ["gh"]
+
+
+def test_a_tools_error_is_reported_to_the_model_unless_retries_are_asked_for() -> None:
+    public = ToolServerConfig(id="docs", url="https://mcp.example/docs", auth=ToolServerAuth.NONE)
+    assert toolset_for(public, tool_settings(NoSecrets())).tool_error_behavior == "failed"
+    retried = dataclasses.replace(public, tool_errors=ToolErrors.RETRY)
+    assert toolset_for(retried, tool_settings(NoSecrets())).tool_error_behavior == "retry"
 
 
 def test_a_basic_server_is_reached_with_its_user_and_secret() -> None:

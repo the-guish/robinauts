@@ -13,6 +13,7 @@ from pydantic_ai.toolsets import AbstractToolset
 
 from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
+    ToolErrors,
     ToolServerAuth,
     ToolServerConfig,
 )
@@ -34,6 +35,9 @@ def toolset_for(server: ToolServerConfig, settings: EngineSettings) -> MCPToolse
         headers=headers,
         init_timeout=server.timeout_seconds,
         read_timeout=server.timeout_seconds,
+        # "failed" hands the error to the model as the call's result and spends no retry: the
+        # framework's default, "retry", ends the turn on a tool's second error.
+        tool_error_behavior="retry" if server.tool_errors is ToolErrors.RETRY else "failed",
     )
 
 

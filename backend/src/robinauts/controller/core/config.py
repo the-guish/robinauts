@@ -15,8 +15,10 @@ from robinauts.controller.contract.domain import (
     ModelConfig,
     ProviderConfig,
     ProviderKind,
+    ToolErrors,
     ToolServerAuth,
     ToolServerConfig,
+    WorkConfig,
 )
 
 ENGINES = ("langchain", "pydantic-ai", "echo")
@@ -44,8 +46,11 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
 
     providers = build("model_providers", ProviderConfig, kind=ProviderKind)
     models = build("models", ModelConfig)
-    tool_servers = build("tool_servers", ToolServerConfig, auth=ToolServerAuth)
+    tool_servers = build(
+        "tool_servers", ToolServerConfig, auth=ToolServerAuth, tool_errors=ToolErrors
+    )
     agents = build("agents", AgentConfig, tools=tuple)
+    work = _work(raw.get("work", {}), problems)
 
     for server in tool_servers.values():
         if server.auth is ToolServerAuth.HEADER:
@@ -64,6 +69,9 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
                 f"not auth {server.auth.value!r}"
             )
     for model in models.values():
+        retries = model.max_retries
+        if isinstance(retries, bool) or not isinstance(retries, int) or retries < 0:
+            problems.append(f"models.{model.id}: max_retries must be a whole number, 0 or more")
         if model.provider not in providers:
             problems.append(f"models.{model.id}: provider {model.provider!r} is not configured")
     for agent in agents.values():
@@ -76,4 +84,29 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
             problems.append(f"agents.{agent.id}: engine {agent.engine!r} is not one of {ENGINES}")
     if problems:
         raise ConfigError("\n".join(problems))
-    return Config(providers, models, tool_servers, agents)
+    return Config(providers, models, tool_servers, agents, work)
+
+
+def _positive(table: str, key: str, value: Any, kind: type, problems: list[str]) -> bool:
+    if isinstance(value, bool) or not isinstance(value, kind) or value <= 0:
+        problems.append(f"{table}: {key} must be a number more than 0, not {value!r}")
+        return False
+    return True
+
+
+def _work(raw: Mapping[str, Any], problems: list[str]) -> WorkConfig:
+    """The ``[work]`` table: a single table of numbers, each with its default."""
+    if not isinstance(raw, Mapping):
+        problems.append("work: a table of keys, not a value")
+        return WorkConfig()
+    fields = {f.name: f for f in dataclasses.fields(WorkConfig)}
+    if unknown := sorted(set(raw) - set(fields)):
+        problems.append(f"work: unknown key(s) {', '.join(unknown)}")
+    values: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key not in fields:
+            continue
+        kind = (int, float) if fields[key].type == "float" else int
+        if _positive("work", key, value, kind, problems):
+            values[key] = value
+    return WorkConfig(**values)

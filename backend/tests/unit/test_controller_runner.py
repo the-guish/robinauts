@@ -34,11 +34,13 @@ from robinauts.controller.contract.domain import (
     TurnActiveError,
     TurnEnded,
     TurnState,
+    WorkConfig,
 )
 from robinauts.controller.core.documents import event_from_document
 from robinauts.controller.ports.store import Store
 
-FIVE_MINUTES = timedelta(minutes=5)
+PAST_THE_LEASE = timedelta(minutes=30)
+"""Past the lease of a turn started now: its deadline, `max_turn_seconds`, and a margin."""
 
 
 class ScriptedEngine(EchoEngine):
@@ -161,7 +163,7 @@ async def test_a_runner_refused_mid_stream_writes_nothing_more() -> None:
     sid = started.session_id
     await controller._store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
     task = controller._dispatcher._tasks[started.turn_id]
-    controller._now = jumped(FIVE_MINUTES)
+    controller._now = jumped(PAST_THE_LEASE)
     assert (await controller.open_session(user, sid)).active is None
     engine.gate.set()
     await task
@@ -182,7 +184,7 @@ async def test_a_turn_whose_lease_has_passed_is_interrupted_and_a_new_turn_start
     started = await controller.start_session(user, agent="echo", model="echo", text="one")
     sid = started.session_id
     await controller._store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
-    controller._now = jumped(FIVE_MINUTES)
+    controller._now = jumped(PAST_THE_LEASE)
     watched = [e async for e in controller.watch_turn(user, sid, started.turn_id)]
     assert [type(n.event).__name__ for n in watched] == ["MessageStarted", "TurnEnded"]
     assert watched[-1].event == TurnEnded(TurnState.INTERRUPTED)
@@ -296,3 +298,39 @@ def test_the_config_names_the_engine_an_agent_runs_on() -> None:
     assert CONFIG.agents["echo"] == AgentConfig(
         "echo", title="Echo", system_prompt="", model="echo", engine="echo"
     )
+
+
+class RecordingEngine(EchoEngine):
+    """Echo, keeping the limits each turn was streamed with."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.limits: list[dict[str, Any]] = []
+
+    def stream(self, *args: Any, **kwargs: Any) -> AsyncGenerator[Event, None]:
+        self.limits.append(
+            {key: kwargs[key] for key in ("timeout_seconds", "max_model_calls", "model")}
+        )
+        return super().stream(*args, **kwargs)
+
+
+@asyncio_test
+async def test_a_turn_runs_to_the_works_deadline_not_to_the_models_call_timeout() -> None:
+    work = WorkConfig(max_turn_seconds=3 * 3600, max_model_calls=7)
+    store = MemoryStore()
+    controller = await over(store)
+    controller._config = dataclasses.replace(CONFIG, work=work)
+    engine = RecordingEngine()
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="hello")
+    await settled(controller, user, started)
+    turn = await store.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert turn.deadline_at - turn.started_at == timedelta(hours=3)
+    assert turn.lease_until > turn.deadline_at
+    (limits,) = engine.limits
+    assert limits["max_model_calls"] == 7
+    # What is left of three hours, and nothing to do with the model's 120 s per call.
+    assert 3 * 3600 - 60 < limits["timeout_seconds"] <= 3 * 3600
+    await controller.close()

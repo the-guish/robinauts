@@ -96,15 +96,32 @@ ENGINES = pytest.mark.parametrize(
 )
 
 
-async def turn_over(plug: Plug, vendor: Vendor, monkeypatch: pytest.MonkeyPatch) -> list[Event]:
+async def turn_over(
+    plug: Plug, vendor: Vendor, monkeypatch: pytest.MonkeyPatch, max_model_calls: int = 100
+) -> list[Event]:
     engine = plug(vendor, monkeypatch)
     await engine.setup()
     session = uuid.uuid4()
     await engine.create(session)
     stream = engine.stream(
-        session, AGENT, PROMPT, model="m", checkpoint_id=None, timeout_seconds=10.0
+        session,
+        AGENT,
+        PROMPT,
+        model="m",
+        checkpoint_id=None,
+        timeout_seconds=10.0,
+        max_model_calls=max_model_calls,
     )
     return [event async for event in stream]
+
+
+def tool_rounds(rounds: int) -> Vendor:
+    """A vendor that calls the tool ``rounds`` times, then answers."""
+    calls = [
+        streamed(*calling(f"call-{n}", "add", ARGUMENTS), *finished("tool_calls"))
+        for n in range(rounds)
+    ]
+    return Vendor(bodies=[*calls, streamed(*said(ANSWER), *finished())])
 
 
 @ENGINES
@@ -157,3 +174,32 @@ async def test_a_tool_round_is_run_and_its_result_sent_back(
         "content": "5",
         "tool_call_id": CALL_ID,
     }
+
+
+@ENGINES
+@asyncio_test
+async def test_a_rate_limit_is_tried_again_by_the_client_and_the_turn_goes_on(
+    plug: Plug, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vendor = Vendor(streamed(*said(ANSWER), *finished()), overloaded=2)
+    events = await turn_over(plug, vendor, monkeypatch)
+    assert events[-1] == Done(text=ANSWER, checkpoint_id=events[-1].checkpoint_id)
+    assert vendor.overloaded == 0
+
+
+@ENGINES
+@asyncio_test
+async def test_a_turn_makes_as_many_model_calls_as_it_is_allowed(
+    plug: Plug, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events = await turn_over(plug, tool_rounds(2), monkeypatch, max_model_calls=3)
+    assert events[-1] == Done(text=ANSWER, checkpoint_id=events[-1].checkpoint_id)
+
+
+@ENGINES
+@asyncio_test
+async def test_a_turn_that_needs_more_model_calls_than_allowed_ends_with_an_error(
+    plug: Plug, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(Exception, match="limit"):
+        await turn_over(plug, tool_rounds(2), monkeypatch, max_model_calls=2)

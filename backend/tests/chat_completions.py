@@ -111,7 +111,8 @@ class Vendor:
     with the result -- and the last of them answers whatever follows.
     ``status`` other than 200 answers with ``error`` as the body, which is how
     the vendor refuses a key, a model or a request, and what the SDK raises its
-    own exception from.
+    own exception from. ``overloaded`` answers that many requests first with a
+    429 that asks to be tried again at once, which the SDK retries by itself.
     """
 
     body: bytes = b""
@@ -119,9 +120,15 @@ class Vendor:
     status: int = 200
     error: dict[str, Any] | None = None
     headers: dict[str, str] = field(default_factory=dict)
+    overloaded: int = 0
     sent: list[httpx2.Request] = field(default_factory=list)
 
     def answer(self, request: httpx2.Request) -> httpx2.Response:
+        if self.overloaded > 0:
+            self.overloaded -= 1
+            return httpx2.Response(
+                429, json={"error": {"message": "slow down"}}, headers={"retry-after-ms": "1"}
+            )
         self.sent.append(request)
         if self.status != 200:
             return httpx2.Response(
