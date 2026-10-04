@@ -10,7 +10,8 @@ runs no engine.
 Its deadline is the turn's ``deadline_at``, which bounds the engine's run; each vendor call
 has the model's own timeout, inside the engine. On
 ``TurnLostError`` from any write it closes the engine's stream and writes nothing more: the
-turn is another runner's, a reader ended it, or its lease has passed. Stopped naming
+turn is another runner's, a reader ended it, or its lease has passed; so it does when the
+session was deleted under it. Stopped naming
 ``LOST``, by the heartbeat that found the same, it writes nothing more either.
 """
 
@@ -45,6 +46,7 @@ from robinauts.controller.contract.domain import (
     ResultLanded,
     Role,
     Session,
+    SessionNotFoundError,
     TextPart,
     TextPiece,
     ToolCallPart,
@@ -69,6 +71,9 @@ RETENTION = timedelta(hours=24)
 DEADLINE_MARGIN = 10.0
 """With less than this many seconds left before its deadline, the runner does not claim the
 turn."""
+
+LOST_WRITES = (TurnLostError, SessionNotFoundError)
+"""What a refused write raises: the turn is not this runner's, or its session was deleted."""
 
 DEADLINE_PASSED = "deadline passed"
 """The error of a turn the engine ended at its deadline."""
@@ -160,7 +165,7 @@ async def run_turn(
     writer = _Writer(store, owner, turn)
     try:
         await writer.append(MessageStarted(answer_id, parent_id=question.id))
-    except TurnLostError:
+    except LOST_WRITES:
         return
     finishing: asyncio.Future[None] | None = None
 
@@ -231,7 +236,7 @@ async def run_turn(
                         writer.finish(TurnState.FINISHED, None, answer, last)
                     )
                     await asyncio.shield(finishing)
-    except TurnLostError:
+    except LOST_WRITES:
         return
     except asyncio.CancelledError as exc:
         if finishing is not None:
@@ -258,5 +263,5 @@ async def _end(
     """End a turn, with what it answered if anything; nothing more if the turn is lost."""
     try:
         await writer.finish(state, error, answer, writer.last(TurnEnded(state)))
-    except TurnLostError:
+    except LOST_WRITES:
         return

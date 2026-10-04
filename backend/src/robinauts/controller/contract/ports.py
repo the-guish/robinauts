@@ -66,7 +66,9 @@ class Controller(ABC):
 
     @abstractmethod
     async def delete_session(self, user: User, session_id: uuid.UUID) -> None:
-        """``SessionNotFoundError``. The engine's memory goes with the records."""
+        """``SessionNotFoundError``. A running turn is cancelled first, whichever process runs
+        it. The engine's memory goes with the records, at once, or once a turn that did not
+        end in time has, by the sweep."""
         raise NotImplementedError
 
     @abstractmethod
@@ -136,9 +138,11 @@ class Controller(ABC):
     @abstractmethod
     async def cancel_turn(
         self, user: User, session_id: uuid.UUID, turn_id: uuid.UUID | None = None
-    ) -> None:
-        """``SessionNotFoundError``; ``NoActiveTurnError`` when nothing runs. ``turn_id``
-        ``None`` names the session's running turn."""
+    ) -> bool:
+        """Ask for the turn to be cancelled, whichever process runs it, and wait a few seconds
+        for it to end: true when it did, false when the cancel is recorded and its end is
+        still to come. ``SessionNotFoundError``; ``NoActiveTurnError`` when nothing runs.
+        ``turn_id`` ``None`` names the session's running turn."""
         raise NotImplementedError
 
     @abstractmethod

@@ -113,13 +113,15 @@ CREATE TABLE IF NOT EXISTS users (
 -- partial unique index on `turns` below, and what is running is looked up
 -- there.
 --
--- `deleted_at` hides a session. It is set only while no turn is running, under
--- a lock on the row taken first, so that no runner and no engine writes under
--- a purge. From the moment it is set, every read treats the session as not
--- found and no turn may start on it. The purge then calls `forget` on the
--- engine the row names and deletes the row, and the cascade takes its
--- messages and turns with it. Trash, in stage two, is a delay before the
--- purge, not a change of schema.
+-- `deleted_at` hides a session, whatever runs: a delete asks for its running
+-- turn's cancel first, and hides it whether or not the turn has ended. From
+-- the moment it is set, every read treats the session as not found, no turn
+-- may start on it, every write of a runner's is refused and the heartbeat
+-- renews none of its leases. The purge then calls `forget` on the engine the
+-- row names and deletes the row, and the cascade takes its messages and turns
+-- with it: at once when no turn of it runs, else once the last lease has
+-- passed, so that no runner and no engine writes under a purge. Trash, in
+-- stage two, is a delay before the purge, not a change of schema.
 --
 -- `owner_id` cascades: a user's sessions are private to them, and there is
 -- nobody else for them to belong to once the user is gone.
@@ -252,9 +254,11 @@ CREATE INDEX IF NOT EXISTS messages_session_id_parent_id_idx
 -- process's turns. Every write of the runner's is refused past it, and a
 -- running turn whose lease has passed was left by a runner that went away:
 -- the next reader to find it ends it as `interrupted`, with no event.
--- `cancel_requested_at`, which a cancel from another process will set and
--- the runner read back, is not written yet. Every time here is set by the
--- application's clock.
+-- `cancel_requested_at` is set by a cancel, in whichever process the request
+-- reached, which also announces it on `robinauts_cancel`; the holder stops
+-- the turn, and its heartbeat reads the column back in case the announcement
+-- was missed. A turn whose lease passes with a cancel asked for ends as
+-- `cancelled`. Every time here is set by the application's clock.
 CREATE TABLE IF NOT EXISTS turns (
     id uuid
         CONSTRAINT turns_pkey PRIMARY KEY,

@@ -189,35 +189,81 @@ class StoreContract:
         assert await store.get_session(me.id, one.id) == renamed
 
     @store_test
-    async def test_a_hide_is_refused_while_a_turn_runs_and_hides_the_session_after(
+    async def test_a_hide_hides_the_session_whatever_runs_and_its_turn_writes_nothing(
         self, store: Store
     ) -> None:
         me, one, _, running = await self.started(store)
-        with pytest.raises(TurnActiveError):
-            await store.hide_session(me.id, one.id, NOW)
-        await store.finish_turn(
-            me.id,
-            one.id,
-            running.id,
-            TurnState.CANCELLED,
-            NOW,
-            None,
-            None,
-            [piece(1)],
-            NOW,
-            fence=FENCE,
-        )
         await store.hide_session(me.id, one.id, NOW)
         with pytest.raises(SessionNotFoundError):
             await store.get_session(me.id, one.id)
+        with pytest.raises((TurnLostError, SessionNotFoundError)):
+            await self.append(store, me, one, running, piece(1))
+        with pytest.raises((TurnLostError, SessionNotFoundError)):
+            await store.finish_turn(
+                me.id,
+                one.id,
+                running.id,
+                TurnState.CANCELLED,
+                NOW,
+                None,
+                None,
+                [],
+                NOW,
+                fence=FENCE,
+            )
+        assert isinstance(store, WorkQueue)
+        beat = await store.heartbeat(WORKER, [Held(running.id, 1)], NOW, MINUTE)
+        assert beat.lost == {running.id}
         on_purged = turn(one.id, uuid.uuid4())
         with pytest.raises(SessionNotFoundError):
             await store.start_turn(me.id, on_purged, None)
+        with pytest.raises(SessionNotFoundError):
+            await store.hide_session(me.id, one.id, NOW)
         assert await store.sessions_of(me.id, 10, None) == []
         await store.purge_session(me.id, one.id)
         with pytest.raises(SessionNotFoundError):
             await store.get_session(me.id, one.id)
         await store.purge_session(me.id, one.id)
+
+    @store_test
+    async def test_a_cancel_is_recorded_once_and_signalled_and_read_back_by_the_heartbeat(
+        self, store: Store
+    ) -> None:
+        assert isinstance(store, WorkQueue)
+        me, one, _, running = await self.started(store)
+        signals = store.cancel_signals()
+        listening = asyncio.ensure_future(anext(signals))
+        await asyncio.sleep(0.2)
+        cancelled = await store.request_cancel(me.id, one.id, running.id, NOW + MINUTE)
+        assert cancelled is not None
+        assert cancelled.cancel_requested_at == NOW + MINUTE
+        assert await asyncio.wait_for(listening, 5) == running.id
+        again = await store.request_cancel(me.id, one.id, running.id, NOW + 2 * MINUTE)
+        assert again is not None
+        assert again.cancel_requested_at == NOW + MINUTE
+        assert await asyncio.wait_for(anext(signals), 5) == running.id
+        await signals.aclose()
+        beat = await store.heartbeat(WORKER, [Held(running.id, 1)], NOW + MINUTE, MINUTE)
+        assert (beat.lost, beat.cancelled) == (frozenset(), {running.id})
+        await store.finish_turn(
+            me.id, one.id, running.id, TurnState.CANCELLED, NOW, None, None, [], NOW, fence=FENCE
+        )
+        assert await store.request_cancel(me.id, one.id, running.id, NOW) is None
+
+    @store_test
+    async def test_an_expired_turn_whose_cancel_was_asked_for_ends_cancelled(
+        self, store: Store
+    ) -> None:
+        me = await store.add_user_if_absent(user())
+        one = session(me.id)
+        await store.add_session(one)
+        asked = question(one.id)
+        running = turn(one.id, asked.id, lease_until=NOW + MINUTE)
+        await store.start_turn(me.id, running, asked)
+        await store.request_cancel(me.id, one.id, running.id, NOW)
+        ended = await store.end_expired_turn(me.id, one.id, running.id, NOW + 2 * MINUTE, None)
+        assert ended is not None
+        assert (ended.state, ended.error) == (TurnState.CANCELLED, None)
 
     # --- turns --------------------------------------------------------------
 

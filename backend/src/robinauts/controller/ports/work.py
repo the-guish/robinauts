@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -27,7 +27,10 @@ class Held:
 @dataclass(frozen=True, slots=True)
 class HeartbeatResult:
     lost: frozenset[uuid.UUID] = field(default_factory=frozenset)
-    """Turns this process held and holds no more: ended, past their lease, or another's."""
+    """Turns this process held and holds no more: ended, past their lease, another's, or of
+    a hidden session."""
+    cancelled: frozenset[uuid.UUID] = field(default_factory=frozenset)
+    """Turns renewed whose cancel was asked for: a signal this process may have missed."""
 
 
 class WorkQueue(ABC):
@@ -36,5 +39,10 @@ class WorkQueue(ABC):
         self, worker: str, held: Sequence[Held], now: datetime, lease: timedelta
     ) -> HeartbeatResult:
         """Renew, to ``now + lease``, the lease of every turn in ``held`` that is running, is
-        ``worker``'s at that attempt, and whose lease has not passed ``now``; every other is
-        lost."""
+        ``worker``'s at that attempt, of a visible session, and whose lease has not passed
+        ``now``; every other is lost."""
+
+    @abstractmethod
+    def cancel_signals(self) -> AsyncIterator[uuid.UUID]:
+        """The turns whose cancel is asked for from now on, from any process, as they are.
+        A signal may be lost: the heartbeat reads every cancel back."""

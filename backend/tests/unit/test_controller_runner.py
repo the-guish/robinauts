@@ -20,6 +20,7 @@ from robinauts.agent_engines.contract.domain import Done, Event, TextDelta, Tool
 from robinauts.agent_engines.echo_engine.engine import EchoEngine
 from robinauts.controller.adapters.dispatch import InProcessDispatcher
 from robinauts.controller.adapters.memory.store import MemoryStore
+from robinauts.controller.application import controller as controller_module
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.contract.domain import (
     AgentConfig,
@@ -31,7 +32,6 @@ from robinauts.controller.contract.domain import (
     TextPart,
     ToolCallPart,
     ToolResultPart,
-    TurnActiveError,
     TurnEnded,
     TurnState,
     WorkConfig,
@@ -92,6 +92,15 @@ async def over(store: MemoryStore, **options: Any) -> RobinautsController:
     dispatcher.run = controller.run_turn
     await controller.open()
     return controller
+
+
+async def released(controller: RobinautsController) -> None:
+    """Wait for the controller's dispatcher to have let every turn go."""
+    for _ in range(100):
+        if not controller._dispatcher.held():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"still held: {controller._dispatcher.held()}")
 
 
 def jumped(by: timedelta) -> Any:
@@ -220,7 +229,7 @@ async def test_a_cancel_before_the_runner_claimed_ends_the_turn_cancelled() -> N
 
 
 @asyncio_test
-async def test_a_cancel_of_a_turn_another_process_runs_is_refused() -> None:
+async def test_a_cancel_through_another_process_stops_the_turn_where_it_runs() -> None:
     store = MemoryStore()
     first = await over(store)
     engine = GatedEngine()
@@ -229,10 +238,63 @@ async def test_a_cancel_of_a_turn_another_process_runs_is_refused() -> None:
     user = await first.ensure_user(Identity("local", "me"))
     started = await first.start_session(user, agent="echo", model="echo", text="one")
     await store.wait_for_events(user.id, started.session_id, started.turn_id, 0, 5.0)
-    with pytest.raises(TurnActiveError):
-        await second.cancel_turn(user, started.session_id, started.turn_id)
-    engine.gate.set()
-    await settled(second, user, started)
+    assert await second.cancel_turn(user, started.session_id, started.turn_id) is True
+    turn = await store.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert turn.state is TurnState.CANCELLED
+    assert turn.cancel_requested_at is not None
+    await released(first)
+    watched = [e async for e in second.watch_turn(user, started.session_id, started.turn_id)]
+    assert watched[-1].event == TurnEnded(TurnState.CANCELLED)
+    await first.close()
+    await second.close()
+
+
+@asyncio_test
+async def test_a_cancel_whose_holder_does_not_answer_is_pending_then_ends_cancelled() -> None:
+    store = MemoryStore()
+    first = await over(store)
+    first._engines["echo"] = GatedEngine()
+    second = await over(store)
+    user = await first.ensure_user(Identity("local", "me"))
+    started = await first.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    await store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
+    # The holder died: nothing hears the signal, and nothing renews the lease.
+    await first._work_loop.stop()
+    first._dispatcher._tasks.clear()
+    controller_module.CANCEL_WAIT, waited = 0.2, controller_module.CANCEL_WAIT
+    try:
+        assert await second.cancel_turn(user, sid, started.turn_id) is False
+    finally:
+        controller_module.CANCEL_WAIT = waited
+    second._now = jumped(PAST_THE_LEASE)
+    shown = await second.open_session(user, sid)
+    assert shown.ended_badly is not None
+    assert shown.ended_badly.state is TurnState.CANCELLED
+    # Cancelled, not interrupted: no answer is kept.
+    assert len(shown.messages) == 1
+    await second.close()
+
+
+@asyncio_test
+async def test_a_delete_through_another_process_cancels_the_turn_and_purges() -> None:
+    store = MemoryStore()
+    first = await over(store)
+    engine = GatedEngine()
+    first._engines["echo"] = engine
+    second = await over(store)
+    second._engines["echo"] = engine
+    user = await first.ensure_user(Identity("local", "me"))
+    started = await first.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    await store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
+    await second.delete_session(user, sid)
+    await released(first)
+    assert not await engine.exists(sid)
+    with pytest.raises(SessionNotFoundError):
+        await first.open_session(user, sid)
+    assert sid not in store._sessions
     await first.close()
     await second.close()
 

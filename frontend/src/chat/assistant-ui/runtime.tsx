@@ -734,7 +734,16 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     if (conversationId === null || runId === null) return;
     try {
       await cancelRun(conversationId, runId);
-    } catch {
+    } catch (failure) {
+      // **A refusal that names the run is no failed stop.** The stop reaches
+      // the run on whichever server holds it, so a 404 or a 409 says only
+      // that it has already ended, and the stream says how.
+      if (
+        failure instanceof ApiError &&
+        (failure.status === 404 || failure.status === 409)
+      ) {
+        return;
+      }
       // **Nothing about the run changed**, and the stream watching it is
       // still watching: the request failed, so nothing was cancelled and the
       // answer carries on arriving. Forgetting the run here would leave it

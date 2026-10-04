@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from datetime import datetime, timedelta
 
 import asyncpg
@@ -51,6 +51,12 @@ from robinauts.controller.ports.work import HeartbeatResult, Held, WorkQueue
 CHANNEL = "robinauts_turns"
 """Where a turn's writes are announced: ``<turn> <position>``, or ``<turn> end``."""
 
+CANCEL_CHANNEL = "robinauts_cancel"
+"""Where a cancel is announced to the process holding the turn: ``<turn>``."""
+
+LISTENER_CHECK = 5.0
+"""How often a reader of cancel signals makes sure the listener is still connected."""
+
 ONE_RUNNING = "turns_one_running_per_session"
 POSITION_TAKEN = "turn_events_pkey"
 USER_EXISTS = "users_provider_subject_key"
@@ -58,7 +64,7 @@ USER_EXISTS = "users_provider_subject_key"
 _SESSION_COLUMNS = "id, owner_id, agent, engine, title, created_at, updated_at"
 _TURN_COLUMNS = (
     "id, session_id, follows, model, state, started_at, ended_at, error, lease_until, retries,"
-    " deadline_at, worker_id, attempt, heartbeat_at"
+    " deadline_at, worker_id, attempt, heartbeat_at, cancel_requested_at"
 )
 
 _VISIBLE = "SELECT 1 FROM sessions WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL"
@@ -76,15 +82,27 @@ FOR SHARE OF t
 _HEARTBEAT = """
 UPDATE turns AS t
 SET lease_until = $3, heartbeat_at = $2
-FROM unnest($4::uuid[], $5::integer[]) AS h(id, attempt)
+FROM unnest($4::uuid[], $5::integer[]) AS h(id, attempt), sessions AS s
 WHERE t.id = h.id AND t.attempt = h.attempt AND t.worker_id = $1
   AND t.state = 'running' AND t.lease_until > $2
-RETURNING t.id
+  AND s.id = t.session_id AND s.deleted_at IS NULL
+RETURNING t.id, t.cancel_requested_at
+"""
+
+_REQUEST_CANCEL = f"""
+UPDATE turns AS t
+SET cancel_requested_at = coalesce(t.cancel_requested_at, $4)
+FROM sessions AS s
+WHERE s.id = t.session_id AND s.id = $2 AND s.owner_id = $1 AND s.deleted_at IS NULL
+  AND t.id = $3 AND t.state = 'running'
+RETURNING {", ".join("t." + c for c in _TURN_COLUMNS.split(", "))}
 """
 
 _END_EXPIRED = f"""
 UPDATE turns AS t
-SET state = 'interrupted', ended_at = $4, error = 'lease expired'
+SET state = CASE WHEN t.cancel_requested_at IS NULL THEN 'interrupted' ELSE 'cancelled' END,
+    ended_at = $4,
+    error = CASE WHEN t.cancel_requested_at IS NULL THEN 'lease expired' END
 FROM sessions AS s
 WHERE s.id = t.session_id AND s.id = $2 AND s.owner_id = $1 AND s.deleted_at IS NULL
   AND t.id = $3 AND t.state = 'running' AND t.lease_until < $4
@@ -120,6 +138,7 @@ def _turn(row: asyncpg.Record) -> Turn:
         row["worker_id"],
         row["attempt"],
         row["heartbeat_at"],
+        row["cancel_requested_at"],
     )
 
 
@@ -146,6 +165,7 @@ class PostgresStore(Store, WorkQueue):
         self._waiters: dict[uuid.UUID, set[asyncio.Future[None]]] = {}
         self._opening: asyncio.Lock | None = None
         self._work: WorkConnection | None = None
+        self._cancels: set[asyncio.Queue[uuid.UUID]] = set()
 
     @property
     def pool(self) -> asyncpg.Pool:
@@ -247,20 +267,15 @@ class PostgresStore(Store, WorkQueue):
         return [_session(row) for row in rows]
 
     async def hide_session(self, owner: uuid.UUID, session: uuid.UUID, at: datetime) -> None:
-        async with self._pool.acquire() as connection, connection.transaction():
-            # The row first, then the question: a second statement's snapshot sees a turn
-            # that `start_turn` committed under the lock, where one UPDATE's would not.
-            held = await connection.fetchval(_VISIBLE + " FOR NO KEY UPDATE", session, owner)
-            if held is None:
-                raise SessionNotFoundError(str(session))
-            status = await connection.execute(
-                "UPDATE sessions SET deleted_at = $2 WHERE id = $1 AND NOT EXISTS"
-                " (SELECT 1 FROM turns WHERE session_id = $1 AND state = 'running')",
-                session,
-                at,
-            )
-            if _rows(status) == 0:
-                raise TurnActiveError(str(session))
+        status = await self._pool.execute(
+            "UPDATE sessions SET deleted_at = $3"
+            " WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL",
+            session,
+            owner,
+            at,
+        )
+        if _rows(status) == 0:
+            raise SessionNotFoundError(str(session))
 
     async def purge_session(self, owner: uuid.UUID, session: uuid.UUID) -> None:
         await self._pool.execute(
@@ -290,7 +305,7 @@ class PostgresStore(Store, WorkQueue):
                     await self._insert_message(connection, question)
                 await connection.execute(
                     f"INSERT INTO turns ({_TURN_COLUMNS})"
-                    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+                    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
                     turn.id,
                     turn.session_id,
                     turn.follows,
@@ -305,6 +320,7 @@ class PostgresStore(Store, WorkQueue):
                     turn.worker_id,
                     turn.attempt,
                     turn.heartbeat_at,
+                    turn.cancel_requested_at,
                 )
         except asyncpg.UniqueViolationError as violated:
             if violated.constraint_name == ONE_RUNNING:
@@ -459,6 +475,16 @@ class PostgresStore(Store, WorkQueue):
             await connection.execute("SELECT pg_notify($1, $2)", CHANNEL, f"{turn} end")
         return _turn(row)
 
+    async def request_cancel(
+        self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, now: datetime
+    ) -> Turn | None:
+        async with self._pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(_REQUEST_CANCEL, owner, session, turn, now)
+            if row is None:
+                return None
+            await connection.execute("SELECT pg_notify($1, $2)", CANCEL_CHANNEL, str(turn))
+        return _turn(row)
+
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:
         async with self._pool.acquire() as connection:
             await self._visible(connection, owner, session)
@@ -530,7 +556,24 @@ class PostgresStore(Store, WorkQueue):
             [h.attempt for h in held],
         )
         renewed = {row["id"] for row in rows}
-        return HeartbeatResult(lost=frozenset(h.turn for h in held if h.turn not in renewed))
+        return HeartbeatResult(
+            lost=frozenset(h.turn for h in held if h.turn not in renewed),
+            cancelled=frozenset(r["id"] for r in rows if r["cancel_requested_at"] is not None),
+        )
+
+    async def cancel_signals(self) -> AsyncIterator[uuid.UUID]:
+        signals: asyncio.Queue[uuid.UUID] = asyncio.Queue()
+        self._cancels.add(signals)
+        try:
+            while True:
+                # A dropped listener is opened again here, so that cancels keep arriving.
+                await self._listen()
+                try:
+                    yield await asyncio.wait_for(signals.get(), LISTENER_CHECK)
+                except TimeoutError:
+                    continue
+        finally:
+            self._cancels.discard(signals)
 
     # --- helpers ------------------------------------------------------------
 
@@ -567,7 +610,14 @@ class PostgresStore(Store, WorkQueue):
                 raise RuntimeError("a store that waits for events needs the database's dsn")
             listener = await asyncpg.connect(self._dsn)
             await listener.add_listener(CHANNEL, self._notified)
+            await listener.add_listener(CANCEL_CHANNEL, self._cancel_notified)
             self._listener = listener
+            # Whatever was announced while no listener was connected is lost: every waiter
+            # reads the store again.
+            for waiting in self._waiters.values():
+                for woken in waiting:
+                    if not woken.done():
+                        woken.set_result(None)
 
     def _notified(self, connection: object, pid: int, channel: str, payload: str) -> None:
         head, _, _ = payload.partition(" ")
@@ -578,6 +628,14 @@ class PostgresStore(Store, WorkQueue):
         for woken in self._waiters.get(turn, ()):
             if not woken.done():
                 woken.set_result(None)
+
+    def _cancel_notified(self, connection: object, pid: int, channel: str, payload: str) -> None:
+        try:
+            turn = uuid.UUID(payload)
+        except ValueError:
+            return
+        for signals in self._cancels:
+            signals.put_nowait(turn)
 
     async def _visible(
         self, connection: asyncpg.Connection, owner: uuid.UUID, session: uuid.UUID

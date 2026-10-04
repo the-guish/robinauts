@@ -112,7 +112,7 @@ async def test_an_append_waits_on_a_readers_end_and_then_inserts_nothing() -> No
 
 
 @asyncio_test
-async def test_a_hide_waits_on_a_starting_turn_and_is_then_refused() -> None:
+async def test_a_hide_waits_on_a_starting_turn_which_it_then_hides_too() -> None:
     async with temporary_schema() as schema:
         store = PostgresStore(schema.pool, dsn=url())
         me, one, asked, running = await seeded(store)
@@ -120,6 +120,7 @@ async def test_a_hide_waits_on_a_starting_turn_and_is_then_refused() -> None:
             me.id, one.id, running.id, TurnState.FINISHED, NOW, None, None, [], NOW, fence=FENCE
         )
         starter = await raw(schema)
+        started = uuid.uuid4()
         try:
             starting = starter.transaction()
             await starting.start()
@@ -128,23 +129,29 @@ async def test_a_hide_waits_on_a_starting_turn_and_is_then_refused() -> None:
             )
             await starter.execute(
                 "INSERT INTO turns (id, session_id, follows, model, state, started_at,"
-                " lease_until) VALUES ($1, $2, $3, 'm', 'running', $4, $5)",
-                uuid.uuid4(),
+                " lease_until, worker_id, attempt) VALUES ($1, $2, $3, 'm', 'running', $4, $5,"
+                " $6, 1)",
+                started,
                 one.id,
                 asked.id,
                 NOW,
                 LEASE,
+                WORKER,
             )
             hiding = asyncio.create_task(store.hide_session(me.id, one.id, NOW))
             await asyncio.sleep(0.3)
             assert not hiding.done(), "the hide did not wait on the session's lock"
             await starting.commit()
-            with pytest.raises(TurnActiveError):
-                await hiding
+            await hiding
         finally:
             await starter.close()
-        assert await store.get_session(me.id, one.id) == one
-        assert await store.active_turn(me.id, one.id) is not None
+        with pytest.raises(SessionNotFoundError):
+            await store.get_session(me.id, one.id)
+        # The turn that started under it writes nothing, and its lease is not renewed.
+        with pytest.raises(TurnLostError):
+            await store.append_event(me.id, one.id, started, 1, DOCUMENT, NOW, EXPIRY, fence=FENCE)
+        beat = await store.heartbeat(WORKER, [Held(started, 1)], NOW, timedelta(minutes=1))
+        assert beat.lost == {started}
         await store.close()
 
 

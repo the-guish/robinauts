@@ -2263,6 +2263,47 @@ test("a stop that does not reach the server leaves the answer alone", async () =
   });
 });
 
+for (const [status, answer] of [
+  [202, () => new Response(null, { status: 202 })],
+  [409, () => refusal(409, "TurnActiveError", "elsewhere")],
+  [404, () => refusal(404, "NoActiveTurnError", "over")],
+] as const) {
+  test(`a stop answered ${status} is no stop that failed to arrive`, async () => {
+    // The stop reaches the run wherever it runs: still ending, or already
+    // over, which the stream says.
+    const { response, write } = writable({
+      headers: streamHeaders(RUN, CONVERSATION),
+    });
+    stub((call) => {
+      if (call.url === `/api/conversations/${CONVERSATION}`) {
+        return json(opened(conversation(1), TREE));
+      }
+      if (call.url.endsWith("/cancel")) return answer();
+      if (call.url === `/api/conversations/${CONVERSATION}/turns`)
+        return response;
+      return undefined;
+    });
+    const { result } = chatting({ conversationId: CONVERSATION });
+    await waitFor(() => {
+      expect(result.current.state.messages).toHaveLength(2);
+    });
+    await act(async () => {
+      void result.current.runtime.thread.append("and then?");
+      await settle();
+    });
+    write(
+      event("TEXT_MESSAGE_START", { messageId: "m4", role: "assistant" }, 2),
+    );
+    await settle();
+    await act(async () => {
+      result.current.runtime.thread.cancelRun();
+      await settle();
+    });
+    expect(result.current.state.notice).toBeNull();
+    expect(result.current.state.runId).toBe(RUN);
+  });
+}
+
 test("a turn the backend refuses takes its question back off the screen", async () => {
   // The 409 a conversation that is already answering makes: another tab
   // started a run between this one's reading and its send.

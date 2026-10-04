@@ -146,6 +146,19 @@ test("a bodyless POST says it is JSON as well", async () => {
   expect(init?.body).toBeUndefined();
 });
 
+test("a 202 is accepted and carries nothing to read", async () => {
+  // A cancel whose run, on whichever server holds it, is still ending.
+  answering(202, null);
+
+  const nothing = await request(
+    "post",
+    "/api/conversations/{conversation_id}/runs/{run_id}/cancel",
+    { path: { conversation_id: "c-1", run_id: "r-1" } },
+  );
+
+  expect(nothing).toBeUndefined();
+});
+
 test("a body is sent as JSON", async () => {
   const fetch = answering(200, JSON.stringify({ id: "c-1", title: "Renamed" }));
 

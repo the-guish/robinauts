@@ -1033,6 +1033,9 @@
           }
         ],
         "responses": {
+          "202": {
+            "description": "The cancel is recorded, and the run is still ending"
+          },
           "204": {
             "description": "Successful Response"
           },

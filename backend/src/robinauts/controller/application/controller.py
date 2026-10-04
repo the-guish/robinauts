@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import contextlib
 import dataclasses
 import uuid
 from collections.abc import AsyncGenerator, Callable
@@ -29,12 +31,12 @@ from robinauts.controller.contract.domain import (
     OpenedSession,
     Role,
     Session,
+    SessionNotFoundError,
     SessionPage,
     StorageConfig,
     StorageKind,
     TextPart,
     Turn,
-    TurnActiveError,
     TurnEnded,
     TurnLostError,
     TurnStarted,
@@ -65,6 +67,12 @@ from robinauts.controller.ports.work import WorkQueue
 
 WAIT_SECONDS = 15.0
 """How long a watcher waits for an event before it reads the store again."""
+
+CANCEL_WAIT = 5.0
+"""How long a cancel, or the delete of a session whose turn runs, waits for the turn to end."""
+
+LAST_POSITION = 2**31 - 1
+"""A position past any event's."""
 
 CLOSE_TIMEOUT = 10.0
 """How long `close` waits for the turns this process runs before it interrupts them."""
@@ -209,11 +217,13 @@ class RobinautsController(Controller):
         session = await self._store.get_session(user.id, session_id)
         await self._end_expired(user.id, session_id)
         running = await self._store.active_turn(user.id, session_id)
-        if running is not None and await self._dispatcher.stop(running.id, CANCEL):
-            await self._end_if_running(user, running, TurnState.CANCELLED)
+        ended = running is None or await self._cancel(user.id, session_id, running.id)
+        # Hidden whatever runs: a turn that did not end in time writes nothing more, and its
+        # engine's memory goes with the records once it has ended, by the sweep.
         await self._store.hide_session(user.id, session_id, self._now())
-        await (await self._engine(session.engine)).forget(session_id)
-        await self._store.purge_session(user.id, session_id)
+        if ended:
+            await (await self._engine(session.engine)).forget(session_id)
+            await self._store.purge_session(user.id, session_id)
 
     async def fork_session(
         self, user: User, session_id: uuid.UUID, *, at_message: uuid.UUID
@@ -328,22 +338,47 @@ class RobinautsController(Controller):
 
     async def cancel_turn(
         self, user: User, session_id: uuid.UUID, turn_id: uuid.UUID | None = None
-    ) -> None:
+    ) -> bool:
         await self._store.get_session(user.id, session_id)
         await self._end_expired(user.id, session_id)
         running = await self._store.active_turn(user.id, session_id)
         if running is None or (turn_id is not None and running.id != turn_id):
             raise NoActiveTurnError(str(session_id))
-        if not await self._dispatcher.stop(running.id, CANCEL):
-            raise TurnActiveError(f"turn {running.id} runs in another process")
-        # A runner that never claimed the turn wrote nothing: the turn is ended here.
-        await self._end_if_running(user, running, TurnState.CANCELLED)
+        return await self._cancel(user.id, session_id, running.id)
 
-    async def _end_if_running(self, user: User, turn: Turn, state: TurnState) -> None:
+    async def _cancel(self, owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID) -> bool:
+        """Ask for the turn's cancel, which reaches whichever process holds it, and wait up to
+        ``CANCEL_WAIT`` for it to end: true when it has."""
+        requested = await self._store.request_cancel(owner, session_id, turn_id, self._now())
+        if requested is None:
+            return True
+        # This process's own is stopped here, without the signal's round trip; one whose
+        # runner never started wrote nothing, and is ended here.
+        if await self._dispatcher.stop(turn_id, CANCEL):
+            await self._end_if_running(owner, requested, TurnState.CANCELLED)
+        return await self._ended(owner, session_id, turn_id, CANCEL_WAIT)
+
+    async def _ended(
+        self, owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID, timeout: float
+    ) -> bool:
+        """Whether the turn has ended, or does within ``timeout`` seconds."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            current = await self._store.get_turn(owner, session_id, turn_id)
+            if current is None or current.state is not TurnState.RUNNING:
+                return True
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return False
+            # No event is past the last position there can be: this wakes at the end alone.
+            await self._store.wait_for_events(owner, session_id, turn_id, LAST_POSITION, remaining)
+
+    async def _end_if_running(self, owner: uuid.UUID, turn: Turn, state: TurnState) -> None:
         now = self._now()
         try:
             await self._store.finish_turn(
-                user.id,
+                owner,
                 turn.session_id,
                 turn.id,
                 state,
@@ -395,6 +430,18 @@ class RobinautsController(Controller):
 
     async def run_turn(self, owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID) -> None:
         """Run the turn, from its ids alone: what a worker in another process would call."""
+        try:
+            await self._run_turn(owner, session_id, turn_id)
+        except asyncio.CancelledError as stopped:
+            if CANCEL in stopped.args:
+                # Cancelled before the runner had the turn in hand: it is ended here.
+                with contextlib.suppress(SessionNotFoundError):
+                    turn = await self._store.get_turn(owner, session_id, turn_id)
+                    if turn is not None:
+                        await self._end_if_running(owner, turn, TurnState.CANCELLED)
+            raise
+
+    async def _run_turn(self, owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID) -> None:
         session = await self._store.get_session(owner, session_id)
         turn = await self._store.get_turn(owner, session_id, turn_id)
         if turn is None:
@@ -456,7 +503,8 @@ class RobinautsController(Controller):
         events = await self._store.events_after(owner, session_id, running.id, 0)
         partial = partial_answer(event_from_document(d).event for _, d in events)
         answer = None
-        if partial is not None:
+        # A turn whose cancel was asked for ends cancelled, and keeps nothing.
+        if partial is not None and running.cancel_requested_at is None:
             answer = Message(
                 partial.message_id,
                 session_id,

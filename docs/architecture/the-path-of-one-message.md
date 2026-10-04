@@ -262,11 +262,12 @@ the client sees the terminal event and stops.
   again, or re-attaching with `Last-Event-ID`, continues from the position it had
   reached. This is the same on both.
 - **Cancel.** `POST …/cancel` calls `request_cancel`:
-  - **PostgreSQL:** `UPDATE turns SET cancel_requested_at`.
+  - **PostgreSQL:** `UPDATE turns SET cancel_requested_at`, and
+    `NOTIFY robinauts_cancel`, which the process holding the turn listens on.
   - **AWS:** an `UpdateItem`.
 
-  The runner sees the flag at its next lease tick and cancels the engine's stream. The
-  turn ends as `cancelled`.
+  The holder stops the runner at once, or sees the flag at its next lease tick, and
+  the runner cancels the engine's stream. The turn ends as `cancelled`.
 - **The runner dies**, whether the process crashed or the Lambda was killed. Its lease
   runs out. The next read that finds the turn (`open_session`, `watch_turn`,
   `start_turn`, `cancel_turn`, `delete_session`) ends it as `interrupted` through
@@ -278,12 +279,11 @@ the client sees the terminal event and stops.
   Its `MessageStarted` is refused at position 1 and it returns without running the
   engine. On PostgreSQL the dispatcher is in-process, and it does not happen.
 - **The session is deleted during the turn.** `delete_session` ends a turn whose
-  lease has passed, cancels the turn its own process runs and waits for it to end,
-  then hides. A turn running in another process makes the hide refuse with 409 until
-  stage two's cancel through the store. On PostgreSQL the hide locks the session row
-  first and looks for a running turn in a second statement, so a turn starting under
-  it is seen. So no runner, and no engine, writes under a purge, and `forget` is the
-  last word.
+  lease has passed, asks for the cancel of a running turn wherever it runs and waits
+  a few seconds for it to end, then hides. From the hide on, every write of a runner
+  of the session is refused and no lease of it renewed, so the purge follows at once
+  when no turn runs, and otherwise once the last lease has passed. So no runner, and
+  no engine, writes under a purge, and `forget` is the last word.
 - **A tool returns a NUL**, or half a character. The encoder drops the one and
   replaces the other before the event is written, on both stores alike.
 - **A stream reaches a limit**, such as Lambda's 15 minutes or a proxy's timeout. The

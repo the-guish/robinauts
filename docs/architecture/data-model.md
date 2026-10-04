@@ -90,11 +90,12 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   same turn is refused at position 1, before it has run the engine, because each
   runner mints the answer's id afresh and so no two claims are the same document.
 - **Deleting hides, then purges.** `deleted_at` makes a session not found and closes
-  it to turns. The hide is refused while a turn is running (`TurnActiveError`), so no
-  runner and no engine writes under a purge: the controller first ends a turn whose
-  lease has passed, cancels the turn it runs itself and waits for it to end, and a
-  turn run by another process is refused until stage two's cancel through the store.
-  The purge calls `forget` on the engine the session records, which may no longer be
+  it to turns. The controller first ends a turn whose lease has passed, and asks for
+  the cancel of a running turn, whichever process runs it, waiting a few seconds for
+  it to end. It hides the session whatever runs: from then on every write of a
+  runner's is refused and no lease of it is renewed. So no runner and no engine
+  writes under a purge, which follows at once when no turn runs, and otherwise once
+  the last lease has passed. The purge calls `forget` on the engine the session records, which may no longer be
   the one its agent's configuration names, then deletes the session with its
   messages, turns and events.
 - **Events expire.** `expires_at` is set when an event is written, as that moment
@@ -120,8 +121,11 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   the turn ended with none supplies it from the record. A runner that outlives its
   lease has lost the turn whether or not a reader has found it: every write names
   its time, and the store refuses one past the lease. A heartbeat that finds a turn
-  not renewed stops its runner, which writes nothing more. Reading back
-  `cancel_requested_at` with each renewal is not done yet.
+  not renewed stops its runner, which writes nothing more.
+- **A cancel goes through the store.** `request_cancel` sets `cancel_requested_at` and
+  announces it on `robinauts_cancel`; the process holding the turn stops it, and its
+  heartbeat reads the column back with each renewal, for an announcement it missed.
+  A turn whose lease passes with a cancel asked for ends as `cancelled`.
 - **No clocks and no ids in a store.** The controller mints every id and sets every
   time.
 - **A session and its records are addressed from the owner down.** Every operation on

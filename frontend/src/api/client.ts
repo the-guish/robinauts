@@ -293,7 +293,9 @@ export async function request<M extends Method, P extends PathsWith<M>>(
   if (!response.ok) {
     throw await refused(response);
   }
-  if (response.status === 204) {
+  // A 202 here says "accepted, still under way" and carries nothing to read:
+  // a cancel whose run is still ending (`docs/specs/wire.md`).
+  if (response.status === 204 || response.status === 202) {
     return undefined as Result<Operation<P, M>>;
   }
   try {

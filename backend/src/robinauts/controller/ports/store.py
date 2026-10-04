@@ -99,7 +99,8 @@ class Store(ABC):
 
     @abstractmethod
     async def hide_session(self, owner: uuid.UUID, session: uuid.UUID, at: datetime) -> None:
-        """From then on the session is not found. ``TurnActiveError`` while a turn runs."""
+        """From then on the session is not found, whatever runs: every write of a turn of it
+        is refused, and the heartbeat renews none of its leases."""
 
     @abstractmethod
     async def purge_session(self, owner: uuid.UUID, session: uuid.UUID) -> None:
@@ -171,7 +172,16 @@ class Store(ABC):
     ) -> Turn | None:
         """The turn ended as ``interrupted`` if it is running and its lease has passed
         ``now``, with ``answer`` (what it did, marked failed) stored and the session's
-        ``updated_at`` set to ``now``, in one operation, with no event; ``None`` otherwise."""
+        ``updated_at`` set to ``now``, in one operation, with no event; ``None`` otherwise.
+        A turn whose cancel was asked for ends as ``cancelled`` instead, and ``answer`` must
+        be ``None``."""
+
+    @abstractmethod
+    async def request_cancel(
+        self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, now: datetime
+    ) -> Turn | None:
+        """Record that the turn is to be cancelled, and signal its holder wherever it runs
+        (``WorkQueue.cancel_signals``): the turn, if it is running, else ``None``."""
 
     @abstractmethod
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None: ...

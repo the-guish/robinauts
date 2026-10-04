@@ -352,6 +352,8 @@ class Turn:
     """Which run of the turn holds it: every write of its runner names it."""
     heartbeat_at: datetime | None = None
     """When the holder last renewed the lease."""
+    cancel_requested_at: datetime | None = None
+    """When a cancel was asked for, from whichever process; the holder ends the turn."""
 
 
 @dataclass(frozen=True, slots=True)

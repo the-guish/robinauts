@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import uuid
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from datetime import datetime, timedelta
 
 from robinauts.controller.contract.domain import (
@@ -41,6 +41,7 @@ class MemoryStore(Store, WorkQueue):
         self._turns: dict[uuid.UUID, Turn] = {}
         self._events: dict[uuid.UUID, list[StoredEvent]] = {}
         self._changed = asyncio.Condition()
+        self._cancels: set[asyncio.Queue[uuid.UUID]] = set()
 
     async def open(self) -> None:
         """Nothing to open: the engines keep their memory in this process too."""
@@ -119,8 +120,6 @@ class MemoryStore(Store, WorkQueue):
 
     async def hide_session(self, owner: uuid.UUID, session: uuid.UUID, at: datetime) -> None:
         self._visible(owner, session)
-        if self._running(session) is not None:
-            raise TurnActiveError(str(session))
         self._hidden[session] = at
         await self._notify()
 
@@ -228,15 +227,32 @@ class MemoryStore(Store, WorkQueue):
         running = self._running(session)
         if running is None or running.id != turn or running.lease_until >= now:
             return None
-        ended = dataclasses.replace(
-            running, state=TurnState.INTERRUPTED, ended_at=now, error="lease expired"
-        )
+        if running.cancel_requested_at is None:
+            ended = dataclasses.replace(
+                running, state=TurnState.INTERRUPTED, ended_at=now, error="lease expired"
+            )
+        else:
+            ended = dataclasses.replace(running, state=TurnState.CANCELLED, ended_at=now)
         self._turns[running.id] = ended
         self._sessions[session] = dataclasses.replace(self._sessions[session], updated_at=now)
         if answer is not None:
             self._messages[session].append(answer)
         await self._notify()
         return ended
+
+    async def request_cancel(
+        self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, now: datetime
+    ) -> Turn | None:
+        self._visible(owner, session)
+        found = self._turn_of(session, turn)
+        if found is None or found.state is not TurnState.RUNNING:
+            return None
+        if found.cancel_requested_at is None:
+            found = dataclasses.replace(found, cancel_requested_at=now)
+            self._turns[turn] = found
+        for signals in self._cancels:
+            signals.put_nowait(turn)
+        return found
 
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:
         self._visible(owner, session)
@@ -256,16 +272,31 @@ class MemoryStore(Store, WorkQueue):
     async def heartbeat(
         self, worker: str, held: Sequence[Held], now: datetime, lease: timedelta
     ) -> HeartbeatResult:
-        lost = set()
+        lost, cancelled = set(), set()
         for each in held:
             found = self._turns.get(each.turn)
-            if found is None or not self._held(found, Fence(worker, each.attempt), now):
+            if (
+                found is None
+                or found.session_id in self._hidden
+                or not self._held(found, Fence(worker, each.attempt), now)
+            ):
                 lost.add(each.turn)
                 continue
             self._turns[each.turn] = dataclasses.replace(
                 found, lease_until=now + lease, heartbeat_at=now
             )
-        return HeartbeatResult(lost=frozenset(lost))
+            if found.cancel_requested_at is not None:
+                cancelled.add(each.turn)
+        return HeartbeatResult(lost=frozenset(lost), cancelled=frozenset(cancelled))
+
+    async def cancel_signals(self) -> AsyncIterator[uuid.UUID]:
+        signals: asyncio.Queue[uuid.UUID] = asyncio.Queue()
+        self._cancels.add(signals)
+        try:
+            while True:
+                yield await signals.get()
+        finally:
+            self._cancels.discard(signals)
 
     async def wait_for_events(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, after: int, timeout: float
