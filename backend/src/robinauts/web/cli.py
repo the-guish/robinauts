@@ -12,8 +12,9 @@ refused. ``start`` needs a sign-in configuration that names an identity provider
 provider, every ``/api/`` route answers for the person signed in through it; in the local
 development mode, for the mode's one local user. The interface is the directory
 ``ROBINAUTS_UI_DIR`` names, or the build an installed wheel carries, or ``frontend/dist`` of
-this checkout when it is built. Storage is PostgreSQL when ``ROBINAUTS_DATABASE_URL`` is set,
-and in memory otherwise; the sign-in records are kept on the same storage. The server never
+this checkout when it is built. Storage is PostgreSQL, which ``ROBINAUTS_DATABASE_URL`` names
+and sign-in requires; the local development mode keeps it in memory when it is not set. The
+sign-in records are kept on the same storage. The server never
 changes the database: it refuses one that is not this build's and names the command.
 """
 
@@ -57,6 +58,7 @@ NO_PROVIDER = (
     "no identity provider is configured: name one in [providers], or start with"
     " --dev-no-sign-in to develop on this machine with sign-in off"
 )
+NO_DATABASE = f"no database: set {DATABASE_URL_VARIABLE} to the PostgreSQL this deployment uses"
 SIGN_IN_OFF = "sign-in is off: the local development mode, one local user, loopback only"
 
 
@@ -103,6 +105,8 @@ def serving(
         else:
             if sign_in is None or not sign_in.providers:
                 problems.append(NO_PROVIDER)
+        if not environ.get(DATABASE_URL_VARIABLE):
+            problems.append(NO_DATABASE)
     try:
         config, secret_for = configure(tables, environ)
     except ConfigError as refused:

@@ -30,8 +30,11 @@ def test_version_prints_the_version(capsys: pytest.CaptureFixture[str]) -> None:
     assert capsys.readouterr().out.strip()
 
 
+DATABASE = {"ROBINAUTS_DATABASE_URL": "postgresql://robinauts@db/robinauts"}
+
+
 def test_a_provider_is_served_with_its_sign_in() -> None:
-    _, _, sign_in = serving(SIGN_IN, {}, host="0.0.0.0", dev_no_sign_in=False)
+    _, _, sign_in = serving(SIGN_IN, DATABASE, host="0.0.0.0", dev_no_sign_in=False)
     assert sign_in is not None
     assert list(sign_in.providers) == ["okta"]
 
@@ -39,6 +42,11 @@ def test_a_provider_is_served_with_its_sign_in() -> None:
 def test_no_provider_is_refused_without_the_mode() -> None:
     with pytest.raises(ConfigError, match="--dev-no-sign-in"):
         serving({}, {}, host="127.0.0.1", dev_no_sign_in=False)
+
+
+def test_sign_in_without_a_database_is_refused() -> None:
+    with pytest.raises(ConfigError, match="no database: set ROBINAUTS_DATABASE_URL"):
+        serving(SIGN_IN, {}, host="0.0.0.0", dev_no_sign_in=False)
 
 
 def test_the_mode_cannot_be_combined_with_a_sign_in_table() -> None:
