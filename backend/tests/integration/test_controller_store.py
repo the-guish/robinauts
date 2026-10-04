@@ -16,6 +16,7 @@ import pytest
 from aio import asyncio_test
 from contracts.store import FENCE, WORKER, StoreContract
 from controller_db import TemporarySchema, requires_postgres, temporary_schema, url
+from robinauts.controller.adapters.postgres import store as store_module
 from robinauts.controller.adapters.postgres.pool import codecs, open_pool
 from robinauts.controller.adapters.postgres.schema import create_schema
 from robinauts.controller.adapters.postgres.store import PostgresStore
@@ -340,3 +341,22 @@ async def test_two_processes_sweeping_at_once_delete_everything_expired_once() -
         finally:
             await first.close()
             await second.close()
+
+
+@asyncio_test
+async def test_a_work_connection_that_hangs_is_dropped_and_opened_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(store_module, "WORK_TIMEOUT", 0.3)
+    async with temporary_schema() as schema:
+        store = PostgresStore(schema.pool, dsn=schema.dsn)
+        me, one, _, running = await seeded(store)
+        held = [Held(running.id, FENCE.attempt)]
+        try:
+            with pytest.raises(TimeoutError):
+                await store._on_work_connection(lambda c: c.fetchval("SELECT pg_sleep(5)"))
+            assert store._work is None
+            renewed = await store.heartbeat(WORKER, held, NOW, timedelta(seconds=90))
+            assert renewed.lost(held) == []
+        finally:
+            await store.close()

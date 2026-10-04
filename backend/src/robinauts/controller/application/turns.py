@@ -20,7 +20,7 @@ import contextlib
 import json
 import logging
 import uuid
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import aclosing
 from datetime import UTC, datetime, timedelta
 
@@ -133,16 +133,19 @@ class _Writer:
 
     async def append(self, *events: TurnEvent) -> None:
         """What is held, then these, as one batch. A batch the database had no connection
-        for in time is written again, the same documents at the same positions, which the
-        store takes as the same write."""
+        for in time is written again; one that could not be written at all goes back to be
+        held, unnumbered, so that the next write, or the finish, carries it and no position
+        is lost."""
         self._raise_failed()
         async with self._lock:
-            batch = self._numbered(self._take() + list(events))
-            if not batch:
+            held = self._take() + list(events)
+            if not held:
                 return
-            for tried in range(BUSY_TRIES):
-                try:
-                    await self._store.append_events(
+            before = self.position
+            batch = self._numbered(held)
+            try:
+                await _busy_retried(
+                    lambda: self._store.append_events(
                         self._owner,
                         self._turn.session_id,
                         self._turn.id,
@@ -150,15 +153,19 @@ class _Writer:
                         batch,
                         datetime.now(UTC),
                     )
-                    return
-                except BusyError:
-                    if tried == BUSY_TRIES - 1:
-                        raise
-                    await asyncio.sleep(BUSY_BACKOFF * (tried + 1))
+                )
+            except TurnLostError:
+                raise
+            except Exception:
+                self.position = before
+                self._held = held + self._held
+                raise
 
     async def last(self, *events: TurnEvent) -> list[StoredEvent]:
-        """What is held, then the events a finish writes, numbered after the ones written."""
+        """What is held, then the events a finish writes, numbered after the ones written.
+        ``TurnLostError`` when a batch written in the background was refused as lost."""
         async with self._lock:
+            self._raise_failed()
             return self._numbered(self._take() + list(events))
 
     async def finish(
@@ -168,19 +175,25 @@ class _Writer:
         answer: Message | None,
         events: Sequence[StoredEvent],
     ) -> None:
-        now = datetime.now(UTC)
-        await self._store.finish_turn(
-            self._owner,
-            self._turn.session_id,
-            self._turn.id,
-            self._fence,
-            state,
-            now,
-            error,
-            None if answer is None else stored_message(answer),
-            events,
-            now,
-        )
+        stored = None if answer is None else stored_message(answer)
+
+        async def write() -> None:
+            now = datetime.now(UTC)
+            await self._store.finish_turn(
+                self._owner,
+                self._turn.session_id,
+                self._turn.id,
+                self._fence,
+                state,
+                now,
+                error,
+                stored,
+                events,
+                now,
+            )
+
+        # A finish the pool had no connection for wrote nothing, and is written again.
+        await _busy_retried(write)
 
     async def close(self) -> None:
         """Write nothing more in the background."""
@@ -209,8 +222,11 @@ class _Writer:
     async def _flush(self) -> None:
         try:
             await self.append()
-        except Exception as error:
-            self._failed = error
+        except TurnLostError as lost:
+            self._failed = lost
+        except Exception:
+            # Held again by `append`: the next write, or the finish, carries it.
+            log.warning("a batch of the turn's events could not be written; it is held")
         finally:
             self._flushing = None
         if self._failed is None:
@@ -363,8 +379,25 @@ async def run_turn(
 async def _end(
     writer: _Writer, state: TurnState, error: str | None, answer: Message | None = None
 ) -> None:
-    """End a turn, with what it answered if anything; nothing more if the turn is lost."""
+    """End a turn, with what it answered if anything; nothing more if the turn is lost. An
+    end the database would not take is logged and left: the turn's lease runs out, and
+    whoever finds it then ends it, keeping what it had answered."""
     try:
         await writer.finish(state, error, answer, await writer.last(TurnEnded(state)))
     except TurnLostError:
         return
+    except Exception:
+        log.exception("the turn's end could not be written; it is left to its lease")
+
+
+async def _busy_retried(write: Callable[[], Awaitable[None]]) -> None:
+    """The write, tried again while the pool has no connection free in time: such a write
+    did nothing, so trying it again is safe."""
+    for tried in range(BUSY_TRIES):
+        try:
+            await write()
+            return
+        except BusyError:
+            if tried == BUSY_TRIES - 1:
+                raise
+            await asyncio.sleep(BUSY_BACKOFF * (tried + 1))

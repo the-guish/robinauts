@@ -28,16 +28,19 @@ from robinauts.controller.contract.domain import (
     Identity,
     MessageStarted,
     NumberedEvent,
+    Session,
     SessionNotFoundError,
     StorageConfig,
     StorageKind,
     Swept,
     TextPart,
+    TextPiece,
     ToolCallPart,
     ToolResultPart,
     TurnActiveError,
     TurnEnded,
     TurnState,
+    UnknownModelError,
     WorkConfig,
 )
 from robinauts.controller.core.documents import event_from_document, message_from_document
@@ -704,3 +707,141 @@ async def test_the_sweep_ends_expired_turns_purges_what_a_delete_left_and_delete
     assert (await here.sweep()).events == 7
     await gone.close()
     await here.close()
+
+
+@asyncio_test
+async def test_a_new_chat_refused_leaves_no_conversation_behind() -> None:
+    controller = await over(MemoryStore())
+    user = await controller.ensure_user(Identity("local", "me"))
+    with pytest.raises(UnknownModelError):
+        await controller.start_session(user, agent="echo", model="gone", text="one")
+    await controller.drain()
+    with pytest.raises(DrainingError):
+        await controller.start_session(user, agent="echo", model="echo", text="one")
+    assert (await controller.list_sessions(user, limit=10)).sessions == ()
+    await controller.close()
+
+
+class BusyStartStore(MemoryStore):
+    async def start_turn(self, *args: Any, **kwargs: Any) -> None:
+        raise BusyError("no connection was free")
+
+
+@asyncio_test
+async def test_a_first_turn_the_pool_had_no_room_for_takes_its_conversation_back() -> None:
+    store = BusyStartStore()
+    controller = await over(store)
+    user = await controller.ensure_user(Identity("local", "me"))
+    with pytest.raises(BusyError):
+        await controller.start_session(user, agent="echo", model="echo", text="one")
+    assert (await controller.list_sessions(user, limit=10)).sessions == ()
+    assert store._sessions == {}
+    await controller.close()
+
+
+@asyncio_test
+async def test_a_conversation_with_no_message_opens() -> None:
+    store = MemoryStore()
+    controller = await over(store)
+    user = await controller.ensure_user(Identity("local", "me"))
+    now = datetime.now(UTC)
+    empty = Session(uuid.uuid4(), user.id, "echo", "echo", now, now)
+    await store.add_session(empty)
+    opened = await controller.open_session(user, empty.id)
+    assert (opened.messages, opened.active) == ((), None)
+    await controller.close()
+
+
+class BusyFinishStore(MemoryStore):
+    """A pool with no connection free for a turn's finish, twice."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.refused = 0
+
+    async def finish_turn(self, *args: Any, **kwargs: Any) -> None:
+        if self.refused < 2:
+            self.refused += 1
+            raise BusyError("no connection was free")
+        await super().finish_turn(*args, **kwargs)
+
+
+@asyncio_test
+async def test_a_finish_the_pool_had_no_room_for_is_written_again() -> None:
+    busy = BusyFinishStore()
+    controller = await over(busy)
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    await asyncio.wait_for(settled(controller, user, started), 10.0)
+    assert busy.refused == 2
+    turn = await busy.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert turn.state is TurnState.FINISHED
+    answer = (await controller.open_session(user, started.session_id)).messages[-1]
+    assert not answer.failed
+    await controller.close()
+
+
+class FlakyAppendStore(MemoryStore):
+    """A database that drops the connection under the second batch of a turn, once."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.batches = 0
+
+    async def append_events(self, *args: Any, **kwargs: Any) -> None:
+        self.batches += 1
+        if self.batches == 2:
+            raise ConnectionResetError("the connection went")
+        await super().append_events(*args, **kwargs)
+
+
+@asyncio_test
+async def test_a_batch_written_in_the_background_that_failed_is_held_and_written_later() -> None:
+    flaky = FlakyAppendStore()
+    controller = await over(flaky)
+    engine = ChattyEngine()
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="count")
+    sid = started.session_id
+    await until_async(lambda: flaky.last_position(user.id, sid, started.turn_id), lambda n: n >= 3)
+    engine.gate.set()
+    await settled(controller, user, started)
+    stored = await flaky.events_after(user.id, sid, started.turn_id, 0)
+    assert [p for p, _ in stored] == list(range(1, len(stored) + 1))
+    text = "".join(
+        e.text
+        for e in (event_from_document(d).event for _, d in stored)
+        if isinstance(e, TextPiece)
+    )
+    assert text == "one two three four five"
+    await controller.close()
+
+
+@asyncio_test
+async def test_a_cancel_from_another_process_before_the_runner_began_ends_the_turn() -> None:
+    store = MemoryStore()
+    first = await over(store, worker="pod-a")
+    loading = asyncio.Event()
+
+    async def slow_engine(name: str) -> Any:
+        await loading.wait()
+        return EchoEngine()
+
+    second = await over(store, worker="pod-b")
+    user = await first.ensure_user(Identity("local", "me"))
+    started = await first.start_session(user, agent="echo", model="echo", text="one")
+    await settled(first, user, started)
+    first._engine = slow_engine  # type: ignore[method-assign]
+    # A second turn whose runner is still building its engine when the cancel arrives.
+    turn = await first.regenerate_answer(
+        user, started.session_id, question_id=started.question.id, model="echo"
+    )
+    await asyncio.sleep(0.05)
+    assert await second.cancel_turn(user, started.session_id, turn.turn_id) is True
+    ended = await store.get_turn(user.id, started.session_id, turn.turn_id)
+    assert ended is not None
+    assert ended.state is TurnState.CANCELLED
+    await first.close()
+    await second.close()

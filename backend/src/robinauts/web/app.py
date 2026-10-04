@@ -16,6 +16,7 @@ AG-UI over SSE, its run id is the turn's id, and its thread id the session's.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -74,6 +75,10 @@ from robinauts.web.sign_in import (
 )
 
 DEFAULT_PAGE = 30
+
+FIRST_EVENT_WAIT = 0.5
+"""How long a stream waits for its turn's first event, and so for a refusal, before its
+response begins."""
 
 KEEP_ALIVE_SECONDS = 15.0
 """The longest a turn's stream goes without a byte: a `: keep-alive` comment follows."""
@@ -528,16 +533,29 @@ def create_app(
         user: User, session_id: uuid.UUID, turn_id: uuid.UUID, after: int
     ) -> StreamingResponse:
         events = controller.watch_turn(user, session_id, turn_id, after=after)
-        # The refusals happen inside the generator: ask for the first event here, so that
-        # they answer with a status rather than a broken stream.
-        first = await anext(events, None)
+        # The refusals happen inside the generator, in its first reads: wait a moment for
+        # the first event, so that they answer with a status rather than a broken stream.
+        # Not for the event itself, which may be minutes away behind a long tool call: the
+        # stream begins anyway, and its keep-alives and the drain cover the wait.
+        first: asyncio.Future[NumberedEvent | None] = asyncio.ensure_future(anext(events, None))
+        await asyncio.wait({first}, timeout=FIRST_EVENT_WAIT)
+        if first.done():
+            first.result()
 
         async def chained() -> AsyncIterator[NumberedEvent]:
-            if first is None:
-                return
-            yield first
-            async for event in events:
-                yield event
+            try:
+                head = await first
+                if head is None:
+                    return
+                yield head
+                async for event in events:
+                    yield event
+            finally:
+                if not first.done():
+                    first.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+                        await first
+                await events.aclose()
 
         return event_stream(session_id, turn_id, chained(), drained)
 

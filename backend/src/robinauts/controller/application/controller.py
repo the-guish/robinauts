@@ -253,8 +253,9 @@ class RobinautsController(Controller, Operations):
         await self._end_expired(user.id, session_id)
         messages = await self._messages(user.id, session_id)
         by_id = {m.id: m for m in messages}
-        thread = [messages[-1]]
-        while thread[-1].parent_id is not None:
+        # A conversation whose first turn never began has no message at all.
+        thread = messages[-1:]
+        while thread and thread[-1].parent_id is not None:
             thread.append(by_id[thread[-1].parent_id])
         running = await self._store.active_turn(user.id, session_id)
         active = None
@@ -290,9 +291,15 @@ class RobinautsController(Controller, Operations):
         raise NotImplementedError("fork_session")
 
     async def start_session(self, user: User, *, agent: str, model: str, text: str) -> TurnStarted:
+        # Everything that refuses a turn, before anything is stored: a refusal leaves no
+        # conversation behind.
+        if self._draining:
+            raise DrainingError("this process is stopping; another one takes the turn")
         agent_config = self._config.agents.get(agent)
         if agent_config is None:
             raise UnknownAgentError(agent)
+        if model not in self._config.models:
+            raise UnknownModelError(model)
         now = self._now()
         session = Session(
             uuid.uuid4(),
@@ -314,9 +321,17 @@ class RobinautsController(Controller, Operations):
             engine=session.engine,
             model=model,
         )
+        engine = await self._engine(session.engine)
         await self._store.add_session(session)
-        await (await self._engine(session.engine)).create(session.id)
-        turn = await self._start_turn(user, session, question, model, new_question=True)
+        try:
+            await engine.create(session.id)
+            turn = await self._start_turn(user, session, question, model, new_question=True)
+        except BaseException:
+            # Refused after all, as by a pool with no connection free: the conversation the
+            # turn would have begun goes with it.
+            await engine.forget(session.id)
+            await self._store.purge_session(user.id, session.id)
+            raise
         return TurnStarted(session.id, turn.id, question)
 
     async def send_message(
@@ -555,7 +570,42 @@ class RobinautsController(Controller, Operations):
         """Run the turn's attempt, from its ids alone: what a worker in another process would
         call. A turn this process does not hold under that attempt is not run."""
         with logs.about(session=session_id, turn=turn_id):
-            await self._run_turn(owner, session_id, turn_id, attempt)
+            try:
+                await self._run_turn(owner, session_id, turn_id, attempt)
+            except asyncio.CancelledError as stopped:
+                # Stopped before its runner claimed the turn, as by a cancel from another
+                # process that arrived during the loading: the runner wrote nothing, so the
+                # holder ends the turn here rather than leave it to its lease.
+                state = None
+                if StopReason.CANCEL in stopped.args:
+                    state = TurnState.CANCELLED
+                elif StopReason.CLOSE in stopped.args:
+                    state = TurnState.INTERRUPTED
+                if state is not None:
+                    await self._end_unclaimed(owner, session_id, turn_id, attempt, state)
+                raise
+
+    async def _end_unclaimed(
+        self,
+        owner: uuid.UUID,
+        session_id: uuid.UUID,
+        turn_id: uuid.UUID,
+        attempt: int,
+        state: TurnState,
+    ) -> None:
+        """End the turn as ``state`` if it still runs, held here under ``attempt``, with no
+        event of its runner's: nothing, when the runner ended it itself."""
+        try:
+            turn = await self._store.get_turn(owner, session_id, turn_id)
+            if (
+                turn is not None
+                and turn.state is TurnState.RUNNING
+                and (turn.worker_id, turn.attempt) == (self._worker, attempt)
+                and await self._store.last_position(owner, session_id, turn_id) == 0
+            ):
+                await self._end_if_running(owner, turn, state)
+        except Exception:
+            log.exception("a turn stopped before its runner began could not be ended")
 
     async def _run_turn(
         self, owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID, attempt: int

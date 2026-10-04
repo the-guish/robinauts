@@ -113,3 +113,21 @@ def test_the_first_stop_signal_begins_the_drain_once_and_uvicorn_still_stops() -
 
     asyncio.run(go())
     assert drained == ["drain"]
+
+
+@asyncio_test
+async def test_a_reattach_waiting_on_its_first_event_still_begins_and_hears_the_drain() -> None:
+    async with served() as (http, app, composed):
+        controller = composed.controller
+        engine = GatedEngine()
+        controller._engines["echo"] = engine  # type: ignore[attr-defined]
+        user = await controller.ensure_user(LOCAL_IDENTITY)
+        started = await controller.start_session(user, agent="echo", model="echo", text="hi")
+        url = f"/api/conversations/{started.session_id}/runs/{started.turn_id}/events?after=1"
+        # Nothing past position 1 until the gate opens: the response begins all the same,
+        # so the drain reaches it.
+        asyncio.get_running_loop().call_later(1.0, app.state.drain)
+        body = (await asyncio.wait_for(http.get(url), 5.0)).text
+        assert body.startswith("event: RUN_STARTED")
+        assert body.endswith(reconnect_hint())
+        engine.gate.set()

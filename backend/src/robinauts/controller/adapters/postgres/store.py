@@ -60,6 +60,10 @@ CANCEL_CHANNEL = "robinauts_cancel"
 READY_SECONDS = 1.0
 """How long the database has to answer a readiness check."""
 
+WORK_TIMEOUT = 10.0
+"""How long the work connection has to open, or to answer one statement, before it is
+dropped: well inside a heartbeat, so the next one renews the leases."""
+
 ACQUIRE_TIMEOUT = 5.0
 """How long a store operation waits for a connection of the pool, by default."""
 
@@ -718,19 +722,23 @@ class PostgresStore(Store, WorkQueue):
     ) -> T:
         """One statement on the work connection: this process's own, outside the pool, so
         that a pool every request is waiting on never delays a lease. Opened on first use,
-        one statement at a time, and opened again after it breaks."""
+        one statement at a time, and opened again after it breaks. Opening it, and every
+        statement on it, has ``WORK_TIMEOUT`` seconds: a connection gone half-open, which
+        would otherwise hang until the kernel gives up on it, is dropped then and opened
+        again at the next statement."""
         if self._work_lock is None:
             self._work_lock = asyncio.Lock()
         async with self._work_lock:
             if self._work is None or self._work.is_closed():
                 if self._dsn is None:
                     raise RuntimeError("a store that renews leases needs the database's dsn")
-                self._work = await asyncpg.connect(self._dsn)
+                self._work = await asyncpg.connect(self._dsn, timeout=WORK_TIMEOUT)
             try:
-                return await statement(self._work)
-            except (asyncpg.InterfaceError, OSError):
+                return await asyncio.wait_for(statement(self._work), WORK_TIMEOUT)
+            except (TimeoutError, asyncpg.InterfaceError, OSError):
                 broken, self._work = self._work, None
-                broken.terminate()
+                if broken is not None:
+                    broken.terminate()
                 raise
 
     # --- helpers ------------------------------------------------------------
