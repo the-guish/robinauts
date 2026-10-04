@@ -7,11 +7,13 @@ import { refusal } from "../../../test/api";
 import { event, streamed, streamHeaders, writable } from "../../../test/stream";
 import {
   attach,
-  RETRIES,
+  backoff,
+  LONGEST_WAIT_MS,
   startNewConversation,
   startTurn,
   type Attached,
   type Numbered,
+  type Reconnecting,
 } from "./client";
 
 const RUN = "11111111-2222-4333-8444-555555555555";
@@ -19,6 +21,29 @@ const CONVERSATION = "00000000-0000-4000-8000-000000000001";
 
 /** Never waited for: the backoff is what a test would otherwise sit through. */
 const at_once = { wait: () => Promise.resolve() };
+
+/**
+ * Never waited for either, and every wait and every report kept: the spread
+ * is taken out (`random` in the middle), so the waits are exact.
+ */
+function counting() {
+  const waits: number[] = [];
+  const said: (Reconnecting | null)[] = [];
+  return {
+    waits,
+    said,
+    watching: {
+      wait: (ms: number) => {
+        waits.push(ms);
+        return Promise.resolve();
+      },
+      onReconnecting: (reconnecting: Reconnecting | null) => {
+        said.push(reconnecting);
+      },
+      random: () => 0.5,
+    },
+  };
+}
 
 /** Answer each call in turn, and remember what was asked. */
 function answering(answers: (() => Response)[]) {
@@ -257,16 +282,42 @@ test("a run that ended in an error is an ending too", async () => {
   expect(fetch).toHaveBeenCalledTimes(1);
 });
 
-test("the tries are bounded, and giving up is something to say", async () => {
+test("a run that keeps dropping is tried for ever, waiting longer each time", async () => {
   const dropping = () =>
     streamed([], { headers: streamHeaders(RUN, CONVERSATION) });
-  const fetch = answering(Array.from({ length: RETRIES + 2 }, () => dropping));
-  const attached = await startNewConversation("helper", null, "x", at_once);
-  const lost = await all(attached).catch((failure: unknown) => failure);
-  expect(lost).toBeInstanceOf(ApiError);
-  expect((lost as ApiError).error).toBe("stream_lost");
-  // The first stream and one per retry, and not a sixth.
-  expect(fetch).toHaveBeenCalledTimes(RETRIES + 1);
+  const fetch = answering([
+    ...Array.from({ length: 9 }, () => dropping),
+    () =>
+      streamed([finished(9)], { headers: streamHeaders(RUN, CONVERSATION) }),
+  ]);
+  const { waits, said, watching } = counting();
+  const attached = await startNewConversation("helper", null, "x", watching);
+  const seen = await all(attached);
+  expect(seen.map((each) => each.event.type)).toEqual(["RUN_FINISHED"]);
+  expect(fetch).toHaveBeenCalledTimes(10);
+  // Doubling from half a second, up to thirty, and no last try.
+  expect(waits).toEqual([
+    500, 1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000,
+  ]);
+  // Said before every try, and over once the run is.
+  expect(said.map((each) => each?.tries ?? null)).toEqual([
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    null,
+  ]);
+});
+
+test("the waits are spread a fifth either way and never past the longest", () => {
+  expect(backoff(0, () => 0)).toBe(400);
+  expect(backoff(0, () => 1)).toBe(600);
+  expect(backoff(20, () => 1)).toBe(LONGEST_WAIT_MS * 1.2);
 });
 
 test("a re-attach that is refused stops it rather than trying for ever", async () => {
@@ -338,7 +389,7 @@ test("a deployment that is restarting answers 5xx, and that is tried again", asy
   expect(fetch).toHaveBeenCalledTimes(3);
 });
 
-test("requests that never arrive are bounded like streams that drop", async () => {
+test("requests that never arrive are tried until the watcher goes away", async () => {
   const fetch = vi.fn<typeof globalThis.fetch>((input) =>
     String(input) === "/api/turns"
       ? Promise.resolve(
@@ -347,11 +398,20 @@ test("requests that never arrive are bounded like streams that drop", async () =
       : Promise.reject(new TypeError("no route to host")),
   );
   vi.stubGlobal("fetch", fetch);
-  const attached = await startNewConversation("helper", null, "x", at_once);
-  const lost = await all(attached).catch((failure: unknown) => failure);
-  expect((lost as ApiError).error).toBe("stream_lost");
-  // The first stream and one `GET` per try, and not a fifth.
-  expect(fetch).toHaveBeenCalledTimes(RETRIES + 1);
+  const control = new AbortController();
+  let waited = 0;
+  const attached = await startNewConversation("helper", null, "x", {
+    signal: control.signal,
+    wait: () => {
+      waited += 1;
+      if (waited === 12) control.abort(new Error("gone"));
+      return Promise.resolve();
+    },
+  });
+  const stopped = await all(attached).catch((failure: unknown) => failure);
+  expect((stopped as Error).message).toBe("gone");
+  // The first stream and one `GET` per try until then.
+  expect(fetch).toHaveBeenCalledTimes(12);
 });
 
 test("a block replayed at a position already seen is not read again", async () => {
@@ -363,21 +423,23 @@ test("a block replayed at a position already seen is not read again", async () =
       [event("TEXT_MESSAGE_CONTENT", { messageId: "m", delta: "once" }, 3)],
       { headers: streamHeaders(RUN, CONVERSATION) },
     );
-  const fetch = answering(Array.from({ length: 12 }, () => replay));
-  const attached = await startNewConversation("helper", null, "x", at_once);
+  answering([
+    ...Array.from({ length: 6 }, () => replay),
+    () =>
+      streamed([finished(9)], { headers: streamHeaders(RUN, CONVERSATION) }),
+  ]);
+  const { waits, watching } = counting();
+  const attached = await startNewConversation("helper", null, "x", watching);
   const seen: Numbered[] = [];
-  const lost = await (async () => {
-    try {
-      for await (const each of attached.events) seen.push(each);
-    } catch (failure: unknown) {
-      return failure;
-    }
-    return null;
-  })();
+  for await (const each of attached.events) seen.push(each);
   // Said once, however many times it was sent.
-  expect(seen).toHaveLength(1);
-  expect((lost as ApiError).error).toBe("stream_lost");
-  expect(fetch).toHaveBeenCalledTimes(RETRIES + 1);
+  expect(seen.map((each) => each.event.type)).toEqual([
+    "TEXT_MESSAGE_CONTENT",
+    "RUN_FINISHED",
+  ]);
+  // The first one delivered; every replay after it is a try that did not,
+  // and the waits grow rather than starting again.
+  expect(waits).toEqual([500, 1000, 2000, 4000, 8000, 16000]);
 });
 
 test("an id nothing here could have sent is not a position, and not a loss", () => {
@@ -459,9 +521,9 @@ test("an ending is read whatever its id says", async () => {
   expect(seen[1]?.position).toBeNull();
 });
 
-test("the budget is spent on connections that do not deliver, not on time", async () => {
-  // A run answering for an hour over a flaky link reconnects more than four
-  // times; what is bounded is tries since the last event that arrived.
+test("the waits start again after a stream that delivers, however long the run", async () => {
+  // A run answering for an hour over a flaky link reconnects many times; what
+  // grows is the wait since the last event that arrived.
   let at = 0;
   const fetch = vi.fn<typeof globalThis.fetch>(() => {
     at += 1;
@@ -482,14 +544,91 @@ test("the budget is spent on connections that do not deliver, not on time", asyn
     );
   });
   vi.stubGlobal("fetch", fetch);
-  const attached = await startNewConversation("helper", null, "x", at_once);
+  const { waits, watching } = counting();
+  const attached = await startNewConversation("helper", null, "x", watching);
   const seen = [];
   for await (const each of attached.events) {
     seen.push(each);
     if (seen.length === 6) break;
   }
   expect(seen).toHaveLength(6);
-  expect(fetch.mock.calls.length).toBeGreaterThan(RETRIES + 1);
+  expect(waits.slice(0, 6)).toEqual([500, 1000, 500, 1000, 500, 1000]);
+});
+
+test("a connection that says nothing for too long is opened again", async () => {
+  const quiet = writable({ headers: streamHeaders(RUN, CONVERSATION) });
+  const fetch = answering([
+    () => quiet.response,
+    () =>
+      streamed([finished(9)], { headers: streamHeaders(RUN, CONVERSATION) }),
+  ]);
+  const attached = await startNewConversation("helper", null, "x", {
+    ...at_once,
+    idleMs: 50,
+  });
+  quiet.write(
+    event("TEXT_MESSAGE_START", { messageId: "m", role: "assistant" }, 1),
+  );
+  const seen = await all(attached);
+  expect(seen.map((each) => each.event.type)).toEqual([
+    "TEXT_MESSAGE_START",
+    "RUN_FINISHED",
+  ]);
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(
+    (fetch.mock.calls[1]?.[1]?.headers as Record<string, string>)[
+      "last-event-id"
+    ],
+  ).toBe("1");
+});
+
+test("keep-alive comments are a connection that works", async () => {
+  const kept = writable({ headers: streamHeaders(RUN, CONVERSATION) });
+  const fetch = answering([() => kept.response]);
+  const attached = await startNewConversation("helper", null, "x", {
+    ...at_once,
+    idleMs: 60,
+  });
+  const reading = all(attached);
+  for (let n = 0; n < 8; n += 1) {
+    kept.write(": keep-alive\n\n");
+    await new Promise((done) => setTimeout(done, 20));
+  }
+  kept.write(finished(2));
+  const seen = await reading;
+  expect(seen.map((each) => each.event.type)).toEqual(["RUN_FINISHED"]);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+test("a wait is cut short by asking now, by the network coming back, or by the tab being looked at", async () => {
+  for (const how of ["now", "online", "visible"] as const) {
+    const fetch = answering([
+      () => streamed([], { headers: streamHeaders(RUN, CONVERSATION) }),
+      () =>
+        streamed([finished(9)], {
+          headers: streamHeaders(RUN, CONVERSATION),
+        }),
+    ]);
+    let now: (() => void) | null = null;
+    const attached = await startNewConversation("helper", null, "x", {
+      // A wait that would never end of its own accord.
+      wait: () => new Promise<void>(() => undefined),
+      onReconnecting: (reconnecting) => {
+        if (reconnecting !== null) now = reconnecting.now;
+      },
+    });
+    const reading = all(attached);
+    await vi.waitFor(() => {
+      expect(now).not.toBeNull();
+    });
+    if (how === "now") now!();
+    if (how === "online") window.dispatchEvent(new Event("online"));
+    if (how === "visible")
+      document.dispatchEvent(new Event("visibilitychange"));
+    const seen = await reading;
+    expect(seen.map((each) => each.event.type)).toEqual(["RUN_FINISHED"]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  }
 });
 
 test("attaching asks from where the conversation said to, and says so once", async () => {

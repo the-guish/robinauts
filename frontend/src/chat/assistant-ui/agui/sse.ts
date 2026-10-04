@@ -70,7 +70,8 @@ export interface SseBlock {
  * `signal` is how a caller stops reading: the reader is cancelled, this
  * generator stops, and whatever the signal gave as its reason is thrown --
  * an abort is the caller's own doing and must be told apart from a stream
- * that failed.
+ * that failed. `heard` is called whenever bytes arrive, whether or not they
+ * make a block: a keep-alive comment is a connection that works.
  *
  * Whoever stops iterating early -- a `break`, or a `return` -- has the
  * generator's own cleanup cancel the reader, so a stream is never left open
@@ -79,6 +80,7 @@ export interface SseBlock {
 export async function* blocks(
   body: ReadableStream<Uint8Array>,
   signal?: AbortSignal,
+  heard?: () => void,
 ): AsyncGenerator<SseBlock> {
   // A caller that has already given up is not given a first block either.
   if (givenUp(signal)) throw signal?.reason;
@@ -101,6 +103,9 @@ export async function* blocks(
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      // Any bytes at all, a comment included: what a watch for a connection
+      // that went quiet goes by.
+      heard?.();
       // `stream: true`, because a chunk may end in the middle of the bytes
       // of one character and the rest of them is in the next one.
       buffer += decoder.decode(value, { stream: true });

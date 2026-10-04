@@ -24,8 +24,14 @@
  * - **carries on where it left off** when a connection drops before the run
  *   ended: the last `id:` it saw is the position, `Last-Event-ID` is how it
  *   is said, and the backend replays no event it has had in full;
- * - gives up after a bounded number of tries, because a stream nobody can
- *   open again is a thing to say rather than a thing to keep doing.
+ * - **is patient about it**: while the run lives it never gives up, backing
+ *   off from half a second to thirty, trying again at once when the network
+ *   comes back or the tab is looked at again, and saying so to its caller,
+ *   who can ask for a try now;
+ * - **notices a connection that went quiet**: the backend says a comment at
+ *   least every fifteen seconds (`docs/specs/wire.md`), so one that has said
+ *   nothing for `IDLE_MS` is a connection something in between dropped
+ *   without closing, and it is opened again.
  *
  * **A refusal is a status and comes before the stream** (`docs/specs/wire.md`),
  * so everything that can be refused -- a conversation already answering, a
@@ -46,27 +52,48 @@ const RUN_ID_HEADER = "x-robinauts-run-id";
 const CONVERSATION_ID_HEADER = "x-robinauts-conversation-id";
 
 /**
- * How many times a dropped stream is opened again before giving up.
+ * How long before the first try at a dropped stream, and the longest wait
+ * between two: each wait doubles the one before, up to that.
  *
- * A handful: a deployment restarting, a proxy closing a connection, a laptop
- * changing network. Past that, something is wrong that trying again will not
- * fix, and the conversation is still on the server -- reopening it is how the
- * answer is seen (`docs/specs/runs.md`).
+ * **There is no last try.** A run that is still going is still going on the
+ * server, and a deployment restarting, a proxy closing a connection, a laptop
+ * asleep or changing network are all things that end; only a refusal (a run
+ * that is not there, a session that ended) ends the watch.
  */
-export const RETRIES = 4;
+export const FIRST_WAIT_MS = 500;
+export const LONGEST_WAIT_MS = 30_000;
 
-/** How long before each of those tries: a little, then more. */
-export const BACKOFF_MS: readonly number[] = [250, 500, 1000, 2000];
+/**
+ * How long a connection may say nothing at all before it is taken for one
+ * that went: three of the backend's fifteen-second keep-alives.
+ */
+export const IDLE_MS = 45_000;
 
-/** How long to wait before try number `tries`, counted from zero. */
-function backoff(tries: number): number {
-  return BACKOFF_MS[Math.min(tries, BACKOFF_MS.length - 1)] ?? 0;
+/**
+ * How long to wait before try number `tries`, counted from zero: doubling,
+ * capped, and spread by a fifth either way, so that every tab a restart cut
+ * off does not come back in the same instant.
+ */
+export function backoff(
+  tries: number,
+  random: () => number = Math.random,
+): number {
+  const base = Math.min(LONGEST_WAIT_MS, FIRST_WAIT_MS * 2 ** tries);
+  return Math.round(base * (0.8 + 0.4 * random()));
 }
 
-/** What a stream that could not be picked up again is reported as. */
-export const LOST =
-  "the connection to this answer was lost and could not be picked up again";
+/** What a watch says while it is waiting to open a dropped stream again. */
+export interface Reconnecting {
+  /** How many tries since the stream last delivered: 1 for the first. */
+  tries: number;
+  /** How long until this one. */
+  inMs: number;
+  /** Try now rather than then. */
+  now: () => void;
+}
 
+/** What a connection that went quiet is ended with. */
+const IDLE = "the connection said nothing for too long";
 /** What a response that is not one of our streams is reported as. */
 export const NOT_OURS = "the answer was not one of our event streams";
 
@@ -99,6 +126,15 @@ export interface Watching {
    * retrying does not wait the seconds a person would.
    */
   wait?: (ms: number) => Promise<void>;
+  /**
+   * Told when a dropped stream is about to be opened again, and `null` once
+   * a stream delivers again: what the interface says meanwhile.
+   */
+  onReconnecting?: (reconnecting: Reconnecting | null) => void;
+  /** `IDLE_MS`, unless a test says otherwise. */
+  idleMs?: number;
+  /** Where the spread of the waits comes from. */
+  random?: () => number;
 }
 
 const sleep = (ms: number) =>
@@ -245,20 +281,43 @@ async function* following(
   from: number,
   watching: Watching,
 ): AsyncGenerator<Numbered> {
-  const { signal, wait = sleep } = watching;
+  const {
+    signal,
+    wait = sleep,
+    onReconnecting,
+    idleMs = IDLE_MS,
+    random = Math.random,
+  } = watching;
   let body: ReadableStream<Uint8Array> | null = first;
   let position = from;
   let tries = 0;
   for (;;) {
     let carried = false;
+    // **One connection, one controller**: the watcher's own signal ends it,
+    // and so does a connection that has said nothing for `idleMs`, which
+    // ends this connection and not the watch.
+    const connection = new AbortController();
+    const unlink = linked(signal, connection);
+    let idle: ReturnType<typeof setTimeout> | undefined;
+    const heard = () => {
+      clearTimeout(idle);
+      idle = setTimeout(() => {
+        connection.abort(new ApiError(0, "stream_idle", IDLE));
+      }, idleMs);
+    };
     try {
+      heard();
       // **Opening is inside the try**, so that a re-attach whose *request*
       // does not arrive is retried like a stream that connected and then
       // ended. Outside it, the one failure that a dropped network is most
       // likely to produce -- the next `GET` never getting through -- would
       // have been the one failure that ended the watch.
-      body ??= streamOf(await open(conversationId, runId, position, watching));
-      for await (const block of blocks(body, signal)) {
+      body ??= streamOf(
+        await open(conversationId, runId, position, {
+          signal: connection.signal,
+        }),
+      );
+      for await (const block of blocks(body, connection.signal, heard)) {
         const event = decode(block.data);
         if (event === null) continue;
         const over = isTerminal(event);
@@ -277,10 +336,10 @@ async function* following(
             position = seen;
             numbered = true;
             // A stream that is delivering is a connection that works, so the
-            // budget below is about connections that do not: it counts tries
-            // since the last event the platform numbered, not since the
-            // watch began. A run answering for an hour over a flaky link is
-            // not one to give up on at its fifth reconnection.
+            // waits below are about connections that do not: they count
+            // tries since the last event the platform numbered, not since
+            // the watch began.
+            if (!carried && tries > 0) onReconnecting?.(null);
             carried = true;
           } else if (!over) {
             // **A numbered event that does not move the position forward is
@@ -290,8 +349,8 @@ async function* following(
             // what it has seen, so the backend cannot send one: what can is
             // something in front of the deployment replaying a block.
             // Reading it would say a delta twice, and counting it as
-            // delivery would reset the budget below -- so a proxy replaying
-            // one event and cutting would be reconnected to for ever.
+            // delivery would reset the waits below -- so a proxy replaying
+            // one event and cutting would be reconnected to at once for ever.
             //
             // **Never an ending, whatever its id says.** Every stream ends
             // with one, and a watcher that dropped the one it was sent would
@@ -302,7 +361,10 @@ async function* following(
         yield { position: numbered ? position : null, event };
         // The run is over: every stream ends with one of these, and one that
         // merely closed is a connection to make again.
-        if (over) return;
+        if (over) {
+          if (tries > 0 && !carried) onReconnecting?.(null);
+          return;
+        }
       }
     } catch (failure) {
       // An abort is this watcher going away, not a stream that failed.
@@ -311,22 +373,81 @@ async function* following(
       // not this person's (404), a position it has not reached (422), a
       // session that ended (401): asking again asks the same question and
       // gets the same answer, and a 401 has already put the interface back to
-      // signed-out. Only a request that did not arrive, or a deployment
-      // answering 5xx, is worth another try.
+      // signed-out. Only a request that did not arrive, a deployment
+      // answering 5xx, or a connection that went quiet is worth another try.
       if (refusalOf(failure)) throw failure;
+    } finally {
+      clearTimeout(idle);
+      unlink();
     }
     body = null;
     if (carried) tries = 0;
     // Here three ways -- the body ended, reading it threw, or the request for
     // it did -- and none of them is the run saying it is over. So the
     // connection went and the run did not: it is picked up where it was left
-    // off.
-    if (tries >= RETRIES) {
-      throw new ApiError(0, "stream_lost", LOST);
-    }
-    await wait(backoff(tries));
+    // off, after a wait that grows while nothing gets through.
+    const ms = backoff(tries, random);
     tries += 1;
+    await pause(ms, wait, signal, (now) => {
+      onReconnecting?.({ tries, inMs: ms, now });
+    });
+    // A watcher that went away while this waited is told it was its own doing.
+    if (signal?.aborted === true) throw signal.reason;
   }
+}
+
+/** That controller aborted when that signal is; undone by what it returns. */
+function linked(
+  signal: AbortSignal | undefined,
+  connection: AbortController,
+): () => void {
+  if (signal === undefined) return () => undefined;
+  if (signal.aborted) {
+    connection.abort(signal.reason);
+    return () => undefined;
+  }
+  const abort = () => {
+    connection.abort(signal.reason);
+  };
+  signal.addEventListener("abort", abort, { once: true });
+  return () => {
+    signal.removeEventListener("abort", abort);
+  };
+}
+
+/**
+ * Wait `ms`, or less: until the network is back, the tab is looked at again,
+ * the watcher goes away, or somebody asks for a try now through `told`.
+ */
+function pause(
+  ms: number,
+  wait: (ms: number) => Promise<void>,
+  signal: AbortSignal | undefined,
+  told: (now: () => void) => void,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let done = false;
+    const visible = () => {
+      if (document.visibilityState === "visible") now();
+    };
+    const now = () => {
+      if (done) return;
+      done = true;
+      if (typeof window !== "undefined") {
+        window.removeEventListener("online", now);
+        document.removeEventListener("visibilitychange", visible);
+      }
+      signal?.removeEventListener("abort", now);
+      resolve();
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("online", now);
+      document.addEventListener("visibilitychange", visible);
+    }
+    signal?.addEventListener("abort", now, { once: true });
+    told(now);
+    void wait(ms).then(now, now);
+  });
 }
 
 /** Whether that failure is the backend refusing rather than a link that went. */

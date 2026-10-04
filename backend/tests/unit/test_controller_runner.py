@@ -32,6 +32,7 @@ from robinauts.controller.contract.domain import (
     StorageConfig,
     StorageKind,
     TextPart,
+    TextPiece,
     ToolCallPart,
     ToolResultPart,
     TurnEnded,
@@ -148,7 +149,8 @@ async def test_two_turns_of_one_session_number_their_events_from_one_each() -> N
     await settled(controller, user, again)
     for turn in (started.turn_id, again.turn_id):
         stored = await controller._store.events_after(user.id, started.session_id, turn, 0)
-        assert [p for p, _ in stored] == list(range(1, 10))
+        # The echo's pieces of text, streamed in a row, are written as one event.
+        assert [p for p, _ in stored] == list(range(1, 9))
     await controller.close()
 
 
@@ -514,3 +516,56 @@ async def test_a_turn_the_deployment_stops_keeps_what_it_did_as_a_failed_answer(
     documents = await store.messages_of(user.id, started.session_id)
     left = message_from_document(documents[-1])
     assert (left.failed, left.parts) == (True, HALFWAY)
+
+
+class ChattyEngine(EchoEngine):
+    """Streams its answer a token at a time, then pauses until let go before it is done."""
+
+    def __init__(self, tokens: int) -> None:
+        super().__init__()
+        self.tokens = tokens
+        self.gate = asyncio.Event()
+
+    async def stream(self, *args: Any, **kwargs: Any) -> AsyncGenerator[Event, None]:
+        for n in range(self.tokens):
+            yield TextDelta(f"{n} ")
+        await self.gate.wait()
+        yield Done(text="", checkpoint_id=str(uuid.uuid4()))
+
+
+class CountingStore(MemoryStore):
+    """Counts the writes of events, each of which is one announcement to the watchers."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.batches = 0
+
+    async def append_events(self, *args: Any, **kwargs: Any) -> None:
+        self.batches += 1
+        await super().append_events(*args, **kwargs)
+
+
+@asyncio_test
+async def test_text_streamed_a_token_at_a_time_is_written_a_batch_at_a_time() -> None:
+    store = CountingStore()
+    controller = await over(store)
+    engine = ChattyEngine(tokens=500)
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    # The text that waited is written by the timer, while the engine says nothing more.
+    async with asyncio.timeout(2.0):
+        while await store.last_position(user.id, sid, started.turn_id) < 2:
+            await store.wait_for_events(user.id, sid, started.turn_id, 1, 1.0)
+    engine.gate.set()
+    await settled(controller, user, started)
+    stored = await store.events_after(user.id, sid, started.turn_id, 0)
+    events = [event_from_document(d).event for _, d in stored]
+    pieces = [e for e in events if isinstance(e, TextPiece)]
+    assert "".join(p.text for p in pieces) == "".join(f"{n} " for n in range(500))
+    assert len(pieces) < 5
+    assert store.batches < 5
+    answer = message_from_document((await store.messages_of(user.id, sid))[-1])
+    assert answer.parts == (TextPart("".join(f"{n} " for n in range(500))),)
+    await controller.close()

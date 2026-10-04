@@ -492,3 +492,28 @@ class StoreContract:
         again = await store.end_expired_turn(me.id, one.id, later, turn=running.id, answer=left)
         assert again is None
         assert await store.messages_of(me.id, one.id) == [asked.document, left.document]
+
+    # --- batches ------------------------------------------------------------
+
+    @store_test
+    async def test_a_batch_of_events_is_written_whole_once_and_counted_by_its_last(
+        self, store: Store
+    ) -> None:
+        me, one, _, running = await self.started(store)
+        assert await store.last_position(me.id, one.id, running.id) == 0
+        batch = [piece(1, "a"), piece(2, "b"), piece(3, "c")]
+        await store.append_events(me.id, one.id, running.id, batch, NOW, holder=HOLDER)
+        # The same batch again, as after a lost acknowledgement, changes nothing.
+        await store.append_events(me.id, one.id, running.id, batch, NOW, holder=HOLDER)
+        assert await store.last_position(me.id, one.id, running.id) == 3
+        clash = [piece(3, "c"), piece(4, "d")]
+        with pytest.raises(TurnLostError):
+            await store.append_events(me.id, one.id, running.id, clash, NOW, holder=HOLDER)
+        other = [piece(4, "d"), piece(5, "e")]
+        with pytest.raises(TurnLostError):
+            await store.append_events(
+                me.id, one.id, running.id, other, NOW, holder=Holder("pod-b", 1)
+            )
+        assert [p for p, _ in await store.events_after(me.id, one.id, running.id, 0)] == [1, 2, 3]
+        with pytest.raises(SessionNotFoundError):
+            await store.last_position(me.id, uuid.uuid4(), running.id)

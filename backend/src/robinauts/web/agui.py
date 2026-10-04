@@ -4,10 +4,14 @@
 """The controller's turn events as AG-UI events over server-sent events (``docs/specs/wire.md``).
 
 The run id is the turn's id, and the thread id the session's: each turn is a run of its own.
+A stream that has said nothing for ``KEEP_ALIVE_SECONDS`` says an SSE comment, so that a load
+balancer or a proxy in front of the deployment does not close it as idle while a tool runs.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 
 from ag_ui.core import (
@@ -46,6 +50,12 @@ from robinauts.controller.contract.domain import (
 )
 
 ENCODER = EventEncoder()
+
+KEEP_ALIVE_SECONDS = 15.0
+"""How long a stream stays silent before it says ``KEEP_ALIVE``."""
+
+KEEP_ALIVE = ": keep-alive\n\n"
+"""An SSE comment: bytes on the connection, and nothing a client reads as an event."""
 
 ENDED_BADLY = {
     TurnState.FAILED: "the agent could not finish this answer",
@@ -121,3 +131,30 @@ async def stream(
         wire = mapped(thread_id, run_id, event)
         for index, sent in enumerate(wire):
             yield sse(sent, position if index == len(wire) - 1 else None)
+
+
+async def kept_alive(chunks: AsyncIterator[str], every: float | None = None) -> AsyncIterator[str]:
+    """``chunks``, with ``KEEP_ALIVE`` after every ``every`` seconds, ``KEEP_ALIVE_SECONDS``
+    unless said, in which none came."""
+    every = KEEP_ALIVE_SECONDS if every is None else every
+    waiting: asyncio.Task[str] | None = None
+    try:
+        while True:
+            if waiting is None:
+                waiting = asyncio.ensure_future(anext(chunks))
+            done, _ = await asyncio.wait({waiting}, timeout=every)
+            if not done:
+                yield KEEP_ALIVE
+                continue
+            try:
+                chunk = waiting.result()
+            except StopAsyncIteration:
+                return
+            finally:
+                waiting = None
+            yield chunk
+    finally:
+        if waiting is not None:
+            waiting.cancel()
+            with contextlib.suppress(BaseException):
+                await waiting

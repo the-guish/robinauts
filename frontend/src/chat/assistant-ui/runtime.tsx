@@ -66,6 +66,8 @@ import {
   startNewConversation,
   startTurn,
   type Attached,
+  type Reconnecting,
+  type Watching,
 } from "./agui/client";
 import {
   askedIn,
@@ -443,8 +445,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     const resume = opened.resume;
     if (runId !== null && resume !== null) {
       void follow(
-        (watched) =>
-          attach(conversationId, runId, resume.after, { signal: watched }),
+        (watched) => attach(conversationId, runId, resume.after, watched),
         {
           watch: true,
           afterLoss,
@@ -469,7 +470,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
    * must not leave the thread waiting for an answer nothing is reading.
    */
   function follow(
-    start: (signal: AbortSignal) => Promise<Attached>,
+    start: (watching: Watching & { signal: AbortSignal }) => Promise<Attached>,
     {
       watch = false,
       afterLoss = false,
@@ -492,7 +493,13 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
   ): Promise<void> {
     const control = new AbortController();
     starting.add(control);
-    return start(control.signal).then(
+    // While a dropped stream is opened again, the thread says so, with a way
+    // to try at once; never about a watch that has been let go of.
+    const onReconnecting = (reconnecting: Reconnecting | null) => {
+      if (!control.signal.aborted)
+        dispatch({ kind: "reconnecting", reconnecting });
+    };
+    return start({ signal: control.signal, onReconnecting }).then(
       (attached) => {
         starting.delete(control);
         // This page went away while the request was in the air.
@@ -604,11 +611,11 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
       if (asked === null) return;
       dispatch({ kind: "asked", id: unsent(), after: parentId, text });
       await follow(
-        (signal) =>
+        (watching) =>
           startTurn(
             conversationId,
             { ...asked, modelId: props.modelId },
-            { signal },
+            watching,
           ),
         { text },
       );
@@ -621,12 +628,16 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
       return;
     }
     await follow(
-      async (signal) => {
+      async (watching) => {
         // The model goes with the first message and never again: every later
         // turn runs on the conversation's, which the server reads.
-        const attached = await startNewConversation(agentId, modelId, text, {
-          signal,
-        });
+        const attached = await startNewConversation(
+          agentId,
+          modelId,
+          text,
+          watching,
+        );
+        const signal = watching.signal;
         // **Only if this page is still the empty chat.** Somebody who opened
         // another conversation while the request was in the air is not to be
         // taken to this one instead, and claiming it as ours would stop the
@@ -677,11 +688,11 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     // edited text comes back in the edit box of the message it was of
     // (`follow`).
     await follow(
-      (signal) =>
+      (watching) =>
         startTurn(
           conversationId,
           { text, edit: edited, modelId: props.modelId },
-          { signal },
+          watching,
         ),
       { text, editing: edited },
     );
@@ -718,11 +729,11 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
       after: turnStart(state, regenerate) ?? parentId,
     });
     const modelId = props.modelId;
-    await follow((signal) =>
+    await follow((watching) =>
       startTurn(
         conversationId,
         retry ? { retry: regenerate, modelId } : { regenerate, modelId },
-        { signal },
+        watching,
       ),
     );
   }

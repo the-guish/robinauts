@@ -79,8 +79,9 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   turn is not left behind.
 - **A turn finishes in one operation:** its answer, its last events, its state, and
   the session's `updated_at`.
-- **The runner numbers its turn's events** and is their only writer, one at a time, so
-  positions commit in order. The store accepts the same document again at a position
+- **The runner numbers its turn's events** and is their only writer, a batch at a time,
+  so positions commit in order: pieces of text wait up to 150 ms to be written
+  together, and one batch is one write and one announcement to the watchers. The store accepts the same document again at a position
   it has, since a write retried after a lost acknowledgement is not a second runner,
   and refuses another document there, or any append or finish on a turn that is no
   longer running or whose lease has passed at the time of the write, with

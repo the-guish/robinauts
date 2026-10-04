@@ -21,6 +21,9 @@
  * - **A notice about what the person just did**, which is a different thing
  *   and outlives the run that follows it: a message that was not sent, a
  *   stop that did not reach the server. Only their next turn clears it.
+ * - **A stream being opened again**: the answer is still being produced on
+ *   the server, the connection to it dropped, and it is being tried again,
+ *   with a button that tries at once.
  *
  * The welcome slot is the shell's agent and model pickers on an empty chat:
  * in the Thread's empty state the welcome sits directly above the box, which
@@ -51,6 +54,10 @@ function Welcome() {
  */
 const COMPONENTS = { Welcome, ToolFallback: ToolCall };
 
+/** What a stream being opened again is said as. */
+export const RECONNECTING =
+  "The connection to this answer dropped. It is still being produced, and the connection is being tried again.";
+
 export function Chat(props: Readonly<ChatProps>) {
   const { state, runtime } = useChat(props);
   // Only on the empty chat: a conversation with nothing in it yet is still a
@@ -80,6 +87,22 @@ export function Chat(props: Readonly<ChatProps>) {
             <Thread components={COMPONENTS} />
           </WelcomeSlot.Provider>
         </div>
+        {state.reconnecting !== null && (
+          <p
+            role="status"
+            data-reconnecting=""
+            className="mx-auto w-full max-w-3xl px-6 pb-4 text-sm text-muted-foreground"
+          >
+            {RECONNECTING}{" "}
+            <button
+              type="button"
+              className="underline"
+              onClick={state.reconnecting.now}
+            >
+              Reconnect
+            </button>
+          </p>
+        )}
         {state.ended !== null && (
           <p
             role="status"

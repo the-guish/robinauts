@@ -63,9 +63,20 @@ from robinauts.controller.ports.store import Holder, Store, StoredEvent
 RETENTION = timedelta(hours=24)
 """How long a turn's events are kept after they are written, a constant for now."""
 
+FLUSH_SECONDS = 0.15
+"""How long pieces of text wait to be written together."""
+
 
 class _Writer:
-    """The turn's events, numbered and written one at a time, in its holder's name."""
+    """The turn's events, numbered and written in its holder's name, a batch at a time.
+
+    Pieces of text and of reasoning wait up to ``FLUSH_SECONDS``, and a piece that follows
+    another of its kind and message joins it, so a model streaming tokens costs a write and an
+    announcement every so often rather than one per token. Any other event is written at once,
+    with whatever waited before it, and a finish writes what waited in the same operation as
+    the turn's end. A batch that a timer wrote and that was refused is raised by the next
+    write.
+    """
 
     def __init__(self, store: Store, owner: uuid.UUID, turn: Turn, holder: Holder) -> None:
         self._store = store
@@ -73,51 +84,88 @@ class _Writer:
         self._turn = turn
         self._holder = holder
         self.position = 0
+        self._waiting: list[TurnEvent] = []
+        self._writing = asyncio.Lock()
+        self._timer: asyncio.Task[None] | None = None
+        self._refused: BaseException | None = None
 
     async def append(self, event: TurnEvent) -> None:
-        self.position += 1
-        now = datetime.now(UTC)
-        await self._store.append_event(
-            self._owner,
-            self._turn.session_id,
-            self._turn.id,
-            self.position,
-            event_to_document(self._turn.id, self.position, event),
-            now,
-            now + RETENTION,
-            holder=self._holder,
-        )
+        if self._refused is not None:
+            raise self._refused
+        if isinstance(event, TextPiece | ReasoningPiece):
+            last = self._waiting[-1] if self._waiting else None
+            if type(last) is type(event) and last.message_id == event.message_id:
+                self._waiting[-1] = dataclasses.replace(last, text=last.text + event.text)
+            else:
+                self._waiting.append(event)
+            if self._timer is None:
+                self._timer = asyncio.create_task(self._later())
+            return
+        self._waiting.append(event)
+        await self.flush()
 
-    def last(self, *events: TurnEvent) -> list[StoredEvent]:
-        """The events a finish writes, numbered after the ones appended."""
+    async def _later(self) -> None:
+        await asyncio.sleep(FLUSH_SECONDS)
+        self._timer = None
+        try:
+            await self.flush()
+        except Exception as refused:
+            self._refused = refused
+
+    def _numbered(self, events: Sequence[TurnEvent]) -> list[StoredEvent]:
         stored = []
-        now = datetime.now(UTC)
+        expires = datetime.now(UTC) + RETENTION
         for event in events:
             self.position += 1
             document = event_to_document(self._turn.id, self.position, event)
-            stored.append(StoredEvent(self.position, document, now + RETENTION))
+            stored.append(StoredEvent(self.position, document, expires))
         return stored
 
+    async def flush(self) -> None:
+        """Write what waits, now, in one operation."""
+        async with self._writing:
+            if not self._waiting:
+                return
+            batch, self._waiting = self._waiting, []
+            now = datetime.now(UTC)
+            await self._store.append_events(
+                self._owner,
+                self._turn.session_id,
+                self._turn.id,
+                self._numbered(batch),
+                now,
+                holder=self._holder,
+            )
+
+    def drop(self) -> None:
+        """Write nothing more: what waits is let go of, and the timer with it."""
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+        self._waiting = []
+
     async def finish(
-        self,
-        state: TurnState,
-        error: str | None,
-        answer: Message | None,
-        events: Sequence[StoredEvent],
+        self, state: TurnState, error: str | None, answer: Message | None, *last: TurnEvent
     ) -> None:
-        now = datetime.now(UTC)
-        await self._store.finish_turn(
-            self._owner,
-            self._turn.session_id,
-            self._turn.id,
-            state,
-            now,
-            error,
-            None if answer is None else stored_message(answer),
-            events,
-            now,
-            holder=self._holder,
-        )
+        """The turn's end, with what waited and ``last`` as its last events."""
+        async with self._writing:
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+            batch, self._waiting = [*self._waiting, *last], []
+            now = datetime.now(UTC)
+            await self._store.finish_turn(
+                self._owner,
+                self._turn.session_id,
+                self._turn.id,
+                state,
+                now,
+                error,
+                None if answer is None else stored_message(answer),
+                self._numbered(batch),
+                now,
+                holder=self._holder,
+            )
 
 
 async def run_turn(
@@ -198,11 +246,16 @@ async def run_turn(
                         answer = dataclasses.replace(
                             answer, parts=(*answer.parts, TextPart(event.text))
                         )
-                    last = writer.last(MessageCompleted(answer_id), TurnEnded(TurnState.FINISHED))
                     # Once the engine has handed the answer over, a cancellation must not
                     # lose it: the finish runs to its end whatever happens to this task.
                     finishing = asyncio.ensure_future(
-                        writer.finish(TurnState.FINISHED, None, answer, last)
+                        writer.finish(
+                            TurnState.FINISHED,
+                            None,
+                            answer,
+                            MessageCompleted(answer_id),
+                            TurnEnded(TurnState.FINISHED),
+                        )
                     )
                     await asyncio.shield(finishing)
     except TurnLostError:
@@ -225,6 +278,8 @@ async def run_turn(
         # What it streamed before it failed is kept, as an answer marked failed: the
         # thread shows it, and a reply hangs under it.
         await _end(writer, TurnState.FAILED, clean_text(str(exc)), kept(True))
+    finally:
+        writer.drop()
 
 
 async def _end(
@@ -232,6 +287,6 @@ async def _end(
 ) -> None:
     """End a turn, with what it answered if anything; nothing more if the turn is lost."""
     try:
-        await writer.finish(state, error, answer, writer.last(TurnEnded(state)))
+        await writer.finish(state, error, answer, TurnEnded(state))
     except TurnLostError:
         return

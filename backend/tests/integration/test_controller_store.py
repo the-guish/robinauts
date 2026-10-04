@@ -29,7 +29,7 @@ from robinauts.controller.contract.domain import (
     TurnState,
     User,
 )
-from robinauts.controller.ports.store import Store, StoredMessage
+from robinauts.controller.ports.store import Store, StoredEvent, StoredMessage
 from robinauts.controller.ports.work import Held
 
 pytestmark = requires_postgres
@@ -271,3 +271,26 @@ async def test_two_readers_ending_one_expired_turn_keep_its_answer_once() -> Non
         )
         assert len([e for e in ended if e is not None]) == 1
         assert await store.messages_of(me.id, one.id) == [{"v": 1, "text": "hi"}, left.document]
+
+
+@asyncio_test
+async def test_a_batch_of_events_is_announced_once() -> None:
+    async with temporary_schema() as schema:
+        store = PostgresStore(schema.pool, dsn=url())
+        me, one, _, running = await seeded(store)
+        heard: list[str] = []
+        listener = await asyncpg.connect(url())
+        try:
+            await listener.add_listener("robinauts_turns", lambda *a: heard.append(a[-1]))
+            batch = [
+                StoredEvent(n, {"v": 1, "kind": "text_piece", "n": n}, EXPIRY) for n in (1, 2, 3)
+            ]
+            await store.append_events(me.id, one.id, running.id, batch, NOW)
+            async with asyncio.timeout(5.0):
+                while not heard:
+                    await asyncio.sleep(0.01)
+            await asyncio.sleep(0.1)
+            assert heard == [f"{running.id} 3"]
+        finally:
+            await listener.close()
+            await store.close()

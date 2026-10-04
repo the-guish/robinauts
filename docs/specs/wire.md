@@ -133,6 +133,21 @@ documented here, which is what "documented with the API" means for them.
   `RUN_FINISHED` with AG-UI's `cancelled` outcome — "stopped before it
   completed, by whoever was running it, and did not fail" — and not a
   `RUN_ERROR`, which a stock client shows as something having gone wrong.
+- **A quiet stream says a comment.** After fifteen seconds with nothing to
+  send, a stream sends `: keep-alive`, an SSE comment no client reads as an
+  event, so that a load balancer or a proxy in front of the deployment does
+  not close it while a tool runs. A client may take a connection that has
+  said nothing at all for much longer — the interface waits 45 s — for one
+  that went without closing, and re-attach.
+- **Pieces of text arrive in batches.** The runner writes the pieces a model
+  streams together, every 150 ms or so, joining the pieces of one message
+  that arrive in a row into one `TEXT_MESSAGE_CONTENT`; anything else is
+  written at once. A client sees the same text in fewer, larger deltas.
+- **A client re-attaches for as long as the turn runs.** The interface waits
+  half a second before its first try and doubles each wait to thirty seconds,
+  spread a fifth either way; it tries at once when the network comes back or
+  the tab is looked at again, and offers a Reconnect. Only a refusal ends the
+  watch: a turn that is not there, a session that ended.
 - `RUN_ERROR` carries a `code`: the turn's state where it ended in an error
   (`failed`, or `interrupted` — the deployment stopped with the turn in it,
   which is not AG-UI's *interrupt* outcome). Its message is **a fixed
@@ -150,8 +165,6 @@ hold as the rule and are not enforced yet:
   is not there and one in somebody else's conversation answer the same 404,
   and **before the stream begins**: a refusal is a status.
 - `Last-Event-ID` and `after` saying two different things is refused (422).
-- A comment line (`: keep-alive`) goes out while nothing is arriving, so
-  that nothing in front of the deployment closes a quiet stream.
 - **Every stream ends with an event saying the turn is over.** Re-attaching
   at or past the last position of a turn that has ended is answered with
   **how that turn really ended**, read from its record. A position a turn

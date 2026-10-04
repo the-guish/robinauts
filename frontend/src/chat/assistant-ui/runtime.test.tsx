@@ -2623,3 +2623,51 @@ test("a read that says the same thing hands back the same messages", () => {
   expect(edited.messages[0]).toBe(first.messages[0]);
   expect(edited.messages[1]).not.toBe(first.messages[1]);
 });
+
+test("a stream that drops says it is being opened again, and Reconnect tries at once", async () => {
+  const { response, write, close } = writable({
+    headers: streamHeaders(RUN, CONVERSATION),
+  });
+  const events = `/api/conversations/${CONVERSATION}/runs/${RUN}/events`;
+  let reattached = 0;
+  stub((call) => {
+    if (call.url === `/api/conversations/${CONVERSATION}`) {
+      return json(opened(conversation(1), TREE));
+    }
+    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+      return response;
+    }
+    if (call.url === events) {
+      reattached += 1;
+      return streamed(
+        [event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 3)],
+        { headers: streamHeaders(RUN, CONVERSATION) },
+      );
+    }
+    return undefined;
+  });
+  const { result } = chatting({ conversationId: CONVERSATION });
+  await waitFor(() => {
+    expect(result.current.state.messages).toHaveLength(2);
+  });
+  await act(async () => {
+    void result.current.runtime.thread.append("and then?");
+    await settle();
+  });
+  write(event("TEXT_MESSAGE_START", { messageId: "m4", role: "assistant" }, 2));
+  close();
+  await waitFor(() => {
+    expect(result.current.state.reconnecting).not.toBeNull();
+  });
+  expect(result.current.state.runId).toBe(RUN);
+  expect(reattached).toBe(0);
+  await act(async () => {
+    result.current.state.reconnecting?.now();
+    await settle();
+  });
+  await waitFor(() => {
+    expect(result.current.state.runId).toBeNull();
+  });
+  expect(reattached).toBe(1);
+  expect(result.current.state.reconnecting).toBeNull();
+});

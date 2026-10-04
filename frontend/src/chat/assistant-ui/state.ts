@@ -36,6 +36,7 @@
  * draw as text.
  */
 import type { Message } from "../../conversation/conversation";
+import type { Reconnecting } from "./agui/client";
 import type { AguiEvent } from "./agui/events";
 
 /**
@@ -142,6 +143,11 @@ export interface ChatState {
   /** What to say about the last run when it did not end well. */
   ended: string | null;
   /**
+   * The stream of the run in flight dropped, and is being opened again: how
+   * many tries, and how to try at once. `null` while it is delivering.
+   */
+  reconnecting: Reconnecting | null;
+  /**
    * Something said to the person, which only the person clears.
    *
    * Apart from `ended`, which is about a run and goes when the next one
@@ -174,6 +180,7 @@ export const EMPTY: ChatState = {
   writing: null,
   thinking: null,
   ended: null,
+  reconnecting: null,
   notice: null,
   before: null,
 };
@@ -395,6 +402,8 @@ export type ChatAction =
   | { kind: "event"; event: AguiEvent }
   /** The stream could not be picked up again: nothing is watching the run. */
   | { kind: "lost"; detail: string }
+  /** The stream dropped and is being opened again, or `null`: it delivers. */
+  | { kind: "reconnecting"; reconnecting: Reconnecting | null }
   /** Something to say, and nothing else about the conversation changes. */
   | { kind: "told"; detail: string }
   /**
@@ -451,6 +460,7 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
         thinking: null,
         // Said once: by the failed answer when there is one at the end.
         ended: messages.at(-1)?.state === "failed" ? null : action.endedBadly,
+        reconnecting: null,
         before: null,
       };
     }
@@ -466,6 +476,7 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
         sending: false,
         writing: null,
         thinking: null,
+        reconnecting: null,
         failure: { detail: action.detail, missing: action.missing },
       };
     case "asked": {
@@ -498,6 +509,8 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
         ended: null,
         notice: null,
       };
+    case "reconnecting":
+      return { ...state, reconnecting: action.reconnecting };
     case "started":
       return {
         ...state,
@@ -506,6 +519,7 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
         sending: false,
         before: null,
         ended: null,
+        reconnecting: null,
       };
     case "told":
       return { ...state, notice: action.detail };
@@ -517,7 +531,11 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
       // `cancelled` and not `failed`, because nothing is known to have gone
       // wrong with the answer -- only with the watching of it -- and the
       // sentence beside it says which (`LOST_TOUCH`).
-      return { ...ending(state, "cancelled"), ended: action.detail };
+      return {
+        ...ending(state, "cancelled"),
+        ended: action.detail,
+        reconnecting: null,
+      };
     case "refused":
       // The thread goes back to what it was: the server refused the turn
       // that would have changed the conversation, so what that turn did to

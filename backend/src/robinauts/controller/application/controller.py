@@ -202,8 +202,8 @@ class RobinautsController(Controller):
         running = await self._store.active_turn(user.id, session_id)
         active = None
         if running is not None:
-            events = await self._store.events_after(user.id, session_id, running.id, 0)
-            active = ActiveTurn(running.id, running.follows, len(events))
+            position = await self._store.last_position(user.id, session_id, running.id)
+            active = ActiveTurn(running.id, running.follows, position)
         latest = await self._store.latest_turn(user.id, session_id)
         ended_badly = None
         if latest is not None and latest.state in ENDED_BADLY:

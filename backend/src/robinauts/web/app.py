@@ -353,7 +353,7 @@ def event_stream(
     session_id: uuid.UUID, turn_id: uuid.UUID, events: AsyncIterator[NumberedEvent]
 ) -> StreamingResponse:
     return StreamingResponse(
-        agui.stream(str(session_id), str(turn_id), events),
+        agui.kept_alive(agui.stream(str(session_id), str(turn_id), events)),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-store",
