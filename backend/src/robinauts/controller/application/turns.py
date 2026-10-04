@@ -5,7 +5,8 @@
 
 The runner numbers its turn's events from 1 and is their only writer. Its first append is
 its claim on the turn: refused, it has lost the turn to another runner and runs no engine.
-Its deadline is ``max_turn_seconds`` from the turn's start, within the turn's lease. On
+Its deadline is ``max_turn_seconds`` from the turn's start; the process renews the turn's lease
+while it runs. On
 ``TurnLostError`` from any write it closes the engine's stream and writes nothing more: the
 turn is another runner's, a reader ended it, or its lease has passed.
 """
@@ -61,10 +62,6 @@ from robinauts.controller.ports.store import Store, StoredEvent
 
 RETENTION = timedelta(hours=24)
 """How long a turn's events are kept after they are written, a constant for now."""
-
-DEADLINE_MARGIN = 10.0
-"""Seconds the runner's deadline stays short of the lease, so that a finish lands inside it;
-with less than this left, the runner does not claim the turn."""
 
 
 class _Writer:
@@ -140,12 +137,8 @@ async def run_turn(
     checkpoint_id: str | None,
     max_turn_seconds: float,
 ) -> None:
-    now = datetime.now(UTC)
-    deadline = min(
-        turn.started_at + timedelta(seconds=max_turn_seconds),
-        turn.lease_until - timedelta(seconds=DEADLINE_MARGIN),
-    )
-    remaining = (deadline - now).total_seconds()
+    deadline = turn.started_at + timedelta(seconds=max_turn_seconds)
+    remaining = (deadline - datetime.now(UTC)).total_seconds()
     if remaining <= 0:
         return
     answer_id = uuid.uuid4()

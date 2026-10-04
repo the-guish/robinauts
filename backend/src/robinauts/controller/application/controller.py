@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import dataclasses
+import logging
 import uuid
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineFactory, installed
@@ -58,8 +60,12 @@ from robinauts.controller.core.titles import title_from_text
 from robinauts.controller.ports.dispatcher import TurnDispatcher
 from robinauts.controller.ports.store import Cursor, Store
 
-LEASE_MARGIN = timedelta(minutes=1)
-"""What a turn's lease allows past its deadline."""
+LEASE = timedelta(seconds=90)
+"""How long a turn's lease runs from its start or its last renewal: a turn whose process went
+away is found expired, and ended, this long after the last renewal at most."""
+
+HEARTBEAT_SECONDS = 30.0
+"""How often this process renews the leases of the turns it runs, all in one write."""
 
 WAIT_SECONDS = 15.0
 """How long a watcher waits for an event before it reads the store again."""
@@ -69,6 +75,9 @@ CLOSE_TIMEOUT = 10.0
 
 ENDED_BADLY = frozenset({TurnState.FAILED, TurnState.CANCELLED, TurnState.INTERRUPTED})
 """How a turn may end that opening its session says so."""
+
+
+log = logging.getLogger(__name__)
 
 
 def _text(message: Message) -> str:
@@ -97,6 +106,7 @@ class RobinautsController(Controller):
         self._engines: dict[str, AgentEngine] = {}
         self._factories: dict[str, EngineFactory] = {}
         self._handle: object | None = None
+        self._chores: list[asyncio.Task[None]] = []
 
     def _sets_up_engines(self) -> bool:
         """On PostgreSQL `robinauts db init` set the engines up; the server never does."""
@@ -113,9 +123,20 @@ class RobinautsController(Controller):
             self._factories,
             setup=self._sets_up_engines(),
         )
+        self._chores = [
+            asyncio.create_task(_every(HEARTBEAT_SECONDS, self._renew_leases, "renew the leases"))
+        ]
+
+    async def _renew_leases(self) -> None:
+        running = self._dispatcher.running()
+        if running:
+            await self._store.renew_leases(running, self._now() + LEASE)
 
     async def close(self) -> None:
         await self._dispatcher.close(self._close_timeout)
+        for chore in self._chores:
+            chore.cancel()
+        await asyncio.gather(*self._chores, return_exceptions=True)
         self._engines = {}
         await self._store.close()
 
@@ -346,7 +367,6 @@ class RobinautsController(Controller):
             raise UnknownModelError(model)
         now = self._now()
         await self._store.end_expired_turn(user.id, session.id, now)
-        timeout = timedelta(seconds=self._config.max_turn_seconds)
         turn = Turn(
             uuid.uuid4(),
             session.id,
@@ -354,7 +374,7 @@ class RobinautsController(Controller):
             model=model,
             state=TurnState.RUNNING,
             started_at=now,
-            lease_until=now + timeout + LEASE_MARGIN,
+            lease_until=now + LEASE,
             retries=retries,
         )
         stored = stored_message(question) if new_question else None
@@ -441,6 +461,16 @@ class RobinautsController(Controller):
 
     async def sweep(self) -> None:
         raise NotImplementedError("sweep")
+
+
+async def _every(seconds: float, chore: Callable[[], Awaitable[None]], what: str) -> None:
+    """Run ``chore`` every ``seconds`` until cancelled; a failed run is logged, not fatal."""
+    while True:
+        await asyncio.sleep(seconds)
+        try:
+            await chore()
+        except Exception:
+            log.exception("could not %s", what)
 
 
 def _encode_cursor(session: Session) -> str:

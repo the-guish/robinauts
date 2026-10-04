@@ -37,6 +37,9 @@ class InProcessDispatcher(TurnDispatcher):
         await asyncio.wait({task})
         return True
 
+    def running(self) -> list[uuid.UUID]:
+        return list(self._tasks)
+
     async def close(self, timeout: float) -> None:
         tasks = set(self._tasks.values())
         if not tasks:

@@ -310,6 +310,23 @@ class StoreContract:
         assert await store.end_expired_turn(me.id, one.id, NOW + 3 * MINUTE) is None
 
     @store_test
+    async def test_a_renewed_lease_lets_the_runner_write_past_the_old_one(
+        self, store: Store
+    ) -> None:
+        me, one, _, running = await self.started(store)
+        ended = turn(one.id, running.follows)
+        assert await store.renew_leases([running.id, ended.id], NOW + 10 * MINUTE) == set()
+        await self.append(store, me, one, running, piece(1), at=NOW + 5 * MINUTE)
+        assert await store.end_expired_turn(me.id, one.id, NOW + 5 * MINUTE) is None
+        await store.finish_turn(
+            me.id, one.id, running.id, TurnState.FINISHED, NOW + 5 * MINUTE, None, None, [], NOW
+        )
+        await store.renew_leases([running.id], NOW + 20 * MINUTE)
+        stopped = await store.get_turn(me.id, one.id, running.id)
+        assert stopped is not None
+        assert (stopped.state, stopped.lease_until) == (TurnState.FINISHED, NOW + 10 * MINUTE)
+
+    @store_test
     async def test_a_start_and_a_hide_succeed_after_an_expired_turn_is_ended(
         self, store: Store
     ) -> None:

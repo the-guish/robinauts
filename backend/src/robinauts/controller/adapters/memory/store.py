@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 
 from robinauts.controller.contract.domain import (
@@ -213,6 +214,13 @@ class MemoryStore(Store):
         self._turns[running.id] = ended
         await self._notify()
         return ended
+
+    async def renew_leases(self, turns: Collection[uuid.UUID], until: datetime) -> set[uuid.UUID]:
+        for turn in turns:
+            found = self._turns.get(turn)
+            if found is not None and found.state is TurnState.RUNNING:
+                self._turns[turn] = dataclasses.replace(found, lease_until=until)
+        return set()
 
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:
         self._visible(owner, session)

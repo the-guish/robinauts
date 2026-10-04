@@ -198,6 +198,25 @@ async def test_a_turn_whose_lease_has_passed_is_interrupted_and_a_new_turn_start
     await controller.close()
 
 
+@asyncio_test
+async def test_the_heartbeat_renews_the_lease_of_a_running_turn_and_no_other() -> None:
+    controller = await opened()
+    engine = GatedEngine()
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    await controller._store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
+    controller._now = jumped(timedelta(minutes=1))
+    await controller._renew_leases()
+    controller._now = jumped(timedelta(minutes=2))
+    assert (await controller.open_session(user, sid)).active is not None
+    engine.gate.set()
+    await settled(controller, user, started)
+    await controller._renew_leases()
+    await controller.close()
+
+
 class TimedEngine(EchoEngine):
     """Records the time it was given."""
 

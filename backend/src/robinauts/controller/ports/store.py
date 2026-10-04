@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -153,6 +153,11 @@ class Store(ABC):
     ) -> Turn | None:
         """The session's running turn ended as ``interrupted`` if its lease has passed
         ``now``, by one conditional write, with no event; ``None`` otherwise."""
+
+    @abstractmethod
+    async def renew_leases(self, turns: Collection[uuid.UUID], until: datetime) -> set[uuid.UUID]:
+        """Move the lease of each of those turns that still runs to ``until``, in one write;
+        the ones among them whose cancel was requested."""
 
     @abstractmethod
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None: ...

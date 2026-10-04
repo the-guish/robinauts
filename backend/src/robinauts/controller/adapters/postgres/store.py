@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime
 
 import asyncpg
@@ -396,6 +396,15 @@ class PostgresStore(Store):
     ) -> Turn | None:
         row = await self._pool.fetchrow(_END_EXPIRED, owner, session, now)
         return None if row is None else _turn(row)
+
+    async def renew_leases(self, turns: Collection[uuid.UUID], until: datetime) -> set[uuid.UUID]:
+        rows = await self._pool.fetch(
+            "UPDATE turns SET lease_until = $2 WHERE id = ANY($1::uuid[]) AND state = 'running'"
+            " RETURNING id, cancel_requested_at",
+            list(turns),
+            until,
+        )
+        return {row["id"] for row in rows if row["cancel_requested_at"] is not None}
 
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:
         async with self._pool.acquire() as connection:

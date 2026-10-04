@@ -29,6 +29,10 @@ class TurnDispatcher(ABC):
         false when the turn is not this process's."""
 
     @abstractmethod
+    def running(self) -> list[uuid.UUID]:
+        """The turns this process runs."""
+
+    @abstractmethod
     async def close(self, timeout: float) -> None:
         """Wait up to ``timeout`` seconds for the turns this process runs, then cancel the rest
         naming ``CLOSE``, and wait for those too."""
