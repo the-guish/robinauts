@@ -116,12 +116,20 @@ def test_work_and_a_models_retries_are_read() -> None:
             "models": {"m": {"provider": "p", "name": "m-1", "timeout_seconds": 60}},
             "work": {
                 "max_turn_seconds": 3600,
+                "lease_seconds": 60,
+                "heartbeat_seconds": 20,
                 "max_model_calls": 250,
                 "tool_error_behavior": "error",
             },
         }
     )
-    assert config.work == WorkConfig(3600.0, 250, ToolErrorBehavior.ERROR)
+    assert config.work == WorkConfig(
+        max_turn_seconds=3600.0,
+        lease_seconds=60.0,
+        heartbeat_seconds=20.0,
+        max_model_calls=250,
+        tool_error_behavior=ToolErrorBehavior.ERROR,
+    )
     assert (config.models["m"].timeout_seconds, config.models["m"].max_retries) == (60.0, 2)
 
 
@@ -150,3 +158,8 @@ def test_work_and_retries_out_of_range_are_refused_by_name() -> None:
 def test_work_must_be_a_table() -> None:
     with pytest.raises(ConfigError, match="work: a table of settings"):
         parse_config({"work": 3})
+
+
+def test_a_heartbeat_slower_than_half_the_lease_is_refused() -> None:
+    with pytest.raises(ConfigError, match="heartbeat_seconds 50 is more than half"):
+        parse_config({"work": {"lease_seconds": 90, "heartbeat_seconds": 50}})

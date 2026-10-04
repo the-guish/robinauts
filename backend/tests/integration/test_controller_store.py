@@ -14,7 +14,7 @@ import asyncpg
 import pytest
 
 from aio import asyncio_test
-from contracts.store import StoreContract
+from contracts.store import FENCE, WORKER, StoreContract
 from controller_db import TemporarySchema, requires_postgres, temporary_schema, url
 from robinauts.controller.adapters.postgres.pool import codecs, open_pool
 from robinauts.controller.adapters.postgres.schema import create_schema
@@ -30,6 +30,7 @@ from robinauts.controller.contract.domain import (
     User,
 )
 from robinauts.controller.ports.store import Store, StoredMessage
+from robinauts.controller.ports.work import Held
 
 pytestmark = requires_postgres
 
@@ -44,7 +45,7 @@ class TestPostgresStore(StoreContract):
         schema = TemporarySchema()
         pool = await schema.open()
         await create_schema(pool)
-        store = PostgresStore(pool, dsn=url())
+        store = PostgresStore(pool, dsn=schema.dsn)
         self.__dict__.setdefault("schemas", {})[id(store)] = schema
         return store
 
@@ -60,9 +61,23 @@ async def seeded(store: Store) -> tuple[User, Session, StoredMessage, Turn]:
     one = Session(uuid.uuid4(), me.id, "a", "echo", NOW, NOW)
     await store.add_session(one)
     asked = StoredMessage(uuid.uuid4(), one.id, None, Role.USER, NOW, {"v": 1, "text": "hi"})
-    running = Turn(uuid.uuid4(), one.id, asked.id, "m", TurnState.RUNNING, NOW, LEASE)
+    running = held_turn(one.id, asked.id)
     await store.start_turn(me.id, running, asked)
     return me, one, asked, running
+
+
+def held_turn(session: uuid.UUID, follows: uuid.UUID) -> Turn:
+    return Turn(
+        uuid.uuid4(),
+        session,
+        follows,
+        "m",
+        TurnState.RUNNING,
+        NOW,
+        LEASE,
+        worker_id=WORKER,
+        attempt=FENCE.attempt,
+    )
 
 
 async def raw(schema: TemporarySchema) -> asyncpg.Connection:
@@ -87,7 +102,7 @@ async def test_an_append_waits_on_a_readers_end_and_then_inserts_nothing() -> No
                 NOW + timedelta(minutes=1),
             )
             appending = asyncio.create_task(
-                store.append_event(me.id, one.id, running.id, 1, DOCUMENT, NOW, EXPIRY)
+                store.append_event(me.id, one.id, running.id, FENCE, 1, DOCUMENT, NOW, EXPIRY)
             )
             await asyncio.sleep(0.3)
             assert not appending.done(), "the append did not wait on the reader's end"
@@ -106,7 +121,7 @@ async def test_a_hide_waits_on_a_starting_turn_and_is_then_refused() -> None:
         store = PostgresStore(schema.pool, dsn=url())
         me, one, asked, running = await seeded(store)
         await store.finish_turn(
-            me.id, one.id, running.id, TurnState.FINISHED, NOW, None, None, [], NOW
+            me.id, one.id, running.id, FENCE, TurnState.FINISHED, NOW, None, None, [], NOW
         )
         starter = await raw(schema)
         try:
@@ -144,10 +159,10 @@ async def test_a_finish_and_a_start_raced_never_deadlock_and_the_finish_always_l
         me, one, asked, running = await seeded(store)
         started = 0
         for _ in range(20):
-            again = Turn(uuid.uuid4(), one.id, asked.id, "m", TurnState.RUNNING, NOW, LEASE)
+            again = held_turn(one.id, asked.id)
             finished, start = await asyncio.gather(
                 store.finish_turn(
-                    me.id, one.id, running.id, TurnState.FINISHED, NOW, None, None, [], NOW
+                    me.id, one.id, running.id, FENCE, TurnState.FINISHED, NOW, None, None, [], NOW
                 ),
                 store.start_turn(me.id, again, None),
                 return_exceptions=True,
@@ -181,6 +196,7 @@ async def test_a_watcher_on_one_pool_is_woken_by_an_append_on_another() -> None:
                     me.id,
                     one.id,
                     running.id,
+                    FENCE,
                     position,
                     DOCUMENT | {"position": position},
                     NOW,
@@ -203,7 +219,7 @@ async def test_a_watcher_on_one_pool_is_woken_by_an_append_on_another() -> None:
             assert len(await watcher.events_after(me.id, one.id, running.id, 0)) == 2
 
             await writer.finish_turn(
-                me.id, one.id, running.id, TurnState.FINISHED, NOW, None, None, [], NOW
+                me.id, one.id, running.id, FENCE, TurnState.FINISHED, NOW, None, None, [], NOW
             )
             assert await watcher.wait_for_events(me.id, one.id, running.id, 9, 5.0) is True
             with pytest.raises(SessionNotFoundError):
@@ -212,3 +228,24 @@ async def test_a_watcher_on_one_pool_is_woken_by_an_append_on_another() -> None:
             await watcher.close()
             await writer.close()
             await other_pool.close()
+
+
+@asyncio_test
+async def test_the_heartbeat_has_a_connection_of_its_own_and_opens_it_again() -> None:
+    async with temporary_schema(size=1) as schema:
+        store = PostgresStore(schema.pool, dsn=schema.dsn)
+        me, one, _, running = await seeded(store)
+        held = [Held(running.id, FENCE.attempt)]
+        try:
+            # Every connection of the pool is taken, and the lease is renewed all the same.
+            async with schema.pool.acquire():
+                renewed = await asyncio.wait_for(
+                    store.heartbeat(WORKER, held, NOW, timedelta(seconds=90)), 5.0
+                )
+            assert renewed.lost(held) == []
+            assert store._work is not None
+            store._work.terminate()
+            renewed = await store.heartbeat(WORKER, held, NOW, timedelta(seconds=90))
+            assert renewed.lost(held) == []
+        finally:
+            await store.close()

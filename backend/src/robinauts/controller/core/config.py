@@ -100,9 +100,16 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
         WorkConfig,
         problems,
         max_turn_seconds=seconds,
+        lease_seconds=seconds,
+        heartbeat_seconds=seconds,
         max_model_calls=count,
         tool_error_behavior=ToolErrorBehavior,
     )
+    if work.heartbeat_seconds * 2 > work.lease_seconds:
+        problems.append(
+            f"work: heartbeat_seconds {work.heartbeat_seconds:g} is more than half of"
+            f" lease_seconds {work.lease_seconds:g}, so one late heartbeat would lose every turn"
+        )
 
     for server in tool_servers.values():
         if server.auth is ToolServerAuth.HEADER:

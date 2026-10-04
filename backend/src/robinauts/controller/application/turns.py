@@ -3,12 +3,14 @@
 
 """The turn runner: the engine's stream, stored as numbered turn events and an answer.
 
-The runner numbers its turn's events from 1 and is their only writer. Its first append is
-its claim on the turn: refused, it has lost the turn to another runner and runs no engine.
+The runner numbers its turn's events from 1 and is their only writer, and every write names
+the holder and the attempt it runs under (``Fence``). Its first append is its claim on the
+turn: refused, it has lost the turn to another runner and runs no engine.
 Its deadline is the turn's ``deadline_at``, kept short of the lease; each call to the
 vendor is bounded by the model's own timeout, inside the engine. On
-``TurnLostError`` from any write it closes the engine's stream and writes nothing more: the
-turn is another runner's, a reader ended it, or its lease has passed.
+``TurnLostError`` from any write, or when it is stopped naming ``LOST``, it closes the
+engine's stream and writes nothing more: the turn is another runner's, a reader ended it, or
+its lease has passed.
 """
 
 from __future__ import annotations
@@ -57,24 +59,25 @@ from robinauts.controller.core.documents import (
     event_to_document,
     stored_message,
 )
-from robinauts.controller.ports.dispatcher import CLOSE
+from robinauts.controller.ports.dispatcher import StopReason
 from robinauts.controller.ports.store import Store, StoredEvent
+from robinauts.controller.ports.work import Fence
 
 RETENTION = timedelta(hours=24)
 """How long a turn's events are kept after they are written, a constant for now."""
 
 DEADLINE_MARGIN = 10.0
-"""Seconds the runner's deadline stays short of the lease, so that a finish lands inside it;
-with less than this left, the runner does not claim the turn."""
+"""Seconds of its deadline a turn must have left for the runner to claim it."""
 
 
 class _Writer:
     """The turn's events, numbered and written one at a time."""
 
-    def __init__(self, store: Store, owner: uuid.UUID, turn: Turn) -> None:
+    def __init__(self, store: Store, owner: uuid.UUID, turn: Turn, fence: Fence) -> None:
         self._store = store
         self._owner = owner
         self._turn = turn
+        self._fence = fence
         self.position = 0
 
     async def append(self, event: TurnEvent) -> None:
@@ -84,6 +87,7 @@ class _Writer:
             self._owner,
             self._turn.session_id,
             self._turn.id,
+            self._fence,
             self.position,
             event_to_document(self._turn.id, self.position, event),
             now,
@@ -112,6 +116,7 @@ class _Writer:
             self._owner,
             self._turn.session_id,
             self._turn.id,
+            self._fence,
             state,
             now,
             error,
@@ -135,21 +140,22 @@ async def run_turn(
     owner: uuid.UUID,
     session: Session,
     turn: Turn,
+    fence: Fence,
     question: Message,
     prompt: str,
     agent_config: AgentConfig,
     checkpoint_id: str | None,
 ) -> None:
     now = datetime.now(UTC)
-    remaining = (turn.lease_until - now).total_seconds() - DEADLINE_MARGIN
-    if turn.deadline_at is not None:
-        remaining = min(remaining, (turn.deadline_at - now).total_seconds())
-    if remaining <= 0:
+    if turn.deadline_at is None or turn.lease_until <= now:
+        return
+    remaining = (turn.deadline_at - now).total_seconds()
+    if remaining <= DEADLINE_MARGIN:
         return
     answer_id = uuid.uuid4()
     definition = AgentDefinition(agent_config.system_prompt, agent_config.tools)
     parts: list[MessagePart] = []
-    writer = _Writer(store, owner, turn)
+    writer = _Writer(store, owner, turn, fence)
     try:
         await writer.append(MessageStarted(answer_id, parent_id=question.id))
     except TurnLostError:
@@ -213,8 +219,8 @@ async def run_turn(
             await asyncio.wait({finishing})
             if not finishing.cancelled():
                 finishing.exception()
-        else:
-            state = TurnState.INTERRUPTED if CLOSE in exc.args else TurnState.CANCELLED
+        elif StopReason.LOST not in exc.args:
+            state = TurnState.INTERRUPTED if StopReason.CLOSE in exc.args else TurnState.CANCELLED
             await _end(writer, state, None)
         raise
     except Exception as exc:

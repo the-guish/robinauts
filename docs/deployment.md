@@ -198,6 +198,8 @@ max_output_tokens = 8192
 # max_turn_seconds = 1200        # a turn's deadline, from its start
 # max_model_calls = 100          # calls to the model in one turn
 # tool_error_behavior = "failed" # a tool's error goes back to the model
+# lease_seconds = 90             # a turn of a process that went away, at most
+# heartbeat_seconds = 30         # renews them all, at most half the lease
 
 [agents.assistant]
 title = "Assistant"
@@ -309,6 +311,12 @@ Four kinds of variable, and three of them are secrets. Put them in
     ROBINAUTS_GOOGLE_SECRET=...
     ROBINAUTS_OKTA_SECRET=...
     ROBINAUTS_ANTHROPIC_KEY=...
+
+`ROBINAUTS_WORKER_ID` names the process as the holder of the turns it runs,
+which every write of a turn's runner names; it is not a secret. Left out it is
+`<host name>:<pid>`, which is unique on one machine; where processes come and
+go under the same host name, set it to something unique per process, as a
+Kubernetes Deployment does with the pod's name.
 
 `ROBINAUTS_AUTH_CONFIG` is the old name of `ROBINAUTS_CONFIG`. It is still
 read, with a warning at start-up; if both are set the new one wins and the

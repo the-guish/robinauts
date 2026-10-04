@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any
 
 from robinauts.controller.contract.domain import Role, Session, Turn, TurnState, User
+from robinauts.controller.ports.work import Fence
 
 Document = Mapping[str, Any]
 """A message or an event, whole, as the encoder wrote it."""
@@ -115,14 +116,15 @@ class Store(ABC):
         owner: uuid.UUID,
         session: uuid.UUID,
         turn: uuid.UUID,
+        fence: Fence,
         position: int,
         document: Document,
         written_at: datetime,
         expires_at: datetime,
     ) -> None:
         """The same document again at a position it has is accepted. Another document there,
-        or any append on a turn that is not running or whose lease has passed ``written_at``,
-        is ``TurnLostError``."""
+        or any append on a turn that is not running, is not held under ``fence``, or whose
+        lease has passed ``written_at``, is ``TurnLostError``."""
 
     @abstractmethod
     async def events_after(
@@ -136,6 +138,7 @@ class Store(ABC):
         owner: uuid.UUID,
         session: uuid.UUID,
         turn: uuid.UUID,
+        fence: Fence,
         state: TurnState,
         ended_at: datetime,
         error: str | None,
@@ -144,8 +147,8 @@ class Store(ABC):
         updated_at: datetime,
     ) -> None:
         """The answer, the last events, the turn's state and the session's ``updated_at``, in
-        one operation, only while the turn is running and its lease has not passed
-        ``ended_at``: else ``TurnLostError``."""
+        one operation, only while the turn is running, held under ``fence``, and its lease
+        has not passed ``ended_at``: else ``TurnLostError``."""
 
     @abstractmethod
     async def end_expired_turn(

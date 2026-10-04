@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineFactory, installed
 from robinauts.controller.application.engines import build_engines
 from robinauts.controller.application.turns import run_turn
+from robinauts.controller.application.work import WorkLoop
 from robinauts.controller.contract.domain import (
     ActiveTurn,
     AgentListing,
@@ -56,11 +57,9 @@ from robinauts.controller.core.engine_settings import (
 )
 from robinauts.controller.core.failures import prompt_after_failures
 from robinauts.controller.core.titles import title_from_text
-from robinauts.controller.ports.dispatcher import TurnDispatcher
+from robinauts.controller.ports.dispatcher import StopReason, TurnDispatcher
 from robinauts.controller.ports.store import Cursor, Store
-
-LEASE_MARGIN = timedelta(minutes=1)
-"""What a turn's lease allows past its deadline."""
+from robinauts.controller.ports.work import Fence, WorkQueue
 
 WAIT_SECONDS = 15.0
 """How long a watcher waits for an event before it reads the store again."""
@@ -85,6 +84,8 @@ class RobinautsController(Controller):
         storage: StorageConfig,
         secret_for: SecretLookup,
         dispatcher: TurnDispatcher,
+        work: WorkQueue,
+        worker: str,
         close_timeout: float = CLOSE_TIMEOUT,
         now: Callable[[], datetime] | None = None,
     ) -> None:
@@ -93,8 +94,18 @@ class RobinautsController(Controller):
         self._storage = storage
         self._secret_for = secret_for
         self._dispatcher = dispatcher
+        self._worker = worker
         self._close_timeout = close_timeout
         self._now = now or (lambda: datetime.now(UTC))
+        self._lease = timedelta(seconds=config.work.lease_seconds)
+        self._work_loop = WorkLoop(
+            work,
+            dispatcher,
+            worker,
+            lease=self._lease,
+            every=config.work.heartbeat_seconds,
+            now=lambda: self._now(),
+        )
         self._engines: dict[str, AgentEngine] = {}
         self._factories: dict[str, EngineFactory] = {}
         self._handle: object | None = None
@@ -114,9 +125,12 @@ class RobinautsController(Controller):
             self._factories,
             setup=self._sets_up_engines(),
         )
+        self._work_loop.start()
 
     async def close(self) -> None:
+        # The heartbeat goes on while the turns this process runs are given their time.
         await self._dispatcher.close(self._close_timeout)
+        await self._work_loop.stop()
         self._engines = {}
         await self._store.close()
 
@@ -195,7 +209,7 @@ class RobinautsController(Controller):
         session = await self._store.get_session(user.id, session_id)
         await self._store.end_expired_turn(user.id, session_id, self._now())
         running = await self._store.active_turn(user.id, session_id)
-        if running is not None and await self._dispatcher.cancel(user.id, session_id, running.id):
+        if running is not None and await self._dispatcher.stop(running.id, StopReason.CANCEL):
             await self._end_if_running(user, running, TurnState.CANCELLED)
         await self._store.hide_session(user.id, session_id, self._now())
         await (await self._engine(session.engine)).forget(session_id)
@@ -320,7 +334,7 @@ class RobinautsController(Controller):
         running = await self._store.active_turn(user.id, session_id)
         if running is None or (turn_id is not None and running.id != turn_id):
             raise NoActiveTurnError(str(session_id))
-        if not await self._dispatcher.cancel(user.id, session_id, running.id):
+        if not await self._dispatcher.stop(running.id, StopReason.CANCEL):
             raise TurnActiveError(f"turn {running.id} runs in another process")
         # A runner that never claimed the turn wrote nothing: the turn is ended here.
         await self._end_if_running(user, running, TurnState.CANCELLED)
@@ -329,7 +343,16 @@ class RobinautsController(Controller):
         now = self._now()
         try:
             await self._store.finish_turn(
-                user.id, turn.session_id, turn.id, state, now, None, None, [], now
+                user.id,
+                turn.session_id,
+                turn.id,
+                Fence(self._worker, turn.attempt),
+                state,
+                now,
+                None,
+                None,
+                [],
+                now,
             )
         except TurnLostError:
             return
@@ -358,20 +381,26 @@ class RobinautsController(Controller):
             model=model,
             state=TurnState.RUNNING,
             started_at=now,
-            lease_until=deadline + LEASE_MARGIN,
+            lease_until=now + self._lease,
             retries=retries,
             deadline_at=deadline,
+            worker_id=self._worker,
+            attempt=1,
+            heartbeat_at=now,
         )
         stored = stored_message(question) if new_question else None
         await self._store.start_turn(user.id, turn, stored)
-        await self._dispatcher.dispatch(user.id, session.id, turn.id)
+        await self._dispatcher.dispatch(user.id, session.id, turn.id, turn.attempt)
         return turn
 
-    async def run_turn(self, owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID) -> None:
-        """Run the turn, from its ids alone: what a worker in another process would call."""
+    async def run_turn(
+        self, owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID, attempt: int
+    ) -> None:
+        """Run the turn's attempt, from its ids alone: what a worker in another process would
+        call. A turn this process does not hold under that attempt is not run."""
         session = await self._store.get_session(owner, session_id)
         turn = await self._store.get_turn(owner, session_id, turn_id)
-        if turn is None:
+        if turn is None or (turn.worker_id, turn.attempt) != (self._worker, attempt):
             return
         by_id = {m.id: m for m in await self._messages(owner, session_id)}
         question = by_id[turn.follows]
@@ -403,6 +432,7 @@ class RobinautsController(Controller):
             owner,
             session,
             turn,
+            Fence(self._worker, attempt),
             question,
             prompt,
             agent_config,

@@ -141,6 +141,11 @@ class WorkConfig:
 
     max_turn_seconds: float = 1200.0
     """A turn's deadline, from its start: the whole run, whatever its calls take."""
+    lease_seconds: float = 90.0
+    """How long a turn is this process's without a heartbeat: a process that went away
+    leaves its turns for this long at most."""
+    heartbeat_seconds: float = 30.0
+    """How often this process renews the leases of the turns it runs, all in one write."""
     max_model_calls: int = 100
     """Calls to the model in one turn, past which the engine ends it."""
     tool_error_behavior: ToolErrorBehavior = ToolErrorBehavior.FAILED
@@ -351,6 +356,12 @@ class Turn:
     """The failed answer this turn tries again, which the model is told about."""
     deadline_at: datetime | None = None
     """When the run must have ended, whatever its lease: its start plus ``max_turn_seconds``."""
+    worker_id: str | None = None
+    """The process that holds the turn while it runs, and held it last once it has ended."""
+    attempt: int = 1
+    """Which holding of the turn this is; every write of its runner names it."""
+    heartbeat_at: datetime | None = None
+    """When its holder last renewed its lease."""
 
 
 @dataclass(frozen=True, slots=True)

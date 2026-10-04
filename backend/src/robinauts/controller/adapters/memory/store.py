@@ -9,7 +9,8 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import uuid
-from datetime import datetime
+from collections.abc import Sequence
+from datetime import datetime, timedelta
 
 from robinauts.controller.contract.domain import (
     Session,
@@ -27,9 +28,10 @@ from robinauts.controller.ports.store import (
     StoredEvent,
     StoredMessage,
 )
+from robinauts.controller.ports.work import Fence, Held, Renewed, WorkQueue
 
 
-class MemoryStore(Store):
+class MemoryStore(Store, WorkQueue):
     def __init__(self) -> None:
         self._users: dict[tuple[str, str], User] = {}
         self._sessions: dict[uuid.UUID, Session] = {}
@@ -66,6 +68,18 @@ class MemoryStore(Store):
     def _turn_of(self, session: uuid.UUID, turn: uuid.UUID) -> Turn | None:
         found = self._turns.get(turn)
         return found if found is not None and found.session_id == session else None
+
+    def _held(self, session: uuid.UUID, turn: uuid.UUID, fence: Fence, at: datetime) -> Turn:
+        """The turn, while it runs under ``fence`` and its lease has not passed ``at``."""
+        found = self._turn_of(session, turn)
+        if (
+            found is None
+            or found.state is not TurnState.RUNNING
+            or found.lease_until <= at
+            or (found.worker_id, found.attempt) != (fence.worker, fence.attempt)
+        ):
+            raise TurnLostError(f"turn {turn} is not running under this holder")
+        return found
 
     async def _notify(self) -> None:
         async with self._changed:
@@ -148,15 +162,14 @@ class MemoryStore(Store):
         owner: uuid.UUID,
         session: uuid.UUID,
         turn: uuid.UUID,
+        fence: Fence,
         position: int,
         document: Document,
         written_at: datetime,
         expires_at: datetime,
     ) -> None:
         self._visible(owner, session)
-        found = self._turn_of(session, turn)
-        if found is None or found.state is not TurnState.RUNNING or found.lease_until <= written_at:
-            raise TurnLostError(f"turn {turn} is not running")
+        self._held(session, turn, fence, written_at)
         events = self._events[turn]
         taken = next((e for e in events if e.position == position), None)
         if taken is not None:
@@ -180,17 +193,16 @@ class MemoryStore(Store):
         owner: uuid.UUID,
         session: uuid.UUID,
         turn: uuid.UUID,
+        fence: Fence,
         state: TurnState,
         ended_at: datetime,
         error: str | None,
         answer: StoredMessage | None,
-        events: list[StoredEvent] | tuple[StoredEvent, ...],
+        events: Sequence[StoredEvent],
         updated_at: datetime,
     ) -> None:
         self._visible(owner, session)
-        found = self._turn_of(session, turn)
-        if found is None or found.state is not TurnState.RUNNING or found.lease_until <= ended_at:
-            raise TurnLostError(f"turn {turn} is not running")
+        found = self._held(session, turn, fence, ended_at)
         if answer is not None:
             self._messages[session].append(answer)
         self._events[turn].extend(events)
@@ -226,6 +238,24 @@ class MemoryStore(Store):
     async def get_turn(self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID) -> Turn | None:
         self._visible(owner, session)
         return self._turn_of(session, turn)
+
+    async def heartbeat(
+        self, worker: str, held: Sequence[Held], now: datetime, lease: timedelta
+    ) -> Renewed:
+        renewed = {}
+        for h in held:
+            found = self._turns.get(h.turn)
+            if (
+                found is not None
+                and found.state is TurnState.RUNNING
+                and (found.worker_id, found.attempt) == (worker, h.attempt)
+                and found.lease_until > now
+            ):
+                self._turns[h.turn] = dataclasses.replace(
+                    found, lease_until=now + lease, heartbeat_at=now
+                )
+                renewed[h.turn] = None
+        return Renewed(renewed)
 
     async def wait_for_events(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, after: int, timeout: float

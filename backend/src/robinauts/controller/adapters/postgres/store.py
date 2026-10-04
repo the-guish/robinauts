@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import Sequence
-from datetime import datetime
+from collections.abc import Awaitable, Callable, Sequence
+from datetime import datetime, timedelta
+from typing import TypeVar
 
 import asyncpg
 
@@ -41,6 +42,9 @@ from robinauts.controller.ports.store import (
     StoredEvent,
     StoredMessage,
 )
+from robinauts.controller.ports.work import Fence, Held, Renewed, WorkQueue
+
+T = TypeVar("T")
 
 CHANNEL = "robinauts_turns"
 """Where a turn's writes are announced: ``<turn> <position>``, or ``<turn> end``."""
@@ -52,7 +56,7 @@ USER_EXISTS = "users_provider_subject_key"
 _SESSION_COLUMNS = "id, owner_id, agent, engine, title, created_at, updated_at"
 _TURN_COLUMNS = (
     "id, session_id, follows, model, state, started_at, ended_at, error, lease_until, retries,"
-    " deadline_at"
+    " deadline_at, worker_id, attempt, heartbeat_at"
 )
 
 _VISIBLE = "SELECT 1 FROM sessions WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL"
@@ -63,8 +67,16 @@ SELECT t.id, $4, $5, $6
 FROM turns AS t
 JOIN sessions AS s ON s.id = t.session_id
 WHERE t.id = $3 AND t.session_id = $2 AND s.owner_id = $1 AND s.deleted_at IS NULL
-  AND t.state = 'running' AND t.lease_until > $7
+  AND t.state = 'running' AND t.lease_until > $7 AND t.worker_id = $8 AND t.attempt = $9
 FOR SHARE OF t
+"""
+
+_HEARTBEAT = """
+UPDATE turns AS t SET lease_until = $3, heartbeat_at = $2
+FROM unnest($4::uuid[], $5::integer[]) AS h(id, attempt)
+WHERE t.id = h.id AND t.attempt = h.attempt AND t.worker_id = $1
+  AND t.state = 'running' AND t.lease_until > $2
+RETURNING t.id, t.cancel_requested_at
 """
 
 _END_EXPIRED = f"""
@@ -102,6 +114,9 @@ def _turn(row: asyncpg.Record) -> Turn:
         row["error"],
         row["retries"],
         row["deadline_at"],
+        row["worker_id"],
+        row["attempt"],
+        row["heartbeat_at"],
     )
 
 
@@ -116,7 +131,7 @@ def _rows(status: str) -> int:
     return int(status.rsplit(" ", 1)[-1])
 
 
-class PostgresStore(Store):
+class PostgresStore(Store, WorkQueue):
     """Over a pool it is given, which the giver closes, or over a dsn, from which ``open``
     makes its own pool, checks the schema, and ``close`` closes it."""
 
@@ -127,6 +142,8 @@ class PostgresStore(Store):
         self._listener: asyncpg.Connection | None = None
         self._waiters: dict[uuid.UUID, set[asyncio.Future[None]]] = {}
         self._opening: asyncio.Lock | None = None
+        self._work: asyncpg.Connection | None = None
+        self._work_lock: asyncio.Lock | None = None
 
     @property
     def pool(self) -> asyncpg.Pool:
@@ -142,6 +159,9 @@ class PostgresStore(Store):
         return self._pool
 
     async def close(self) -> None:
+        if self._work is not None:
+            work, self._work = self._work, None
+            await work.close()
         if self._listener is not None:
             listener, self._listener = self._listener, None
             await listener.close()
@@ -267,7 +287,7 @@ class PostgresStore(Store):
                     await self._insert_message(connection, question)
                 await connection.execute(
                     f"INSERT INTO turns ({_TURN_COLUMNS})"
-                    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
                     turn.id,
                     turn.session_id,
                     turn.follows,
@@ -279,6 +299,9 @@ class PostgresStore(Store):
                     turn.lease_until,
                     turn.retries,
                     turn.deadline_at,
+                    turn.worker_id,
+                    turn.attempt,
+                    turn.heartbeat_at,
                 )
         except asyncpg.UniqueViolationError as violated:
             if violated.constraint_name == ONE_RUNNING:
@@ -290,6 +313,7 @@ class PostgresStore(Store):
         owner: uuid.UUID,
         session: uuid.UUID,
         turn: uuid.UUID,
+        fence: Fence,
         position: int,
         document: Document,
         written_at: datetime,
@@ -298,7 +322,16 @@ class PostgresStore(Store):
         try:
             async with self._pool.acquire() as connection, connection.transaction():
                 status = await connection.execute(
-                    _APPEND, owner, session, turn, position, document, expires_at, written_at
+                    _APPEND,
+                    owner,
+                    session,
+                    turn,
+                    position,
+                    document,
+                    expires_at,
+                    written_at,
+                    fence.worker,
+                    fence.attempt,
                 )
                 if _rows(status) == 0:
                     raise TurnLostError(f"turn {turn} is not running")
@@ -345,6 +378,7 @@ class PostgresStore(Store):
         owner: uuid.UUID,
         session: uuid.UUID,
         turn: uuid.UUID,
+        fence: Fence,
         state: TurnState,
         ended_at: datetime,
         error: str | None,
@@ -368,12 +402,14 @@ class PostgresStore(Store):
                 status = await connection.execute(
                     "UPDATE turns SET state = $3, ended_at = $4, error = $5"
                     " WHERE id = $1 AND session_id = $2 AND state = 'running'"
-                    "   AND lease_until > $4",
+                    "   AND lease_until > $4 AND worker_id = $6 AND attempt = $7",
                     turn,
                     session,
                     state.value,
                     ended_at,
                     error,
+                    fence.worker,
+                    fence.attempt,
                 )
                 if _rows(status) == 0:
                     raise TurnLostError(f"turn {turn} is not running")
@@ -454,6 +490,45 @@ class PostgresStore(Store):
                     waiting.discard(woken)
                     if not waiting:
                         del self._waiters[turn]
+
+    # --- work ---------------------------------------------------------------
+
+    async def heartbeat(
+        self, worker: str, held: Sequence[Held], now: datetime, lease: timedelta
+    ) -> Renewed:
+        if not held:
+            return Renewed({})
+        rows = await self._on_work_connection(
+            lambda connection: connection.fetch(
+                _HEARTBEAT,
+                worker,
+                now,
+                now + lease,
+                [h.turn for h in held],
+                [h.attempt for h in held],
+            )
+        )
+        return Renewed({row["id"]: row["cancel_requested_at"] for row in rows})
+
+    async def _on_work_connection(
+        self, statement: Callable[[asyncpg.Connection], Awaitable[T]]
+    ) -> T:
+        """One statement on the work connection: this process's own, outside the pool, so
+        that a pool every request is waiting on never delays a lease. Opened on first use,
+        one statement at a time, and opened again after it breaks."""
+        if self._work_lock is None:
+            self._work_lock = asyncio.Lock()
+        async with self._work_lock:
+            if self._work is None or self._work.is_closed():
+                if self._dsn is None:
+                    raise RuntimeError("a store that renews leases needs the database's dsn")
+                self._work = await asyncpg.connect(self._dsn)
+            try:
+                return await statement(self._work)
+            except (asyncpg.InterfaceError, OSError):
+                broken, self._work = self._work, None
+                broken.terminate()
+                raise
 
     # --- helpers ------------------------------------------------------------
 

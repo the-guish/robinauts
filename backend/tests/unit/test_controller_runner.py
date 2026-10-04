@@ -88,6 +88,8 @@ async def over(store: Store, **options: Any) -> RobinautsController:
         storage=StorageConfig(StorageKind.IN_MEMORY),
         secret_for={}.get,
         dispatcher=dispatcher,
+        work=store,
+        worker=options.pop("worker", "pod-a"),
         **options,
     )
     dispatcher.run = controller.run_turn
@@ -145,7 +147,8 @@ async def test_the_turns_deadline_is_its_own_and_not_the_models_timeout() -> Non
     turn = await controller._store.get_turn(user.id, started.session_id, started.turn_id)
     assert turn is not None
     assert turn.deadline_at == turn.started_at + timedelta(hours=1)
-    assert turn.lease_until > turn.deadline_at
+    # The lease is the heartbeat's, apart from the deadline.
+    assert turn.lease_until == turn.started_at + timedelta(seconds=90)
     [timeout] = engine.timeouts
     assert 3500 < timeout <= 3600
     await controller.close()
@@ -177,7 +180,7 @@ async def test_a_runner_whose_claim_is_refused_runs_no_engine_and_never_finishes
     sid = started.session_id
     await controller._store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
     # A second runner for the same turn, as a duplicate dispatch would be.
-    await controller.run_turn(user.id, sid, started.turn_id)
+    await controller.run_turn(user.id, sid, started.turn_id, 1)
     assert engine.streams == 1
     turn = await controller._store.get_turn(user.id, sid, started.turn_id)
     assert turn is not None
@@ -197,7 +200,7 @@ async def test_a_runner_refused_mid_stream_writes_nothing_more() -> None:
     started = await controller.start_session(user, agent="echo", model="echo", text="one")
     sid = started.session_id
     await controller._store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
-    task = controller._dispatcher._tasks[started.turn_id]
+    _, task = controller._dispatcher._tasks[started.turn_id]
     controller._now = jumped(PAST_THE_LEASE)
     assert (await controller.open_session(user, sid)).active is None
     engine.gate.set()
@@ -236,6 +239,55 @@ async def test_a_turn_whose_lease_has_passed_is_interrupted_and_a_new_turn_start
 
 
 @asyncio_test
+async def test_the_heartbeat_keeps_a_turn_past_the_lease_it_started_with() -> None:
+    config = dataclasses.replace(CONFIG, work=WorkConfig(lease_seconds=0.6, heartbeat_seconds=0.1))
+    controller = await over(MemoryStore(), config=config)
+    engine = GatedEngine()
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    await controller._store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
+    first = await controller._store.get_turn(user.id, sid, started.turn_id)
+    await asyncio.sleep(1.2)
+    assert first is not None
+    assert datetime.now(UTC) > first.lease_until
+    renewed = await controller._store.get_turn(user.id, sid, started.turn_id)
+    assert renewed is not None
+    assert renewed.lease_until > first.lease_until
+    assert renewed.heartbeat_at is not None
+    assert renewed.heartbeat_at > first.started_at
+    assert (await controller.open_session(user, sid)).active is not None
+    engine.gate.set()
+    await settled(controller, user, started)
+    turn = await controller._store.get_turn(user.id, sid, started.turn_id)
+    assert turn is not None
+    assert turn.state is TurnState.FINISHED
+    await controller.close()
+
+
+@asyncio_test
+async def test_a_turn_the_heartbeat_did_not_renew_is_stopped_and_writes_nothing_more() -> None:
+    store = MemoryStore()
+    controller = await over(store)
+    engine = GatedEngine()
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    await store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
+    # Another process holds it now, under another attempt.
+    taken = dataclasses.replace(store._turns[started.turn_id], worker_id="pod-b", attempt=2)
+    store._turns[started.turn_id] = taken
+    await controller._work_loop.beat()
+    assert controller._dispatcher.held() == []
+    assert await store.get_turn(user.id, sid, started.turn_id) == taken
+    assert len(await store.events_after(user.id, sid, started.turn_id, 0)) == 1
+    assert len(await store.messages_of(user.id, sid)) == 1
+    await controller.close()
+
+
+@asyncio_test
 async def test_a_cancel_before_the_runner_claimed_ends_the_turn_cancelled() -> None:
     controller = await opened()
     user = await controller.ensure_user(Identity("local", "me"))
@@ -253,10 +305,10 @@ async def test_a_cancel_before_the_runner_claimed_ends_the_turn_cancelled() -> N
 @asyncio_test
 async def test_a_cancel_of_a_turn_another_process_runs_is_refused() -> None:
     store = MemoryStore()
-    first = await over(store)
+    first = await over(store, worker="pod-a")
     engine = GatedEngine()
     first._engines["echo"] = engine
-    second = await over(store)
+    second = await over(store, worker="pod-b")
     user = await first.ensure_user(Identity("local", "me"))
     started = await first.start_session(user, agent="echo", model="echo", text="one")
     await store.wait_for_events(user.id, started.session_id, started.turn_id, 0, 5.0)

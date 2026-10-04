@@ -240,13 +240,20 @@ CREATE INDEX IF NOT EXISTS messages_session_id_parent_id_idx
 -- start plus `[work] max_turn_seconds`. It is the turn's alone: the model's
 -- `timeout_seconds` bounds each call to the vendor, never the turn.
 --
--- `lease_until` is written with the turn, as its deadline and a margin.
--- Every write of the runner's is refused past it, and a running turn
--- whose lease has passed was left by a runner that went away: the next reader
--- to find it ends it as `interrupted`, with no event. Renewing the lease for a
--- long turn, and `cancel_requested_at`, which a cancel from another process
--- will set and the runner read back, are stage two. Both are set by the
--- application's clock.
+-- A running turn is held by one process, `worker_id` (the pod's name),
+-- under an `attempt`, and every write of its runner names both: the store
+-- refuses a write whose turn is held by another or under another attempt.
+-- `worker_id` stays on an ended turn, naming its last holder.
+--
+-- `lease_until` is written with the turn, as its start plus `[work]
+-- lease_seconds`, and the holder renews it every `heartbeat_seconds`, with
+-- `heartbeat_at`, in one statement for every turn it holds. A lease that has
+-- passed is never renewed. Every write of the runner's is refused past it,
+-- and a running turn whose lease has passed was left by a runner that went
+-- away: the next reader to find it ends it as `interrupted`, with no event.
+-- `cancel_requested_at`, which a cancel from another process will set and
+-- the holder read back, is the next step. All are set by the application's
+-- clock.
 CREATE TABLE IF NOT EXISTS turns (
     id uuid
         CONSTRAINT turns_pkey PRIMARY KEY,
@@ -268,6 +275,10 @@ CREATE TABLE IF NOT EXISTS turns (
     error text,
     lease_until timestamptz NOT NULL,
     deadline_at timestamptz,
+    worker_id text,
+    attempt integer NOT NULL DEFAULT 1
+        CONSTRAINT turns_attempt_from_one CHECK (attempt >= 1),
+    heartbeat_at timestamptz,
     cancel_requested_at timestamptz,
     -- The failed answer a retry tries again: the model is told about it
     -- (docs/specs/ui.md). Null on every other turn.
@@ -303,6 +314,10 @@ CREATE INDEX IF NOT EXISTS turns_session_id_started_at_idx
 -- What the sweep reads: the running turns whose lease has passed.
 CREATE INDEX IF NOT EXISTS turns_lease_until_idx
     ON turns (lease_until) WHERE state = 'running';
+
+-- The running turns of one holder.
+CREATE INDEX IF NOT EXISTS turns_worker_idx
+    ON turns (worker_id) WHERE state = 'running';
 
 
 -- ---------------------------------------------------------------------------

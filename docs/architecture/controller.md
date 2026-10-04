@@ -13,8 +13,9 @@ signed in is web's own concern, the user session.
 ## Lifecycle
 
 - `open`: build the stores on the given storage, build the engines the configuration names, and
-  run their setup. A turn a process that went away left running is ended by its lease, by the
-  next reader to find it.
+  run their setup, and start the heartbeat that renews the leases of the turns this process
+  runs. A turn a process that went away left running is ended by its lease, by the next reader
+  to find it.
 - `close`: wait for the turns this process runs, bounded, interrupt the rest, and release the
   storage.
 
