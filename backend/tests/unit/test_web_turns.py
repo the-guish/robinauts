@@ -138,3 +138,13 @@ async def test_an_edit_names_the_message_and_a_reply_its_parent() -> None:
             f"/api/conversations/{cid}/turns", json={"text": "x", "edit": answer["id"]}
         )
         assert not_a_question.status_code == 404
+
+
+@asyncio_test
+async def test_an_agent_this_process_does_not_know_is_404_not_500() -> None:
+    async with client() as http:
+        response = await http.post("/api/turns", json={"agent_id": "gone", "text": "hello"})
+        assert response.status_code == 404
+        assert response.json()["error"] == "UnknownAgentError"
+        started = await http.post("/api/turns", json={"agent_id": "echo", "text": "hello"})
+        assert started.status_code == 200

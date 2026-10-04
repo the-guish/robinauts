@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineFactory, installed
 from robinauts.controller.application.engines import build_engines
-from robinauts.controller.application.turns import run_turn
+from robinauts.controller.application.turns import RETENTION, run_turn
 from robinauts.controller.contract.domain import (
     ActiveTurn,
     AgentListing,
@@ -38,6 +38,7 @@ from robinauts.controller.contract.domain import (
     TurnLostError,
     TurnStarted,
     TurnState,
+    UnknownAgentError,
     UnknownEngineError,
     UnknownModelError,
     User,
@@ -45,6 +46,7 @@ from robinauts.controller.contract.domain import (
 from robinauts.controller.contract.ports import Controller
 from robinauts.controller.core.documents import (
     event_from_document,
+    event_to_document,
     message_from_document,
     stored_message,
 )
@@ -56,7 +58,7 @@ from robinauts.controller.core.engine_settings import (
 from robinauts.controller.core.failures import prompt_after_failures
 from robinauts.controller.core.titles import title_from_text
 from robinauts.controller.ports.dispatcher import TurnDispatcher
-from robinauts.controller.ports.store import Cursor, Store
+from robinauts.controller.ports.store import Cursor, Store, StoredEvent
 
 LEASE_MARGIN = timedelta(minutes=1)
 """What a turn's lease allows past its timeout."""
@@ -206,7 +208,9 @@ class RobinautsController(Controller):
         raise NotImplementedError("fork_session")
 
     async def start_session(self, user: User, *, agent: str, model: str, text: str) -> TurnStarted:
-        agent_config = self._config.agents[agent]
+        agent_config = self._config.agents.get(agent)
+        if agent_config is None:
+            raise UnknownAgentError(agent)
         now = self._now()
         session = Session(
             uuid.uuid4(),
@@ -368,6 +372,15 @@ class RobinautsController(Controller):
         turn = await self._store.get_turn(owner, session_id, turn_id)
         if turn is None:
             return
+        agent_config = self._config.agents.get(session.agent)
+        model_config = self._config.models.get(turn.model)
+        if agent_config is None or model_config is None:
+            # A replica whose configuration is not the one that started the turn: the turn
+            # ends at once, rather than holding its conversation until its lease passes.
+            unknown = "agent" if agent_config is None else "model"
+            name = session.agent if agent_config is None else turn.model
+            await self._fail_unrunnable(owner, turn, f"{unknown} {name!r} is not configured here")
+            return
         by_id = {m.id: m for m in await self._messages(owner, session_id)}
         question = by_id[turn.follows]
         # The nearest answer up the thread that has a checkpoint: a failed answer has
@@ -377,9 +390,8 @@ class RobinautsController(Controller):
         while above is not None and checkpoint_id is None:
             checkpoint_id = by_id[above].checkpoint_id
             above = by_id[above].parent_id
-        agent_config = self._config.agents[session.agent]
         engine = await self._engine(session.engine)
-        model_timeout = self._config.models[turn.model].timeout_seconds
+        model_timeout = model_config.timeout_seconds
         # The failed exchanges between the last answer that finished and this question,
         # oldest first: the engine remembers none of them, so the prompt carries them.
         earlier: list[tuple[str, Message]] = []
@@ -405,6 +417,24 @@ class RobinautsController(Controller):
             checkpoint_id,
             model_timeout,
         )
+
+    async def _fail_unrunnable(self, owner: uuid.UUID, turn: Turn, error: str) -> None:
+        now = self._now()
+        ended = event_to_document(turn.id, 1, TurnEnded(TurnState.FAILED))
+        try:
+            await self._store.finish_turn(
+                owner,
+                turn.session_id,
+                turn.id,
+                TurnState.FAILED,
+                now,
+                error,
+                None,
+                [StoredEvent(1, ended, now + RETENTION)],
+                now,
+            )
+        except TurnLostError:
+            return
 
     async def watch_turn(
         self,

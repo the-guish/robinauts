@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+import uuid
+from datetime import timedelta
+
 from aio import asyncio_test
 from robinauts.controller.composition import build
 from robinauts.controller.contract.domain import (
@@ -25,6 +28,7 @@ from robinauts.controller.contract.domain import (
     StorageKind,
     TextPart,
     TextPiece,
+    Turn,
     TurnEnded,
     TurnStarted,
     TurnState,
@@ -126,4 +130,37 @@ async def test_watch_turn_follows_the_turn_to_its_end() -> None:
         e async for e in controller.watch_turn(user, sid, started.turn_id, after=len(watched) - 1)
     ]
     assert again == [watched[-1]]
+    await controller.close()
+
+
+@asyncio_test
+async def test_a_turn_this_process_cannot_run_ends_failed_at_once() -> None:
+    controller = await opened()
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="hello")
+    await settled(controller, user, started)
+    # A replica rolled to a configuration without the model the turn names.
+    again = await controller.regenerate_answer(
+        user, started.session_id, question_id=started.question.id, model="echo"
+    )
+    await settled(controller, user, again)
+    turn = await controller._store.get_turn(user.id, started.session_id, again.turn_id)
+    assert turn is not None
+    controller._config = Config(CONFIG.providers, {}, {}, CONFIG.agents)
+    third = Turn(
+        uuid.uuid4(),
+        started.session_id,
+        started.question.id,
+        "echo",
+        TurnState.RUNNING,
+        turn.started_at,
+        turn.started_at + timedelta(hours=1),
+    )
+    await controller._store.start_turn(user.id, third, None)
+    await controller.run_turn(user.id, started.session_id, third.id)
+    ended = await controller._store.get_turn(user.id, started.session_id, third.id)
+    assert ended is not None
+    assert (ended.state, ended.error) == (TurnState.FAILED, "model 'echo' is not configured here")
+    watched = [e async for e in controller.watch_turn(user, started.session_id, third.id)]
+    assert [e.event for e in watched] == [TurnEnded(TurnState.FAILED)]
     await controller.close()

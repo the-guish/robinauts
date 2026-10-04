@@ -9,7 +9,7 @@ import pytest
 import uvicorn
 
 from robinauts.controller.contract.domain import ConfigError
-from robinauts.web.cli import run, serving
+from robinauts.web.cli import NO_DATABASE, run, serving
 
 SIGN_IN = {
     "public_url": "https://robinauts.example.com",
@@ -24,6 +24,8 @@ SIGN_IN = {
     "allow": [{"provider": "okta", "everyone": True}],
 }
 
+DATABASE = {"ROBINAUTS_DATABASE_URL": "postgresql://robinauts@db/robinauts"}
+
 
 def test_version_prints_the_version(capsys: pytest.CaptureFixture[str]) -> None:
     run(["version"])
@@ -31,9 +33,22 @@ def test_version_prints_the_version(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_a_provider_is_served_with_its_sign_in() -> None:
-    _, _, sign_in = serving(SIGN_IN, {}, host="0.0.0.0", dev_no_sign_in=False)
+    _, _, sign_in = serving(SIGN_IN, DATABASE, host="0.0.0.0", dev_no_sign_in=False)
     assert sign_in is not None
     assert list(sign_in.providers) == ["okta"]
+
+
+@pytest.mark.parametrize("environ", [{}, {"ROBINAUTS_DATABASE_URL": ""}])
+def test_sign_in_without_a_database_is_refused(environ: dict[str, str]) -> None:
+    # One replica silently keeping its records in memory would be a deployment of its own.
+    with pytest.raises(ConfigError) as refused:
+        serving(SIGN_IN, environ, host="0.0.0.0", dev_no_sign_in=False)
+    assert NO_DATABASE in str(refused.value)
+
+
+def test_the_mode_may_keep_its_records_in_memory() -> None:
+    _, _, sign_in = serving({}, {}, host="127.0.0.1", dev_no_sign_in=True)
+    assert sign_in is None
 
 
 def test_no_provider_is_refused_without_the_mode() -> None:
