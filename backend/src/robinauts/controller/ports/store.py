@@ -174,6 +174,12 @@ class Store(ABC):
         ``open`` on; a request missed is read back by ``renew_leases``."""
 
     @abstractmethod
+    async def sweep(self, now: datetime) -> list[Session]:
+        """Delete what has expired by ``now`` (turn events, and the sign-in records a store on
+        the same database keeps), end every running turn whose lease has passed as
+        ``interrupted``, and return the hidden sessions with no running turn, to purge."""
+
+    @abstractmethod
     async def renew_leases(self, turns: Collection[uuid.UUID], until: datetime) -> set[uuid.UUID]:
         """Move the lease of each of those turns that still runs to ``until``, in one write;
         the ones among them whose cancel was requested."""

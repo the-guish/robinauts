@@ -445,6 +445,21 @@ class PostgresStore(Store):
     def when_cancelled(self, callback: Callable[[uuid.UUID], None]) -> None:
         self._cancelled.append(callback)
 
+    async def sweep(self, now: datetime) -> list[Session]:
+        # Each statement on its own, and each safe to run twice at once in two processes.
+        for table in ("turn_events", "user_sessions", "api_tokens"):
+            await self._pool.execute(f"DELETE FROM {table} WHERE expires_at <= $1", now)
+        await self._pool.execute(
+            "UPDATE turns SET state = 'interrupted', ended_at = $1, error = 'lease expired'"
+            " WHERE state = 'running' AND lease_until < $1",
+            now,
+        )
+        rows = await self._pool.fetch(
+            f"SELECT {_SESSION_COLUMNS} FROM sessions AS s WHERE deleted_at IS NOT NULL"
+            " AND NOT EXISTS (SELECT 1 FROM turns WHERE session_id = s.id AND state = 'running')"
+        )
+        return [_session(row) for row in rows]
+
     async def renew_leases(self, turns: Collection[uuid.UUID], until: datetime) -> set[uuid.UUID]:
         if self._dsn is not None:
             await self._listen()  # a listener that dropped is opened again here

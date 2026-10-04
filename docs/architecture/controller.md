@@ -51,4 +51,9 @@ signed in is web's own concern, the user session.
 
 Run by the process that holds the controller, on a schedule of its own, never by a shell.
 
-- `sweep`: delete what has expired, and forget its memory.
+- `sweep`, every five minutes in every process: delete the turn events, user sessions and API
+  tokens that have expired, end every running turn whose lease has passed as `interrupted`,
+  and purge the deleted sessions whose turns have ended, forgetting their memory. Two
+  processes sweeping at once do nothing twice.
+- The heartbeat, every thirty seconds: renew the leases of the turns this process runs, and
+  cancel those whose cancel was requested.

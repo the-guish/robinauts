@@ -66,6 +66,9 @@ away is found expired, and ended, this long after the last renewal at most."""
 HEARTBEAT_SECONDS = 30.0
 """How often this process renews the leases of the turns it runs, all in one write."""
 
+SWEEP_SECONDS = 300.0
+"""How often each process sweeps; two sweeping at once do nothing twice."""
+
 WAIT_SECONDS = 15.0
 """How long a watcher waits for an event before it reads the store again."""
 
@@ -124,7 +127,8 @@ class RobinautsController(Controller):
         )
         self._store.when_cancelled(self._dispatcher.stop)
         self._chores = [
-            asyncio.create_task(_every(HEARTBEAT_SECONDS, self._renew_leases, "renew the leases"))
+            asyncio.create_task(_every(HEARTBEAT_SECONDS, self._renew_leases, "renew the leases")),
+            asyncio.create_task(_every(SWEEP_SECONDS, self.sweep, "sweep")),
         ]
 
     async def _renew_leases(self) -> None:
@@ -226,11 +230,11 @@ class RobinautsController(Controller):
         # A turn another process runs fails its next write on the hidden session and stops;
         # the sweep purges the session once its turns have ended.
         if running is None:
-            await self._purge(user.id, session)
+            await self._purge(session)
 
-    async def _purge(self, owner: uuid.UUID, session: Session) -> None:
+    async def _purge(self, session: Session) -> None:
         await (await self._engine(session.engine)).forget(session.id)
-        await self._store.purge_session(owner, session.id)
+        await self._store.purge_session(session.owner_id, session.id)
 
     async def fork_session(
         self, user: User, session_id: uuid.UUID, *, at_message: uuid.UUID
@@ -475,7 +479,8 @@ class RobinautsController(Controller):
                 return
 
     async def sweep(self) -> None:
-        raise NotImplementedError("sweep")
+        for session in await self._store.sweep(self._now()):
+            await self._purge(session)
 
 
 async def _every(seconds: float, chore: Callable[[], Awaitable[None]], what: str) -> None:

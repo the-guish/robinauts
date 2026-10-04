@@ -228,6 +228,16 @@ class MemoryStore(Store):
     def when_cancelled(self, callback: Callable[[uuid.UUID], None]) -> None:
         self._callbacks.append(callback)
 
+    async def sweep(self, now: datetime) -> list[Session]:
+        for turn, events in self._events.items():
+            self._events[turn] = [e for e in events if e.expires_at > now]
+        for turn in list(self._turns.values()):
+            if turn.state is TurnState.RUNNING and turn.lease_until < now:
+                self._turns[turn.id] = dataclasses.replace(
+                    turn, state=TurnState.INTERRUPTED, ended_at=now, error="lease expired"
+                )
+        return [self._sessions[s] for s in self._hidden if self._running(s) is None]
+
     async def renew_leases(self, turns: Collection[uuid.UUID], until: datetime) -> set[uuid.UUID]:
         renewed = set()
         for turn in turns:

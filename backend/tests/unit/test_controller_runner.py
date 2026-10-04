@@ -285,6 +285,11 @@ async def test_delete_through_another_process_hides_at_once_and_the_runner_stops
     first._engines["echo"].gate.set()
     await asyncio.wait(set(first._dispatcher._tasks.values()))
     assert store._turns[started.turn_id].state is TurnState.RUNNING
+    # Its lease is not renewed any more: the sweep ends the turn and purges the session.
+    second._now = jumped(PAST_THE_LEASE)
+    await second.sweep()
+    assert started.turn_id not in store._turns
+    assert sid not in store._sessions
     await first.close()
     await second.close()
 

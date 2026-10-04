@@ -361,6 +361,24 @@ class StoreContract:
         assert await store.renew_leases([running.id], NOW + MINUTE) == {running.id}
 
     @store_test
+    async def test_the_sweep_ends_expired_turns_drops_old_events_and_names_what_to_purge(
+        self, store: Store
+    ) -> None:
+        me, one, _, running = await self.started(store)
+        await self.append(store, me, one, running, piece(1))
+        hidden = session(me.id)
+        await store.add_session(hidden)
+        await store.hide_session(me.id, hidden.id, NOW)
+        assert await store.sweep(NOW) == [hidden]
+        assert len(await store.events_after(me.id, one.id, running.id, 0)) == 1
+        await store.hide_session(me.id, one.id, NOW)
+        assert await store.sweep(NOW) == [hidden]
+        swept = await store.sweep(EXPIRY)
+        assert sorted(s.id for s in swept) == sorted([hidden.id, one.id])
+        await store.purge_session(me.id, hidden.id)
+        assert [s.id for s in await store.sweep(EXPIRY)] == [one.id]
+
+    @store_test
     async def test_a_start_and_a_hide_succeed_after_an_expired_turn_is_ended(
         self, store: Store
     ) -> None:
