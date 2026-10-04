@@ -164,6 +164,9 @@ class Controller(ABC):
 
     @abstractmethod
     async def sweep(self) -> None:
+        """The housekeeping every process does on an interval: expired events and sign-in
+        records deleted, turns whose lease has passed ended, and hidden sessions purged.
+        Safe to run in every process at once."""
         raise NotImplementedError
 
 
@@ -238,4 +241,10 @@ class Credentials(ABC):
     @abstractmethod
     async def delete_api_token(self, user_id: uuid.UUID, token_id: uuid.UUID) -> bool:
         """Only the owner's: true when that user had that token."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def delete_expired(self, now: datetime) -> int | None:
+        """Delete every user session, pending login and API token whose ``expires_at`` is
+        not after ``now``: how many, or ``None`` when another process is at it."""
         raise NotImplementedError

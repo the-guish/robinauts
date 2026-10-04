@@ -156,3 +156,46 @@ async def test_the_pool_is_the_size_the_configuration_says() -> None:
         assert pool.get_max_size() == 3
         assert pool.acquire_timeout == 1.5
         await composed.controller.close()
+
+
+@asyncio_test
+async def test_two_processes_sweeping_at_once_end_a_dead_turn_once() -> None:
+    async with temporary_schema() as schema:
+        dsn = dsn_in(schema.name)
+        storage = StorageConfig(StorageKind.POSTGRES, url=dsn)
+        one = compose(CONFIG, storage=storage, secret_for={}.get, worker_id="pod-a")
+        two = compose(CONFIG, storage=storage, secret_for={}.get, worker_id="pod-b")
+        for each in (one, two):
+            await each.controller.open()
+        user = await one.controller.ensure_user(Identity("local", "me"))
+        started = await one.controller.start_session(user, agent="echo", model="echo", text="hi")
+        async for _ in one.controller.watch_turn(user, started.session_id, started.turn_id):
+            pass
+        # A second turn whose process went away at once: its lease is all that is left.
+        store = one.controller._store
+        again = await one.controller.regenerate_answer(
+            user, started.session_id, question_id=started.question.id, model="echo"
+        )
+        async for _ in one.controller.watch_turn(user, started.session_id, again.turn_id):
+            pass
+        await store.pool.execute(
+            "UPDATE turns SET state = 'running', ended_at = NULL WHERE id = $1", again.turn_id
+        )
+        await store.pool.execute(
+            "DELETE FROM messages WHERE document->>'turn_id' = $1", str(again.turn_id)
+        )
+        later = datetime.now(UTC) + timedelta(days=2)
+        for each in (one, two):
+            each.controller._now = lambda: later
+        await asyncio.gather(one.controller.sweep(), two.controller.sweep())
+        await asyncio.gather(one.controller.sweep(), two.controller.sweep())
+        turn = await store.get_turn(user.id, started.session_id, again.turn_id)
+        assert turn is not None
+        assert turn.state.value == "interrupted"
+        answers = await store.pool.fetchval(
+            "SELECT count(*) FROM messages WHERE document->>'turn_id' = $1", str(again.turn_id)
+        )
+        assert answers == 1
+        assert await store.pool.fetchval("SELECT count(*) FROM turn_events") == 0
+        for each in (one, two):
+            await each.controller.close()

@@ -395,7 +395,7 @@ CREATE TABLE IF NOT EXISTS user_sessions (
 CREATE INDEX IF NOT EXISTS user_sessions_user_id_idx
     ON user_sessions (user_id);
 
--- What stage two's sweep deletes by: the sessions past their expiry.
+-- What the sweep deletes by: the sessions past their expiry.
 CREATE INDEX IF NOT EXISTS user_sessions_expires_at_idx
     ON user_sessions (expires_at);
 
@@ -411,7 +411,7 @@ CREATE INDEX IF NOT EXISTS user_sessions_expires_at_idx
 --
 -- No foreign key: a sign-in in progress belongs to nobody yet. Beginning one
 -- deletes the expired ones in the same statement, so the table holds ten
--- minutes of sign-ins with no sweep.
+-- minutes of sign-ins; the sweep takes those of a quiet deployment.
 CREATE TABLE IF NOT EXISTS pending_logins (
     state_hash text
         CONSTRAINT pending_logins_pkey PRIMARY KEY
@@ -424,7 +424,7 @@ CREATE TABLE IF NOT EXISTS pending_logins (
     expires_at timestamptz NOT NULL
 );
 
--- What beginning a sign-in deletes by, and stage two's sweep.
+-- What beginning a sign-in deletes by, and the sweep.
 CREATE INDEX IF NOT EXISTS pending_logins_expires_at_idx
     ON pending_logins (expires_at);
 
@@ -457,7 +457,7 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 CREATE INDEX IF NOT EXISTS api_tokens_user_id_idx
     ON api_tokens (user_id);
 
--- What stage two's sweep deletes by: the tokens past their expiry.
+-- What the sweep deletes by: the tokens past their expiry.
 CREATE INDEX IF NOT EXISTS api_tokens_expires_at_idx
     ON api_tokens (expires_at);
 

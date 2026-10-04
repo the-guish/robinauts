@@ -50,4 +50,9 @@ signed in is web's own concern, the user session.
 
 Run by the process that holds the controller, on a schedule of its own, never by a shell.
 
-- `sweep`: delete what has expired, and forget its memory.
+- `sweep`: run by every process every five minutes, each task by one process at a
+  time (a transaction-level advisory lock per task) and idempotent all the same. In
+  order: end the turns whose lease has passed, as their next reader would, rebuilding
+  their answers from their events; delete the events past their expiry, and the
+  expired user sessions, pending sign-ins and API tokens; purge the hidden sessions
+  no live turn holds, forgetting their memory first.

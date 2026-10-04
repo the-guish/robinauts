@@ -25,9 +25,11 @@ from robinauts.controller.ports.store import (
     Cursor,
     Document,
     Fence,
+    SessionRef,
     Store,
     StoredEvent,
     StoredMessage,
+    TurnRef,
 )
 from robinauts.controller.ports.work import HeartbeatResult, Held, WorkQueue
 
@@ -273,6 +275,49 @@ class MemoryStore(Store, WorkQueue):
     async def get_turn(self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID) -> Turn | None:
         self._visible(owner, session)
         return self._turn_of(session, turn)
+
+    # --- housekeeping -------------------------------------------------------
+
+    async def delete_expired_events(self, now: datetime, limit: int) -> int | None:
+        deleted = 0
+        for turn, events in self._events.items():
+            if self._turns[turn].state is TurnState.RUNNING:
+                continue
+            kept = [e for e in events if e.expires_at >= now or deleted >= limit]
+            deleted += len(events) - len(kept)
+            self._events[turn] = kept
+        return deleted
+
+    async def expired_turns(self, now: datetime, limit: int) -> list[TurnRef] | None:
+        expired = sorted(
+            (
+                t
+                for t in self._turns.values()
+                if t.state is TurnState.RUNNING
+                and t.lease_until < now
+                and t.session_id in self._sessions
+                and t.session_id not in self._hidden
+            ),
+            key=lambda t: t.lease_until,
+        )
+        return [
+            TurnRef(self._sessions[t.session_id].owner_id, t.session_id, t.id)
+            for t in expired[:limit]
+        ]
+
+    async def purgeable_sessions(self, now: datetime, limit: int) -> list[SessionRef] | None:
+        live = {
+            t.session_id
+            for t in self._turns.values()
+            if t.state is TurnState.RUNNING and t.lease_until >= now
+        }
+        hidden = sorted(
+            (at, session) for session, at in self._hidden.items() if session not in live
+        )
+        return [
+            SessionRef(self._sessions[s].owner_id, s, self._sessions[s].engine)
+            for _, s in hidden[:limit]
+        ]
 
     # --- work ---------------------------------------------------------------
 

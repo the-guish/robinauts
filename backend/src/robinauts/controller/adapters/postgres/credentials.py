@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from robinauts.controller.adapters.postgres.store import PostgresStore, _rows, _user
+from robinauts.controller.adapters.postgres.store import SWEEP_LOCK, PostgresStore, _rows, _user
 from robinauts.controller.contract.domain import ApiToken, PendingLogin, User, UserSession
 from robinauts.controller.contract.ports import Credentials
 
@@ -104,6 +104,18 @@ class PostgresCredentials(Credentials):
             "DELETE FROM api_tokens WHERE id = $1 AND user_id = $2", token_id, user_id
         )
         return _rows(status) == 1
+
+    async def delete_expired(self, now: datetime) -> int | None:
+        async with self._store.pool.acquire() as connection, connection.transaction():
+            if not await connection.fetchval(SWEEP_LOCK, "sign-in"):
+                return None
+            deleted = 0
+            for table in ("user_sessions", "pending_logins", "api_tokens"):
+                status = await connection.execute(
+                    f"DELETE FROM {table} WHERE expires_at <= $1", now
+                )
+                deleted += _rows(status)
+        return deleted
 
     async def _resolve(self, table: str, secret_hash: str, now: datetime) -> User | None:
         row = await self._store.pool.fetchrow(_RESOLVE.format(table=table), secret_hash, now)

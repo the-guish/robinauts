@@ -66,3 +66,11 @@ class MemoryCredentials(Credentials):
             return False
         del self._tokens[found.secret_hash]
         return True
+
+    async def delete_expired(self, now: datetime) -> int | None:
+        deleted = 0
+        for held in (self._sessions, self._pending, self._tokens):
+            for key in [k for k, v in held.items() if v.expires_at <= now]:
+                del held[key]
+                deleted += 1
+        return deleted

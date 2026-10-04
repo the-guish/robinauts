@@ -105,6 +105,7 @@ def compose(
         dispatcher=dispatcher,
         work=store,
         worker_id=worker_id or worker_id_from(os.environ),
+        sign_ins=credentials,
     )
     # Handed over here, so that no adapter imports the application.
     dispatcher.run = controller.run_turn

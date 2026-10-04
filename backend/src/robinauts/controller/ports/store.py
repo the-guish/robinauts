@@ -60,6 +60,24 @@ class StoredEvent:
     expires_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class TurnRef:
+    """A turn, by the ids every operation on it names."""
+
+    owner: uuid.UUID
+    session: uuid.UUID
+    turn: uuid.UUID
+
+
+@dataclass(frozen=True, slots=True)
+class SessionRef:
+    """A session, by its owner and its id, with the engine that holds its memory."""
+
+    owner: uuid.UUID
+    session: uuid.UUID
+    engine: str
+
+
 class Store(ABC):
     @abstractmethod
     async def open(self) -> object | None:
@@ -204,6 +222,28 @@ class Store(ABC):
     async def get_turn(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID
     ) -> Turn | None: ...
+
+    # --- housekeeping -------------------------------------------------------
+    #
+    # Every process sweeps. Each task is done by one process at a time where the store can
+    # say so: ``None`` is "another process is at it". Each is idempotent all the same.
+
+    @abstractmethod
+    async def delete_expired_events(self, now: datetime, limit: int) -> int | None:
+        """Delete up to ``limit`` events whose ``expires_at`` has passed ``now``, of turns that
+        have ended: how many. A running turn's are kept, for whoever ends it to rebuild its
+        answer from."""
+
+    @abstractmethod
+    async def expired_turns(self, now: datetime, limit: int) -> list[TurnRef] | None:
+        """Up to ``limit`` running turns of visible sessions whose lease has passed ``now``,
+        for ``end_expired_turn``."""
+
+    @abstractmethod
+    async def purgeable_sessions(self, now: datetime, limit: int) -> list[SessionRef] | None:
+        """Up to ``limit`` hidden sessions, oldest first, with no turn running under a lease
+        that has not passed ``now``: a delete whose purge did not happen, or was left for
+        a turn to end first."""
 
     @abstractmethod
     async def wait_for_events(

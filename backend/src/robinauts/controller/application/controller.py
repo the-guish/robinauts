@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineFactory, installed
 from robinauts.controller.application.engines import build_engines
+from robinauts.controller.application.housekeeping import Housekeeper
 from robinauts.controller.application.turns import RETENTION, run_turn
 from robinauts.controller.application.work import WorkLoop
 from robinauts.controller.contract.domain import (
@@ -48,7 +49,7 @@ from robinauts.controller.contract.domain import (
     UnknownModelError,
     User,
 )
-from robinauts.controller.contract.ports import Controller, Operations
+from robinauts.controller.contract.ports import Controller, Credentials, Operations
 from robinauts.controller.core.documents import (
     event_from_document,
     event_to_document,
@@ -75,6 +76,15 @@ CANCEL_WAIT = 5.0
 
 LAST_POSITION = 2**31 - 1
 """A position past any event's."""
+
+SWEEP_SECONDS = 300.0
+"""How often every process sweeps."""
+
+SWEEP_BATCH = 1000
+"""How many rows one step of a sweep takes at most."""
+
+SWEEP_BATCHES = 20
+"""How many steps of deleting expired events one sweep takes at most."""
 
 FINAL_WAIT = 10.0
 """How long `close` waits for anything after the turns: interrupted turns' last writes, and
@@ -108,6 +118,8 @@ class RobinautsController(Controller, Operations):
         worker_id: str,
         close_timeout: float | None = None,
         now: Callable[[], datetime] | None = None,
+        sign_ins: Credentials | None = None,
+        sweep_every: float = SWEEP_SECONDS,
     ) -> None:
         self._config = config
         self._store = store
@@ -118,6 +130,8 @@ class RobinautsController(Controller, Operations):
         self._draining = False
         self._now = now or (lambda: datetime.now(UTC))
         self._worker = worker_id
+        self._sign_ins = sign_ins
+        self._housekeeper = Housekeeper(self.sweep, every=sweep_every)
         self._work_loop = WorkLoop(
             work,
             dispatcher,
@@ -146,11 +160,13 @@ class RobinautsController(Controller, Operations):
             setup=self._sets_up_engines(),
         )
         self._work_loop.start()
+        self._housekeeper.start()
 
     async def close(self) -> None:
         """Give the turns running here their bounded window to finish, then end the rest as
         interrupted, and let everything go, each wait bounded."""
         self._draining = True
+        await self._housekeeper.stop()
         await self._dispatcher.close(self._close_timeout)
         await self._work_loop.stop()
         self._engines = {}
@@ -604,7 +620,26 @@ class RobinautsController(Controller, Operations):
                 return
 
     async def sweep(self) -> None:
-        raise NotImplementedError("sweep")
+        now = self._now()
+        # Turns whose runner went away: ended as their next reader would end them. First,
+        # since their answers are rebuilt from events the next step may delete.
+        for ref in await self._store.expired_turns(now, SWEEP_BATCH) or []:
+            with contextlib.suppress(SessionNotFoundError):
+                await self._end_expired(ref.owner, ref.session)
+        for _ in range(SWEEP_BATCHES):
+            deleted = await self._store.delete_expired_events(now, SWEEP_BATCH)
+            if deleted is None or deleted < SWEEP_BATCH:
+                break
+        if self._sign_ins is not None:
+            await self._sign_ins.delete_expired(now)
+        # Deletes whose purge died, or waited for a turn to end.
+        for ref in await self._store.purgeable_sessions(now, SWEEP_BATCH) or []:
+            try:
+                await (await self._engine(ref.engine)).forget(ref.session)
+            except UnknownEngineError:
+                log.exception("session %s is kept: its engine cannot forget it", ref.session)
+                continue
+            await self._store.purge_session(ref.owner, ref.session)
 
 
 def _fence(turn: Turn) -> Fence:

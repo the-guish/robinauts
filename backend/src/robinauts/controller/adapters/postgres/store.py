@@ -46,9 +46,11 @@ from robinauts.controller.ports.store import (
     Cursor,
     Document,
     Fence,
+    SessionRef,
     Store,
     StoredEvent,
     StoredMessage,
+    TurnRef,
 )
 from robinauts.controller.ports.work import HeartbeatResult, Held, WorkQueue
 
@@ -83,6 +85,12 @@ FOR SHARE OF t
 """
 """The turn, running and held under the fence: locked against an end until the append
 commits."""
+
+SWEEP_LOCK = """
+SELECT pg_try_advisory_xact_lock(hashtextextended(current_schema() || ' robinauts.sweep.' || $1, 0))
+"""
+"""One sweeper per task and schema at a time, for the transaction, which a pooler in
+transaction mode keeps too: false when another process is at it."""
 
 _INSERT_EVENT = (
     "INSERT INTO turn_events (turn_id, position, document, expires_at) VALUES ($1, $2, $3, $4)"
@@ -583,6 +591,50 @@ class PostgresStore(Store, WorkQueue):
                     waiting.discard(woken)
                     if not waiting:
                         del self._waiters[turn]
+
+    # --- housekeeping -------------------------------------------------------
+
+    async def delete_expired_events(self, now: datetime, limit: int) -> int | None:
+        async with self._pool.acquire() as connection, connection.transaction():
+            if not await connection.fetchval(SWEEP_LOCK, "events"):
+                return None
+            status = await connection.execute(
+                "DELETE FROM turn_events WHERE ctid = ANY (ARRAY("
+                "  SELECT e.ctid FROM turn_events AS e JOIN turns AS t ON t.id = e.turn_id"
+                "  WHERE e.expires_at < $1 AND t.state <> 'running' LIMIT $2))",
+                now,
+                limit,
+            )
+        return _rows(status)
+
+    async def expired_turns(self, now: datetime, limit: int) -> list[TurnRef] | None:
+        async with self._pool.acquire() as connection, connection.transaction():
+            if not await connection.fetchval(SWEEP_LOCK, "turns"):
+                return None
+            rows = await connection.fetch(
+                "SELECT s.owner_id, t.session_id, t.id FROM turns AS t"
+                " JOIN sessions AS s ON s.id = t.session_id"
+                " WHERE t.state = 'running' AND t.lease_until < $1 AND s.deleted_at IS NULL"
+                " ORDER BY t.lease_until LIMIT $2",
+                now,
+                limit,
+            )
+        return [TurnRef(r["owner_id"], r["session_id"], r["id"]) for r in rows]
+
+    async def purgeable_sessions(self, now: datetime, limit: int) -> list[SessionRef] | None:
+        async with self._pool.acquire() as connection, connection.transaction():
+            if not await connection.fetchval(SWEEP_LOCK, "purge"):
+                return None
+            rows = await connection.fetch(
+                "SELECT s.owner_id, s.id, s.engine FROM sessions AS s"
+                " WHERE s.deleted_at IS NOT NULL AND NOT EXISTS ("
+                "   SELECT 1 FROM turns AS t WHERE t.session_id = s.id"
+                "     AND t.state = 'running' AND t.lease_until >= $1)"
+                " ORDER BY s.deleted_at, s.id LIMIT $2",
+                now,
+                limit,
+            )
+        return [SessionRef(r["owner_id"], r["id"], r["engine"]) for r in rows]
 
     # --- work ---------------------------------------------------------------
 

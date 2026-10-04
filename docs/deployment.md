@@ -554,10 +554,11 @@ intersection of the two, which is usually a blank page.
     sudo systemctl start robinauts
     journalctl -u robinauts -f
 
-A good start says five lines at `info` and no more: "Started server
-process", "Waiting for application startup", "the start-up sweep ended
-N run(s) left going by a process that went away", "Application startup
-complete", "Uvicorn running on http://127.0.0.1:8000". The log goes to
+A good start says four lines at `info` and no more: "Started server
+process", "Waiting for application startup", "Application startup
+complete", "Uvicorn running on http://127.0.0.1:8000". Every five minutes,
+and first a minute or so after the start, each process sweeps: it ends the
+runs left going by a process that went away, and deletes what has expired. The log goes to
 **stdout**, one line each, with every query string cut off — one of this
 platform's paths carries an authorization code in one.
 

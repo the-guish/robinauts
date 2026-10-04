@@ -18,7 +18,7 @@ from contracts.store import FENCE, WORKER, StoreContract
 from controller_db import TemporarySchema, requires_postgres, temporary_schema, url
 from robinauts.controller.adapters.postgres.pool import codecs, open_pool
 from robinauts.controller.adapters.postgres.schema import create_schema
-from robinauts.controller.adapters.postgres.store import PostgresStore
+from robinauts.controller.adapters.postgres.store import SWEEP_LOCK, PostgresStore
 from robinauts.controller.contract.domain import (
     Role,
     Session,
@@ -290,4 +290,25 @@ async def test_a_batch_is_announced_once() -> None:
         finally:
             await listener.close()
         assert heard == [f"{running.id} 3"]
+        await store.close()
+
+
+@asyncio_test
+async def test_a_sweep_task_another_process_is_at_is_left_to_it() -> None:
+    async with temporary_schema() as schema:
+        store = PostgresStore(schema.pool, dsn=url())
+        await seeded(store)
+        holder = await raw(schema)
+        try:
+            async with holder.transaction():
+                for task in ("events", "turns", "purge"):
+                    assert await holder.fetchval(SWEEP_LOCK, task) is True
+                later = NOW + timedelta(hours=1)
+                assert await store.delete_expired_events(later, 10) is None
+                assert await store.expired_turns(later, 10) is None
+                assert await store.purgeable_sessions(later, 10) is None
+            # Let go at the end of the transaction: the next sweep does the work.
+            assert len(await store.expired_turns(NOW + timedelta(hours=1), 10)) == 1
+        finally:
+            await holder.close()
         await store.close()

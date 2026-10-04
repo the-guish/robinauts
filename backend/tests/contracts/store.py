@@ -28,7 +28,14 @@ from robinauts.controller.contract.domain import (
     TurnState,
     User,
 )
-from robinauts.controller.ports.store import Fence, Store, StoredEvent, StoredMessage
+from robinauts.controller.ports.store import (
+    Fence,
+    SessionRef,
+    Store,
+    StoredEvent,
+    StoredMessage,
+    TurnRef,
+)
 from robinauts.controller.ports.work import HeartbeatResult, Held, WorkQueue
 
 NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
@@ -565,3 +572,38 @@ class StoreContract:
         with pytest.raises(TurnLostError):
             await store.append_events(me.id, one.id, running.id, clash, NOW, fence=FENCE)
         assert len(await store.events_after(me.id, one.id, running.id, 0)) == 3
+
+    # --- housekeeping -----------------------------------------------------------
+
+    @store_test
+    async def test_the_sweep_deletes_expired_events_and_nothing_else(self, store: Store) -> None:
+        me, one, _, running = await self.started(store)
+        old = StoredEvent(1, piece(1).document, NOW - MINUTE)
+        fresh = StoredEvent(2, piece(2).document, NOW + MINUTE)
+        await store.append_events(me.id, one.id, running.id, [old, fresh], NOW, fence=FENCE)
+        # Kept while the turn runs: its answer may yet be rebuilt from them.
+        assert await store.delete_expired_events(NOW, 1000) == 0
+        await store.finish_turn(
+            me.id, one.id, running.id, TurnState.FAILED, NOW, "x", None, [], NOW, fence=FENCE
+        )
+        assert await store.delete_expired_events(NOW, 1000) == 1
+        assert [p for p, _ in await store.events_after(me.id, one.id, running.id, 0)] == [2]
+        assert await store.delete_expired_events(NOW, 1000) == 0
+
+    @store_test
+    async def test_the_sweep_finds_turns_past_their_lease_and_sessions_to_purge(
+        self, store: Store
+    ) -> None:
+        me, one, _, running = await self.started(store)
+        assert await store.expired_turns(NOW, 10) == []
+        expired = await store.expired_turns(NOW + 10 * MINUTE, 10)
+        assert expired == [TurnRef(me.id, one.id, running.id)]
+        assert await store.purgeable_sessions(NOW + 10 * MINUTE, 10) == []
+        await store.hide_session(me.id, one.id, NOW)
+        # Hidden, its turn is the purge's, once no lease of it runs.
+        assert await store.expired_turns(NOW + 10 * MINUTE, 10) == []
+        assert await store.purgeable_sessions(NOW, 10) == []
+        purgeable = await store.purgeable_sessions(NOW + 10 * MINUTE, 10)
+        assert purgeable == [SessionRef(me.id, one.id, one.engine)]
+        await store.purge_session(me.id, one.id)
+        assert await store.purgeable_sessions(NOW + 10 * MINUTE, 10) == []
