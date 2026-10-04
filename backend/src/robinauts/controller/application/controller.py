@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineFactory, installed
 from robinauts.controller.application.engines import build_engines
+from robinauts.controller.application.housekeeping import Housekeeper
 from robinauts.controller.application.turns import run_turn
 from robinauts.controller.application.work import WorkLoop
 from robinauts.controller.contract.domain import (
@@ -33,6 +34,7 @@ from robinauts.controller.contract.domain import (
     Readiness,
     Role,
     Session,
+    SessionNotFoundError,
     SessionPage,
     StorageConfig,
     StorageKind,
@@ -74,6 +76,13 @@ CLOSE_TIMEOUT = 10.0
 
 STOP_WAIT = 5.0
 """How long a cancel, or a delete, waits for a turn another pod runs to end."""
+
+SWEEP_BATCH = 1000
+"""How many rows one statement of the sweep deletes at most."""
+
+PURGE_AFTER = timedelta(minutes=1)
+"""How long a hidden session waits before the sweep finishes its purge: long enough that a
+delete still under way finishes it itself."""
 
 END_OF_EVENTS = 2**31 - 1
 """A position no turn reaches: a wait past it is a wait for the turn's end."""
@@ -120,6 +129,9 @@ class RobinautsController(Controller, Operations):
             work=config.work,
             now=lambda: self._now(),
         )
+        self._housekeeper = Housekeeper(
+            self.sweep, self.end_left_turns, every=config.work.heartbeat_seconds
+        )
         self._engines: dict[str, AgentEngine] = {}
         self._factories: dict[str, EngineFactory] = {}
         self._handle: object | None = None
@@ -140,6 +152,7 @@ class RobinautsController(Controller, Operations):
             setup=self._sets_up_engines(),
         )
         self._work.start()
+        self._housekeeper.start()
 
     async def readiness(self) -> Readiness:
         problems = list(await self._store.problems())
@@ -154,6 +167,7 @@ class RobinautsController(Controller, Operations):
 
     async def close(self) -> None:
         # The heartbeat goes on while the turns get their time to end.
+        await self._housekeeper.stop()
         await self._dispatcher.close(self._close_timeout)
         await self._work.stop()
         self._engines = {}
@@ -550,7 +564,38 @@ class RobinautsController(Controller, Operations):
                 return
 
     async def sweep(self) -> None:
-        raise NotImplementedError("sweep")
+        """Delete what has expired, end the turns left behind, and finish the purges that
+        never finished, a batch at a time: each task is done by one process at a time, and
+        is safe to repeat."""
+        while True:
+            swept = await self._store.sweep_expired(self._now(), SWEEP_BATCH)
+            if all(count < SWEEP_BATCH for count in swept.values()):
+                break
+        await self.end_left_turns()
+        while True:
+            hidden = await self._store.hidden_sessions(self._now() - PURGE_AFTER, SWEEP_BATCH)
+            for session in hidden:
+                await (await self._engine(session.engine)).forget(session.id)
+                await self._store.purge_session(session.owner_id, session.id)
+            if len(hidden) < SWEEP_BATCH:
+                break
+
+    async def end_left_turns(self) -> int:
+        """End the turns whose lease has passed, in every session, keeping what each had
+        answered: what a pod that died left behind, ended whether or not anyone looks."""
+        ended = 0
+        while True:
+            left = await self._store.expired_turns(self._now(), SWEEP_BATCH)
+            before = ended
+            for owner, session_id in left:
+                try:
+                    if await self._end_expired(owner, session_id) is not None:
+                        ended += 1
+                except SessionNotFoundError:
+                    continue
+            # A full batch of which nothing ended is another pod's work under way.
+            if len(left) < SWEEP_BATCH or ended == before:
+                return ended
 
 
 def _encode_cursor(session: Session) -> str:

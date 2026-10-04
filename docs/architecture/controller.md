@@ -54,4 +54,9 @@ signed in is web's own concern, the user session.
 
 Run by the process that holds the controller, on a schedule of its own, never by a shell.
 
-- `sweep`: delete what has expired, and forget its memory.
+- `sweep`: delete what has expired (turn events, sign-in records), end the turns whose lease has
+  passed in every session, keeping what each had answered, and finish the purges of hidden
+  sessions that never finished, forgetting their memory. Every process runs it, every five
+  minutes, and the turns left behind every heartbeat; the store lets one process at a time do
+  each task (`pg_try_advisory_xact_lock`), in batches of a thousand, and each is safe to
+  repeat.

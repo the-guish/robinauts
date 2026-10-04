@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -16,10 +17,13 @@ import pytest
 from aio import asyncio_test
 from contracts.store import StoreContract
 from controller_db import TemporarySchema, requires_postgres, temporary_schema, url
+from robinauts.controller.adapters.postgres.credentials import PostgresCredentials
 from robinauts.controller.adapters.postgres.pool import codecs, open_pool
 from robinauts.controller.adapters.postgres.schema import create_schema
 from robinauts.controller.adapters.postgres.store import PostgresStore
 from robinauts.controller.contract.domain import (
+    ApiToken,
+    PendingLogin,
     Role,
     Session,
     SessionNotFoundError,
@@ -28,6 +32,7 @@ from robinauts.controller.contract.domain import (
     TurnLostError,
     TurnState,
     User,
+    UserSession,
 )
 from robinauts.controller.ports.store import Store, StoredEvent, StoredMessage
 from robinauts.controller.ports.work import Held
@@ -311,3 +316,64 @@ async def test_readiness_names_a_listener_that_dropped_and_is_whole_again_after(
             assert await store.problems() == []
         finally:
             await store.close()
+
+
+@asyncio_test
+async def test_a_sweep_deletes_the_sign_in_records_that_expired() -> None:
+    async with temporary_schema() as schema:
+        store = PostgresStore(schema.pool, dsn=url())
+        me, _, _, _ = await seeded(store)
+        credentials = PostgresCredentials(store)
+        hashes = [hashlib.sha256(str(n).encode()).hexdigest() for n in range(4)]
+        await credentials.add_user_session(
+            UserSession(uuid.uuid4(), me.id, hashes[0], NOW, NOW + timedelta(minutes=1))
+        )
+        await credentials.add_user_session(
+            UserSession(uuid.uuid4(), me.id, hashes[1], NOW, NOW + timedelta(days=1))
+        )
+        await credentials.add_api_token(
+            ApiToken(uuid.uuid4(), me.id, "t", hashes[2], NOW, NOW + timedelta(minutes=1))
+        )
+        await credentials.add_pending_login(
+            PendingLogin(hashes[3], "p", "n", "v", "/", NOW, NOW + timedelta(minutes=1)), NOW
+        )
+        swept = await store.sweep_expired(NOW + timedelta(hours=1), 100)
+        assert swept == {
+            "turn_events": 0,
+            "user_sessions": 1,
+            "pending_logins": 1,
+            "api_tokens": 1,
+        }
+        later = NOW + timedelta(hours=1)
+        assert await credentials.resolve_user_session(hashes[1], later) == me
+
+
+@asyncio_test
+async def test_a_sweep_another_process_holds_is_skipped_and_two_at_once_sweep_once() -> None:
+    async with temporary_schema() as schema:
+        store = PostgresStore(schema.pool, dsn=url())
+        me, one, _, running = await seeded(store)
+        expired = [
+            StoredEvent(n, {"v": 1, "n": n}, NOW + timedelta(seconds=1)) for n in range(1, 41)
+        ]
+        await store.append_events(me.id, one.id, running.id, expired, NOW)
+        holder = await raw(schema)
+        try:
+            async with holder.transaction():
+                taken = await holder.fetchval(
+                    "SELECT pg_try_advisory_xact_lock(hashtext(current_schema()),"
+                    " hashtext('sweep.turn_events'))"
+                )
+                assert taken is True
+                skipped = await store.sweep_expired(LEASE, 100)
+                assert skipped["turn_events"] == 0
+        finally:
+            await holder.close()
+        other = PostgresStore(schema.pool, dsn=url())
+        totals = await asyncio.gather(
+            *(s.sweep_expired(LEASE, 7) for s in (store, other, store, other, store, other))
+        )
+        assert sum(t["turn_events"] for t in totals) <= 40
+        while (await store.sweep_expired(LEASE, 7))["turn_events"]:
+            pass
+        assert await store.events_after(me.id, one.id, running.id, 0) == []

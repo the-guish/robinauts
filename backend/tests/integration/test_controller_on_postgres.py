@@ -231,3 +231,32 @@ async def test_a_stop_whose_signal_was_missed_is_read_back_by_the_heartbeat() ->
         finally:
             await a.close()
             await b.close()
+
+
+@asyncio_test
+async def test_two_pods_sweeping_at_once_end_a_turn_left_behind_once() -> None:
+    async with temporary_schema(applied=False) as schema:
+        a, b = await two_pods(dsn_in(schema.name))
+        try:
+            engine = Gated()
+            a._engines["echo"] = engine
+            user = await a.ensure_user(Identity("local", "me"))
+            started = await a.start_session(user, agent="echo", model="echo", text="hello")
+            sid = started.session_id
+            async with asyncio.timeout(5.0):
+                while not await a._store.last_position(user.id, sid, started.turn_id):
+                    await asyncio.sleep(0.01)
+            # Pod a dies: no heartbeat, no runner.
+            await a._work.stop()
+            a._dispatcher._tasks[started.turn_id].cancel("lost")
+            later = datetime.now(UTC) + timedelta(minutes=5)
+            a._now = b._now = lambda: later
+            await asyncio.gather(a.sweep(), b.sweep(), a.end_left_turns(), b.end_left_turns())
+            turn = await b._store.get_turn(user.id, sid, started.turn_id)
+            assert turn is not None
+            assert turn.state is TurnState.INTERRUPTED
+            roles = [m.role.value for m in (await b.open_session(user, sid)).messages]
+            assert roles == ["user", "assistant"]
+        finally:
+            await a.close()
+            await b.close()

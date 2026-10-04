@@ -596,3 +596,44 @@ async def test_a_write_that_finds_the_pool_busy_is_tried_again() -> None:
     assert turn is not None
     assert turn.state is TurnState.FINISHED
     await controller.close()
+
+
+@asyncio_test
+async def test_the_sweep_ends_a_turn_left_behind_that_nobody_looks_at() -> None:
+    store = MemoryStore()
+    controller = await over(store)
+    engine = HalfwayEngine()
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    await engine.halfway.wait()
+    await controller._work.stop()
+    controller._dispatcher._tasks[started.turn_id].cancel(LOST)
+    controller._now = jumped(PAST_THE_LEASE)
+    assert await controller.end_left_turns() == 1
+    turn = await store.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert turn.state is TurnState.INTERRUPTED
+    left = message_from_document((await store.messages_of(user.id, started.session_id))[-1])
+    assert (left.failed, left.parts) == (True, HALFWAY)
+    assert await controller.end_left_turns() == 0
+    await controller.close()
+
+
+@asyncio_test
+async def test_the_sweep_finishes_a_purge_that_never_finished() -> None:
+    store = MemoryStore()
+    controller = await over(store)
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    await settled(controller, user, started)
+    engine = controller._engines["echo"]
+    # Hidden, and the process died before it forgot and purged.
+    await store.hide_session(user.id, started.session_id, datetime.now(UTC))
+    await controller.sweep()
+    assert await engine.exists(started.session_id)
+    controller._now = jumped(timedelta(minutes=2))
+    await controller.sweep()
+    assert not await engine.exists(started.session_id)
+    assert started.session_id not in store._sessions
+    await controller.close()

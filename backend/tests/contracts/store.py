@@ -517,3 +517,35 @@ class StoreContract:
         assert [p for p, _ in await store.events_after(me.id, one.id, running.id, 0)] == [1, 2, 3]
         with pytest.raises(SessionNotFoundError):
             await store.last_position(me.id, uuid.uuid4(), running.id)
+
+    # --- housekeeping -------------------------------------------------------
+
+    @store_test
+    async def test_a_sweep_deletes_the_events_that_expired_a_batch_at_a_time(
+        self, store: Store
+    ) -> None:
+        me, one, _, running = await self.started(store)
+        old = [StoredEvent(n, {"v": 1, "n": n}, NOW + MINUTE) for n in (1, 2, 3)]
+        fresh = StoredEvent(4, {"v": 1, "n": 4}, EXPIRY)
+        await store.append_events(me.id, one.id, running.id, [*old, fresh], NOW)
+        later = NOW + 2 * MINUTE
+        assert (await store.sweep_expired(later, 2))["turn_events"] == 2
+        assert (await store.sweep_expired(later, 2))["turn_events"] == 1
+        assert (await store.sweep_expired(later, 2))["turn_events"] == 0
+        assert [p for p, _ in await store.events_after(me.id, one.id, running.id, 0)] == [4]
+
+    @store_test
+    async def test_the_turns_left_behind_and_the_hidden_sessions_are_listed(
+        self, store: Store
+    ) -> None:
+        me, one, _, running = await self.started(store)
+        assert await store.expired_turns(NOW, 10) == []
+        past = running.lease_until + MINUTE
+        assert await store.expired_turns(past, 10) == [(me.id, one.id)]
+        await store.end_expired_turn(me.id, one.id, past)
+        assert await store.expired_turns(past, 10) == []
+        await store.hide_session(me.id, one.id, past)
+        assert await store.hidden_sessions(past, 10) == []
+        assert [s.id for s in await store.hidden_sessions(past + MINUTE, 10)] == [one.id]
+        await store.purge_session(me.id, one.id)
+        assert await store.hidden_sessions(past + MINUTE, 10) == []

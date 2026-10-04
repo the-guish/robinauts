@@ -228,6 +228,25 @@ class Store(ABC):
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID
     ) -> Turn | None: ...
 
+    # --- housekeeping -------------------------------------------------------
+
+    @abstractmethod
+    async def sweep_expired(self, now: datetime, limit: int) -> dict[str, int]:
+        """Delete one batch, of at most ``limit`` rows each, of every kind of row that has
+        expired by ``now``: turn events and, where the store keeps them, user sessions,
+        pending sign-ins and API tokens. Each kind is swept by one process at a time and
+        skipped by the others. How many rows of each kind went."""
+
+    @abstractmethod
+    async def expired_turns(self, now: datetime, limit: int) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """At most ``limit`` running turns of visible sessions whose lease has passed ``now``,
+        as ``(owner, session)``; none while another process lists them."""
+
+    @abstractmethod
+    async def hidden_sessions(self, before: datetime, limit: int) -> list[Session]:
+        """At most ``limit`` sessions hidden before ``before``, oldest first, whose purge
+        never finished; none while another process lists them."""
+
     @abstractmethod
     async def wait_for_events(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, after: int, timeout: float

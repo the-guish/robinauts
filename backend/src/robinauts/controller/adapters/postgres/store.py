@@ -116,6 +116,21 @@ RETURNING {", ".join("t." + c for c in _TURN_COLUMNS.split(", "))}
 """
 
 
+SWEPT = ("turn_events", "user_sessions", "pending_logins", "api_tokens")
+"""The tables whose rows expire, by their ``expires_at``, each indexed on it."""
+
+
+async def _swept_here(connection: asyncpg.Connection, task: str) -> bool:
+    """Whether this transaction sweeps ``task``: one at a time across the fleet, taken without
+    waiting, held until the transaction ends. Keyed by the schema too, so that deployments
+    sharing a database do not skip each other's sweeps."""
+    return bool(
+        await connection.fetchval(
+            "SELECT pg_try_advisory_xact_lock(hashtext(current_schema()), hashtext($1))", task
+        )
+    )
+
+
 def _session(row: asyncpg.Record) -> Session:
     return Session(
         row["id"],
@@ -606,6 +621,51 @@ class PostgresStore(Store, WorkQueue):
                     waiting.discard(woken)
                     if not waiting:
                         del self._waiters[turn]
+
+    # --- housekeeping -------------------------------------------------------
+
+    async def sweep_expired(self, now: datetime, limit: int) -> dict[str, int]:
+        swept = {}
+        for table in SWEPT:
+            async with self._pool.acquire() as connection, connection.transaction():
+                if not await _swept_here(connection, f"sweep.{table}"):
+                    swept[table] = 0
+                    continue
+                status = await connection.execute(
+                    f"DELETE FROM {table} WHERE ctid = ANY(ARRAY("
+                    f"  SELECT ctid FROM {table} WHERE expires_at <= $1 LIMIT $2))",
+                    now,
+                    limit,
+                )
+                swept[table] = _rows(status)
+        return swept
+
+    async def expired_turns(self, now: datetime, limit: int) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        async with self._pool.acquire() as connection, connection.transaction():
+            if not await _swept_here(connection, "sweep.turns"):
+                return []
+            rows = await connection.fetch(
+                "SELECT s.owner_id, s.id FROM turns AS t"
+                " JOIN sessions AS s ON s.id = t.session_id"
+                " WHERE t.state = 'running' AND t.lease_until < $1 AND s.deleted_at IS NULL"
+                " ORDER BY t.lease_until LIMIT $2",
+                now,
+                limit,
+            )
+        return [(row["owner_id"], row["id"]) for row in rows]
+
+    async def hidden_sessions(self, before: datetime, limit: int) -> list[Session]:
+        async with self._pool.acquire() as connection, connection.transaction():
+            if not await _swept_here(connection, "sweep.purge"):
+                return []
+            rows = await connection.fetch(
+                f"SELECT {_SESSION_COLUMNS} FROM sessions"
+                " WHERE deleted_at IS NOT NULL AND deleted_at < $1"
+                " ORDER BY deleted_at, id LIMIT $2",
+                before,
+                limit,
+            )
+        return [_session(row) for row in rows]
 
     # --- work ---------------------------------------------------------------
 

@@ -282,6 +282,33 @@ class MemoryStore(Store, WorkQueue):
         self._visible(owner, session)
         return self._turn_of(session, turn)
 
+    # --- housekeeping -------------------------------------------------------
+
+    async def sweep_expired(self, now: datetime, limit: int) -> dict[str, int]:
+        # The sign-in records are the credentials' own dicts, which read their expiry.
+        swept = 0
+        for turn, events in self._events.items():
+            expired = [e for e in events if e.expires_at <= now][: limit - swept]
+            if expired:
+                self._events[turn] = [e for e in events if e not in expired]
+                swept += len(expired)
+        return {"turn_events": swept}
+
+    async def expired_turns(self, now: datetime, limit: int) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        expired = [
+            (self._sessions[t.session_id].owner_id, t.session_id)
+            for t in self._turns.values()
+            if t.state is TurnState.RUNNING
+            and t.lease_until < now
+            and t.session_id in self._sessions
+            and t.session_id not in self._hidden
+        ]
+        return expired[:limit]
+
+    async def hidden_sessions(self, before: datetime, limit: int) -> list[Session]:
+        hidden = sorted((at, s) for s, at in self._hidden.items() if at < before)
+        return [self._sessions[s] for _, s in hidden[:limit]]
+
     # --- work ---------------------------------------------------------------
 
     async def heartbeat(

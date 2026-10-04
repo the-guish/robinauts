@@ -28,6 +28,12 @@ What an internal platform team deploys and controls.
   way within about two minutes: its lease is no longer renewed, and the next
   reader ends it from the events it had published. Several backend processes
   may run against the one database.
+- **Housekeeping runs in every process.** Every five minutes each one
+  sweeps: events past their retention, expired sign-in records, and the
+  purges of deleted conversations that never finished. Every heartbeat it
+  ends the runs whose process died, in conversations nobody has opened. One
+  process at a time does each task and the others skip it, so nothing needs
+  to be elected or scheduled outside the deployment.
 - **Health.** `/health` answers whether the process answers, and reads
   nothing. `/ready` answers whether it should be sent requests: 200, or 503
   with the problems (draining, the database not answering within a second,

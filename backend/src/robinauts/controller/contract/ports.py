@@ -165,6 +165,9 @@ class Controller(ABC):
 
     @abstractmethod
     async def sweep(self) -> None:
+        """Delete what has expired (turn events, sign-in records), end the turns whose lease
+        has passed, keeping their answers, and finish the purges that never finished. Run by
+        every process on an interval; each task is done by one process at a time."""
         raise NotImplementedError
 
 
