@@ -18,6 +18,8 @@
  *   ended before it said anything, a cancellation, a turn the server refused
  *   (`docs/specs/wire.md`). Where there **is** a message, the Thread shows it
  *   under that message itself and this says nothing.
+ * - **A line while a stream's connection is down**, with a Reconnect that
+ *   tries again at once rather than at the end of the backoff.
  * - **A notice about what the person just did**, which is a different thing
  *   and outlives the run that follows it: a message that was not sent, a
  *   stop that did not reach the server. Only their next turn clears it.
@@ -51,8 +53,15 @@ function Welcome() {
  */
 const COMPONENTS = { Welcome, ToolFallback: ToolCall };
 
+/**
+ * What a stream whose connection dropped says while the run lives and it is
+ * tried again (`./agui/client.ts`). The answer goes on on the server.
+ */
+export const RECONNECTING =
+  "The connection to this answer dropped. Reconnecting…";
+
 export function Chat(props: Readonly<ChatProps>) {
-  const { state, runtime } = useChat(props);
+  const { state, runtime, reconnect } = useChat(props);
   // Only on the empty chat: a conversation with nothing in it yet is still a
   // conversation, and its agent is no longer a choice (`../index.ts`).
   const welcome = props.conversationId === null ? props.welcome : undefined;
@@ -80,6 +89,22 @@ export function Chat(props: Readonly<ChatProps>) {
             <Thread components={COMPONENTS} />
           </WelcomeSlot.Provider>
         </div>
+        {state.reconnecting !== null && state.runId !== null && (
+          <p
+            role="status"
+            data-reconnecting=""
+            className="mx-auto flex w-full max-w-3xl items-center gap-3 px-6 pb-4 text-sm text-muted-foreground"
+          >
+            {RECONNECTING}
+            <button
+              type="button"
+              onClick={reconnect}
+              className="underline underline-offset-2 hover:text-foreground"
+            >
+              Reconnect
+            </button>
+          </p>
+        )}
         {state.ended !== null && (
           <p
             role="status"

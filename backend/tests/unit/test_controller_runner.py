@@ -106,6 +106,12 @@ async def until(condition: Callable[[], bool], timeout: float = 5.0) -> None:
             await asyncio.sleep(0.01)
 
 
+async def until_async(read: Callable[[], Any], holds: Callable[[Any], bool]) -> None:
+    async with asyncio.timeout(5.0):
+        while not holds(await read()):
+            await asyncio.sleep(0.02)
+
+
 def jumped(by: timedelta) -> Any:
     return lambda: datetime.now(UTC) + by
 
@@ -163,6 +169,47 @@ async def test_the_turns_deadline_is_its_own_and_not_the_models_timeout() -> Non
     await controller.close()
 
 
+class ChattyEngine(EchoEngine):
+    """Streams many small pieces at once, pauses, streams one more, and waits to be let go."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.gate = asyncio.Event()
+
+    async def stream(self, *args: Any, **kwargs: Any) -> AsyncGenerator[Event, None]:
+        for word in ["one ", "two ", "three ", "four "]:
+            yield TextDelta(word)
+        await asyncio.sleep(0.5)
+        yield TextDelta("five")
+        await self.gate.wait()
+        yield Done(text="one two three four five", checkpoint_id=str(uuid.uuid4()))
+
+
+@asyncio_test
+async def test_pieces_of_text_are_written_together_and_soon_whether_or_not_more_follow() -> None:
+    store = MemoryStore()
+    controller = await over(store)
+    engine = ChattyEngine()
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="count")
+    sid = started.session_id
+    # Nothing follows "five" until the gate opens: it is written all the same, on its own.
+    await until_async(lambda: store.last_position(user.id, sid, started.turn_id), lambda n: n >= 3)
+    stored = await store.events_after(user.id, sid, started.turn_id, 0)
+    pieces = [event_from_document(d).event for _, d in stored]
+    assert [type(p).__name__ for p in pieces] == ["MessageStarted", "TextPiece", "TextPiece"]
+    assert [p.text for p in pieces[1:]] == ["one two three four ", "five"]  # type: ignore[union-attr]
+    opened_now = await controller.open_session(user, sid)
+    assert opened_now.active is not None
+    assert opened_now.active.position == 3
+    engine.gate.set()
+    await settled(controller, user, started)
+    answer = (await controller.open_session(user, sid)).messages[-1]
+    assert answer.parts == (TextPart("one two three four five"),)
+    await controller.close()
+
+
 @asyncio_test
 async def test_two_turns_of_one_session_number_their_events_from_one_each() -> None:
     controller = await opened()
@@ -175,7 +222,7 @@ async def test_two_turns_of_one_session_number_their_events_from_one_each() -> N
     await settled(controller, user, again)
     for turn in (started.turn_id, again.turn_id):
         stored = await controller._store.events_after(user.id, started.session_id, turn, 0)
-        assert [p for p, _ in stored] == list(range(1, 10))
+        assert [p for p, _ in stored] == list(range(1, 9))
     await controller.close()
 
 
@@ -326,7 +373,7 @@ async def test_an_expired_turn_keeps_its_partial_answer_as_failed_and_retry_star
     user = await controller.ensure_user(Identity("local", "me"))
     started = await controller.start_session(user, agent="echo", model="echo", text="find them")
     sid = started.session_id
-    while len(await store.events_after(user.id, sid, started.turn_id, 0)) < 7:
+    while len(await store.events_after(user.id, sid, started.turn_id, 0)) < 6:
         await store.wait_for_events(user.id, sid, started.turn_id, 0, 0.05)
     # Its process went away: nothing renews the lease, and the runner is gone.
     await controller._work_loop.stop()
@@ -431,7 +478,7 @@ async def test_a_cancel_of_a_turn_whose_holder_went_away_ends_it_cancelled_at_it
     user = await gone.ensure_user(Identity("local", "me"))
     started = await gone.start_session(user, agent="echo", model="echo", text="one")
     sid = started.session_id
-    while len(await store.events_after(user.id, sid, started.turn_id, 0)) < 7:
+    while len(await store.events_after(user.id, sid, started.turn_id, 0)) < 6:
         await store.wait_for_events(user.id, sid, started.turn_id, 0, 0.05)
     # The holder went away, signals and all.
     await gone._work_loop.stop()

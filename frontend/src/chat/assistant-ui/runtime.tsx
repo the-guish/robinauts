@@ -65,7 +65,9 @@ import {
   attach,
   startNewConversation,
   startTurn,
+  Wake,
   type Attached,
+  type Watching,
 } from "./agui/client";
 import {
   askedIn,
@@ -168,6 +170,8 @@ function forItsModel(failure: unknown): boolean {
 export interface Chatting {
   state: ChatState;
   runtime: AssistantRuntime;
+  /** Try a dropped stream's connection again now. */
+  reconnect: () => void;
 }
 
 export function useChat(props: ChatProps): Chatting {
@@ -288,7 +292,7 @@ export function useChat(props: ChatProps): Chatting {
     if (box.getState().text === "") box.setText(wanted.text);
   });
 
-  return { state, runtime };
+  return { state, runtime, reconnect: turns.reconnect };
 }
 
 /**
@@ -330,6 +334,29 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     const held = wanted;
     wanted = null;
     return held;
+  }
+
+  /**
+   * What cuts the wait before the stream's next try short: the person's
+   * Reconnect, beside the browser coming back online or into view, which the
+   * client listens for itself.
+   */
+  const wake = new Wake();
+
+  /** How a stream of this chat is watched. */
+  function watchingWith(signal: AbortSignal): Watching {
+    return {
+      signal,
+      wake,
+      onReconnecting: (inMs) => {
+        if (!signal.aborted) dispatch({ kind: "reconnecting", inMs });
+      },
+    };
+  }
+
+  /** Try the stream's connection again now, rather than at the next try. */
+  function reconnect(): void {
+    wake.now();
   }
 
   /** What a turn begun from now on reads. Written after every render. */
@@ -443,7 +470,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     if (runId !== null && resume !== null) {
       void follow(
         (watched) =>
-          attach(conversationId, runId, resume.after, { signal: watched }),
+          attach(conversationId, runId, resume.after, watchingWith(watched)),
         {
           watch: true,
           afterLoss,
@@ -607,7 +634,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
           startTurn(
             conversationId,
             { ...asked, modelId: props.modelId },
-            { signal },
+            watchingWith(signal),
           ),
         { text },
       );
@@ -623,9 +650,12 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
       async (signal) => {
         // The model goes with the first message and never again: every later
         // turn runs on the conversation's, which the server reads.
-        const attached = await startNewConversation(agentId, modelId, text, {
-          signal,
-        });
+        const attached = await startNewConversation(
+          agentId,
+          modelId,
+          text,
+          watchingWith(signal),
+        );
         // **Only if this page is still the empty chat.** Somebody who opened
         // another conversation while the request was in the air is not to be
         // taken to this one instead, and claiming it as ours would stop the
@@ -680,7 +710,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
         startTurn(
           conversationId,
           { text, edit: edited, modelId: props.modelId },
-          { signal },
+          watchingWith(signal),
         ),
       { text, editing: edited },
     );
@@ -721,7 +751,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
       startTurn(
         conversationId,
         retry ? { retry: regenerate, modelId } : { regenerate, modelId },
-        { signal },
+        watchingWith(signal),
       ),
     );
   }
@@ -765,6 +795,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
   return {
     now,
     began,
+    reconnect,
     stop,
     saying,
     read,

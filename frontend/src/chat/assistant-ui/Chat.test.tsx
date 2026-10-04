@@ -525,3 +525,43 @@ test("the welcome is not remounted by what is typed beside it", async () => {
   // loses the focus, and the box beside it re-renders on every keystroke.
   expect(mounts).toBe(1);
 });
+
+test("a dropped stream says it is reconnecting, and Reconnect tries at once", async () => {
+  const { response, write, close } = writable({
+    headers: streamHeaders(RUN, CONVERSATION),
+  });
+  const reattached: Call[] = [];
+  const fetch = stub((call) => {
+    if (call.url === "/api/turns") return response;
+    if (call.url.endsWith(`/runs/${RUN}/events`)) {
+      reattached.push(call);
+      return streamed(
+        [event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 9)],
+        { headers: streamHeaders(RUN, CONVERSATION) },
+      );
+    }
+    if (call.url === `/api/conversations/${CONVERSATION}`) {
+      return json(opened(conversation(1), TREE));
+    }
+    return undefined;
+  });
+  draw();
+  await settle();
+  await send("Why?");
+  write(event("TEXT_MESSAGE_START", { messageId: "m2", role: "assistant" }, 2));
+  // The connection goes, and the run does not.
+  close();
+  const reconnect = await screen.findByRole("button", { name: "Reconnect" });
+  expect(screen.getByText(/Reconnecting/)).toBeInTheDocument();
+  await act(async () => {
+    fireEvent.click(reconnect);
+    await settle();
+  });
+  await waitFor(() => {
+    expect(reattached).toHaveLength(1);
+  });
+  await waitFor(() => {
+    expect(screen.queryByText(/Reconnecting/)).not.toBeInTheDocument();
+  });
+  expect(fetch).toHaveBeenCalled();
+});

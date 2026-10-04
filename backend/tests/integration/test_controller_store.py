@@ -29,7 +29,7 @@ from robinauts.controller.contract.domain import (
     TurnState,
     User,
 )
-from robinauts.controller.ports.store import Store, StoredMessage
+from robinauts.controller.ports.store import Store, StoredEvent, StoredMessage
 from robinauts.controller.ports.work import Held
 
 pytestmark = requires_postgres
@@ -102,7 +102,9 @@ async def test_an_append_waits_on_a_readers_end_and_then_inserts_nothing() -> No
                 NOW + timedelta(minutes=1),
             )
             appending = asyncio.create_task(
-                store.append_event(me.id, one.id, running.id, FENCE, 1, DOCUMENT, NOW, EXPIRY)
+                store.append_events(
+                    me.id, one.id, running.id, FENCE, [StoredEvent(1, DOCUMENT, EXPIRY)], NOW
+                )
             )
             await asyncio.sleep(0.3)
             assert not appending.done(), "the append did not wait on the reader's end"
@@ -192,16 +194,8 @@ async def test_a_watcher_on_one_pool_is_woken_by_an_append_on_another() -> None:
 
             async def soon(position: int) -> None:
                 await asyncio.sleep(0.2)
-                await writer.append_event(
-                    me.id,
-                    one.id,
-                    running.id,
-                    FENCE,
-                    position,
-                    DOCUMENT | {"position": position},
-                    NOW,
-                    EXPIRY,
-                )
+                event = StoredEvent(position, DOCUMENT | {"position": position}, EXPIRY)
+                await writer.append_events(me.id, one.id, running.id, FENCE, [event], NOW)
 
             appending = asyncio.create_task(soon(1))
             before = time.monotonic()

@@ -153,6 +153,11 @@ export interface ChatState {
    */
   notice: string | null;
   /**
+   * The wait, in milliseconds, before the next try at a stream whose
+   * connection dropped, while the run lives; `null` while it is connected.
+   */
+  reconnecting: number | null;
+  /**
    * The thread as it was before the turn on its way changed it.
    *
    * A turn the server refuses is one that never happened, so what it did to
@@ -175,6 +180,7 @@ export const EMPTY: ChatState = {
   thinking: null,
   ended: null,
   notice: null,
+  reconnecting: null,
   before: null,
 };
 
@@ -380,6 +386,8 @@ export type ChatAction =
   | { kind: "lost"; detail: string }
   /** Something to say, and nothing else about the conversation changes. */
   | { kind: "told"; detail: string }
+  /** The stream's connection dropped, and is tried again in that long. */
+  | { kind: "reconnecting"; inMs: number | null }
   /**
    * The turn was refused before it began, so nothing about the run changed.
    *
@@ -433,6 +441,7 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
         sending: false,
         writing: null,
         thinking: null,
+        reconnecting: null,
         // Said once: by the failed answer when there is one at the end.
         ended: messages.at(-1)?.state === "failed" ? null : action.endedBadly,
         before: null,
@@ -488,11 +497,14 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
         conversationId: action.conversationId,
         runId: action.runId,
         sending: false,
+        reconnecting: null,
         before: null,
         ended: null,
       };
     case "told":
       return { ...state, notice: action.detail };
+    case "reconnecting":
+      return { ...state, reconnecting: action.inMs };
     case "event":
       return applied(state, action.event);
     case "lost":
@@ -930,6 +942,7 @@ function ending(
     sending: false,
     writing: null,
     thinking: null,
+    reconnecting: null,
     // **Every message still open, not only the one being written.** One
     // answer at a time is the rule and the platform keeps it, so there is
     // never more than one; a run that ends leaving two would leave the second

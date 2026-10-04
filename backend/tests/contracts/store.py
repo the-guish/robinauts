@@ -129,9 +129,7 @@ class StoreContract:
         at: datetime = NOW,
         fence: Fence = FENCE,
     ) -> None:
-        await store.append_event(
-            me.id, one.id, running.id, fence, event.position, event.document, at, event.expires_at
-        )
+        await store.append_events(me.id, one.id, running.id, fence, [event], at)
 
     async def end_expired(
         self,
@@ -536,3 +534,24 @@ class StoreContract:
         assert await store.request_cancel(me.id, one.id, uuid.uuid4(), NOW) is None
         with pytest.raises(SessionNotFoundError):
             await store.request_cancel(user("you").id, one.id, running.id, NOW)
+
+    # --- batches ------------------------------------------------------------
+
+    @store_test
+    async def test_a_batch_is_kept_whole_or_not_at_all_and_its_last_position_is_read(
+        self, store: Store
+    ) -> None:
+        me, one, _, running = await self.started(store)
+        assert await store.last_position(me.id, one.id, running.id) == 0
+        batch = [piece(1, "a"), piece(2, "b"), piece(3, "c")]
+        await store.append_events(me.id, one.id, running.id, FENCE, batch, NOW)
+        assert await store.last_position(me.id, one.id, running.id) == 3
+        # The same batch again is the runner's own write, acknowledged late.
+        await store.append_events(me.id, one.id, running.id, FENCE, batch, NOW)
+        clash = [piece(4, "d"), piece(3, "other")]
+        with pytest.raises(TurnLostError):
+            await store.append_events(me.id, one.id, running.id, FENCE, clash, NOW)
+        stored = await store.events_after(me.id, one.id, running.id, 0)
+        assert [p for p, _ in stored] == [1, 2, 3]
+        assert await store.last_position(me.id, one.id, running.id) == 3
+        assert await store.last_position(me.id, one.id, uuid.uuid4()) == 0

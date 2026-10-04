@@ -142,6 +142,24 @@ documented here, which is what "documented with the API" means for them.
   had streamed as an answer marked `failed`, under the message id it
   streamed with, so the answer a client holds is the one a Retry names.
 
+**Streams that outlive a connection.**
+
+- A comment line (`: keep-alive`) goes out after 15 s with nothing to say,
+  so that nothing in front of the deployment closes a quiet stream, and a
+  client can tell a quiet stream from a dead one.
+- The pieces of text and of reasoning of one message are written in batches
+  of about 150 ms, consecutive pieces merged: a client sees fewer, longer
+  deltas, never one twice and never one lost.
+- The UI re-attaches with `Last-Event-ID` whenever a connection drops before
+  the turn has ended, backing off from half a second, doubling to thirty
+  with jitter, and trying at once when the browser comes back online or into
+  view, or when the person presses Reconnect. It never gives up while the
+  turn lives: only a refusal (4xx) ends the watch. A connection that has
+  said nothing for 45 s, three keep-alives, is taken for dropped.
+- Any process of the deployment serves any turn's stream, and opening a
+  conversation reads where its running turn's events end without reading
+  the events.
+
 **Not yet served.** The wire is the happy path today
 ([working-notes/echo-e2e-plan.md](../working-notes/echo-e2e-plan.md)); these
 hold as the rule and are not enforced yet:
@@ -153,8 +171,6 @@ hold as the rule and are not enforced yet:
   is not there and one in somebody else's conversation answer the same 404,
   and **before the stream begins**: a refusal is a status.
 - `Last-Event-ID` and `after` saying two different things is refused (422).
-- A comment line (`: keep-alive`) goes out while nothing is arriving, so
-  that nothing in front of the deployment closes a quiet stream.
 - **Every stream ends with an event saying the turn is over.** Re-attaching
   at or past the last position of a turn that has ended is answered with
   **how that turn really ended**, read from its record. A position a turn

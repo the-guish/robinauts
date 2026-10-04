@@ -8,6 +8,8 @@ The run id is the turn's id, and the thread id the session's: each turn is a run
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 
 from ag_ui.core import (
@@ -46,6 +48,9 @@ from robinauts.controller.contract.domain import (
 )
 
 ENCODER = EventEncoder()
+
+KEEP_ALIVE = ": keep-alive\n\n"
+"""An SSE comment: bytes on a quiet stream, which every client reads as nothing."""
 
 ENDED_BADLY = {
     TurnState.FAILED: "the agent could not finish this answer",
@@ -99,6 +104,36 @@ def mapped(thread_id: str, run_id: str, event: TurnEvent) -> list[BaseEvent]:
         case TurnEnded():
             return [RunErrorEvent(message=ENDED_BADLY[event.state], code=event.state.value)]
     return []
+
+
+async def kept_alive(chunks: AsyncIterator[str], every: float) -> AsyncIterator[str]:
+    """The chunks, with a ``: keep-alive`` comment after every ``every`` seconds of silence,
+    so that a proxy or a load balancer between here and the browser does not close a stream
+    that is waiting on a long tool call. The next chunk is awaited in a task of its own and
+    never cancelled by the timer: the watcher behind it is waiting on the store."""
+    pending: asyncio.Future[str] | None = None
+    try:
+        while True:
+            if pending is None:
+                pending = asyncio.ensure_future(anext(chunks))
+            done, _ = await asyncio.wait({pending}, timeout=every)
+            if not done:
+                yield KEEP_ALIVE
+                continue
+            finished, pending = pending, None
+            try:
+                chunk = finished.result()
+            except StopAsyncIteration:
+                return
+            yield chunk
+    finally:
+        if pending is not None:
+            pending.cancel()
+            with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+                await pending
+        aclose = getattr(chunks, "aclose", None)
+        if aclose is not None:
+            await aclose()
 
 
 async def stream(

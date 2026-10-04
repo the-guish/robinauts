@@ -71,6 +71,9 @@ from robinauts.web.sign_in import (
 
 DEFAULT_PAGE = 30
 
+KEEP_ALIVE_SECONDS = 15.0
+"""The longest a turn's stream goes without a byte: a `: keep-alive` comment follows."""
+
 STATUS_OF: dict[type[ControllerError], int] = {
     InvalidValueError: 422,
     SessionNotFoundError: 404,
@@ -353,7 +356,7 @@ def event_stream(
     session_id: uuid.UUID, turn_id: uuid.UUID, events: AsyncIterator[NumberedEvent]
 ) -> StreamingResponse:
     return StreamingResponse(
-        agui.stream(str(session_id), str(turn_id), events),
+        agui.kept_alive(agui.stream(str(session_id), str(turn_id), events), KEEP_ALIVE_SECONDS),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-store",

@@ -434,9 +434,11 @@ root of the origin. Three things matter:
   gives that name a platform that will not keep a session. The
   `X-Forwarded-*` headers below are good practice and reach the access log;
   they are not what makes the deployment https.
-- **No buffering on the event stream**, and a read timeout longer than a
-  whole turn. A stream sends a heartbeat comment every 15 s and a turn may
-  run for 600 s by default. Every stream also carries
+- **No buffering on the event stream**, and a read timeout well above
+  15 s. A stream sends a `: keep-alive` comment after every 15 s of
+  silence, and the interface re-attaches to a stream that drops, so the
+  timeout bounds a quiet moment, not the turn, which may run for
+  `[work] max_turn_seconds` (1200 s by default). Every stream also carries
   `X-Accel-Buffering: no`, which nginx obeys — the setting below is there
   for the proxies that do not.
 - The paths are `/ui/` (the interface), `/api/` (the API and the streams),
@@ -487,7 +489,8 @@ server {
         proxy_set_header X-Forwarded-Host  $host;
 
         # Server-sent events: nothing held back, nothing rewritten, and a
-        # read timeout past the longest turn.
+        # read timeout past the 15 s keep-alive (the interface re-attaches to
+        # a stream that is cut, so it need not outlast the turn).
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 900s;
@@ -696,6 +699,6 @@ engine = "pydantic-ai"
 | `?error=provider_unavailable` | the discovery document or the token endpoint could not be reached | outbound https, and the `issuer` spelling |
 | `?error=invalid_id_token` | `issuer`, `client_id` or the clock | the discovery document's `issuer` must equal the configured one; check the clock (60 s of skew is allowed) |
 | an answer streams nowhere, then arrives all at once at the end | the proxy is buffering | `proxy_buffering off` / `flush_interval -1` |
-| a stream dies after a fixed number of seconds | the proxy's read timeout | raise it past the longest turn |
+| the interface keeps saying it is reconnecting | the proxy's read timeout is below the 15 s keep-alive, or it buffers the stream | a read timeout of a minute or more, and no buffering |
 | a write is refused with a `403` | the browser's `Origin` header does not equal `public_url`, string for string | the same cause as the sign-in loop: one origin, and `public_url` spelt as the browser spells it |
 | the interface shows "not built" | a wheel without the interface, which cannot be built — so this is a source checkout, not a wheel | install the wheel |

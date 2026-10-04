@@ -158,27 +158,34 @@ class MemoryStore(Store, WorkQueue):
         self._events[turn.id] = []
         await self._notify()
 
-    async def append_event(
+    async def append_events(
         self,
         owner: uuid.UUID,
         session: uuid.UUID,
         turn: uuid.UUID,
         fence: Fence,
-        position: int,
-        document: Document,
+        events: Sequence[StoredEvent],
         written_at: datetime,
-        expires_at: datetime,
     ) -> None:
         self._visible(owner, session)
         self._held(session, turn, fence, written_at)
-        events = self._events[turn]
-        taken = next((e for e in events if e.position == position), None)
-        if taken is not None:
-            if taken.document == document:
-                return
-            raise TurnLostError(f"position {position} of turn {turn} holds another event")
-        events.append(StoredEvent(position, document, expires_at))
-        await self._notify()
+        held = {e.position: e for e in self._events[turn]}
+        fresh = []
+        for event in events:
+            taken = held.get(event.position)
+            if taken is None:
+                fresh.append(event)
+            elif taken.document != event.document:
+                raise TurnLostError(f"position {event.position} of turn {turn} holds another")
+        if fresh:
+            self._events[turn].extend(fresh)
+            await self._notify()
+
+    async def last_position(self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID) -> int:
+        self._visible(owner, session)
+        if self._turn_of(session, turn) is None:
+            return 0
+        return max((e.position for e in self._events[turn]), default=0)
 
     async def events_after(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, position: int
