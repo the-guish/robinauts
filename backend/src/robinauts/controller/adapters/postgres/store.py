@@ -16,8 +16,9 @@ costs a timeout and nothing else.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from datetime import datetime, timedelta
 from typing import TypeVar
 
@@ -46,8 +47,16 @@ from robinauts.controller.ports.work import Fence, Held, Renewed, WorkQueue
 
 T = TypeVar("T")
 
+log = logging.getLogger(__name__)
+
 CHANNEL = "robinauts_turns"
 """Where a turn's writes are announced: ``<turn> <position>``, or ``<turn> end``."""
+
+CANCEL_CHANNEL = "robinauts_cancel"
+"""Where a cancel is asked for: ``<turn>``, which its holder, wherever it runs, stops."""
+
+LISTENER_CHECK = 5.0
+"""How often a reader of cancel signals makes sure the listening connection is up."""
 
 ONE_RUNNING = "turns_one_running_per_session"
 POSITION_TAKEN = "turn_events_pkey"
@@ -56,7 +65,7 @@ USER_EXISTS = "users_provider_subject_key"
 _SESSION_COLUMNS = "id, owner_id, agent, engine, title, created_at, updated_at"
 _TURN_COLUMNS = (
     "id, session_id, follows, model, state, started_at, ended_at, error, lease_until, retries,"
-    " deadline_at, worker_id, attempt, heartbeat_at"
+    " deadline_at, worker_id, attempt, heartbeat_at, cancel_requested_at"
 )
 
 _VISIBLE = "SELECT 1 FROM sessions WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL"
@@ -114,6 +123,7 @@ def _turn(row: asyncpg.Record) -> Turn:
         row["worker_id"],
         row["attempt"],
         row["heartbeat_at"],
+        row["cancel_requested_at"],
     )
 
 
@@ -140,6 +150,7 @@ class PostgresStore(Store, WorkQueue):
         self._waiters: dict[uuid.UUID, set[asyncio.Future[None]]] = {}
         self._opening: asyncio.Lock | None = None
         self._work: asyncpg.Connection | None = None
+        self._cancels: set[asyncio.Queue[uuid.UUID]] = set()
         self._work_lock: asyncio.Lock | None = None
 
     @property
@@ -284,7 +295,7 @@ class PostgresStore(Store, WorkQueue):
                     await self._insert_message(connection, question)
                 await connection.execute(
                     f"INSERT INTO turns ({_TURN_COLUMNS})"
-                    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+                    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
                     turn.id,
                     turn.session_id,
                     turn.follows,
@@ -299,6 +310,7 @@ class PostgresStore(Store, WorkQueue):
                     turn.worker_id,
                     turn.attempt,
                     turn.heartbeat_at,
+                    turn.cancel_requested_at,
                 )
         except asyncpg.UniqueViolationError as violated:
             if violated.constraint_name == ONE_RUNNING:
@@ -455,6 +467,29 @@ class PostgresStore(Store, WorkQueue):
             raise
         return _turn(row)
 
+    async def request_cancel(
+        self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, now: datetime
+    ) -> Turn | None:
+        async with self._pool.acquire() as connection, connection.transaction():
+            await self._visible(connection, owner, session)
+            row = await connection.fetchrow(
+                "UPDATE turns SET cancel_requested_at = coalesce(cancel_requested_at, $3)"
+                " WHERE id = $1 AND session_id = $2 AND state = 'running'"
+                f" RETURNING {_TURN_COLUMNS}",
+                turn,
+                session,
+                now,
+            )
+            if row is not None:
+                await connection.execute("SELECT pg_notify($1, $2)", CANCEL_CHANNEL, str(turn))
+                return _turn(row)
+            row = await connection.fetchrow(
+                f"SELECT {_TURN_COLUMNS} FROM turns WHERE id = $1 AND session_id = $2",
+                turn,
+                session,
+            )
+        return None if row is None else _turn(row)
+
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:
         async with self._pool.acquire() as connection:
             await self._visible(connection, owner, session)
@@ -529,6 +564,23 @@ class PostgresStore(Store, WorkQueue):
         )
         return Renewed({row["id"]: row["cancel_requested_at"] for row in rows})
 
+    async def cancel_signals(self) -> AsyncIterator[uuid.UUID]:
+        signals: asyncio.Queue[uuid.UUID] = asyncio.Queue()
+        self._cancels.add(signals)
+        try:
+            while True:
+                try:
+                    await self._listen()
+                except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError):
+                    # The database is away: the heartbeat reads the asks back once it is not.
+                    log.warning("the listening connection could not be opened; trying again")
+                try:
+                    yield await asyncio.wait_for(signals.get(), LISTENER_CHECK)
+                except TimeoutError:
+                    continue
+        finally:
+            self._cancels.discard(signals)
+
     async def _on_work_connection(
         self, statement: Callable[[asyncpg.Connection], Awaitable[T]]
     ) -> T:
@@ -579,6 +631,7 @@ class PostgresStore(Store, WorkQueue):
                 raise RuntimeError("a store that waits for events needs the database's dsn")
             listener = await asyncpg.connect(self._dsn)
             await listener.add_listener(CHANNEL, self._notified)
+            await listener.add_listener(CANCEL_CHANNEL, self._cancel_notified)
             self._listener = listener
 
     def _notified(self, connection: object, pid: int, channel: str, payload: str) -> None:
@@ -590,6 +643,14 @@ class PostgresStore(Store, WorkQueue):
         for woken in self._waiters.get(turn, ()):
             if not woken.done():
                 woken.set_result(None)
+
+    def _cancel_notified(self, connection: object, pid: int, channel: str, payload: str) -> None:
+        try:
+            turn = uuid.UUID(payload)
+        except ValueError:
+            return
+        for signals in self._cancels:
+            signals.put_nowait(turn)
 
     async def _visible(
         self, connection: asyncpg.Connection, owner: uuid.UUID, session: uuid.UUID

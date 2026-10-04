@@ -93,11 +93,18 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
 - **Deleting hides, then purges.** `deleted_at` makes a session not found and closes
   it to turns. The hide is refused while a turn is running (`TurnActiveError`), so no
   runner and no engine writes under a purge: the controller first ends a turn whose
-  lease has passed, cancels the turn it runs itself and waits for it to end, and a
-  turn run by another process is refused until stage two's cancel through the store.
+  lease has passed, and asks for a running one to stop, wherever it runs, and waits
+  for it to end; one that has not ended in time refuses the delete.
   The purge calls `forget` on the engine the session records, which may no longer be
   the one its agent's configuration names, then deletes the session with its
   messages, turns and events.
+- **A cancel goes through the store.** `request_cancel` sets `cancel_requested_at`,
+  once, on a running turn, and sends `NOTIFY robinauts_cancel '<turn>'` in the same
+  transaction. Every process listens, and the one that holds the turn stops it,
+  and its runner ends it `cancelled`. The heartbeat reads every ask back with the
+  leases it renews, so an ask whose signal was lost is acted on within one
+  heartbeat. A turn whose holder went away ends `cancelled`, with no answer, when
+  its lease has passed and somebody finds it.
 - **Events expire.** `expires_at` is set when an event is written, as that moment
   plus a retention of hours. Ending a turn touches none of its events. The answer is
   in `messages` and the outcome is in `turns`, so after a turn ends nothing reads its

@@ -2,7 +2,7 @@
 # Copyright The Robinauts Authors
 
 """The work a process does for the turns it holds, apart from the store's records: the
-heartbeat that renews their leases.
+heartbeat that renews their leases, and the signals that ask it to stop one.
 
 A turn is held by one process, its ``worker_id``, under an ``attempt``: every write of its
 runner names both, and the store refuses one whose turn another holds, or holds under
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -56,3 +56,9 @@ class WorkQueue(ABC):
         """Renew the lease of every turn held to ``now + lease``, in one operation, and only
         while the turn is running, held by ``worker`` under that attempt, and its lease has
         not passed ``now``: a lease that has passed is never renewed."""
+
+    @abstractmethod
+    def cancel_signals(self) -> AsyncIterator[uuid.UUID]:
+        """The turns a cancel is asked for, through any process, as the asks arrive: a hint,
+        which may be lost with a dropped connection. The heartbeat reads every ask back
+        (``Renewed``), so a lost one is acted on at the next heartbeat."""

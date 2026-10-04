@@ -21,8 +21,16 @@ from robinauts.web.app import create_app
 
 
 @asynccontextmanager
-async def client() -> AsyncIterator[httpx.AsyncClient]:
+async def client(
+    cancel_ends: bool | None = None,
+) -> AsyncIterator[httpx.AsyncClient]:
     composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
+    if cancel_ends is not None:
+
+        async def cancel_turn(*_: object) -> bool:
+            return cancel_ends
+
+        composed.controller.cancel_turn = cancel_turn  # type: ignore[method-assign]
     app = create_app(
         composed.controller, credentials=composed.credentials, sign_in=None, secret_for={}.get
     )
@@ -150,3 +158,25 @@ async def test_an_agent_this_process_does_not_know_is_not_found() -> None:
             "/api/turns", json={"agent_id": "gone", "model_id": "echo", "text": "hello"}
         )
         assert named.status_code == 404
+
+
+@asyncio_test
+async def test_a_stop_answers_204_when_the_run_ended_and_202_when_its_end_is_on_its_way() -> None:
+    url = f"/api/conversations/{uuid.uuid4()}/runs/{uuid.uuid4()}/cancel"
+    async with client(cancel_ends=True) as http:
+        ended = await http.post(url)
+        assert (ended.status_code, ended.content) == (204, b"")
+    async with client(cancel_ends=False) as http:
+        pending = await http.post(url)
+        assert (pending.status_code, pending.content) == (202, b"")
+
+
+@asyncio_test
+async def test_a_stop_of_a_run_that_has_ended_is_not_found() -> None:
+    async with client() as http:
+        started = await http.post("/api/turns", json={"agent_id": "echo", "text": "hello"})
+        cid = started.headers["x-robinauts-conversation-id"]
+        rid = started.headers["x-robinauts-run-id"]
+        stopped = await http.post(f"/api/conversations/{cid}/runs/{rid}/cancel")
+        assert stopped.status_code == 404
+        assert stopped.json()["error"] == "NoActiveTurnError"

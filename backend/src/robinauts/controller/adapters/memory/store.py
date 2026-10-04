@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import uuid
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from datetime import datetime, timedelta
 
 from robinauts.controller.contract.domain import (
@@ -40,6 +40,7 @@ class MemoryStore(Store, WorkQueue):
         self._turns: dict[uuid.UUID, Turn] = {}
         self._events: dict[uuid.UUID, list[StoredEvent]] = {}
         self._changed = asyncio.Condition()
+        self._cancels: set[asyncio.Queue[uuid.UUID]] = set()
 
     async def open(self) -> None:
         """Nothing to open: the engines keep their memory in this process too."""
@@ -239,6 +240,29 @@ class MemoryStore(Store, WorkQueue):
         await self._notify()
         return ended
 
+    async def request_cancel(
+        self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, now: datetime
+    ) -> Turn | None:
+        self._visible(owner, session)
+        found = self._turn_of(session, turn)
+        if found is None or found.state is not TurnState.RUNNING:
+            return found
+        if found.cancel_requested_at is None:
+            found = dataclasses.replace(found, cancel_requested_at=now)
+            self._turns[turn] = found
+        for signals in self._cancels:
+            signals.put_nowait(turn)
+        return found
+
+    async def cancel_signals(self) -> AsyncIterator[uuid.UUID]:
+        signals: asyncio.Queue[uuid.UUID] = asyncio.Queue()
+        self._cancels.add(signals)
+        try:
+            while True:
+                yield await signals.get()
+        finally:
+            self._cancels.discard(signals)
+
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:
         self._visible(owner, session)
         return self._running(session)
@@ -267,7 +291,7 @@ class MemoryStore(Store, WorkQueue):
                 self._turns[h.turn] = dataclasses.replace(
                     found, lease_until=now + lease, heartbeat_at=now
                 )
-                renewed[h.turn] = None
+                renewed[h.turn] = found.cancel_requested_at
         return Renewed(renewed)
 
     async def wait_for_events(

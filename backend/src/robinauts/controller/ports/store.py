@@ -169,6 +169,15 @@ class Store(ABC):
         whose clock is behind: the caller reads the events again."""
 
     @abstractmethod
+    async def request_cancel(
+        self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, now: datetime
+    ) -> Turn | None:
+        """Record that a cancel of the turn was asked for at ``now``, unless one was already,
+        while it runs, and signal its holder, whichever process that is
+        (``WorkQueue.cancel_signals``), in one operation: the turn as it then is, running or
+        not, or ``None`` when the session has no such turn."""
+
+    @abstractmethod
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None: ...
 
     @abstractmethod

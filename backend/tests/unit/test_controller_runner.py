@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -97,6 +97,13 @@ async def over(store: Store, **options: Any) -> RobinautsController:
     dispatcher.run = controller.run_turn
     await controller.open()
     return controller
+
+
+async def until(condition: Callable[[], bool], timeout: float = 5.0) -> None:
+    """Wait for what another task does next, such as a runner leaving its dispatcher."""
+    async with asyncio.timeout(timeout):
+        while not condition():
+            await asyncio.sleep(0.01)
 
 
 def jumped(by: timedelta) -> Any:
@@ -369,7 +376,7 @@ async def test_a_cancel_before_the_runner_claimed_ends_the_turn_cancelled() -> N
 
 
 @asyncio_test
-async def test_a_cancel_of_a_turn_another_process_runs_is_refused() -> None:
+async def test_a_cancel_through_another_process_stops_the_turn_where_it_runs() -> None:
     store = MemoryStore()
     first = await over(store, worker="pod-a")
     engine = GatedEngine()
@@ -377,13 +384,108 @@ async def test_a_cancel_of_a_turn_another_process_runs_is_refused() -> None:
     second = await over(store, worker="pod-b")
     user = await first.ensure_user(Identity("local", "me"))
     started = await first.start_session(user, agent="echo", model="echo", text="one")
-    await store.wait_for_events(user.id, started.session_id, started.turn_id, 0, 5.0)
-    with pytest.raises(TurnActiveError):
-        await second.cancel_turn(user, started.session_id, started.turn_id)
-    engine.gate.set()
-    await settled(second, user, started)
+    sid = started.session_id
+    await store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
+    assert await second.cancel_turn(user, sid, started.turn_id) is True
+    turn = await store.get_turn(user.id, sid, started.turn_id)
+    assert turn is not None
+    assert turn.state is TurnState.CANCELLED
+    assert turn.cancel_requested_at is not None
+    await until(lambda: first._dispatcher.held() == [])
+    watched = [e async for e in second.watch_turn(user, sid, started.turn_id)]
+    assert watched[-1].event == TurnEnded(TurnState.CANCELLED)
     await first.close()
     await second.close()
+
+
+@asyncio_test
+async def test_a_cancel_whose_signal_was_lost_is_acted_on_at_the_next_heartbeat() -> None:
+    store = MemoryStore()
+    controller = await over(store, cancel_wait=0.05)
+    engine = GatedEngine()
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    await store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
+    # Asked for through the store, by a process whose signal never arrived.
+    store._cancels.clear()
+    asked = await store.request_cancel(user.id, sid, started.turn_id, datetime.now(UTC))
+    assert asked is not None
+    assert asked.cancel_requested_at is not None
+    assert controller._dispatcher.held() != []
+    await controller._work_loop.beat()
+    await asyncio.wait_for(settled(controller, user, started), 5.0)
+    turn = await store.get_turn(user.id, sid, started.turn_id)
+    assert turn is not None
+    assert turn.state is TurnState.CANCELLED
+    await controller.close()
+
+
+@asyncio_test
+async def test_a_cancel_of_a_turn_whose_holder_went_away_ends_it_cancelled_at_its_lease() -> None:
+    store = MemoryStore()
+    gone = await over(store, worker="pod-a")
+    gone._engines["echo"] = HangingEngine()
+    here = await over(store, worker="pod-b", cancel_wait=0.05)
+    user = await gone.ensure_user(Identity("local", "me"))
+    started = await gone.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    while len(await store.events_after(user.id, sid, started.turn_id, 0)) < 7:
+        await store.wait_for_events(user.id, sid, started.turn_id, 0, 0.05)
+    # The holder went away, signals and all.
+    await gone._work_loop.stop()
+    _, task = gone._dispatcher._tasks.pop(started.turn_id)
+    task.cancel(StopReason.LOST)
+    assert await here.cancel_turn(user, sid, started.turn_id) is False
+    here._now = jumped(PAST_THE_LEASE)
+    opened_after = await here.open_session(user, sid)
+    assert opened_after.active is None
+    assert opened_after.ended_badly is not None
+    assert opened_after.ended_badly.state is TurnState.CANCELLED
+    # Cancelled, as its runner would have ended it: no answer is stored.
+    assert [m.id for m in opened_after.messages] == [started.question.id]
+    await gone.close()
+    await here.close()
+
+
+@asyncio_test
+async def test_a_delete_through_another_process_stops_the_turn_and_then_purges() -> None:
+    store = MemoryStore()
+    first = await over(store, worker="pod-a")
+    engine = GatedEngine()
+    first._engines["echo"] = engine
+    second = await over(store, worker="pod-b")
+    second._engines["echo"] = first._engines["echo"]
+    user = await first.ensure_user(Identity("local", "me"))
+    started = await first.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    await store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
+    await second.delete_session(user, sid)
+    await until(lambda: first._dispatcher.held() == [])
+    assert not await engine.exists(sid)
+    with pytest.raises(SessionNotFoundError):
+        await first.open_session(user, sid)
+    await first.close()
+    await second.close()
+
+
+@asyncio_test
+async def test_a_delete_is_refused_while_a_turn_has_not_stopped_in_time() -> None:
+    store = MemoryStore()
+    gone = await over(store, worker="pod-a")
+    gone._engines["echo"] = GatedEngine()
+    here = await over(store, worker="pod-b", delete_wait=0.05)
+    user = await gone.ensure_user(Identity("local", "me"))
+    started = await gone.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    await store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
+    await gone._work_loop.stop()
+    with pytest.raises(TurnActiveError):
+        await here.delete_session(user, sid)
+    assert (await here.open_session(user, sid)).active is not None
+    await gone.close()
+    await here.close()
 
 
 @asyncio_test

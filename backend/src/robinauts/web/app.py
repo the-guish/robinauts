@@ -703,11 +703,21 @@ def create_app(
         position = after if after is not None else int(last_event_id or 0)
         return await watched(user, conversation_id, run_id, position)
 
-    @app.post("/api/conversations/{conversation_id}/runs/{run_id}/cancel", status_code=204)
+    @app.post(
+        "/api/conversations/{conversation_id}/runs/{run_id}/cancel",
+        status_code=204,
+        response_class=Response,
+        responses={
+            204: {"description": "The run has ended"},
+            202: {"description": "The stop is recorded, and the run's end is on its way"},
+        },
+    )
     async def cancel_turn(
         conversation_id: uuid.UUID, run_id: uuid.UUID, user: User = asking
-    ) -> None:
-        await controller.cancel_turn(user, conversation_id, run_id)
+    ) -> Response:
+        # Whichever process runs it: the ask goes through the store to its holder.
+        ended = await controller.cancel_turn(user, conversation_id, run_id)
+        return Response(status_code=204 if ended else 202)
 
     # --- liveness --------------------------------------------------------------
 

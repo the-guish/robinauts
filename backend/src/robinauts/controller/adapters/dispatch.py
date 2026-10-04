@@ -17,6 +17,7 @@ class InProcessDispatcher(TurnDispatcher):
         self.run = run
         """The controller's ``run_turn``, handed over by the composition."""
         self._tasks: dict[uuid.UUID, tuple[int, asyncio.Task[None]]] = {}
+        self._stopped: set[asyncio.Task[None]] = set()
 
     async def dispatch(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, attempt: int
@@ -31,6 +32,7 @@ class InProcessDispatcher(TurnDispatcher):
         held = self._tasks.get(turn)
         if held is not None and held[1] is task:
             del self._tasks[turn]
+        self._stopped.discard(task)
         if not task.cancelled():
             task.exception()
 
@@ -42,7 +44,10 @@ class InProcessDispatcher(TurnDispatcher):
         if held is None:
             return False
         _, task = held
-        task.cancel(reason)
+        # Once: a second cancel would cut short the write with which the runner ends the turn.
+        if task not in self._stopped:
+            self._stopped.add(task)
+            task.cancel(reason)
         await asyncio.wait({task})
         return True
 
@@ -51,7 +56,8 @@ class InProcessDispatcher(TurnDispatcher):
         if not tasks:
             return
         _, pending = await asyncio.wait(tasks, timeout=timeout)
-        for task in pending:
+        for task in pending - self._stopped:
+            self._stopped.add(task)
             task.cancel(CLOSE)
         if pending:
             await asyncio.wait(pending)

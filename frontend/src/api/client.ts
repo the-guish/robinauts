@@ -293,7 +293,8 @@ export async function request<M extends Method, P extends PathsWith<M>>(
   if (!response.ok) {
     throw await refused(response);
   }
-  if (response.status === 204) {
+  // Nothing to say: done (204), or accepted and on its way (202).
+  if (response.status === 204 || response.status === 202) {
     return undefined as Result<Operation<P, M>>;
   }
   try {

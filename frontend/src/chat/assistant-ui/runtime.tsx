@@ -733,8 +733,21 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     // state: there is no request that would say "stop whatever is going".
     if (conversationId === null || runId === null) return;
     try {
+      // Whichever server runs it: the stop goes through the store to it, and
+      // is answered once the run has ended (204) or the stop is recorded and
+      // the end is on its way (202).
       await cancelRun(conversationId, runId);
-    } catch {
+    } catch (failure) {
+      // **The server had it, and has nothing to stop**: the run has ended
+      // already (404), or an older server ran it elsewhere (409). The stream
+      // watching it brings its ending either way, and telling the person the
+      // stop went nowhere would be wrong.
+      if (
+        failure instanceof ApiError &&
+        (failure.status === 404 || failure.status === 409)
+      ) {
+        return;
+      }
       // **Nothing about the run changed**, and the stream watching it is
       // still watching: the request failed, so nothing was cancelled and the
       // answer carries on arriving. Forgetting the run here would leave it

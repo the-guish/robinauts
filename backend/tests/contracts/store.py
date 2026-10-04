@@ -500,3 +500,39 @@ class StoreContract:
         )
         held = [Held(running.id, 1)]
         assert (await store.heartbeat(WORKER, held, NOW, 90 * SECOND)).lost(held) == [running.id]
+
+    # --- cancels through the store ------------------------------------------
+
+    @store_test
+    async def test_a_cancel_is_recorded_once_and_signalled_to_whoever_listens(
+        self, store: Store
+    ) -> None:
+        assert isinstance(store, WorkQueue)
+        me, one, _, running = await self.started(store)
+        signals = store.cancel_signals()
+        listening = asyncio.ensure_future(anext(signals))
+        await asyncio.sleep(0.2)
+        asked = await store.request_cancel(me.id, one.id, running.id, NOW + MINUTE)
+        assert asked is not None
+        assert (asked.state, asked.cancel_requested_at) == (TurnState.RUNNING, NOW + MINUTE)
+        assert await asyncio.wait_for(listening, 5.0) == running.id
+        await signals.aclose()
+        again = await store.request_cancel(me.id, one.id, running.id, NOW + 2 * MINUTE)
+        assert again is not None
+        assert again.cancel_requested_at == NOW + MINUTE
+        held = [Held(running.id, 1)]
+        renewed = await store.heartbeat(WORKER, held, NOW + MINUTE, 90 * SECOND)
+        assert renewed == Renewed({running.id: NOW + MINUTE})
+
+    @store_test
+    async def test_a_cancel_of_an_ended_or_unknown_turn_changes_nothing(self, store: Store) -> None:
+        me, one, _, running = await self.started(store)
+        await store.finish_turn(
+            me.id, one.id, running.id, FENCE, TurnState.FINISHED, NOW, None, None, [], NOW
+        )
+        ended = await store.request_cancel(me.id, one.id, running.id, NOW + MINUTE)
+        assert ended is not None
+        assert (ended.state, ended.cancel_requested_at) == (TurnState.FINISHED, None)
+        assert await store.request_cancel(me.id, one.id, uuid.uuid4(), NOW) is None
+        with pytest.raises(SessionNotFoundError):
+            await store.request_cancel(user("you").id, one.id, running.id, NOW)

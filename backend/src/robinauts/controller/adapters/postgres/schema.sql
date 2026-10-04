@@ -254,9 +254,10 @@ CREATE INDEX IF NOT EXISTS messages_session_id_parent_id_idx
 -- and a running turn whose lease has passed was left by a runner that went
 -- away: the next reader to find it ends it as `interrupted`, storing the
 -- answer it had begun and its last event.
--- `cancel_requested_at`, which a cancel from another process will set and
--- the holder read back, is the next step. All are set by the application's
--- clock.
+-- `cancel_requested_at` is set, once, by a cancel through any process, with
+-- `NOTIFY robinauts_cancel` in the same transaction: the holder stops the
+-- turn on the signal, or at its next heartbeat, which reads it back. All are
+-- set by the application's clock.
 CREATE TABLE IF NOT EXISTS turns (
     id uuid
         CONSTRAINT turns_pkey PRIMARY KEY,

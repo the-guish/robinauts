@@ -2192,6 +2192,55 @@ test("a first message refused as not there is about its agent, and keeps the tex
   expect(onModelRefused).not.toHaveBeenCalled();
 });
 
+for (const [status, answer] of [
+  [202, () => new Response(null, { status: 202 })],
+  [404, () => refusal(404, "NoActiveTurnError", "nothing runs")],
+  [409, () => refusal(409, "TurnActiveError", "runs in another process")],
+] as const) {
+  test(`a stop the server had (${status}) says nothing and leaves the ending to the stream`, async () => {
+    const { response, write, close } = writable({
+      headers: streamHeaders(RUN, CONVERSATION),
+    });
+    stub((call) => {
+      if (call.url === `/api/conversations/${CONVERSATION}`) {
+        return json(opened(conversation(1), TREE));
+      }
+      if (call.url.endsWith("/cancel")) return answer();
+      if (call.url === `/api/conversations/${CONVERSATION}/turns`)
+        return response;
+      return undefined;
+    });
+    const { result } = chatting({ conversationId: CONVERSATION });
+    await waitFor(() => {
+      expect(result.current.state.messages).toHaveLength(2);
+    });
+    await act(async () => {
+      void result.current.runtime.thread.append("and then?");
+      await settle();
+    });
+    write(
+      event("TEXT_MESSAGE_START", { messageId: "m4", role: "assistant" }, 2),
+    );
+    await settle();
+    await act(async () => {
+      result.current.runtime.thread.cancelRun();
+      await settle();
+    });
+    expect(result.current.state.notice).not.toBe(STOP_DID_NOT_ARRIVE);
+    write(
+      event(
+        "RUN_FINISHED",
+        { threadId: CONVERSATION, runId: RUN, outcome: { type: "cancelled" } },
+        3,
+      ),
+    );
+    close();
+    await waitFor(() => {
+      expect(result.current.state.runId).toBeNull();
+    });
+  });
+}
+
 test("a stop that does not reach the server leaves the answer alone", async () => {
   const { response, write, close } = writable({
     headers: streamHeaders(RUN, CONVERSATION),
