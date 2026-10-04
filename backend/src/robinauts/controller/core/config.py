@@ -12,6 +12,7 @@ from robinauts.controller.contract.domain import (
     AgentConfig,
     Config,
     ConfigError,
+    DatabaseConfig,
     ModelConfig,
     ProviderConfig,
     ProviderKind,
@@ -50,7 +51,15 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
         "tool_servers", ToolServerConfig, auth=ToolServerAuth, tool_errors=ToolErrors
     )
     agents = build("agents", AgentConfig, tools=tuple)
-    work = _work(raw.get("work", {}), problems)
+    work = _numbers("work", WorkConfig, raw.get("work", {}), problems)
+    database = _numbers("database", DatabaseConfig, raw.get("database", {}), problems)
+    if database.pool_max < 2:
+        problems.append("database: pool_max must be 2 or more")
+    if work.heartbeat_seconds * 2 > work.lease_seconds:
+        problems.append(
+            "work: heartbeat_seconds must be at most half of lease_seconds, so that one late"
+            " heartbeat does not lose a turn"
+        )
 
     for server in tool_servers.values():
         if server.auth is ToolServerAuth.HEADER:
@@ -84,7 +93,7 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
             problems.append(f"agents.{agent.id}: engine {agent.engine!r} is not one of {ENGINES}")
     if problems:
         raise ConfigError("\n".join(problems))
-    return Config(providers, models, tool_servers, agents, work)
+    return Config(providers, models, tool_servers, agents, work, database)
 
 
 def _positive(table: str, key: str, value: Any, kind: type, problems: list[str]) -> bool:
@@ -94,25 +103,19 @@ def _positive(table: str, key: str, value: Any, kind: type, problems: list[str])
     return True
 
 
-def _work(raw: Mapping[str, Any], problems: list[str]) -> WorkConfig:
-    """The ``[work]`` table: a single table of numbers, each with its default."""
+def _numbers(table: str, cls: Any, raw: Mapping[str, Any], problems: list[str]) -> Any:
+    """A single table of numbers, ``[work]`` or ``[database]``, each with its default."""
     if not isinstance(raw, Mapping):
-        problems.append("work: a table of keys, not a value")
-        return WorkConfig()
-    fields = {f.name: f for f in dataclasses.fields(WorkConfig)}
+        problems.append(f"{table}: a table of keys, not a value")
+        return cls()
+    fields = {f.name: f for f in dataclasses.fields(cls)}
     if unknown := sorted(set(raw) - set(fields)):
-        problems.append(f"work: unknown key(s) {', '.join(unknown)}")
+        problems.append(f"{table}: unknown key(s) {', '.join(unknown)}")
     values: dict[str, Any] = {}
     for key, value in raw.items():
         if key not in fields:
             continue
         kind = (int, float) if fields[key].type == "float" else int
-        if _positive("work", key, value, kind, problems):
+        if _positive(table, key, value, kind, problems):
             values[key] = value
-    work = WorkConfig(**values)
-    if work.heartbeat_seconds * 2 > work.lease_seconds:
-        problems.append(
-            "work: heartbeat_seconds must be at most half of lease_seconds, so that one late"
-            " heartbeat does not lose a turn"
-        )
-    return work
+    return cls(**values)

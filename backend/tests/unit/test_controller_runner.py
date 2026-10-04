@@ -569,3 +569,30 @@ async def test_text_streamed_a_token_at_a_time_is_written_a_batch_at_a_time() ->
     answer = message_from_document((await store.messages_of(user.id, sid))[-1])
     assert answer.parts == (TextPart("".join(f"{n} " for n in range(500))),)
     await controller.close()
+
+
+class BusyStore(MemoryStore):
+    """A pool with no free connection for the first few writes."""
+
+    def __init__(self, busy: int) -> None:
+        super().__init__()
+        self.busy = busy
+
+    async def append_events(self, *args: Any, **kwargs: Any) -> None:
+        if self.busy > 0:
+            self.busy -= 1
+            raise TimeoutError
+        await super().append_events(*args, **kwargs)
+
+
+@asyncio_test
+async def test_a_write_that_finds_the_pool_busy_is_tried_again() -> None:
+    store = BusyStore(busy=2)
+    controller = await over(store)
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    await settled(controller, user, started)
+    turn = await store.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert turn.state is TurnState.FINISHED
+    await controller.close()

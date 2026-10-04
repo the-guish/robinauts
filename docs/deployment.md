@@ -201,6 +201,11 @@ lease_seconds = 90        # a dead pod's turns are found this long after its las
 heartbeat_seconds = 30    # how often a pod renews its turns' leases; at most half the lease
 drain_seconds = 30        # how long a stopping process lets its turns finish
 
+# The connections one process opens. Both keys have these defaults.
+[database]
+pool_max = 10                 # the pool the store and both engines share
+acquire_timeout_seconds = 5   # past this a request is answered 503
+
 [agents.assistant]
 title = "Assistant"
 model = "sonnet"
@@ -266,6 +271,16 @@ Notes on what is and is not there:
   of the whole turn, and `max_model_calls` the number of model calls one
   turn may make, its tool loop included; past either, the turn fails and
   keeps what it streamed.
+- **Connections.** A process opens at most `pool_max + 2` connections to
+  PostgreSQL: its pool, which the store and both engines share, the
+  listener that hears what other processes announce, and the work
+  connection its heartbeat writes on, apart from the pool so that a pool
+  busy with requests never delays a lease. A fleet of N processes needs
+  `N × (pool_max + 2) + 2` (the `db init` job and one command at a time
+  besides) below the server's `max_connections`: three replicas at the
+  default need 38 of PostgreSQL's default 100. A request that waits longer
+  than `acquire_timeout_seconds` for a connection of the pool is answered
+  503; a turn's write tries again for a few seconds before it gives up.
 - **A tool's error** goes back to the model as the call's result, and the
   turn goes on. `tool_errors = "retry"` on a `[tool_servers.<id>]` table
   makes the Pydantic AI engine ask the model to correct the call instead,

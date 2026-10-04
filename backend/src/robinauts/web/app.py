@@ -461,6 +461,14 @@ def create_app(
     async def not_let_in(request: Request, exc: Refused) -> JSONResponse:
         return JSONResponse({"error": exc.error, "detail": exc.detail}, status_code=exc.status)
 
+    @app.exception_handler(TimeoutError)
+    async def busy(request: Request, exc: TimeoutError) -> JSONResponse:
+        # The pool had no connection to give within `acquire_timeout_seconds`.
+        return JSONResponse(
+            {"error": "Busy", "detail": "the database is busy: try again shortly"},
+            status_code=503,
+        )
+
     @app.exception_handler(NotImplementedError)
     async def not_implemented(request: Request, exc: NotImplementedError) -> JSONResponse:
         return JSONResponse({"error": "NotImplemented", "detail": str(exc)}, status_code=501)

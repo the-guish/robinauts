@@ -44,7 +44,9 @@ WORKER_ID_VARIABLE = "ROBINAUTS_WORKER_ID"
 """The pod's name, which a Deployment sets to the pod's own: what a turn records as its
 runner, and every runner's write names."""
 
-CONTROLLER_TABLES = frozenset({"model_providers", "models", "tool_servers", "agents", "work"})
+CONTROLLER_TABLES = frozenset(
+    {"model_providers", "models", "tool_servers", "agents", "work", "database"}
+)
 """The file's tables that are the controller's, the ones `parse_config` reads."""
 
 SCHEMA_READY = "the database is at schema version {version} (schema.sql {digest})"
@@ -89,7 +91,11 @@ def compose(
     if storage.kind is StorageKind.POSTGRES:
         if not storage.url:
             raise ConfigError(f"{DATABASE_URL_VARIABLE} is not set")
-        postgres = PostgresStore(dsn=storage.url)
+        postgres = PostgresStore(
+            dsn=storage.url,
+            pool_max=config.database.pool_max,
+            acquire_timeout=config.database.acquire_timeout_seconds,
+        )
         store, credentials = postgres, PostgresCredentials(postgres)
     elif storage.kind is StorageKind.IN_MEMORY:
         memory = MemoryStore()

@@ -18,7 +18,7 @@ import asyncio
 import dataclasses
 import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import aclosing
 from datetime import UTC, datetime, timedelta
 
@@ -65,6 +65,21 @@ RETENTION = timedelta(hours=24)
 
 FLUSH_SECONDS = 0.15
 """How long pieces of text wait to be written together."""
+
+WRITE_TRIES = 4
+"""How many times a write that found no free connection is tried, a second apart: a pool
+busy for a moment does not fail a turn."""
+
+
+async def _patiently[T](write: Callable[[], Awaitable[T]]) -> T:
+    for tried in range(1, WRITE_TRIES + 1):
+        try:
+            return await write()
+        except TimeoutError:
+            if tried == WRITE_TRIES:
+                raise
+            await asyncio.sleep(1.0)
+    raise AssertionError("unreachable")
 
 
 class _Writer:
@@ -127,14 +142,16 @@ class _Writer:
             if not self._waiting:
                 return
             batch, self._waiting = self._waiting, []
-            now = datetime.now(UTC)
-            await self._store.append_events(
-                self._owner,
-                self._turn.session_id,
-                self._turn.id,
-                self._numbered(batch),
-                now,
-                holder=self._holder,
+            numbered = self._numbered(batch)
+            await _patiently(
+                lambda: self._store.append_events(
+                    self._owner,
+                    self._turn.session_id,
+                    self._turn.id,
+                    numbered,
+                    datetime.now(UTC),
+                    holder=self._holder,
+                )
             )
 
     def drop(self) -> None:
@@ -153,19 +170,25 @@ class _Writer:
                 self._timer.cancel()
                 self._timer = None
             batch, self._waiting = [*self._waiting, *last], []
-            now = datetime.now(UTC)
-            await self._store.finish_turn(
-                self._owner,
-                self._turn.session_id,
-                self._turn.id,
-                state,
-                now,
-                error,
-                None if answer is None else stored_message(answer),
-                self._numbered(batch),
-                now,
-                holder=self._holder,
-            )
+            numbered = self._numbered(batch)
+            stored = None if answer is None else stored_message(answer)
+
+            async def finish() -> None:
+                now = datetime.now(UTC)
+                await self._store.finish_turn(
+                    self._owner,
+                    self._turn.session_id,
+                    self._turn.id,
+                    state,
+                    now,
+                    error,
+                    stored,
+                    numbered,
+                    now,
+                    holder=self._holder,
+                )
+
+            await _patiently(finish)
 
 
 async def run_turn(

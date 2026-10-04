@@ -170,3 +170,22 @@ async def test_a_stop_answers_204_once_ended_and_202_while_another_pod_ends_it()
             path = f"/api/conversations/{uuid.uuid4()}/runs/{uuid.uuid4()}/cancel"
             assert (await http.post(path)).status_code == 204
             assert (await http.post(path)).status_code == 202
+
+
+@asyncio_test
+async def test_a_request_that_finds_the_database_busy_is_answered_503() -> None:
+    composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
+    app = create_app(
+        composed.controller, credentials=composed.credentials, sign_in=None, secret_for={}.get
+    )
+
+    async def list_sessions(*_: object, **__: object) -> None:
+        raise TimeoutError
+
+    composed.controller.list_sessions = list_sessions  # type: ignore[method-assign]
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+            busy = await http.get("/api/conversations")
+    assert busy.status_code == 503
+    assert busy.json()["error"] == "Busy"

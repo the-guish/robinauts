@@ -25,7 +25,13 @@ from typing import Any
 
 import asyncpg
 
-from robinauts.controller.adapters.postgres.pool import OPENING_FAILURES, codecs, open_pool
+from robinauts.controller.adapters.postgres.pool import (
+    ACQUIRE_TIMEOUT,
+    MAX_POOL_SIZE,
+    OPENING_FAILURES,
+    codecs,
+    open_pool,
+)
 from robinauts.controller.adapters.postgres.schema import check_schema
 from robinauts.controller.contract.domain import (
     Role,
@@ -158,10 +164,19 @@ class PostgresStore(Store, WorkQueue):
     makes its own pool, checks the schema, and ``close`` closes it. The listener and the work
     connection are opened from the dsn, on first use, and closed by ``close``."""
 
-    def __init__(self, pool: asyncpg.Pool | None = None, dsn: str | None = None) -> None:
+    def __init__(
+        self,
+        pool: asyncpg.Pool | None = None,
+        dsn: str | None = None,
+        *,
+        pool_max: int = MAX_POOL_SIZE,
+        acquire_timeout: float = ACQUIRE_TIMEOUT,
+    ) -> None:
         self._pool: asyncpg.Pool = pool  # type: ignore[assignment]
         self._owns_pool = pool is None
         self._dsn = dsn
+        self._pool_max = pool_max
+        self._acquire_timeout = acquire_timeout
         self._listener: asyncpg.Connection | None = None
         self._waiters: dict[uuid.UUID, set[asyncio.Future[None]]] = {}
         self._opening: asyncio.Lock | None = None
@@ -179,7 +194,9 @@ class PostgresStore(Store, WorkQueue):
         if self._owns_pool and self._pool is None:
             if self._dsn is None:
                 raise RuntimeError("a store opened from nothing needs the database's dsn")
-            self._pool = await open_pool(self._dsn)
+            self._pool = await open_pool(
+                self._dsn, max_size=self._pool_max, acquire_timeout=self._acquire_timeout
+            )
         await check_schema(self._pool)
         # The connections apart from the pool see the tables the pool sees.
         self._search_path = await self._pool.fetchval("SELECT current_setting('search_path')")

@@ -7,6 +7,7 @@ import pytest
 
 from robinauts.controller.contract.domain import (
     ConfigError,
+    DatabaseConfig,
     ProviderKind,
     ToolErrors,
     ToolServerAuth,
@@ -161,3 +162,13 @@ def test_a_heartbeat_slower_than_half_the_lease_is_refused() -> None:
     )
     with pytest.raises(ConfigError, match="heartbeat_seconds must be at most half"):
         parse_config({"work": {"lease_seconds": 90, "heartbeat_seconds": 60}})
+
+
+def test_the_database_table_sizes_the_pool_and_bounds_its_wait() -> None:
+    assert parse_config({}).database == DatabaseConfig(pool_max=10, acquire_timeout_seconds=5)
+    config = parse_config({"database": {"pool_max": 4, "acquire_timeout_seconds": 2.5}})
+    assert config.database == DatabaseConfig(pool_max=4, acquire_timeout_seconds=2.5)
+    with pytest.raises(ConfigError) as raised:
+        parse_config({"database": {"pool_max": 1, "size": 3}})
+    assert "database: pool_max must be 2 or more" in str(raised.value)
+    assert "database: unknown key(s) size" in str(raised.value)

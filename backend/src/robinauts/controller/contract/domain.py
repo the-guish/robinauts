@@ -153,6 +153,18 @@ class WorkConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class DatabaseConfig:
+    """The ``[database]`` table: the connections one process opens. Beside the pool, a
+    process holds the listener and the work connection, one each."""
+
+    pool_max: int = 10
+    """The most connections the pool holds, which the store and both engines share."""
+    acquire_timeout_seconds: float = 5.0
+    """How long a request or a runner waits for a connection of the pool before it gives up:
+    a request is then answered 503."""
+
+
+@dataclass(frozen=True, slots=True)
 class AgentConfig:
     id: str
     title: str
@@ -169,6 +181,7 @@ class Config:
     tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
     agents: Mapping[str, AgentConfig] = field(default_factory=dict)
     work: WorkConfig = field(default_factory=WorkConfig)
+    database: DatabaseConfig = field(default_factory=DatabaseConfig)
 
 
 class StorageKind(StrEnum):
