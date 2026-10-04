@@ -133,6 +133,27 @@ class StoreContract:
             me.id, one.id, running.id, fence, event.position, event.document, at, event.expires_at
         )
 
+    async def end_expired(
+        self,
+        store: Store,
+        me: User,
+        one: Session,
+        running: Turn,
+        now: datetime,
+        partial: StoredMessage | None = None,
+        events: list[StoredEvent] | None = None,
+    ) -> Turn | None:
+        return await store.end_expired_turn(
+            me.id,
+            one.id,
+            running.id,
+            TurnState.INTERRUPTED,
+            now,
+            "lease expired",
+            partial,
+            events or [],
+        )
+
     # --- users --------------------------------------------------------------
 
     @store_test
@@ -323,18 +344,44 @@ class StoreContract:
         asked = question(one.id)
         running = turn(one.id, asked.id, lease_until=NOW + MINUTE)
         await store.start_turn(me.id, running, asked)
-        assert await store.end_expired_turn(me.id, one.id, NOW + MINUTE / 2) is None
+        await self.append(store, me, one, running, piece(1))
+        partial = answer(one.id, asked.id, NOW + 2 * MINUTE)
+        assert await self.end_expired(store, me, one, running, NOW + MINUTE / 2) is None
         assert await store.active_turn(me.id, one.id) == running
-        ended = await store.end_expired_turn(me.id, one.id, NOW + 2 * MINUTE)
+        later = NOW + 2 * MINUTE
+        ended = await self.end_expired(store, me, one, running, later, partial, [piece(2)])
         assert ended is not None
-        assert (ended.id, ended.state, ended.ended_at) == (
+        assert (ended.id, ended.state, ended.ended_at, ended.error) == (
             running.id,
             TurnState.INTERRUPTED,
-            NOW + 2 * MINUTE,
+            later,
+            "lease expired",
         )
         assert await store.get_turn(me.id, one.id, running.id) == ended
         assert await store.active_turn(me.id, one.id) is None
-        assert await store.end_expired_turn(me.id, one.id, NOW + 3 * MINUTE) is None
+        assert await store.messages_of(me.id, one.id) == [asked.document, partial.document]
+        positions = [p for p, _ in await store.events_after(me.id, one.id, running.id, 0)]
+        assert positions == [1, 2]
+        assert (await store.get_session(me.id, one.id)).updated_at == later
+        again = NOW + 3 * MINUTE
+        assert await self.end_expired(store, me, one, running, again) is None
+
+    @store_test
+    async def test_an_expired_end_is_refused_on_a_position_its_runner_took(
+        self, store: Store
+    ) -> None:
+        me = await store.add_user_if_absent(user())
+        one = session(me.id)
+        await store.add_session(one)
+        asked = question(one.id)
+        running = turn(one.id, asked.id, lease_until=NOW + MINUTE)
+        await store.start_turn(me.id, running, asked)
+        await self.append(store, me, one, running, piece(1))
+        partial = answer(one.id, asked.id)
+        with pytest.raises(TurnLostError):
+            await self.end_expired(store, me, one, running, NOW + 2 * MINUTE, partial, [piece(1)])
+        assert await store.active_turn(me.id, one.id) == running
+        assert await store.messages_of(me.id, one.id) == [asked.document]
 
     @store_test
     async def test_a_start_and_a_hide_succeed_after_an_expired_turn_is_ended(
@@ -344,12 +391,13 @@ class StoreContract:
         one = session(me.id)
         await store.add_session(one)
         asked = question(one.id)
-        await store.start_turn(me.id, turn(one.id, asked.id, lease_until=NOW + MINUTE), asked)
-        assert await store.end_expired_turn(me.id, one.id, NOW + 2 * MINUTE) is not None
+        first = turn(one.id, asked.id, lease_until=NOW + MINUTE)
+        await store.start_turn(me.id, first, asked)
+        assert await self.end_expired(store, me, one, first, NOW + 2 * MINUTE) is not None
         again = turn(one.id, asked.id, lease_until=NOW + 5 * MINUTE)
         await store.start_turn(me.id, again, None)
         assert await store.active_turn(me.id, one.id) == again
-        assert await store.end_expired_turn(me.id, one.id, NOW + 6 * MINUTE) is not None
+        assert await self.end_expired(store, me, one, again, NOW + 6 * MINUTE) is not None
         await store.hide_session(me.id, one.id, NOW + 6 * MINUTE)
         with pytest.raises(SessionNotFoundError):
             await store.get_session(me.id, one.id)

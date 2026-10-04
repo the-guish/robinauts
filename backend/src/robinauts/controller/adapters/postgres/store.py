@@ -80,12 +80,9 @@ RETURNING t.id, t.cancel_requested_at
 """
 
 _END_EXPIRED = f"""
-UPDATE turns AS t
-SET state = 'interrupted', ended_at = $3, error = 'lease expired'
-FROM sessions AS s
-WHERE s.id = t.session_id AND s.id = $2 AND s.owner_id = $1 AND s.deleted_at IS NULL
-  AND t.state = 'running' AND t.lease_until < $3
-RETURNING {", ".join("t." + c for c in _TURN_COLUMNS.split(", "))}
+UPDATE turns SET state = $3, ended_at = $4, error = $5
+WHERE id = $1 AND session_id = $2 AND state = 'running' AND lease_until < $4
+RETURNING {_TURN_COLUMNS}
 """
 
 
@@ -415,15 +412,7 @@ class PostgresStore(Store, WorkQueue):
                     raise TurnLostError(f"turn {turn} is not running")
                 if answer is not None:
                     await self._insert_message(connection, answer)
-                for event in events:
-                    await connection.execute(
-                        "INSERT INTO turn_events (turn_id, position, document, expires_at)"
-                        " VALUES ($1, $2, $3, $4)",
-                        turn,
-                        event.position,
-                        event.document,
-                        event.expires_at,
-                    )
+                await self._insert_events(connection, turn, events)
                 await connection.execute("SELECT pg_notify($1, $2)", CHANNEL, f"{turn} end")
         except asyncpg.UniqueViolationError as violated:
             if violated.constraint_name in (POSITION_TAKEN, "messages_pkey"):
@@ -431,10 +420,40 @@ class PostgresStore(Store, WorkQueue):
             raise
 
     async def end_expired_turn(
-        self, owner: uuid.UUID, session: uuid.UUID, now: datetime
+        self,
+        owner: uuid.UUID,
+        session: uuid.UUID,
+        turn: uuid.UUID,
+        state: TurnState,
+        now: datetime,
+        error: str | None,
+        answer: StoredMessage | None,
+        events: Sequence[StoredEvent],
     ) -> Turn | None:
-        row = await self._pool.fetchrow(_END_EXPIRED, owner, session, now)
-        return None if row is None else _turn(row)
+        try:
+            async with self._pool.acquire() as connection, connection.transaction():
+                # The session row first, then the turn: the lock order of every transaction
+                # that writes both.
+                held = await connection.fetchval(_VISIBLE + " FOR NO KEY UPDATE", session, owner)
+                if held is None:
+                    raise SessionNotFoundError(str(session))
+                row = await connection.fetchrow(
+                    _END_EXPIRED, turn, session, state.value, now, error
+                )
+                if row is None:
+                    return None
+                await connection.execute(
+                    "UPDATE sessions SET updated_at = $2 WHERE id = $1", session, now
+                )
+                if answer is not None:
+                    await self._insert_message(connection, answer)
+                await self._insert_events(connection, turn, events)
+                await connection.execute("SELECT pg_notify($1, $2)", CHANNEL, f"{turn} end")
+        except asyncpg.UniqueViolationError as violated:
+            if violated.constraint_name in (POSITION_TAKEN, "messages_pkey"):
+                raise TurnLostError(f"turn {turn} wrote an event meanwhile") from violated
+            raise
+        return _turn(row)
 
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:
         async with self._pool.acquire() as connection:
@@ -577,6 +596,16 @@ class PostgresStore(Store, WorkQueue):
     ) -> None:
         if await connection.fetchval(_VISIBLE, session, owner) is None:
             raise SessionNotFoundError(str(session))
+
+    async def _insert_events(
+        self, connection: asyncpg.Connection, turn: uuid.UUID, events: Sequence[StoredEvent]
+    ) -> None:
+        if events:
+            await connection.executemany(
+                "INSERT INTO turn_events (turn_id, position, document, expires_at)"
+                " VALUES ($1, $2, $3, $4)",
+                [(turn, e.position, e.document, e.expires_at) for e in events],
+            )
 
     async def _insert_message(self, connection: asyncpg.Connection, message: StoredMessage) -> None:
         await connection.execute(

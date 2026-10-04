@@ -132,9 +132,11 @@ documented here, which is what "documented with the API" means for them.
   `RUN_ERROR`, which a stock client shows as something having gone wrong.
 - `RUN_ERROR` carries a `code`: the turn's state where it ended in an error
   (`failed`, or `interrupted` — the deployment stopped with the turn in it,
-  which is not AG-UI's *interrupt* outcome). Its message is **a fixed
-  sentence** — never the turn's stored error, which is written for an
-  operator.
+  or the process running it went away, which is not AG-UI's *interrupt*
+  outcome). Its message is **a fixed sentence** — never the turn's stored
+  error, which is written for an operator. Either way the turn stores what it
+  had streamed as an answer marked `failed`, under the message id it
+  streamed with, so the answer a client holds is the one a Retry names.
 
 **Not yet served.** The wire is the happy path today
 ([working-notes/echo-e2e-plan.md](../working-notes/echo-e2e-plan.md)); these

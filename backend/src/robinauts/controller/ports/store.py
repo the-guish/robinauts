@@ -152,10 +152,21 @@ class Store(ABC):
 
     @abstractmethod
     async def end_expired_turn(
-        self, owner: uuid.UUID, session: uuid.UUID, now: datetime
+        self,
+        owner: uuid.UUID,
+        session: uuid.UUID,
+        turn: uuid.UUID,
+        state: TurnState,
+        now: datetime,
+        error: str | None,
+        answer: StoredMessage | None,
+        events: Sequence[StoredEvent],
     ) -> Turn | None:
-        """The session's running turn ended as ``interrupted`` if its lease has passed
-        ``now``, by one conditional write, with no event; ``None`` otherwise."""
+        """End the turn as ``state``, with the answer and the last events, and the session's
+        ``updated_at``, in one operation that only a running turn whose lease has passed
+        ``now`` takes: the turn as ended, or ``None`` when it is not such a turn.
+        ``TurnLostError`` when a position of ``events`` was taken meanwhile, by a runner
+        whose clock is behind: the caller reads the events again."""
 
     @abstractmethod
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None: ...

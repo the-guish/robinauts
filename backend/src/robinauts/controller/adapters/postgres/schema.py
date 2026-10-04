@@ -35,7 +35,7 @@ from robinauts.controller.contract.domain import ConfigError
 SCHEMA_VERSION = 1
 """The schema this build was written against; frozen at 1 until the first release."""
 
-SCHEMA_SHA256 = "b5a4226750a7e89c77867026714dc4442dd25001bf6859de5398864c29f9a491"
+SCHEMA_SHA256 = "db1c98054132e79647e8505d03097d511c3215b90f3a6045d396652a098b49d4"
 """``schema.sql`` as this build was written against it, line endings normalised to LF."""
 
 SCHEMA_TABLES = (

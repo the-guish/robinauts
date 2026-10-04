@@ -24,6 +24,7 @@ from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.contract.domain import (
     AgentConfig,
     Identity,
+    MessageStarted,
     NumberedEvent,
     SessionNotFoundError,
     StorageConfig,
@@ -36,7 +37,8 @@ from robinauts.controller.contract.domain import (
     TurnState,
     WorkConfig,
 )
-from robinauts.controller.core.documents import event_from_document
+from robinauts.controller.core.documents import event_from_document, message_from_document
+from robinauts.controller.ports.dispatcher import StopReason
 from robinauts.controller.ports.store import Store
 
 PAST_THE_LEASE = timedelta(hours=1)
@@ -208,8 +210,10 @@ async def test_a_runner_refused_mid_stream_writes_nothing_more() -> None:
     turn = await controller._store.get_turn(user.id, sid, started.turn_id)
     assert turn is not None
     assert turn.state is TurnState.INTERRUPTED
-    assert len(await controller._store.events_after(user.id, sid, started.turn_id, 0)) == 1
-    assert len(await controller._store.messages_of(user.id, sid)) == 1
+    # The reader that ended it wrote the end, and the answer as far as it had gone; the
+    # runner, refused, wrote nothing more.
+    assert len(await controller._store.events_after(user.id, sid, started.turn_id, 0)) == 2
+    assert len(await controller._store.messages_of(user.id, sid)) == 2
     await controller.close()
 
 
@@ -226,7 +230,7 @@ async def test_a_turn_whose_lease_has_passed_is_interrupted_and_a_new_turn_start
     watched = [e async for e in controller.watch_turn(user, sid, started.turn_id)]
     assert [type(n.event).__name__ for n in watched] == ["MessageStarted", "TurnEnded"]
     assert watched[-1].event == TurnEnded(TurnState.INTERRUPTED)
-    assert watched[-1].position == 1
+    assert watched[-1].position == 2
     engine.gate.set()
     again = await controller.regenerate_answer(
         user, sid, question_id=started.question.id, model="echo"
@@ -287,6 +291,68 @@ async def test_a_turn_the_heartbeat_did_not_renew_is_stopped_and_writes_nothing_
     await controller.close()
 
 
+class HangingEngine(EchoEngine):
+    """Writes, calls its tool and has the result, then never answers; records its prompts."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.prompts: list[str] = []
+
+    async def stream(
+        self, session_id: uuid.UUID, agent: Any, prompt: str, **kwargs: Any
+    ) -> AsyncGenerator[Event, None]:
+        self.prompts.append(prompt)
+        yield TextDelta("Let me ")
+        yield TextDelta("look. ")
+        yield ToolCall(call_id="c1", name="search", arguments={"q": "robins"})
+        yield ToolResult(call_id="c1", name="search", output="three hits")
+        await asyncio.Event().wait()
+        yield Done(text="never", checkpoint_id="never")
+
+
+@asyncio_test
+async def test_an_expired_turn_keeps_its_partial_answer_as_failed_and_retry_starts_over() -> None:
+    store = MemoryStore()
+    controller = await over(store)
+    engine = HangingEngine()
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="find them")
+    sid = started.session_id
+    while len(await store.events_after(user.id, sid, started.turn_id, 0)) < 7:
+        await store.wait_for_events(user.id, sid, started.turn_id, 0, 0.05)
+    # Its process went away: nothing renews the lease, and the runner is gone.
+    await controller._work_loop.stop()
+    _, task = controller._dispatcher._tasks.pop(started.turn_id)
+    task.cancel(StopReason.LOST)
+    controller._now = jumped(PAST_THE_LEASE)
+    opened_after = await controller.open_session(user, sid)
+    assert opened_after.active is None
+    assert opened_after.ended_badly is not None
+    assert opened_after.ended_badly.state is TurnState.INTERRUPTED
+    partial = opened_after.messages[-1]
+    assert partial.failed
+    assert partial.turn_id == started.turn_id
+    assert partial.parent_id == started.question.id
+    assert partial.parts == (
+        TextPart("Let me look. "),
+        ToolCallPart("c1", "search", {"q": "robins"}),
+        ToolResultPart("c1", "three hits", False),
+    )
+    # The thread showed it under the id it streamed with.
+    stored = await store.events_after(user.id, sid, started.turn_id, 0)
+    first = event_from_document(stored[0][1]).event
+    assert isinstance(first, MessageStarted)
+    assert first.message_id == partial.id
+    assert event_from_document(stored[-1][1]).event == TurnEnded(TurnState.INTERRUPTED)
+    retried = await controller.retry_answer(user, sid, answer_id=partial.id, model="echo")
+    assert retried.question == started.question
+    await store.wait_for_events(user.id, sid, retried.turn_id, 0, 5.0)
+    assert 'search({"q": "robins"}) -> result, tool output: "three hits"' in engine.prompts[-1]
+    assert "pressed the retry button" in engine.prompts[-1]
+    await controller.close()
+
+
 @asyncio_test
 async def test_a_cancel_before_the_runner_claimed_ends_the_turn_cancelled() -> None:
     controller = await opened()
@@ -336,6 +402,9 @@ async def test_close_interrupts_a_running_turn_and_keeps_an_answer_being_finishe
     assert turn.state is TurnState.INTERRUPTED
     stored = await controller._store.events_after(user.id, sid, started.turn_id, 0)
     assert event_from_document(stored[-1][1]).event == TurnEnded(TurnState.INTERRUPTED)
+    # What it had streamed, nothing here, is kept as an answer that failed.
+    question, interrupted = await controller._store.messages_of(user.id, sid)
+    assert message_from_document(interrupted).failed
 
     slow = SlowFinishStore()
     controller = await over(slow, close_timeout=0.01)

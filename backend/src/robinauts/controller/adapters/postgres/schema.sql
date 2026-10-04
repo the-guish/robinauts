@@ -155,7 +155,9 @@ CREATE INDEX IF NOT EXISTS sessions_deleted_at_idx
 
 -- One message of a session: a node of its tree. A question is stored before
 -- its turn starts, and an answer when its turn ends: a failed turn's is marked
--- failed in its document. A cancelled or interrupted turn leaves none.
+-- failed in its document. An interrupted turn's is marked failed too, stored
+-- by its runner or, when the runner went away, by whoever ended the turn,
+-- from its events. A cancelled turn leaves none.
 --
 -- `document` is the whole message in the controller's versioned format
 -- (docs/architecture/data-model.md): the fields below again, its parts (text,
@@ -250,7 +252,8 @@ CREATE INDEX IF NOT EXISTS messages_session_id_parent_id_idx
 -- `heartbeat_at`, in one statement for every turn it holds. A lease that has
 -- passed is never renewed. Every write of the runner's is refused past it,
 -- and a running turn whose lease has passed was left by a runner that went
--- away: the next reader to find it ends it as `interrupted`, with no event.
+-- away: the next reader to find it ends it as `interrupted`, storing the
+-- answer it had begun and its last event.
 -- `cancel_requested_at`, which a cancel from another process will set and
 -- the holder read back, is the next step. All are set by the application's
 -- clock.
@@ -346,9 +349,10 @@ CREATE INDEX IF NOT EXISTS turns_worker_idx
 --
 -- There is no `kind` column. "A turn ends once" is held by `finish_turn`, which
 -- changes only a running turn whose lease has not passed, in the same
--- transaction that writes its last events; a turn ended by its lease
--- (`end_expired_turn`) writes no event at all, and a watcher reads the record.
--- So no index on the event's kind is needed to hold it.
+-- transaction that writes its last events, and by `end_expired_turn`, which
+-- changes only a running turn whose lease has passed, in the same transaction
+-- that writes its `turn_ended` event. So no index on the event's kind is
+-- needed to hold it.
 CREATE TABLE IF NOT EXISTS turn_events (
     turn_id uuid NOT NULL
         CONSTRAINT turn_events_turn_id_fkey REFERENCES turns (id) ON DELETE CASCADE,

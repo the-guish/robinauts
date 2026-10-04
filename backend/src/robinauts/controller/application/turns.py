@@ -59,12 +59,16 @@ from robinauts.controller.core.documents import (
     event_to_document,
     stored_message,
 )
+from robinauts.controller.core.transcript import with_text
 from robinauts.controller.ports.dispatcher import StopReason
 from robinauts.controller.ports.store import Store, StoredEvent
 from robinauts.controller.ports.work import Fence
 
 RETENTION = timedelta(hours=24)
 """How long a turn's events are kept after they are written, a constant for now."""
+
+PROCESS_STOPPED = "the process stopped"
+"""The error of a turn its process ended as it stopped, for the operator."""
 
 DEADLINE_MARGIN = 10.0
 """Seconds of its deadline a turn must have left for the runner to claim it."""
@@ -126,14 +130,6 @@ class _Writer:
         )
 
 
-def _with_text(parts: list[MessagePart], text: str) -> None:
-    """Text that arrives in a row is one part, until a tool call comes between."""
-    if parts and isinstance(parts[-1], TextPart):
-        parts[-1] = TextPart(parts[-1].text + text)
-    else:
-        parts.append(TextPart(text))
-
-
 async def run_turn(
     store: Store,
     engine: AgentEngine,
@@ -161,6 +157,24 @@ async def run_turn(
     except TurnLostError:
         return
     finishing: asyncio.Future[None] | None = None
+
+    def failed() -> Message:
+        """What it streamed before it stopped, as an answer marked failed: the thread shows
+        it, a reply hangs under it, and Retry starts it over."""
+        return Message(
+            answer_id,
+            session.id,
+            parent_id=question.id,
+            role=Role.ASSISTANT,
+            parts=tuple(parts),
+            created_at=datetime.now(UTC),
+            agent=session.agent,
+            engine=session.engine,
+            model=turn.model,
+            turn_id=turn.id,
+            failed=True,
+        )
+
     try:
         stream = engine.stream(
             session.id,
@@ -174,7 +188,7 @@ async def run_turn(
             async for event in events:
                 if isinstance(event, TextDelta):
                     await writer.append(TextPiece(answer_id, event.text))
-                    _with_text(parts, event.text)
+                    with_text(parts, event.text)
                 elif isinstance(event, ReasoningDelta):
                     await writer.append(ReasoningPiece(answer_id, event.text))
                 elif isinstance(event, ToolCall):
@@ -219,27 +233,13 @@ async def run_turn(
             await asyncio.wait({finishing})
             if not finishing.cancelled():
                 finishing.exception()
+        elif StopReason.CLOSE in exc.args:
+            await _end(writer, TurnState.INTERRUPTED, PROCESS_STOPPED, failed())
         elif StopReason.LOST not in exc.args:
-            state = TurnState.INTERRUPTED if StopReason.CLOSE in exc.args else TurnState.CANCELLED
-            await _end(writer, state, None)
+            await _end(writer, TurnState.CANCELLED, None)
         raise
     except Exception as exc:
-        # What it streamed before it failed is kept, as an answer marked failed: the
-        # thread shows it, and a reply hangs under it.
-        failed = Message(
-            answer_id,
-            session.id,
-            parent_id=question.id,
-            role=Role.ASSISTANT,
-            parts=tuple(parts),
-            created_at=datetime.now(UTC),
-            agent=session.agent,
-            engine=session.engine,
-            model=turn.model,
-            turn_id=turn.id,
-            failed=True,
-        )
-        await _end(writer, TurnState.FAILED, clean_text(str(exc)), failed)
+        await _end(writer, TurnState.FAILED, clean_text(str(exc)), failed())
 
 
 async def _end(
