@@ -453,7 +453,10 @@ def create_app(
         return JSONResponse({"error": type(exc).__name__, "detail": str(exc)}, status_code=status)
 
     async def default_model(agent: str) -> str:
-        return next(a.default_model for a in await controller.list_agents() if a.id == agent)
+        """The agent's default model; "" for an agent this process's configuration does not
+        name, which a turn on it then refuses, as a rolling change of configuration can leave
+        one replica behind the others."""
+        return next((a.default_model for a in await controller.list_agents() if a.id == agent), "")
 
     async def watched(
         user: User, session_id: uuid.UUID, turn_id: uuid.UUID, after: int
@@ -606,7 +609,7 @@ def create_app(
         page = await controller.list_sessions(user, limit=limit, cursor=cursor)
         defaults = {a.id: a.default_model for a in await controller.list_agents()}
         return ConversationListResponse(
-            items=[summary(c, defaults[c.agent]) for c in page.sessions],
+            items=[summary(c, defaults.get(c.agent, "")) for c in page.sessions],
             next_cursor=page.cursor,
         )
 
@@ -651,6 +654,8 @@ def create_app(
     @app.post("/api/turns", include_in_schema=False)
     async def start_session(body: NewChatRequest, user: User = asking) -> StreamingResponse:
         model = body.model_id or await default_model(body.agent_id)
+        if not model:
+            raise UnknownAgentError(body.agent_id)
         started = await controller.start_session(
             user, agent=body.agent_id, model=model, text=body.text
         )

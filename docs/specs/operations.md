@@ -143,4 +143,7 @@ is settled:
   command line: a url holds a password, and a command line is a shell
   history. A database that cannot be opened — no server there, no such
   database, credentials refused — is one line naming what the driver said,
-  and never the url it was given.
+  and never the url it was given. A start with sign-in and no
+  `ROBINAUTS_DATABASE_URL` is refused: a replica that kept its records in
+  memory would answer for the others' conversations with nothing. Only the
+  local development mode keeps them in memory.

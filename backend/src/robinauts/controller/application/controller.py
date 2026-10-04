@@ -38,6 +38,7 @@ from robinauts.controller.contract.domain import (
     TurnLostError,
     TurnStarted,
     TurnState,
+    UnknownAgentError,
     UnknownEngineError,
     UnknownModelError,
     User,
@@ -206,7 +207,9 @@ class RobinautsController(Controller):
         raise NotImplementedError("fork_session")
 
     async def start_session(self, user: User, *, agent: str, model: str, text: str) -> TurnStarted:
-        agent_config = self._config.agents[agent]
+        agent_config = self._config.agents.get(agent)
+        if agent_config is None:
+            raise UnknownAgentError(agent)
         now = self._now()
         session = Session(
             uuid.uuid4(),
@@ -341,6 +344,8 @@ class RobinautsController(Controller):
         new_question: bool,
         retries: uuid.UUID | None = None,
     ) -> Turn:
+        if session.agent not in self._config.agents:
+            raise UnknownAgentError(session.agent)
         model_config = self._config.models.get(model)
         if model_config is None:
             raise UnknownModelError(model)

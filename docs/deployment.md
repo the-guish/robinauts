@@ -627,7 +627,9 @@ as one fixed local user, on the loopback interface only — for developing
 on one's own machine. It refuses any bind address that is not loopback, it
 logs a warning at start-up, and the interface shows a permanent banner.
 It may be given a configuration file, and then only its model tables are
-read; a file that also holds sign-in tables is a start-up refusal.
+read; a file that also holds sign-in tables is a start-up refusal. Without
+`ROBINAUTS_DATABASE_URL` it keeps its records in memory, which no start with
+sign-in does: there, a missing database is a start-up refusal.
 
 ```toml
 [model_providers.anthropic]

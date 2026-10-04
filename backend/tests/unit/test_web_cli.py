@@ -24,6 +24,8 @@ SIGN_IN = {
     "allow": [{"provider": "okta", "everyone": True}],
 }
 
+DATABASE = {"ROBINAUTS_DATABASE_URL": "postgresql://robinauts@db.example.com/robinauts"}
+
 
 def test_version_prints_the_version(capsys: pytest.CaptureFixture[str]) -> None:
     run(["version"])
@@ -31,9 +33,22 @@ def test_version_prints_the_version(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_a_provider_is_served_with_its_sign_in() -> None:
-    _, _, sign_in = serving(SIGN_IN, {}, host="0.0.0.0", dev_no_sign_in=False)
+    _, _, sign_in = serving(SIGN_IN, DATABASE, host="0.0.0.0", dev_no_sign_in=False)
     assert sign_in is not None
     assert list(sign_in.providers) == ["okta"]
+
+
+@pytest.mark.parametrize("environ", [{}, {"ROBINAUTS_DATABASE_URL": ""}])
+def test_sign_in_without_a_database_is_refused_rather_than_kept_in_memory(
+    environ: dict[str, str],
+) -> None:
+    with pytest.raises(ConfigError, match="no database: set ROBINAUTS_DATABASE_URL"):
+        serving(SIGN_IN, environ, host="0.0.0.0", dev_no_sign_in=False)
+
+
+def test_the_mode_may_keep_its_records_in_memory() -> None:
+    _, _, sign_in = serving({}, {}, host="127.0.0.1", dev_no_sign_in=True)
+    assert sign_in is None
 
 
 def test_no_provider_is_refused_without_the_mode() -> None:
