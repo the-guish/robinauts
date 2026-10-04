@@ -334,7 +334,9 @@ Four kinds of variable, and three of them are secrets. Put them in
 
 `ROBINAUTS_WORKER_ID` is optional: the name of this process among the
 deployment's, which every turn it runs records as its holder. Left out it is
-`<hostname>:<pid>`; under Kubernetes, set it to the pod's name.
+`<hostname>:<pid>`; under Kubernetes, set it to the pod's name. Every log
+line names it. `ROBINAUTS_LOG_FORMAT` is `text` (the default), one line each
+for a person, or `json`, one object each, for a collector.
 
 `ROBINAUTS_AUTH_CONFIG` is the old name of `ROBINAUTS_CONFIG`. It is still
 read, with a warning at start-up; if both are set the new one wins and the
@@ -452,14 +454,16 @@ root of the origin. Three things matter:
   gives that name a platform that will not keep a session. The
   `X-Forwarded-*` headers below are good practice and reach the access log;
   they are not what makes the deployment https.
-- **No buffering on the event stream**, and a read timeout longer than a
-  whole turn. A stream sends a heartbeat comment every 15 s and a turn may
-  run for 600 s by default. Every stream also carries
+- **No buffering on the event stream**, and a read timeout above a minute.
+  A stream sends a keep-alive comment after 15 s of silence, so a quiet turn
+  never looks dead; a turn may run for `[work] max_turn_seconds` (20 min by
+  default), and a stream cut before it ends is re-attached by the interface
+  where it left off. Every stream also carries
   `X-Accel-Buffering: no`, which nginx obeys — the setting below is there
   for the proxies that do not.
 - The paths are `/ui/` (the interface), `/api/` (the API and the streams),
-  `/auth/` (the sign-in navigations), `/health` and `/openapi.json`. All
-  of them are under `/`, so one location is enough.
+  `/auth/` (the sign-in navigations), `/health`, `/ready` and
+  `/openapi.json`. All of them are under `/`, so one location is enough.
 
 nginx:
 
@@ -655,8 +659,72 @@ without:
   proxy in front is the rate limit until per-client limits arrive.
 - **Migrations.** As above.
 - **Usage reporting**, token budgets, audit export, retention and purge.
-- **Several backend processes.** One process, one machine.
 - **A container image**, an SBOM and signed releases.
+
+## Several processes: Kubernetes
+
+The same wheel runs as N identical processes on one PostgreSQL: every
+process serves the interface, the API and the streams, and runs the turns
+asked of it. A stream, a Stop or a delete works whichever process the
+request lands on, since they all go through the database; no sticky
+sessions are needed. What a Deployment needs beyond the sections above:
+
+- **The schema is made by a Job**, `robinauts db init`, run once before a
+  rollout, never by every pod (an init container would race the engines'
+  own tables). The server only checks the schema, and refuses one that is
+  not its build's. Until the first release a change of schema recreates
+  the database, which is a stop of every pod, not a rolling update.
+- **Probes**: `livenessProbe` on `/health`, `readinessProbe` on `/ready`,
+  both on the one port, 8000.
+- **`ROBINAUTS_WORKER_ID`** from the pod's name (the downward API's
+  `metadata.name`), so that the log and the database say which pod held a
+  turn. `ROBINAUTS_LOG_FORMAT=json` gives one JSON object per line, for a
+  collector; every line names the pod, and where it is a turn's, the turn
+  and its conversation.
+- **Stopping**: `lifecycle.preStop.exec.command: ["sleep", "5"]`, so that
+  the pod has left the Service's endpoints before it is told to stop, then
+  `SIGTERM` drains it (section 10: no new turn, streams told to re-attach
+  elsewhere, the turns running there given `drain_seconds` to finish).
+  `terminationGracePeriodSeconds: 60` covers the 5 s sleep, the 40 s drain
+  and the last bounded waits.
+- **Crashes**: a pod that dies with turns in it stops renewing their
+  leases; within `lease_seconds` (90 s) any other pod ends them as
+  interrupted when it next reads them, or its sweep does within five
+  minutes, keeping what they did as failed answers. Their conversations
+  stay usable, and Retry starts the task again.
+- **Connections**: `N × (pool_max + 2) + 2` below the database's
+  `max_connections` (section 3). Point the pods at PostgreSQL itself, not
+  at a pooler in transaction mode, which does not carry `LISTEN`.
+- **The load balancer passes `Origin` through** unchanged: a write that
+  carries the session cookie is compared with `public_url` by it. It must
+  not buffer `text/event-stream`, and its idle timeout must be above the
+  15 s keep-alive.
+- **Rolling updates** with `maxUnavailable: 0`, for a change that leaves
+  the schema alone.
+
+```yaml
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate: {maxUnavailable: 0}
+  template:
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: robinauts
+          command: ["robinauts", "start", "--host", "0.0.0.0", "--port", "8000"]
+          ports: [{containerPort: 8000}]
+          env:
+            - name: ROBINAUTS_WORKER_ID
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: ROBINAUTS_LOG_FORMAT
+              value: json
+          envFrom: [{secretRef: {name: robinauts}}]
+          readinessProbe: {httpGet: {path: /ready, port: 8000}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /health, port: 8000}, periodSeconds: 10}
+          lifecycle:
+            preStop: {exec: {command: ["sleep", "5"]}}
+```
 
 ## The local development mode
 

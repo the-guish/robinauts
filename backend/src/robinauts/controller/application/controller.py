@@ -19,6 +19,7 @@ from robinauts.controller.application.engines import build_engines
 from robinauts.controller.application.housekeeping import Housekeeper
 from robinauts.controller.application.turns import RETENTION, run_turn
 from robinauts.controller.application.work import WorkLoop
+from robinauts.controller.contract import context
 from robinauts.controller.contract.domain import (
     ActiveTurn,
     AgentListing,
@@ -487,10 +488,12 @@ class RobinautsController(Controller, Operations):
             raise
 
     async def _run_turn(self, owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID) -> None:
+        context.about(session_id, turn_id)
         session = await self._store.get_session(owner, session_id)
         turn = await self._store.get_turn(owner, session_id, turn_id)
         if turn is None:
             return
+        context.about(session_id, turn_id, turn.attempt)
         agent_config = self._config.agents.get(session.agent)
         model_config = self._config.models.get(turn.model)
         if agent_config is None or model_config is None:

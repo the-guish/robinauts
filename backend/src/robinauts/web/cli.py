@@ -46,12 +46,16 @@ from robinauts.controller.composition import (
     load,
     read_tables,
     storage_from,
+    worker_id_from,
 )
 from robinauts.controller.contract.domain import Config, ConfigError
+from robinauts.web import logs
 from robinauts.web.app import create_app
 from robinauts.web.sign_in import SIGN_IN_KEYS, SignInConfig, is_loopback, parse_sign_in
 
 REPO = Path(__file__).resolve().parents[4]
+
+LOG_FORMAT_VARIABLE = "ROBINAUTS_LOG_FORMAT"
 
 GRACEFUL_SHUTDOWN_SECONDS = 10
 """How long uvicorn waits for open requests on a stop before it closes them. The streams end
@@ -83,8 +87,14 @@ class DrainingServer(uvicorn.Server):
 
 def serve(app: Any, host: str, port: int) -> None:
     """Serve the app until a stop signal, draining it first."""
+    # No log configuration of uvicorn's own: its lines go through the root logger, and so
+    # name the process and lose their query strings like every other.
     config = uvicorn.Config(
-        app, host=host, port=port, timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS
+        app,
+        host=host,
+        port=port,
+        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
+        log_config=None,
     )
     DrainingServer(config, app.state.drain).run()
 
@@ -164,8 +174,15 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     except ConfigError as refused:
         print(refused, file=sys.stderr)
         return 1
-    composed = compose(config, storage=storage_from(os.environ), secret_for=secret_for)
-    logging.basicConfig(level=logging.INFO)
+    worker_id = worker_id_from(os.environ)
+    try:
+        logs.configure(os.environ.get(LOG_FORMAT_VARIABLE) or "text", worker_id)
+    except ValueError as refused:
+        print(refused, file=sys.stderr)
+        return 1
+    composed = compose(
+        config, storage=storage_from(os.environ), secret_for=secret_for, worker_id=worker_id
+    )
     if dev_no_sign_in:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
     app = create_app(
