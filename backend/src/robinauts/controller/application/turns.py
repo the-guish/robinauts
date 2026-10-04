@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import logging
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import aclosing
@@ -59,6 +60,8 @@ from robinauts.controller.core.documents import (
 from robinauts.controller.core.transcript import parts_of
 from robinauts.controller.ports.dispatcher import CLOSE, LOST
 from robinauts.controller.ports.store import Holder, Store, StoredEvent
+
+log = logging.getLogger(__name__)
 
 RETENTION = timedelta(hours=24)
 """How long a turn's events are kept after they are written, a constant for now."""
@@ -281,7 +284,9 @@ async def run_turn(
                         )
                     )
                     await asyncio.shield(finishing)
+                    log.info("turn ended as finished")
     except TurnLostError:
+        log.warning("the turn is no longer this pod's: its runner stops")
         return
     except asyncio.CancelledError as exc:
         if finishing is not None:
@@ -312,4 +317,6 @@ async def _end(
     try:
         await writer.finish(state, error, answer, TurnEnded(state))
     except TurnLostError:
+        log.warning("the turn was lost before it could end as %s", state.value)
         return
+    log.info("turn ended as %s", state.value)

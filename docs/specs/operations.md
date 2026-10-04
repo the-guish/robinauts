@@ -26,8 +26,12 @@ What an internal platform team deploys and controls.
   for requests still open and a few seconds for each run to write its end. A
   second signal stops it at once. A run whose process died is ended the same
   way within about two minutes: its lease is no longer renewed, and the next
-  reader ends it from the events it had published. Several backend processes
-  may run against the one database.
+  reader ends it from the events it had published.
+- **Several identical processes** may run against the one database, behind
+  one load balancer with no sticky sessions: a stream, a Stop and a delete
+  work whichever process a request lands on, and a process that dies costs
+  its runs a restart, not their conversations
+  ([deployment.md](../deployment.md), "Several replicas").
 - **Housekeeping runs in every process.** Every five minutes each one
   sweeps: events past their retention, expired sign-in records, and the
   purges of deleted conversations that never finished. Every heartbeat it

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import dataclasses
+import logging
 import uuid
 from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime, timedelta
@@ -17,6 +18,7 @@ from robinauts.controller.application.engines import build_engines
 from robinauts.controller.application.housekeeping import Housekeeper
 from robinauts.controller.application.turns import run_turn
 from robinauts.controller.application.work import WorkLoop
+from robinauts.controller.contract.context import LOG_CONTEXT, LogContext
 from robinauts.controller.contract.domain import (
     ActiveTurn,
     AgentConfig,
@@ -70,6 +72,8 @@ from robinauts.controller.ports.work import WorkQueue
 
 WAIT_SECONDS = 15.0
 """How long a watcher waits for an event before it reads the store again."""
+
+log = logging.getLogger(__name__)
 
 CLOSE_TIMEOUT = 10.0
 """How long `close` waits for the turns this process runs before it interrupts them."""
@@ -162,8 +166,11 @@ class RobinautsController(Controller, Operations):
 
     async def drain(self) -> None:
         self._draining = True
+        held = len(self._dispatcher.held())
+        log.info("draining: %s turn(s) running here get %ss", held, self._config.work.drain_seconds)
         # The heartbeat goes on: the turns keep their leases while they finish.
         await self._dispatcher.close(self._config.work.drain_seconds)
+        log.info("drained")
 
     async def close(self) -> None:
         # The heartbeat goes on while the turns get their time to end.
@@ -426,6 +433,12 @@ class RobinautsController(Controller, Operations):
         stored = await self._store.events_after(owner, session_id, running.id, 0)
         events = [event_from_document(document).event for _, document in stored]
         answer = left_answer(session, running, events, now)
+        log.warning(
+            "turn %s of conversation %s was left by pod %s: its lease passed, it ends here",
+            running.id,
+            session_id,
+            running.worker_id,
+        )
         return await self._store.end_expired_turn(
             owner,
             session_id,
@@ -486,7 +499,10 @@ class RobinautsController(Controller, Operations):
         self, owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID, attempt: int
     ) -> None:
         """Run that attempt of the turn, from its ids alone: what a worker in another process
-        would call. Every write names this pod and the attempt."""
+        would call. Every write names this pod and the attempt, and every log line written
+        while it runs names the conversation and the turn."""
+        LOG_CONTEXT.set(LogContext(str(session_id), str(turn_id), attempt))
+        log.info("turn started")
         session = await self._store.get_session(owner, session_id)
         turn = await self._store.get_turn(owner, session_id, turn_id)
         if turn is None:

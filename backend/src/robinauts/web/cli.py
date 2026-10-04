@@ -53,6 +53,7 @@ from robinauts.controller.composition import (
     worker_id_from,
 )
 from robinauts.controller.contract.domain import Config, ConfigError
+from robinauts.web import logs
 from robinauts.web.app import create_app
 from robinauts.web.sign_in import SIGN_IN_KEYS, SignInConfig, is_loopback, parse_sign_in
 
@@ -177,13 +178,11 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     except ConfigError as refused:
         print(refused, file=sys.stderr)
         return 1
+    pod = worker_id_from(os.environ)
     composed = compose(
-        config,
-        storage=storage_from(os.environ),
-        secret_for=secret_for,
-        worker_id=worker_id_from(os.environ),
+        config, storage=storage_from(os.environ), secret_for=secret_for, worker_id=pod
     )
-    logging.basicConfig(level=logging.INFO)
+    logs.configure(pod, os.environ.get(logs.FORMAT_VARIABLE, "text"))
     if dev_no_sign_in:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
     app = create_app(

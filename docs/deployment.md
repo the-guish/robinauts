@@ -622,15 +622,19 @@ command could not do what it was asked.
 
 ## 10. Operating
 
-**Logs.** stdout, so `journalctl -u robinauts`. `--log-level debug` on
-`robinauts start` for more; it never prints a conversation's content, a
-client secret or an API key. Turning a **vendor's** logger up in your own
+**Logs.** stdout, so `journalctl -u robinauts`. Every line names the pod
+that wrote it (`ROBINAUTS_WORKER_ID`) and, while a turn runs, its
+conversation, turn and attempt, so one turn can be followed across
+replicas; `ROBINAUTS_LOG_FORMAT=json` writes one JSON object a line.
+`--log-level debug` on `robinauts start` for more; it never prints a
+conversation's content, a client secret or an API key. Turning a **vendor's** logger up in your own
 logging configuration would print request bodies, which is why the
 platform pins those loggers and removes `ANTHROPIC_LOG` at start-up.
 
-**Restart.** `systemctl restart robinauts`. Runs still in flight are ended
-and marked `interrupted`; their authors retry by sending the message
-again. A configuration change — an agent's engine, an agent's default
+**Restart.** `systemctl restart robinauts`. The process drains first
+(`[work] drain_seconds`): runs that finish in that time finish, and the rest
+are marked `interrupted`, keeping what they had done, which Retry starts
+over. A configuration change — an agent's engine, an agent's default
 model (for new conversations only), the allow list, a new agent — takes
 effect at the next restart, because the file is read once at start-up.
 
@@ -662,9 +666,52 @@ without:
   proxy in front is the rate limit until per-client limits arrive.
 - **Migrations.** As above.
 - **Usage reporting**, token budgets, audit export, retention and purge.
-- **Several backend processes.** One process, one machine.
-- **Draining runs on shutdown.** A restart interrupts them.
 - **A container image**, an SBOM and signed releases.
+
+## Several replicas
+
+The same wheel runs as N identical processes against the one database,
+behind one load balancer: every process serves the interface, the API and
+the streams, and runs the turns started through it. A stream, a Stop and a
+delete work whichever process a request lands on, so **no sticky sessions**.
+What follows is written for Kubernetes; the same holds for any orchestrator
+that sends SIGTERM, waits, and probes.
+
+- **One Deployment**, `replicas: N`, one container port (8000), and
+  `robinauts start --host 0.0.0.0 --port 8000`. Rolling updates with
+  `maxUnavailable: 0`.
+- **The pod's name is its worker id.** Set `ROBINAUTS_WORKER_ID` from the
+  downward API (`fieldRef: metadata.name`): a turn records the pod that runs
+  it, every write of its runner names that pod, and the logs say it.
+- **Probes on the same port.** `readinessProbe: GET /ready` (503 while the
+  pod drains, or cannot reach its database, listener or work connection);
+  `livenessProbe: GET /health`, which reads nothing.
+- **Stopping.** `lifecycle.preStop.exec.command: ["sleep", "5"]`, so the pod
+  leaves the Service's endpoints before it is sent SIGTERM; then it drains:
+  its streams end with a hint to attach again, which the interface does, to
+  another pod; it starts no turn; its running turns get `drain_seconds`
+  (30 s) to finish and are then interrupted, keeping what they had done.
+  `terminationGracePeriodSeconds: 60` covers the sleep, the drain, uvicorn's
+  10 s for open requests and the close; raise it with `drain_seconds`.
+- **A pod that dies** leaves its turns with a lease nobody renews. Within
+  `lease_seconds` (90 s) and a heartbeat, another pod ends each of them as
+  interrupted, keeping what it had said, whether or not anyone is looking,
+  and its conversation is usable at once.
+- **`db init` is a Job**, run before a rollout that changes `schema.sql`,
+  never by the pods: a pod refuses a database that is not its build's. Until
+  the first release such a rollout recreates the database.
+- **Connections**: `N × (pool_max + 2) + 2` below `max_connections`
+  (section 4).
+- **The load balancer passes `Origin` through unchanged**, and the
+  interface is reached at exactly `public_url`: a write that carries the
+  session cookie must carry `Origin` equal to it. It must not buffer
+  `text/event-stream`, and its idle timeout must be longer than 15 s, the
+  longest a stream stays silent between keep-alives; a minute is plenty.
+- **Logs**: `ROBINAUTS_LOG_FORMAT=json` for one object a line.
+
+Two processes on one database, a stream on one, a Stop through the other
+and a kill in the middle of a turn are what
+`backend/tests/integration/test_replicas.py` runs.
 
 ## The local development mode
 
