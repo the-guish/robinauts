@@ -60,9 +60,12 @@ class ModelConfig:
     provider: str
     name: str
     timeout_seconds: float = 120.0
+    """One vendor call; the run's own bound is the ``timeout_seconds`` of ``stream``."""
     max_output_tokens: int | None = None
     context_window: int | None = None
     title: str = ""
+    max_retries: int = 2
+    """The vendor client's retries of one call, with its backoff."""
 
 
 class ToolServerAuth(StrEnum):

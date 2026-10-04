@@ -31,7 +31,11 @@ from robinauts.agent_engines.contract.domain import (
     ToolCall,
     ToolResult,
 )
-from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings
+from robinauts.agent_engines.contract.ports import (
+    DEFAULT_MAX_MODEL_CALLS,
+    AgentEngine,
+    EngineSettings,
+)
 from robinauts.agent_engines.langchain_engine.clients import chat_model, force_tracing_off
 from robinauts.agent_engines.langchain_engine.memory import Memory
 from robinauts.agent_engines.langchain_engine.tools import tools_for
@@ -65,6 +69,7 @@ class LangChainEngine(AgentEngine):
         checkpoint_id: str | None,
         timeout_seconds: float,
         resume: bool = False,
+        max_model_calls: int = DEFAULT_MAX_MODEL_CALLS,
     ) -> AsyncGenerator[Event, None]:
         if not await self._memory.exists(session_id):
             raise SessionNotFoundError(str(session_id))
@@ -81,8 +86,10 @@ class LangChainEngine(AgentEngine):
             system_prompt=agent.system_prompt,
             checkpointer=self._memory.saver,
         )
+        # A model call and the tool calls it asks for are a step each: n calls take 2n - 1.
+        limited: RunnableConfig = {**start, "recursion_limit": 2 * max_model_calls - 1}
         stream = graph.astream(
-            {"messages": [HumanMessage(prompt)]}, start, stream_mode=["messages", "updates"]
+            {"messages": [HumanMessage(prompt)]}, limited, stream_mode=["messages", "updates"]
         )
         # The deadline bounds the run, not the caller's handling of what is yielded.
         deadline = asyncio.get_running_loop().time() + timeout_seconds

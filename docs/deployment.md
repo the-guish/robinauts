@@ -189,8 +189,14 @@ api_key_env = "ROBINAUTS_ANTHROPIC_KEY"
 provider = "anthropic"
 name = "claude-sonnet-5"
 title = "Claude Sonnet 5"
-timeout_seconds = 120
+timeout_seconds = 120     # one call to the vendor
+max_retries = 2           # of one call, with backoff, on 429, 529 and lost connections
 max_output_tokens = 8192
+
+# How turns run. Both keys are optional; these are the defaults.
+[work]
+max_turn_seconds = 1200   # a turn's deadline, from its start
+max_model_calls = 100     # the model calls one turn may make
 
 [agents.assistant]
 title = "Assistant"

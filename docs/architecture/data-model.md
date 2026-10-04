@@ -21,7 +21,7 @@ agent to another engine, and what its sessions then do, is stage two.
 | user | `id` | `provider` and `subject` (unique together), `name`, `email`, `created_at` | no |
 | session | `id` | `owner_id`, `agent`, `engine`, `title`, `created_at`, `updated_at`, `deleted_at` | no |
 | message | `id` | `session_id`, `parent_id`, `role`, `created_at` | **yes** |
-| turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `lease_until`, `cancel_requested_at`, `retries` | no |
+| turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `deadline_at`, `lease_until`, `cancel_requested_at`, `retries` | no |
 | turn event | `(turn_id, position)` | `expires_at` | **yes** |
 | user session | `id` | `user_id`, `secret_hash` (unique), `created_at`, `expires_at` | no |
 | pending login | `state_hash` | `provider`, `nonce`, `verifier`, `return_to`, `created_at`, `expires_at` | no |
@@ -99,8 +99,11 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   in `messages` and the outcome is in `turns`, so after a turn ends nothing reads its
   events but a late watcher. Until they expire, they are the only copy of a turn's
   reasoning, and of what a cancelled or interrupted turn streamed.
-- **A turn holds a lease.** `lease_until` is written with the turn, as its start plus
-  its timeout and a margin, and the runner's own deadline is set from it. A running
+- **A turn has a deadline.** `deadline_at` is its start plus `[work]
+  max_turn_seconds`, and bounds the engine's run. It is not the lease, and not the
+  timeout of a vendor call, which is the model's `timeout_seconds`.
+- **A turn holds a lease.** `lease_until` is written with the turn, past its
+  deadline by a margin. A running
   turn whose lease has passed is ended as `interrupted` by the next reader to find it
   (`open_session`, `start_turn`, `watch_turn`, `cancel_turn`, `delete_session`),
   through `end_expired_turn`: one conditional write that only a running turn takes,

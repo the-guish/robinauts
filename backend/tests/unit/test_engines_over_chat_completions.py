@@ -157,3 +157,33 @@ async def test_a_tool_round_is_run_and_its_result_sent_back(
         "content": "5",
         "tool_call_id": CALL_ID,
     }
+
+
+@ENGINES
+@asyncio_test
+async def test_a_run_makes_no_more_model_calls_than_it_is_allowed(
+    plug: Plug, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vendor = Vendor(
+        bodies=[
+            streamed(*calling(CALL_ID, "add", ARGUMENTS), *finished("tool_calls")),
+            streamed(*said(ANSWER), *finished()),
+        ]
+    )
+    engine = plug(vendor, monkeypatch)
+    await engine.setup()
+    session = uuid.uuid4()
+    await engine.create(session)
+    stream = engine.stream(
+        session,
+        AGENT,
+        PROMPT,
+        model="m",
+        checkpoint_id=None,
+        timeout_seconds=10.0,
+        max_model_calls=1,
+    )
+    with pytest.raises(Exception, match="(?i)limit"):
+        async for _ in stream:
+            pass
+    assert len(vendor.sent) == 1

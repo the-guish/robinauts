@@ -5,7 +5,12 @@ from __future__ import annotations
 
 import pytest
 
-from robinauts.controller.contract.domain import ConfigError, ProviderKind, ToolServerAuth
+from robinauts.controller.contract.domain import (
+    ConfigError,
+    ProviderKind,
+    ToolServerAuth,
+    WorkConfig,
+)
 from robinauts.controller.core.config import parse_config
 
 AGENT = {"title": "A", "system_prompt": "", "model": "fast"}
@@ -95,3 +100,38 @@ def test_a_header_on_another_auth_is_refused() -> None:
     message = str(raised.value)
     assert "tool_servers.gh: `header` is for auth \"header\" alone, not auth 'bearer'" in message
     assert "tool_servers.wiki: `header` is for auth \"header\" alone, not auth 'basic'" in message
+
+
+def test_work_has_defaults_and_takes_its_keys() -> None:
+    assert parse_config({}).work == WorkConfig()
+    work = parse_config({"work": {"max_turn_seconds": 3600, "max_model_calls": 20}}).work
+    assert (work.max_turn_seconds, work.max_model_calls) == (3600, 20)
+
+
+def test_work_refuses_unknown_keys_and_numbers_out_of_range() -> None:
+    with pytest.raises(ConfigError) as raised:
+        parse_config(
+            {
+                "work": {"max_turn_seconds": 0, "max_model_calls": 2.5, "colour": 1},
+                "model_providers": {"p": {"kind": "anthropic", "api_key_env": "K"}},
+                "models": {"m": {"provider": "p", "name": "m-1", "max_retries": -1}},
+            }
+        )
+    message = str(raised.value)
+    assert "work: unknown key colour" in message
+    assert "work.max_turn_seconds: 0 is not a number above 0" in message
+    assert "work.max_model_calls: 2.5 is not a whole number above 0" in message
+    assert "models.m: max_retries -1 is not a whole number" in message
+
+
+def test_a_model_retries_its_vendor_calls_twice_unless_told() -> None:
+    config = parse_config(
+        {
+            "model_providers": {"p": {"kind": "anthropic", "api_key_env": "K"}},
+            "models": {
+                "m": {"provider": "p", "name": "m-1"},
+                "n": {"provider": "p", "name": "n-1", "max_retries": 0},
+            },
+        }
+    )
+    assert (config.models["m"].max_retries, config.models["n"].max_retries) == (2, 0)

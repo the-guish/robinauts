@@ -17,9 +17,13 @@ from robinauts.controller.contract.domain import (
     ProviderKind,
     ToolServerAuth,
     ToolServerConfig,
+    WorkConfig,
 )
 
 ENGINES = ("langchain", "pydantic-ai", "echo")
+
+TABLES = ("model_providers", "models", "tool_servers", "agents", "work")
+"""The file's tables that are the controller's."""
 
 # An HTTP field name is a token (RFC 9110, section 5.1): nothing else can go on the wire.
 HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
@@ -42,10 +46,27 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
                 problems.append(f"{table}.{id_}: {error}")
         return built
 
+    def single(table: str, cls: Any) -> Any:
+        """A table of settings, not of ids: every key known, every value a positive number of
+        the field's type."""
+        fields = raw.get(table, {})
+        types = {f.name: f.type for f in dataclasses.fields(cls)}
+        values = {}
+        for key, value in fields.items():
+            if key not in types:
+                problems.append(f"{table}: unknown key {key}")
+            elif not _positive(value, integer=types[key] == "int"):
+                kind = "a whole number" if types[key] == "int" else "a number"
+                problems.append(f"{table}.{key}: {value!r} is not {kind} above 0")
+            else:
+                values[key] = value
+        return cls(**values)
+
     providers = build("model_providers", ProviderConfig, kind=ProviderKind)
     models = build("models", ModelConfig)
     tool_servers = build("tool_servers", ToolServerConfig, auth=ToolServerAuth)
     agents = build("agents", AgentConfig, tools=tuple)
+    work = single("work", WorkConfig)
 
     for server in tool_servers.values():
         if server.auth is ToolServerAuth.HEADER:
@@ -64,6 +85,9 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
                 f"not auth {server.auth.value!r}"
             )
     for model in models.values():
+        retries = model.max_retries
+        if isinstance(retries, bool) or not isinstance(retries, int) or retries < 0:
+            problems.append(f"models.{model.id}: max_retries {retries!r} is not a whole number")
         if model.provider not in providers:
             problems.append(f"models.{model.id}: provider {model.provider!r} is not configured")
     for agent in agents.values():
@@ -76,4 +100,10 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
             problems.append(f"agents.{agent.id}: engine {agent.engine!r} is not one of {ENGINES}")
     if problems:
         raise ConfigError("\n".join(problems))
-    return Config(providers, models, tool_servers, agents)
+    return Config(providers, models, tool_servers, agents, work)
+
+
+def _positive(value: Any, *, integer: bool) -> bool:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return False
+    return value > 0 and (not integer or isinstance(value, int))

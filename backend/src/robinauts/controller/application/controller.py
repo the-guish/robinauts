@@ -61,7 +61,7 @@ from robinauts.controller.ports.dispatcher import TurnDispatcher
 from robinauts.controller.ports.store import Cursor, Store, StoredEvent
 
 LEASE_MARGIN = timedelta(minutes=1)
-"""What a turn's lease allows past its timeout."""
+"""What a turn's lease allows past its deadline."""
 
 WAIT_SECONDS = 15.0
 """How long a watcher waits for an event before it reads the store again."""
@@ -350,7 +350,7 @@ class RobinautsController(Controller):
             raise UnknownModelError(model)
         now = self._now()
         await self._store.end_expired_turn(user.id, session.id, now)
-        timeout = timedelta(seconds=model_config.timeout_seconds)
+        deadline = now + timedelta(seconds=self._config.work.max_turn_seconds)
         turn = Turn(
             uuid.uuid4(),
             session.id,
@@ -358,8 +358,9 @@ class RobinautsController(Controller):
             model=model,
             state=TurnState.RUNNING,
             started_at=now,
-            lease_until=now + timeout + LEASE_MARGIN,
+            lease_until=deadline + LEASE_MARGIN,
             retries=retries,
+            deadline_at=deadline,
         )
         stored = stored_message(question) if new_question else None
         await self._store.start_turn(user.id, turn, stored)
@@ -391,7 +392,6 @@ class RobinautsController(Controller):
             checkpoint_id = by_id[above].checkpoint_id
             above = by_id[above].parent_id
         engine = await self._engine(session.engine)
-        model_timeout = model_config.timeout_seconds
         # The failed exchanges between the last answer that finished and this question,
         # oldest first: the engine remembers none of them, so the prompt carries them.
         earlier: list[tuple[str, Message]] = []
@@ -415,7 +415,7 @@ class RobinautsController(Controller):
             prompt,
             agent_config,
             checkpoint_id,
-            model_timeout,
+            self._config.work.max_model_calls,
         )
 
     async def _fail_unrunnable(self, owner: uuid.UUID, turn: Turn, error: str) -> None:

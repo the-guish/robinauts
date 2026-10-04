@@ -32,7 +32,7 @@ from robinauts.agent_engines.contract.domain import (
     ToolCall,
     ToolResult,
 )
-from robinauts.agent_engines.contract.ports import AgentEngine
+from robinauts.agent_engines.contract.ports import DEFAULT_MAX_MODEL_CALLS, AgentEngine
 
 TOOL = "echo"
 ANSWER = "The tool said: "
@@ -77,6 +77,7 @@ class EchoEngine(AgentEngine):
         checkpoint_id: str | None,
         timeout_seconds: float,
         resume: bool = False,
+        max_model_calls: int = DEFAULT_MAX_MODEL_CALLS,
     ) -> AsyncGenerator[Event, None]:
         checkpoints = self._sessions.get(session_id)
         if checkpoints is None:

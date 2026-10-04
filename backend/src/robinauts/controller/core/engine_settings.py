@@ -63,6 +63,7 @@ def engine_settings(config: domain.Config, secret_for: SecretLookup) -> EngineSe
                 m.max_output_tokens,
                 m.context_window,
                 m.title,
+                m.max_retries,
             )
             for m in config.models.values()
         },

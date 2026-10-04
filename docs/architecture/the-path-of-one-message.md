@@ -134,7 +134,8 @@ returns without running the engine.
 ### 8. The engine loads its memory
 
 `engine.stream(session_id, definition, prompt, model=…, checkpoint_id=…,
-timeout_seconds=120)`. The LangChain engine builds `create_agent(chat_model, tools,
+timeout_seconds=…, max_model_calls=…)`, the time left before the turn's deadline and
+the turn's call limit. The LangChain engine builds `create_agent(chat_model, tools,
 system_prompt, checkpointer)` and starts from that checkpoint.
 
 - **PostgreSQL:** the engine's own tables, through the asyncpg pool it was given
@@ -162,8 +163,9 @@ LangGraph calls the chat model: the Anthropic SDK's client, built by the engine
 the Messages API.
 
 - **Both:** identical, apart from where the key comes from: an environment file on
-  the host, or the Lambda's environment. The engine's deadline of 120 s bounds the
-  whole run.
+  the host, or the Lambda's environment. The turn's deadline (`[work] max_turn_seconds`)
+  bounds the whole run; the model's `timeout_seconds` bounds each call to the vendor,
+  which its client retries `max_retries` times.
 
 ## The way back
 

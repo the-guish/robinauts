@@ -5,7 +5,8 @@
 
 The runner numbers its turn's events from 1 and is their only writer. Its first append is
 its claim on the turn: refused, it has lost the turn to another runner and runs no engine.
-Its deadline comes from the turn's lease, never more than the model's timeout. On
+Its deadline is the turn's ``deadline_at``, which bounds the engine's run; each vendor call
+has the model's own timeout, inside the engine. On
 ``TurnLostError`` from any write it closes the engine's stream and writes nothing more: the
 turn is another runner's, a reader ended it, or its lease has passed.
 """
@@ -63,8 +64,11 @@ RETENTION = timedelta(hours=24)
 """How long a turn's events are kept after they are written, a constant for now."""
 
 DEADLINE_MARGIN = 10.0
-"""Seconds the runner's deadline stays short of the lease, so that a finish lands inside it;
-with less than this left, the runner does not claim the turn."""
+"""With less than this many seconds left before its deadline, the runner does not claim the
+turn."""
+
+DEADLINE_PASSED = "deadline passed"
+"""The error of a turn the engine ended at its deadline."""
 
 
 class _Writer:
@@ -138,10 +142,11 @@ async def run_turn(
     prompt: str,
     agent_config: AgentConfig,
     checkpoint_id: str | None,
-    model_timeout: float,
+    max_model_calls: int,
 ) -> None:
-    remaining = (turn.lease_until - datetime.now(UTC)).total_seconds() - DEADLINE_MARGIN
-    if remaining <= 0:
+    deadline = turn.deadline_at or turn.lease_until
+    remaining = (deadline - datetime.now(UTC)).total_seconds()
+    if remaining <= DEADLINE_MARGIN:
         return
     answer_id = uuid.uuid4()
     definition = AgentDefinition(agent_config.system_prompt, agent_config.tools)
@@ -159,7 +164,8 @@ async def run_turn(
             prompt,
             model=turn.model,
             checkpoint_id=checkpoint_id,
-            timeout_seconds=min(model_timeout, remaining),
+            timeout_seconds=remaining,
+            max_model_calls=max_model_calls,
         )
         async with aclosing(stream) as events:
             async for event in events:
@@ -230,7 +236,8 @@ async def run_turn(
             turn_id=turn.id,
             failed=True,
         )
-        await _end(writer, TurnState.FAILED, clean_text(str(exc)), failed)
+        error = DEADLINE_PASSED if isinstance(exc, TimeoutError) else clean_text(str(exc))
+        await _end(writer, TurnState.FAILED, error, failed)
 
 
 async def _end(

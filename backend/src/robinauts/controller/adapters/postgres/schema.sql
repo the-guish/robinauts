@@ -236,13 +236,16 @@ CREATE INDEX IF NOT EXISTS messages_session_id_parent_id_idx
 -- asked with, but a regeneration answers the same question on another model,
 -- so the turn records its own.
 --
--- `lease_until` is written with the turn, as its start plus its timeout and a
--- margin. Every write of the runner's is refused past it, and a running turn
--- whose lease has passed was left by a runner that went away: the next reader
--- to find it ends it as `interrupted`, with no event. Renewing the lease for a
--- long turn, and `cancel_requested_at`, which a cancel from another process
--- will set and the runner read back, are stage two. Both are set by the
--- application's clock.
+-- `deadline_at` is when the turn must have ended: its start plus
+-- `[work] max_turn_seconds`. It is the runner's bound on the engine, and has
+-- nothing to do with the lease.
+--
+-- `lease_until` is written with the turn, past its deadline. Every write of
+-- the runner's is refused past it, and a running turn whose lease has passed
+-- was left by a runner that went away: the next reader to find it ends it as
+-- `interrupted`, with no event. `cancel_requested_at`, which a cancel from
+-- another process will set and the runner read back, is not written yet.
+-- All three are set by the application's clock.
 CREATE TABLE IF NOT EXISTS turns (
     id uuid
         CONSTRAINT turns_pkey PRIMARY KEY,
@@ -262,6 +265,7 @@ CREATE TABLE IF NOT EXISTS turns (
     -- For the operator. Never sent to the browser, which is told a fixed
     -- sentence (docs/specs/wire.md).
     error text,
+    deadline_at timestamptz,
     lease_until timestamptz NOT NULL,
     cancel_requested_at timestamptz,
     -- The failed answer a retry tries again: the model is told about it

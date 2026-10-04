@@ -32,7 +32,12 @@ def settings_for(kind: ProviderKind, base_url: str | None = None) -> EngineSetti
     """One provider ``p`` of that kind and one model ``m`` on it, with a timeout and a limit."""
     provider = ModelProviderConfig(id="p", kind=kind, api_key_env="", base_url=base_url)
     model = ModelConfig(
-        id="m", provider="p", name="vendor-name", timeout_seconds=7.0, max_output_tokens=321
+        id="m",
+        provider="p",
+        name="vendor-name",
+        timeout_seconds=7.0,
+        max_output_tokens=321,
+        max_retries=3,
     )
     return EngineSettings(
         models=ModelsConfig(providers={"p": provider}, models={"m": model}),

@@ -34,11 +34,12 @@ from robinauts.controller.contract.domain import (
     TurnActiveError,
     TurnEnded,
     TurnState,
+    WorkConfig,
 )
 from robinauts.controller.core.documents import event_from_document
 from robinauts.controller.ports.store import Store
 
-FIVE_MINUTES = timedelta(minutes=5)
+PAST_THE_LEASE = timedelta(hours=1)
 
 
 class ScriptedEngine(EchoEngine):
@@ -161,7 +162,7 @@ async def test_a_runner_refused_mid_stream_writes_nothing_more() -> None:
     sid = started.session_id
     await controller._store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
     task = controller._dispatcher._tasks[started.turn_id]
-    controller._now = jumped(FIVE_MINUTES)
+    controller._now = jumped(PAST_THE_LEASE)
     assert (await controller.open_session(user, sid)).active is None
     engine.gate.set()
     await task
@@ -182,7 +183,7 @@ async def test_a_turn_whose_lease_has_passed_is_interrupted_and_a_new_turn_start
     started = await controller.start_session(user, agent="echo", model="echo", text="one")
     sid = started.session_id
     await controller._store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
-    controller._now = jumped(FIVE_MINUTES)
+    controller._now = jumped(PAST_THE_LEASE)
     watched = [e async for e in controller.watch_turn(user, sid, started.turn_id)]
     assert [type(n.event).__name__ for n in watched] == ["MessageStarted", "TurnEnded"]
     assert watched[-1].event == TurnEnded(TurnState.INTERRUPTED)
@@ -296,3 +297,63 @@ def test_the_config_names_the_engine_an_agent_runs_on() -> None:
     assert CONFIG.agents["echo"] == AgentConfig(
         "echo", title="Echo", system_prompt="", model="echo", engine="echo"
     )
+
+
+class TimedEngine(EchoEngine):
+    """Records what the runner asked of it, and runs past any deadline when told to."""
+
+    def __init__(self, *, hang: bool = False) -> None:
+        super().__init__()
+        self.asked: dict[str, Any] = {}
+        self.hang = hang
+
+    async def stream(self, *args: Any, **kwargs: Any) -> AsyncGenerator[Event, None]:
+        self.asked = kwargs
+        if self.hang:
+            raise TimeoutError()
+        async for event in super().stream(*args, **kwargs):
+            yield event
+
+
+@asyncio_test
+async def test_the_engine_is_bounded_by_the_turns_deadline_not_the_vendor_timeout() -> None:
+    work = WorkConfig(max_turn_seconds=3600, max_model_calls=7)
+    slow_vendor = dataclasses.replace(CONFIG.models["echo"], timeout_seconds=5)
+    config = dataclasses.replace(CONFIG, work=work, models={"echo": slow_vendor})
+    store = MemoryStore()
+    dispatcher = InProcessDispatcher()
+    controller = RobinautsController(
+        config,
+        store=store,
+        storage=StorageConfig(StorageKind.IN_MEMORY),
+        secret_for={}.get,
+        dispatcher=dispatcher,
+    )
+    dispatcher.run = controller.run_turn
+    await controller.open()
+    engine = TimedEngine()
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    await settled(controller, user, started)
+    turn = await store.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert turn.deadline_at is not None
+    assert turn.deadline_at - turn.started_at == timedelta(hours=1)
+    assert turn.lease_until > turn.deadline_at
+    assert 3500 < engine.asked["timeout_seconds"] <= 3600
+    assert engine.asked["max_model_calls"] == 7
+    await controller.close()
+
+
+@asyncio_test
+async def test_a_turn_the_engine_ended_at_its_deadline_fails_saying_so() -> None:
+    controller = await opened()
+    controller._engines["echo"] = TimedEngine(hang=True)
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    await settled(controller, user, started)
+    turn = await controller._store.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert (turn.state, turn.error) == (TurnState.FAILED, "deadline passed")
+    await controller.close()

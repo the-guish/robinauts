@@ -14,7 +14,7 @@ import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator
 from contextlib import aclosing
 
-from pydantic_ai import Agent, AgentRunResult
+from pydantic_ai import Agent, AgentRunResult, UsageLimits
 from pydantic_ai.messages import (
     AgentStreamEvent,
     FunctionToolCallEvent,
@@ -41,7 +41,11 @@ from robinauts.agent_engines.contract.domain import (
     ToolCall,
     ToolResult,
 )
-from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings
+from robinauts.agent_engines.contract.ports import (
+    DEFAULT_MAX_MODEL_CALLS,
+    AgentEngine,
+    EngineSettings,
+)
 from robinauts.agent_engines.pydantic_ai_engine.clients import chat_model, force_tracing_off
 from robinauts.agent_engines.pydantic_ai_engine.memory import Memory
 from robinauts.agent_engines.pydantic_ai_engine.tools import toolsets_for
@@ -75,6 +79,7 @@ class PydanticAIEngine(AgentEngine):
         checkpoint_id: str | None,
         timeout_seconds: float,
         resume: bool = False,
+        max_model_calls: int = DEFAULT_MAX_MODEL_CALLS,
     ) -> AsyncGenerator[Event, None]:
         if not await self._memory.exists(session_id):
             raise SessionNotFoundError(str(session_id))
@@ -91,9 +96,10 @@ class PydanticAIEngine(AgentEngine):
             model_settings=model_settings,
             toolsets=toolsets_for(agent, self._settings),
         )
+        limits = UsageLimits(request_limit=max_model_calls)
         # The deadline bounds the run, not the caller's handling of what is yielded.
         deadline = asyncio.get_running_loop().time() + timeout_seconds
-        async with aclosing(run_of(runner, prompt, history)) as items:
+        async with aclosing(run_of(runner, prompt, history, limits)) as items:
             while True:
                 async with asyncio.timeout_at(deadline):
                     item = await anext(items, None)
@@ -115,9 +121,12 @@ class PydanticAIEngine(AgentEngine):
 
 
 async def run_of(
-    runner: Agent[None, str], prompt: str, history: list[ModelMessage] | None
+    runner: Agent[None, str],
+    prompt: str,
+    history: list[ModelMessage] | None,
+    limits: UsageLimits,
 ) -> AsyncIterator[AgentStreamEvent | AgentRunResult[str]]:
-    async with runner.iter(prompt, message_history=history) as run:
+    async with runner.iter(prompt, message_history=history, usage_limits=limits) as run:
         async for node in run:
             if Agent.is_model_request_node(node) or Agent.is_call_tools_node(node):
                 async with node.stream(run.ctx) as events:

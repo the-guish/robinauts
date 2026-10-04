@@ -34,6 +34,10 @@ def toolset_for(server: ToolServerConfig, settings: EngineSettings) -> MCPToolse
         headers=headers,
         init_timeout=server.timeout_seconds,
         read_timeout=server.timeout_seconds,
+        # An error from a tool goes back to the model as a failed result, which spends no
+        # retry: the default would end the run on a tool's second error. The run's model
+        # calls bound repeated failures.
+        tool_error_behavior="failed",
     )
 
 

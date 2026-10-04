@@ -92,9 +92,13 @@ class ModelConfig:
     provider: str
     name: str
     timeout_seconds: float = 120.0
+    """One vendor call, nothing more: the turn's deadline is ``WorkConfig.max_turn_seconds``."""
     max_output_tokens: int | None = None
     context_window: int | None = None
     title: str = ""
+    max_retries: int = 2
+    """How many times the vendor's client retries a call, with backoff, on a 429, a 529 or a
+    connection error."""
 
 
 class ToolServerAuth(StrEnum):
@@ -127,11 +131,22 @@ class AgentConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkConfig:
+    """``[work]``: how this process runs turns. Every key has a default."""
+
+    max_turn_seconds: float = 1200.0
+    """A turn's deadline, from its start (``turns.deadline_at``), apart from its lease."""
+    max_model_calls: int = 100
+    """How many model calls one turn may make: the engines' own limits come from it."""
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
     providers: Mapping[str, ProviderConfig] = field(default_factory=dict)
     models: Mapping[str, ModelConfig] = field(default_factory=dict)
     tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
     agents: Mapping[str, AgentConfig] = field(default_factory=dict)
+    work: WorkConfig = field(default_factory=WorkConfig)
 
 
 class StorageKind(StrEnum):
@@ -325,6 +340,8 @@ class Turn:
     """For the operator, on a turn that ended badly; never sent to a browser."""
     retries: uuid.UUID | None = None
     """The failed answer this turn tries again, which the model is told about."""
+    deadline_at: datetime | None = None
+    """When the turn must have ended, from ``max_turn_seconds``; the lease is apart from it."""
 
 
 @dataclass(frozen=True, slots=True)

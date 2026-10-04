@@ -32,13 +32,13 @@ from robinauts.controller.adapters.postgres.store import PostgresStore
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.contract.domain import Config, ConfigError, StorageConfig, StorageKind
 from robinauts.controller.contract.ports import Controller, Credentials
-from robinauts.controller.core.config import parse_config
+from robinauts.controller.core.config import TABLES, parse_config
 from robinauts.controller.core.engine_settings import SecretLookup, engine_settings
 from robinauts.controller.ports.store import Store
 
 DATABASE_URL_VARIABLE = "ROBINAUTS_DATABASE_URL"
 
-CONTROLLER_TABLES = frozenset({"model_providers", "models", "tool_servers", "agents"})
+CONTROLLER_TABLES = frozenset(TABLES)
 """The file's tables that are the controller's, the ones `parse_config` reads."""
 
 SCHEMA_READY = "the database is at schema version {version} (schema.sql {digest})"
