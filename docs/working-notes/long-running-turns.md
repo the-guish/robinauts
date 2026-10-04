@@ -78,12 +78,8 @@ the owner decided:
 | D4 | A message sent while a turn runs | **Queued behind it** | One *running* turn per conversation, any number queued in order. The queued question enters the message tree when its turn is claimed, under the branch tip. This is also what callbacks (§7.4) need |
 | D5 | Schema migrations | **At the first release** | Until then every phase that changes the schema (most do) is rolled out by recreating the database. "Survives deploys" therefore holds only for deploys that leave the schema alone, which is fine while nobody depends on the data. Migrations, +3–5 days, come before the release. Resuming a turn across builds also needs a rule: fingerprint each turn's graph configuration, and restart rather than resume when it changed |
 
-No preference was expressed on **tool safety**, so the recommended default
-stands: a tool call in flight at a crash, or one made by a callback turn with
-nobody watching, runs again only if the tool is read-only or idempotent, by MCP
-hints with a per-server operator override. Any other call reports "outcome
-unknown" to the model (§3.4, option 2). MCP's default `idempotentHint=false`
-makes this conservative for most servers.
+| D6 | A tool call in flight when a turn crashed or was released | **Never called again.** On resume the agent always gets "outcome unknown: this call may or may not have happened" as that call's result, and checks for itself if it matters | §3.4 below. No MCP hints, no per-server override: simpler than the hint rule first proposed. The call shows as "outcome unknown" in the transcript. Callback turns are not restricted further: nothing is repeated in them, and they run tools as any turn does |
+| D7 | Retry of a turn that failed for good | **Start over only**, as today | A failed turn's partial progress is not kept for Retry. Its intermediate checkpoints are pruned when it ends. ADR 0005 stands as it is on this point. Automatic resume after a crash or a deploy (§3) is a different thing and is unaffected |
 
 Defaults taken where the reviewers agreed, to revisit if they prove wrong:
 
@@ -286,9 +282,10 @@ else:   # fresh, or a resume with nothing kept: run again from the checkpoint
   thread's latest, partial state after a failed first turn). Fingerprint the
   turn's graph configuration (model, tools, middleware), and restart rather than
   resume when a deploy changed it (D5).
-- Before resuming, settle the in-flight tool calls by the tool-safety rule:
+- Before resuming, settle the in-flight tool calls (D6):
   `aupdate_state(as_node="tools")` writes an "outcome unknown" `ToolMessage` for
-  each call that must not be repeated.
+  **every** call of the interrupted step that has no stored result, so LangGraph
+  re-runs none of them.
 - Turn on the middleware ADR 0005 promised: `SummarizationMiddleware` or
   `ContextEditingMiddleware` (B5) and `ModelRetryMiddleware` (B4). All of them are
   in the locked `langchain` (`langchain/agents/middleware/`). Under resume the
@@ -361,7 +358,11 @@ rules out (§6.1).
 ### 3.4 Side effects: what at-least-once means for tools
 
 Whatever the engine, a tool call that was **in flight** when the process died has
-an unknown outcome. Options, in increasing order of effort:
+an unknown outcome. **Decided (D6): never call it again.** Every in-flight call
+gets a synthesised "outcome unknown" result. That is option 2's mechanism applied
+to every tool, with no hints consulted. Option 3 stays compatible as future work:
+a call running as an MCP task could be re-attached instead of reported unknown.
+The options, in increasing order of effort, are kept for the record:
 
 1. **Accept it, and document it.** Most MCP tools that agents call are reads.
 2. **Use MCP tool annotations.** The protocol's `ToolAnnotations` carry
@@ -971,7 +972,7 @@ included. It is rough, for ordering, not for commitments.
 | **0. Quick wins** | Split `timeout_seconds` (per vendor call) from an agent-level `max_turn_seconds` (B1). Vendor retries or `ModelRetryMiddleware` (B4). Pydantic `UsageLimits` and LangGraph `recursion_limit` from config (B3). Summarisation or context editing in both engines (B5). SSE keep-alive (B10). Coalesce deltas over about 100–250 ms in `_Writer` (B8). `open_session` counts with `max(position)` (B9). Configurable pool size and acquire timeout. Refuse to start without a database URL in sign-in mode (§5.2). Controller budgets (time, calls, cost) with the wrap-up call. Pydantic AI `tool_error_behavior` | 5–7 |
 | **1. Leases and cancel through the store** | Heartbeat tick per process, short lease, `deadline_at`, `worker_id` and `attempt` fencing (B2). Cancel and delete via `cancel_requested_at` + `NOTIFY` (B11). Frontend: 409 on cancel no longer shown as "did not arrive". Heartbeat and claim on their own connection | 4–6 |
 | **2. Queue and admission** | `queued` state, claim loop with `SKIP LOCKED`, wake-ups, admission signals and limits, per-user fairness. Web answers the POST at once with a `queued` event (B14). Frontend "…waiting…", patient reconnect and watchdog. Drain on `SIGTERM`, with a readiness probe. `sessions.mode` live and background with a per-user live cap of about 10 and a background share (D2, D3). Queue-behind with questions entering the tree at claim (D4). Exact caps through one claimer at a time | 10–14 |
-| **3. Resume (LangGraph) and release on shutdown** | `durability="sync"`, turn-tagged checkpoints, the resume path, `StepCommitted` and `TurnResumed` events, transcript rewind, `max_crashes`, release leases on drain. Saver index, transactional writes, pruning (B13). `StepCommitted` from `aput`, pinned start, config fingerprint, hint-gated in-flight calls, `crashes` apart from `attempt`, re-claim jitter, the "resumed" marker. Kill tests | 8–12 |
+| **3. Resume (LangGraph) and release on shutdown** | `durability="sync"`, turn-tagged checkpoints, the resume path, `StepCommitted` and `TurnResumed` events, transcript rewind, `max_crashes`, release leases on drain. Saver index, transactional writes, pruning (B13). `StepCommitted` from `aput`, pinned start, config fingerprint, "outcome unknown" for every in-flight call (D6), `crashes` apart from `attempt`, re-claim jitter, the "resumed" marker. Kill tests | 8–12 |
 | **4. Resume (Pydantic AI)** | P1 snapshots (with the pending request), native cancel capture and P2, shipped together. A `supports_resume` flag in the contract suite (§3.3) | 6–8 |
 | **5. Visibility** | `progress` and partial snapshot (B9), history badges, notifications, structured logs, `/metrics` on a separate port or behind a token, `robinauts turns list\|cancel` CLI. A metadata-only admin view later, with roles | 6–10 |
 | **6. Role split** | `--role web\|worker\|all`, worker-only `/health` and `/metrics`, deployment docs with two Deployments and queue-depth autoscaling. Reconcile the deployment docs for several processes (§5.2) | 2–4 |
@@ -1002,10 +1003,7 @@ Phases 0 and 1 are worth doing whatever is decided about the rest.
    the 1000/80% example. The event loop, not RAM, may be the first limit.
 6. **Callback turn or suspended turn** for external jobs (§7.4–7.5)? Defaulted to
    the callback turn. Is a suspended turn needed for any agent?
-7. **Retry of a long failed turn:** resume its partial work, or restart it? The
-   engine review suggests offering both, with resume as the default. That needs
-   an ADR 0005 amendment and checkpoint retention for failed turns.
-8. **The AWS layout** (`the-path-of-one-message.md`). Everything here is behind the
+7. **The AWS layout** (`the-path-of-one-message.md`). Everything here is behind the
    existing ports (store, dispatcher, engine storage), but Lambda's 15-minute cap
    rules it out for long turns unless a turn is cut into Lambda-sized steps that
    each resume from a checkpoint. Out of scope with D1.
