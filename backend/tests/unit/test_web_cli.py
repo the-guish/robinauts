@@ -83,7 +83,7 @@ def test_a_refused_start_exits_before_it_binds(
     path = tmp_path / "robinauts.toml"
     path.write_text('public_url = "https://robinauts.example.com"\n')
     monkeypatch.setenv("ROBINAUTS_CONFIG", str(path))
-    monkeypatch.setattr(uvicorn, "run", pytest.fail)
+    monkeypatch.setattr(uvicorn.Server, "run", pytest.fail)
     with pytest.raises(SystemExit) as exited:
         run(["start", "--dev-no-sign-in"])
     assert exited.value.code == 1

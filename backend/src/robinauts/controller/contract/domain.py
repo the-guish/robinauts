@@ -68,6 +68,14 @@ class NoActiveTurnError(ControllerError):
     pass
 
 
+class DrainingError(ControllerError):
+    """A turn asked of a process that is stopping: another one takes it."""
+
+
+class BusyError(ControllerError):
+    """The database had no connection free in time: try again."""
+
+
 # --- configuration ------------------------------------------------------------
 
 
@@ -146,6 +154,9 @@ class WorkConfig:
     leaves its turns for this long at most."""
     heartbeat_seconds: float = 30.0
     """How often this process renews the leases of the turns it runs, all in one write."""
+    drain_seconds: float = 30.0
+    """How long a stopping process gives the turns it runs to finish, before it ends the rest
+    as interrupted."""
     max_model_calls: int = 100
     """Calls to the model in one turn, past which the engine ends it."""
     tool_error_behavior: ToolErrorBehavior = ToolErrorBehavior.FAILED
@@ -176,6 +187,17 @@ class StorageConfig:
     kind: StorageKind
     url: str | None = None
     path: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Readiness:
+    """Whether this process should be sent requests, and if not, why not."""
+
+    problems: tuple[str, ...] = ()
+
+    @property
+    def ready(self) -> bool:
+        return not self.problems
 
 
 # --- users --------------------------------------------------------------------

@@ -102,6 +102,7 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
         max_turn_seconds=seconds,
         lease_seconds=seconds,
         heartbeat_seconds=seconds,
+        drain_seconds=seconds,
         max_model_calls=count,
         tool_error_behavior=ToolErrorBehavior,
     )

@@ -61,8 +61,14 @@ class Store(ABC):
 
     @abstractmethod
     async def close(self) -> None:
-        """Release what ``open`` took."""
+        """Release what ``open`` took, within a bounded time whatever the database does."""
         raise NotImplementedError
+
+    @abstractmethod
+    async def readiness(self) -> tuple[str, ...]:
+        """What keeps the store from serving now, each said in a few words; nothing when it
+        can: the database answering within a second, and the connections apart from the pool
+        up."""
 
     # --- users --------------------------------------------------------------
 

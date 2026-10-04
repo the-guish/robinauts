@@ -156,6 +156,13 @@ documented here, which is what "documented with the API" means for them.
   view, or when the person presses Reconnect. It never gives up while the
   turn lives: only a refusal (4xx) ends the watch. A connection that has
   said nothing for 45 s, three keep-alives, is taken for dropped.
+- A process that is stopping ends each stream it serves with an SSE
+  `retry: 1000` and `CUSTOM robinauts.reconnect {after_ms: 1000}`, which
+  carry no `id:`. The turn goes on; the client attaches again, through
+  another process, after the last `id:` it saw. A client that does not know
+  the event reads it as nothing and attaches again all the same, its stream
+  having ended without the turn's end. A new turn asked of such a process is
+  refused with 503 (`DrainingError`), before any stream.
 - Any process of the deployment serves any turn's stream, and opening a
   conversation reads where its running turn's events end without reading
   the events.

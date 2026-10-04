@@ -16,8 +16,10 @@ signed in is web's own concern, the user session.
   run their setup, and start the heartbeat that renews the leases of the turns this process
   runs. A turn a process that went away left running is ended by its lease, by the next reader
   to find it.
-- `close`: wait for the turns this process runs, bounded, interrupt the rest, and release the
-  storage.
+- `drain` (operations): take no new turn and answer not ready; `readiness` says whether to send
+  this process requests.
+- `close`: wait for the turns this process runs, `[work] drain_seconds` at most, interrupt the
+  rest, wait a bounded time for them to write their end, and release the storage, bounded too.
 
 ## Users
 

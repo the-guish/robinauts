@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import dataclasses
+import logging
 import uuid
 from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime, timedelta
@@ -20,6 +21,7 @@ from robinauts.controller.contract.domain import (
     ActiveTurn,
     AgentListing,
     Config,
+    DrainingError,
     Identity,
     InvalidValueError,
     Message,
@@ -28,6 +30,7 @@ from robinauts.controller.contract.domain import (
     NoActiveTurnError,
     NumberedEvent,
     OpenedSession,
+    Readiness,
     Role,
     Session,
     SessionPage,
@@ -45,7 +48,7 @@ from robinauts.controller.contract.domain import (
     UnknownModelError,
     User,
 )
-from robinauts.controller.contract.ports import Controller
+from robinauts.controller.contract.ports import Controller, Operations
 from robinauts.controller.core.documents import (
     event_from_document,
     event_to_document,
@@ -67,6 +70,9 @@ from robinauts.controller.ports.work import Fence, WorkQueue
 WAIT_SECONDS = 15.0
 """How long a watcher waits for an event before it reads the store again."""
 
+LEASE_GRACE = 0.1
+"""How long past a turn's lease its watcher looks again."""
+
 LEASE_EXPIRED = "lease expired"
 """The error of a turn ended because its runner went away, for the operator."""
 
@@ -84,8 +90,9 @@ DELETE_WAIT = 10.0
 NO_POSITION = 2**31 - 1
 """A position past any event: waiting after it wakes on the turn's end alone."""
 
-CLOSE_TIMEOUT = 10.0
-"""How long `close` waits for the turns this process runs before it interrupts them."""
+FINAL_WAIT = 10.0
+"""How long `close` waits for the turns it interrupted to write their end, before it leaves
+them to their leases: a database that does not answer must not hold the process."""
 
 ENDED_BADLY = frozenset({TurnState.FAILED, TurnState.CANCELLED, TurnState.INTERRUPTED})
 """How a turn may end that opening its session says so."""
@@ -95,7 +102,10 @@ def _text(message: Message) -> str:
     return "".join(p.text for p in message.parts if isinstance(p, TextPart))
 
 
-class RobinautsController(Controller):
+log = logging.getLogger(__name__)
+
+
+class RobinautsController(Controller, Operations):
     def __init__(
         self,
         config: Config,
@@ -106,7 +116,8 @@ class RobinautsController(Controller):
         dispatcher: TurnDispatcher,
         work: WorkQueue,
         worker: str,
-        close_timeout: float = CLOSE_TIMEOUT,
+        close_timeout: float | None = None,
+        final_wait: float = FINAL_WAIT,
         cancel_wait: float = CANCEL_WAIT,
         delete_wait: float = DELETE_WAIT,
         now: Callable[[], datetime] | None = None,
@@ -117,7 +128,9 @@ class RobinautsController(Controller):
         self._secret_for = secret_for
         self._dispatcher = dispatcher
         self._worker = worker
-        self._close_timeout = close_timeout
+        self._close_timeout = config.work.drain_seconds if close_timeout is None else close_timeout
+        self._final_wait = final_wait
+        self._draining = False
         self._cancel_wait = cancel_wait
         self._delete_wait = delete_wait
         self._now = now or (lambda: datetime.now(UTC))
@@ -151,9 +164,22 @@ class RobinautsController(Controller):
         )
         self._work_loop.start()
 
+    async def readiness(self) -> Readiness:
+        problems = await self._store.readiness()
+        if self._draining:
+            problems = ("this process is stopping", *problems)
+        return Readiness(tuple(problems))
+
+    async def drain(self) -> None:
+        if not self._draining:
+            self._draining = True
+            log.info("draining: no new turn is taken here")
+
     async def close(self) -> None:
-        # The heartbeat goes on while the turns this process runs are given their time.
-        await self._dispatcher.close(self._close_timeout)
+        self._draining = True
+        # The heartbeat goes on, and cancels still arrive, while the turns this process runs
+        # are given their time; those still running then end as interrupted.
+        await self._dispatcher.close(self._close_timeout, self._final_wait)
         await self._work_loop.stop()
         self._engines = {}
         await self._store.close()
@@ -469,6 +495,8 @@ class RobinautsController(Controller):
         new_question: bool,
         retries: uuid.UUID | None = None,
     ) -> Turn:
+        if self._draining:
+            raise DrainingError("this process is stopping; another one takes the turn")
         if session.agent not in self._config.agents:
             raise UnknownAgentError(session.agent)
         if model not in self._config.models:
@@ -563,11 +591,17 @@ class RobinautsController(Controller):
                 after = numbered.position
                 if isinstance(numbered.event, TurnEnded):
                     return
-            await self._store.wait_for_events(user.id, session_id, turn.id, after, WAIT_SECONDS)
+            # No longer than the lease: a turn whose runner went away is ended, and its
+            # watcher told, as soon as it may be, and not at the next timer.
+            until_lease = (turn.lease_until - self._now()).total_seconds() + LEASE_GRACE
+            wait = min(WAIT_SECONDS, max(LEASE_GRACE, until_lease))
+            await self._store.wait_for_events(user.id, session_id, turn.id, after, wait)
             if await self._store.events_after(user.id, session_id, turn.id, after):
                 continue
             await self._end_expired(user.id, session_id)
             current = await self._store.get_turn(user.id, session_id, turn.id)
+            if current is not None:
+                turn = current
             if current is None or current.state is not TurnState.RUNNING:
                 if await self._store.events_after(user.id, session_id, turn.id, after):
                     continue

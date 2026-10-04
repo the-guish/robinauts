@@ -243,3 +243,22 @@ async def test_the_heartbeat_has_a_connection_of_its_own_and_opens_it_again() ->
             assert renewed.lost(held) == []
         finally:
             await store.close()
+
+
+@asyncio_test
+async def test_a_store_is_ready_when_its_database_and_connections_answer() -> None:
+    async with temporary_schema() as schema:
+        store = PostgresStore(schema.pool, dsn=schema.dsn)
+        try:
+            assert await store.readiness() == ()
+        finally:
+            await store.close()
+        # A listening and a work connection that cannot be opened say so.
+        nowhere = PostgresStore(schema.pool, dsn="postgresql://nobody@127.0.0.1:1/none")
+        try:
+            assert await nowhere.readiness() == (
+                "the listening connection is down",
+                "the work connection is down",
+            )
+        finally:
+            await nowhere.close()

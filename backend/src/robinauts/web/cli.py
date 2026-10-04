@@ -26,9 +26,10 @@ import importlib.metadata
 import logging
 import os
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from importlib import resources
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 import uvicorn
@@ -50,9 +51,32 @@ from robinauts.web.sign_in import SIGN_IN_KEYS, SignInConfig, is_loopback, parse
 
 REPO = Path(__file__).resolve().parents[4]
 
-GRACEFUL_SHUTDOWN_SECONDS = 20
-"""How long uvicorn waits for open streams on a stop before it closes them, so that the
-controller's `close`, which runs after, still runs inside a service's stop timeout."""
+GRACEFUL_SHUTDOWN_SECONDS = 5
+"""How long uvicorn waits for open connections on a stop before it closes them. Short: the
+drain has already ended every stream with a reconnect hint, so what is left is requests
+that end on their own, and the controller's `close`, which runs after and gives the running
+turns `[work] drain_seconds`, has to fit inside the deployment's grace period."""
+
+
+class DrainingServer(uvicorn.Server):
+    """uvicorn, beginning the drain on the first ``SIGTERM`` or ``SIGINT`` before it stops
+    taking connections: ``/ready`` answers 503, new turns are refused, and every stream ends
+    with a reconnect hint. A second signal is uvicorn's own: it stops at once."""
+
+    def __init__(self, config: uvicorn.Config, drain: Callable[[], None]) -> None:
+        super().__init__(config)
+        self._drain = drain
+        self._drained = False
+
+    def handle_exit(self, sig: int, frame: FrameType | None) -> None:
+        if not self._drained:
+            self._drained = True
+            try:
+                asyncio.get_running_loop().call_soon_threadsafe(self._drain)
+            except RuntimeError:
+                pass  # no loop is running: nothing is being served, so nothing to drain
+        super().handle_exit(sig, frame)
+
 
 NO_DATABASE = (
     f"no database: set {DATABASE_URL_VARIABLE} to the PostgreSQL this deployment uses;"
@@ -135,18 +159,18 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     logging.basicConfig(level=logging.INFO)
     if dev_no_sign_in:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
-    uvicorn.run(
-        create_app(
-            composed.controller,
-            credentials=composed.credentials,
-            sign_in=sign_in,
-            secret_for=secret_for,
-            ui_dir=ui_dir,
-        ),
-        host=host,
-        port=port,
-        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
+    app = create_app(
+        composed.controller,
+        credentials=composed.credentials,
+        sign_in=sign_in,
+        secret_for=secret_for,
+        ui_dir=ui_dir,
+        operations=composed.operations,
     )
+    config = uvicorn.Config(
+        app, host=host, port=port, timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS
+    )
+    DrainingServer(config, app.state.drain).run()
     return 0
 
 

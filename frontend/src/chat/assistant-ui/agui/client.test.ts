@@ -685,3 +685,31 @@ test("a watcher that goes away while it waits to try again makes no more tries",
   await expect(all(attached)).rejects.toBeDefined();
   expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+test("a stream a stopping server ends with a reconnect hint is attached to again", async () => {
+  const fetch = answering([
+    () =>
+      streamed(
+        [
+          event("TEXT_MESSAGE_CONTENT", { messageId: "m", delta: "half" }, 4),
+          "retry: 1000\n\n",
+          event("CUSTOM", {
+            name: "robinauts.reconnect",
+            value: { after_ms: 1000 },
+          }),
+        ],
+        { headers: streamHeaders(RUN, CONVERSATION) },
+      ),
+    () =>
+      streamed([finished(9)], { headers: streamHeaders(RUN, CONVERSATION) }),
+  ]);
+  const seen = await all(
+    await startNewConversation("helper", null, "x", at_once),
+  );
+  expect(seen.map((each) => each.event.type)).toEqual([
+    "TEXT_MESSAGE_CONTENT",
+    "RUN_FINISHED",
+  ]);
+  const again = fetch.mock.calls[1]?.[1]?.headers as Record<string, string>;
+  expect(again["last-event-id"]).toBe("4");
+});

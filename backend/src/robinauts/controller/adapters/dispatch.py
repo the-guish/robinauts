@@ -6,10 +6,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 
 from robinauts.controller.ports.dispatcher import CLOSE, StopReason, TurnDispatcher, TurnRunner
 from robinauts.controller.ports.work import Held
+
+log = logging.getLogger(__name__)
 
 
 class InProcessDispatcher(TurnDispatcher):
@@ -51,7 +54,7 @@ class InProcessDispatcher(TurnDispatcher):
         await asyncio.wait({task})
         return True
 
-    async def close(self, timeout: float) -> None:
+    async def close(self, timeout: float, final: float) -> None:
         tasks = {task for _, task in self._tasks.values()}
         if not tasks:
             return
@@ -60,4 +63,8 @@ class InProcessDispatcher(TurnDispatcher):
             self._stopped.add(task)
             task.cancel(CLOSE)
         if pending:
-            await asyncio.wait(pending)
+            _, left = await asyncio.wait(pending, timeout=final)
+            if left:
+                log.warning(
+                    "%d turn(s) did not end in time and are left to their leases", len(left)
+                )

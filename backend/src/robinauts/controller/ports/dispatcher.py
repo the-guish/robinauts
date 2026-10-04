@@ -50,6 +50,7 @@ class TurnDispatcher(ABC):
         false when the turn is not this process's."""
 
     @abstractmethod
-    async def close(self, timeout: float) -> None:
+    async def close(self, timeout: float, final: float) -> None:
         """Wait up to ``timeout`` seconds for the turns this process runs, then stop the rest
-        naming ``CLOSE``, and wait for those too."""
+        naming ``CLOSE``, and wait up to ``final`` seconds more for those: what has not
+        ended by then is left, its lease to run out."""

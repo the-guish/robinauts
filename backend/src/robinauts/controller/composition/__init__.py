@@ -33,7 +33,7 @@ from robinauts.controller.adapters.postgres.schema import (
 from robinauts.controller.adapters.postgres.store import PostgresStore
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.contract.domain import Config, ConfigError, StorageConfig, StorageKind
-from robinauts.controller.contract.ports import Controller, Credentials
+from robinauts.controller.contract.ports import Controller, Credentials, Operations
 from robinauts.controller.core.config import parse_config
 from robinauts.controller.core.engine_settings import SecretLookup, engine_settings
 
@@ -69,6 +69,7 @@ class Composed:
 
     controller: Controller
     credentials: Credentials
+    operations: Operations
 
 
 def compose(
@@ -102,7 +103,7 @@ def compose(
     )
     # Handed over here, so that no adapter imports the application.
     dispatcher.run = controller.run_turn
-    return Composed(controller, credentials)
+    return Composed(controller, credentials, controller)
 
 
 def build(config: Config, *, storage: StorageConfig, secret_for: SecretLookup) -> Controller:

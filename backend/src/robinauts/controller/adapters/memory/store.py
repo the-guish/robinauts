@@ -48,6 +48,10 @@ class MemoryStore(Store, WorkQueue):
     async def close(self) -> None:
         """Nothing to release."""
 
+    async def readiness(self) -> tuple[str, ...]:
+        """Always ready: everything is in this process."""
+        return ()
+
     # --- helpers ------------------------------------------------------------
 
     def _visible(self, owner: uuid.UUID, session: uuid.UUID) -> Session:

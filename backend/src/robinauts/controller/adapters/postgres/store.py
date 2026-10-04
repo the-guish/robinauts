@@ -55,6 +55,12 @@ CHANNEL = "robinauts_turns"
 CANCEL_CHANNEL = "robinauts_cancel"
 """Where a cancel is asked for: ``<turn>``, which its holder, wherever it runs, stops."""
 
+READY_SECONDS = 1.0
+"""How long the database has to answer a readiness check."""
+
+CLOSE_SECONDS = 5.0
+"""How long closing a connection, or the pool, may take before it is terminated."""
+
 LISTENER_CHECK = 5.0
 """How often a reader of cancel signals makes sure the listening connection is up."""
 
@@ -166,15 +172,45 @@ class PostgresStore(Store, WorkQueue):
         return self._pool
 
     async def close(self) -> None:
-        if self._work is not None:
-            work, self._work = self._work, None
-            await work.close()
-        if self._listener is not None:
-            listener, self._listener = self._listener, None
-            await listener.close()
+        # Bounded: a database that does not answer must not hold a stopping process until
+        # it is killed. What does not close in time is terminated.
+        for name in ("_work", "_listener"):
+            connection = getattr(self, name)
+            setattr(self, name, None)
+            if connection is not None:
+                try:
+                    await asyncio.wait_for(connection.close(), CLOSE_SECONDS)
+                except (TimeoutError, OSError, asyncpg.InterfaceError):
+                    connection.terminate()
         if self._owns_pool and self._pool is not None:
             pool, self._pool = self._pool, None  # type: ignore[assignment]
-            await pool.close()
+            try:
+                await asyncio.wait_for(pool.close(), CLOSE_SECONDS)
+            except TimeoutError:
+                log.warning(
+                    "the pool did not close in %ss; its connections are dropped", CLOSE_SECONDS
+                )
+                pool.terminate()
+
+    async def readiness(self) -> tuple[str, ...]:
+        problems = []
+        try:
+            async with self._pool.acquire(timeout=READY_SECONDS) as connection:
+                await connection.fetchval("SELECT 1", timeout=READY_SECONDS)
+        except (TimeoutError, OSError, asyncpg.PostgresError, asyncpg.InterfaceError):
+            problems.append("the database does not answer")
+        try:
+            await asyncio.wait_for(self._listen(), READY_SECONDS)
+        except (TimeoutError, OSError, asyncpg.PostgresError, asyncpg.InterfaceError):
+            problems.append("the listening connection is down")
+        try:
+            await asyncio.wait_for(
+                self._on_work_connection(lambda connection: connection.fetchval("SELECT 1")),
+                READY_SECONDS,
+            )
+        except (TimeoutError, OSError, asyncpg.PostgresError, asyncpg.InterfaceError):
+            problems.append("the work connection is down")
+        return tuple(problems)
 
     # --- users --------------------------------------------------------------
 

@@ -200,6 +200,7 @@ max_output_tokens = 8192
 # tool_error_behavior = "failed" # a tool's error goes back to the model
 # lease_seconds = 90             # a turn of a process that went away, at most
 # heartbeat_seconds = 30         # renews them all, at most half the lease
+# drain_seconds = 30             # what a stop gives the turns running here
 
 [agents.assistant]
 title = "Assistant"
@@ -360,9 +361,10 @@ RestartSec=5
 # for ever and a log nobody can read.
 RestartPreventExitStatus=2
 KillSignal=SIGTERM
-# A stop lets open connections finish for 10 s, then ends the runs in flight
-# and gives back what the process holds, bounded at about 35 s more -- some
-# 45 s in all. Anything under a minute here would SIGKILL the tail of that.
+# A stop drains: streams are told to reconnect and open requests get 5 s,
+# then the runs in flight get [work] drain_seconds (30 s) to finish, the rest
+# end as interrupted within 10 s, and the connections close within 5 s more
+# -- some 50 s at most. Anything under a minute here would SIGKILL the tail.
 TimeoutStopSec=90
 NoNewPrivileges=yes
 PrivateTmp=yes
@@ -575,6 +577,9 @@ command could not do what it was asked.
 
 1. `curl -fsS https://robinauts.example.com/health` → `{"status":"ok"}`.
    It reads no database: it answers "this process is up and serving".
+   `/ready` → `{"status":"ready"}` also needs the database to answer; it is
+   503, naming what is wrong, while the process stops or the database is
+   away.
 2. Open `https://robinauts.example.com/` in a browser. It redirects to
    `/ui/` and shows the sign-in page with one button per provider.
 3. Sign in as somebody the allow list has, through Google. Then as
@@ -600,9 +605,10 @@ client secret or an API key. Turning a **vendor's** logger up in your own
 logging configuration would print request bodies, which is why the
 platform pins those loggers and removes `ANTHROPIC_LOG` at start-up.
 
-**Restart.** `systemctl restart robinauts`. Runs still in flight are ended
-and marked `interrupted`; their authors retry by sending the message
-again. A configuration change — an agent's engine, an agent's default
+**Restart.** `systemctl restart robinauts`. Runs in flight get
+`[work] drain_seconds` to finish; those still running are then ended and
+marked `interrupted`, with what they had written kept as a failed answer,
+and their authors press Retry. A configuration change — an agent's engine, an agent's default
 model (for new conversations only), the allow list, a new agent — takes
 effect at the next restart, because the file is read once at start-up.
 
@@ -635,7 +641,6 @@ without:
 - **Migrations.** As above.
 - **Usage reporting**, token budgets, audit export, retention and purge.
 - **Several backend processes.** One process, one machine.
-- **Draining runs on shutdown.** A restart interrupts them.
 - **A container image**, an SBOM and signed releases.
 
 ## The local development mode

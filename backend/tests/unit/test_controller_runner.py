@@ -23,6 +23,7 @@ from robinauts.controller.adapters.memory.store import MemoryStore
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.contract.domain import (
     AgentConfig,
+    DrainingError,
     Identity,
     MessageStarted,
     NumberedEvent,
@@ -92,6 +93,7 @@ async def over(store: Store, **options: Any) -> RobinautsController:
         dispatcher=dispatcher,
         work=store,
         worker=options.pop("worker", "pod-a"),
+        close_timeout=options.pop("close_timeout", 0.1),
         **options,
     )
     dispatcher.run = controller.run_turn
@@ -603,3 +605,39 @@ def test_the_config_names_the_engine_an_agent_runs_on() -> None:
     assert CONFIG.agents["echo"] == AgentConfig(
         "echo", title="Echo", system_prompt="", model="echo", engine="echo"
     )
+
+
+class StuckFinishStore(MemoryStore):
+    """A database that stopped answering: no turn's end ever lands."""
+
+    async def finish_turn(self, *args: Any, **kwargs: Any) -> None:
+        await asyncio.Event().wait()
+
+
+@asyncio_test
+async def test_close_waits_a_bounded_time_for_turns_that_cannot_write_their_end() -> None:
+    stuck = StuckFinishStore()
+    controller = await over(stuck, close_timeout=0.05, final_wait=0.2)
+    controller._engines["echo"] = GatedEngine()
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    await stuck.wait_for_events(user.id, started.session_id, started.turn_id, 0, 5.0)
+    await asyncio.wait_for(controller.close(), 2.0)
+    turn = await stuck.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    # Left to its lease, which whoever finds it next ends.
+    assert turn.state is TurnState.RUNNING
+
+
+@asyncio_test
+async def test_a_draining_controller_is_not_ready_and_takes_no_new_turn() -> None:
+    controller = await over(MemoryStore())
+    user = await controller.ensure_user(Identity("local", "me"))
+    assert (await controller.readiness()).ready
+    await controller.drain()
+    readiness = await controller.readiness()
+    assert not readiness.ready
+    assert readiness.problems == ("this process is stopping",)
+    with pytest.raises(DrainingError):
+        await controller.start_session(user, agent="echo", model="echo", text="one")
+    await controller.close()
