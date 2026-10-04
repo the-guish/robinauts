@@ -18,6 +18,7 @@ from robinauts.controller.contract.domain import (
     NumberedEvent,
     OpenedSession,
     PendingLogin,
+    Readiness,
     Session,
     SessionPage,
     TurnStarted,
@@ -164,6 +165,22 @@ class Controller(ABC):
 
     @abstractmethod
     async def sweep(self) -> None:
+        raise NotImplementedError
+
+
+class Operations(ABC):
+    """What a deployment asks of a process, rather than a person."""
+
+    @abstractmethod
+    async def readiness(self) -> Readiness:
+        """Whether it can serve: the database answers, the listener and the work connection
+        are open, and it is not draining."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def drain(self) -> None:
+        """Stop taking turns, give the turns it runs ``drain_seconds`` to finish, and
+        interrupt the rest, keeping what each had done. From then on it is not ready."""
         raise NotImplementedError
 
 

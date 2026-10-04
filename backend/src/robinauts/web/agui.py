@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 
 from ag_ui.core import (
     BaseEvent,
+    CustomEvent,
     ReasoningMessageContentEvent,
     ReasoningMessageEndEvent,
     ReasoningMessageStartEvent,
@@ -56,6 +57,20 @@ KEEP_ALIVE_SECONDS = 15.0
 
 KEEP_ALIVE = ": keep-alive\n\n"
 """An SSE comment: bytes on the connection, and nothing a client reads as an event."""
+
+RECONNECT_AFTER_MS = 1000
+"""How soon a stream a stopping process ends asks its client to attach again, elsewhere."""
+
+RECONNECT = "robinauts.reconnect"
+"""The name of the event that says so."""
+
+
+def reconnect_hint(after_ms: int = RECONNECT_AFTER_MS) -> str:
+    """What a stream a stopping process ends with, instead of its turn's end: SSE's own
+    ``retry:`` and an AG-UI ``CUSTOM`` event, neither of which a client reads as the end of the
+    turn, so it attaches again after the last position it saw, to another replica."""
+    return f"retry: {after_ms}\n\n" + sse(CustomEvent(name=RECONNECT, value={"after_ms": after_ms}))
+
 
 ENDED_BADLY = {
     TurnState.FAILED: "the agent could not finish this answer",
@@ -154,6 +169,36 @@ async def kept_alive(chunks: AsyncIterator[str], every: float | None = None) -> 
                 waiting = None
             yield chunk
     finally:
+        if waiting is not None:
+            waiting.cancel()
+            with contextlib.suppress(BaseException):
+                await waiting
+
+
+async def until(chunks: AsyncIterator[str], stopping: asyncio.Event) -> AsyncIterator[str]:
+    """``chunks``, until ``stopping`` is set: then the reconnect hint, and the end."""
+    if stopping.is_set():
+        yield reconnect_hint()
+        return
+    waiting: asyncio.Task[str] | None = None
+    stopped = asyncio.ensure_future(stopping.wait())
+    try:
+        while True:
+            if waiting is None:
+                waiting = asyncio.ensure_future(anext(chunks))
+            await asyncio.wait({waiting, stopped}, return_when=asyncio.FIRST_COMPLETED)
+            if not waiting.done():
+                yield reconnect_hint()
+                return
+            try:
+                chunk = waiting.result()
+            except StopAsyncIteration:
+                return
+            finally:
+                waiting = None
+            yield chunk
+    finally:
+        stopped.cancel()
         if waiting is not None:
             waiting.cancel()
             with contextlib.suppress(BaseException):

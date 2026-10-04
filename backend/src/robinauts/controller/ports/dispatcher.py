@@ -47,4 +47,4 @@ class TurnDispatcher(ABC):
     @abstractmethod
     async def close(self, timeout: float) -> None:
         """Wait up to ``timeout`` seconds for the turns this process runs, then cancel the rest
-        naming ``CLOSE``, and wait for those too."""
+        naming ``CLOSE``, and wait a few seconds more for those to write their end."""

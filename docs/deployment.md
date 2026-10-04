@@ -199,6 +199,7 @@ max_turn_seconds = 1200   # a turn's deadline, from its start
 max_model_calls = 100     # the model calls one turn may make
 lease_seconds = 90        # a dead pod's turns are found this long after its last heartbeat
 heartbeat_seconds = 30    # how often a pod renews its turns' leases; at most half the lease
+drain_seconds = 30        # how long a stopping process lets its turns finish
 
 [agents.assistant]
 title = "Assistant"
@@ -369,9 +370,11 @@ RestartSec=5
 # for ever and a log nobody can read.
 RestartPreventExitStatus=2
 KillSignal=SIGTERM
-# A stop lets open connections finish for 10 s, then ends the runs in flight
-# and gives back what the process holds, bounded at about 35 s more -- some
-# 45 s in all. Anything under a minute here would SIGKILL the tail of that.
+# A stop drains: the runs in flight get [work] drain_seconds (30 s) to
+# finish, and the rest are interrupted, keeping what they had done; then open
+# connections get 10 s and the process gives back what it holds, a few
+# seconds more -- under a minute in all. Less than that here would SIGKILL
+# the tail of it.
 TimeoutStopSec=90
 NoNewPrivileges=yes
 PrivateTmp=yes
@@ -444,12 +447,13 @@ root of the origin. Three things matter:
   `X-Forwarded-*` headers below are good practice and reach the access log;
   they are not what makes the deployment https.
 - **No buffering on the event stream**, and a read timeout longer than a
-  whole turn. A stream sends a heartbeat comment every 15 s and a turn may
-  run for 600 s by default. Every stream also carries
+  whole turn. A stream sends a keep-alive comment after 15 s of silence and
+  a turn may run for 1200 s by default (`[work] max_turn_seconds`). Every stream also carries
   `X-Accel-Buffering: no`, which nginx obeys — the setting below is there
   for the proxies that do not.
 - The paths are `/ui/` (the interface), `/api/` (the API and the streams),
-  `/auth/` (the sign-in navigations), `/health` and `/openapi.json`. All
+  `/auth/` (the sign-in navigations), `/health`, `/ready` and
+  `/openapi.json`. All
   of them are under `/`, so one location is enough.
 
 nginx:
@@ -581,6 +585,9 @@ command could not do what it was asked.
 
 1. `curl -fsS https://robinauts.example.com/health` → `{"status":"ok"}`.
    It reads no database: it answers "this process is up and serving".
+   `curl -fsS https://robinauts.example.com/ready` → `{"status":"ready"}`:
+   the database answers and the process is not stopping. A 503 lists what
+   is wrong.
 2. Open `https://robinauts.example.com/` in a browser. It redirects to
    `/ui/` and shows the sign-in page with one button per provider.
 3. Sign in as somebody the allow list has, through Google. Then as

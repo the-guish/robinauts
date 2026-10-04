@@ -68,6 +68,10 @@ class NoActiveTurnError(ControllerError):
     pass
 
 
+class DrainingError(ControllerError):
+    """A turn asked of a process that is stopping: another replica takes it."""
+
+
 # --- configuration ------------------------------------------------------------
 
 
@@ -144,6 +148,8 @@ class WorkConfig:
     this long after its last one."""
     heartbeat_seconds: float = 30.0
     """How often a pod renews the leases of the turns it runs, in one write for all of them."""
+    drain_seconds: float = 30.0
+    """How long a stopping pod lets the turns it runs finish before it interrupts them."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -479,3 +485,12 @@ class NumberedEvent:
 
     position: int
     event: TurnEvent
+
+
+@dataclass(frozen=True, slots=True)
+class Readiness:
+    """Whether this process should be sent requests: what ``/ready`` answers."""
+
+    ready: bool
+    problems: tuple[str, ...] = ()
+    """Why not, in words for an operator, naming no address and no secret."""

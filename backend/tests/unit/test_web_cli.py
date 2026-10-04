@@ -3,13 +3,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import signal
 from pathlib import Path
 
 import pytest
 import uvicorn
 
 from robinauts.controller.contract.domain import ConfigError
-from robinauts.web.cli import run, serving
+from robinauts.web.cli import DrainingServer, run, serving
 
 SIGN_IN = {
     "public_url": "https://robinauts.example.com",
@@ -89,7 +91,48 @@ def test_a_refused_start_exits_before_it_binds(
     path.write_text('public_url = "https://robinauts.example.com"\n')
     monkeypatch.setenv("ROBINAUTS_CONFIG", str(path))
     monkeypatch.setattr(uvicorn, "run", pytest.fail)
+    monkeypatch.setattr(DrainingServer, "run", pytest.fail)
     with pytest.raises(SystemExit) as exited:
         run(["start", "--dev-no-sign-in"])
     assert exited.value.code == 1
     assert "cannot be combined" in capsys.readouterr().err
+
+
+def test_the_first_stop_signal_drains_and_only_then_stops_the_server() -> None:
+    drained: list[str] = []
+
+    async def drain() -> None:
+        drained.append("begun")
+        await asyncio.sleep(0.05)
+        drained.append("done")
+
+    async def go() -> None:
+        server = DrainingServer(uvicorn.Config(lambda *_: None), drain)
+        server._loop = asyncio.get_running_loop()
+        server.handle_exit(signal.SIGTERM, None)
+        assert not server.should_exit
+        await asyncio.sleep(0.01)
+        assert drained == ["begun"]
+        assert not server.should_exit
+        await asyncio.sleep(0.1)
+        assert drained == ["begun", "done"]
+        assert server.should_exit
+
+    asyncio.run(go())
+
+
+def test_a_second_signal_while_draining_stops_at_once() -> None:
+    async def drain() -> None:
+        await asyncio.sleep(3600)
+
+    async def go() -> None:
+        server = DrainingServer(uvicorn.Config(lambda *_: None), drain)
+        server._loop = asyncio.get_running_loop()
+        server.handle_exit(signal.SIGTERM, None)
+        await asyncio.sleep(0.01)
+        server.handle_exit(signal.SIGTERM, None)
+        assert server.should_exit
+        assert server._draining is not None
+        server._draining.cancel()
+
+    asyncio.run(go())

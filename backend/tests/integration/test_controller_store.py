@@ -294,3 +294,20 @@ async def test_a_batch_of_events_is_announced_once() -> None:
         finally:
             await listener.close()
             await store.close()
+
+
+@asyncio_test
+async def test_readiness_names_a_listener_that_dropped_and_is_whole_again_after() -> None:
+    async with temporary_schema() as schema:
+        store = PostgresStore(schema.pool, dsn=url())
+        await store.open()
+        try:
+            assert await store.problems() == []
+            assert store._listener is not None
+            await store._listener.close()
+            assert await store.problems() == ["the listener is not connected"]
+            # The next wait for events opens it again.
+            await store._listen()
+            assert await store.problems() == []
+        finally:
+            await store.close()

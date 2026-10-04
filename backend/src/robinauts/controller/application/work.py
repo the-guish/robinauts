@@ -29,6 +29,9 @@ from robinauts.controller.ports.work import HeartbeatResult, Held, WorkQueue
 
 log = logging.getLogger(__name__)
 
+STOPPING_WAIT = 5.0
+"""How long stopping the loop waits for the cancels it began."""
+
 FOLLOW_AGAIN = 1.0
 """Seconds before the cancels are followed again after the signals failed."""
 
@@ -66,7 +69,7 @@ class WorkLoop:
         if loops:
             await asyncio.wait(loops)
         if self._stopping:
-            await asyncio.wait(self._stopping)
+            await asyncio.wait(self._stopping, timeout=STOPPING_WAIT)
 
     def _cancel(self, turn: uuid.UUID) -> None:
         """Stop the turn's runner, if this pod runs it, without waiting here for it to end."""

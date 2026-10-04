@@ -72,6 +72,11 @@ class Store(ABC):
         """Release what ``open`` took."""
         raise NotImplementedError
 
+    async def problems(self) -> list[str]:
+        """What keeps the store from serving now, in words for an operator; none by
+        default."""
+        return []
+
     # --- users --------------------------------------------------------------
 
     @abstractmethod

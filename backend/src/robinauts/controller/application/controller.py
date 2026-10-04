@@ -21,6 +21,7 @@ from robinauts.controller.contract.domain import (
     AgentConfig,
     AgentListing,
     Config,
+    DrainingError,
     Identity,
     InvalidValueError,
     Message,
@@ -29,6 +30,7 @@ from robinauts.controller.contract.domain import (
     NoActiveTurnError,
     NumberedEvent,
     OpenedSession,
+    Readiness,
     Role,
     Session,
     SessionPage,
@@ -46,7 +48,7 @@ from robinauts.controller.contract.domain import (
     UnknownModelError,
     User,
 )
-from robinauts.controller.contract.ports import Controller
+from robinauts.controller.contract.ports import Controller, Operations
 from robinauts.controller.core.documents import (
     event_from_document,
     message_from_document,
@@ -84,7 +86,7 @@ def _text(message: Message) -> str:
     return "".join(p.text for p in message.parts if isinstance(p, TextPart))
 
 
-class RobinautsController(Controller):
+class RobinautsController(Controller, Operations):
     def __init__(
         self,
         config: Config,
@@ -106,6 +108,7 @@ class RobinautsController(Controller):
         self._worker_id = worker_id
         self._close_timeout = close_timeout
         self._now = now or (lambda: datetime.now(UTC))
+        self._draining = False
         if queue is None:
             if not isinstance(store, WorkQueue):
                 raise TypeError("a store that keeps no leases needs a work queue beside it")
@@ -137,6 +140,17 @@ class RobinautsController(Controller):
             setup=self._sets_up_engines(),
         )
         self._work.start()
+
+    async def readiness(self) -> Readiness:
+        problems = list(await self._store.problems())
+        if self._draining:
+            problems.insert(0, "draining")
+        return Readiness(not problems, tuple(problems))
+
+    async def drain(self) -> None:
+        self._draining = True
+        # The heartbeat goes on: the turns keep their leases while they finish.
+        await self._dispatcher.close(self._config.work.drain_seconds)
 
     async def close(self) -> None:
         # The heartbeat goes on while the turns get their time to end.
@@ -239,7 +253,12 @@ class RobinautsController(Controller):
             raise UnknownAgentError(agent)
         return found
 
+    def _taking_turns(self) -> None:
+        if self._draining:
+            raise DrainingError("this replica is stopping: ask another")
+
     async def start_session(self, user: User, *, agent: str, model: str, text: str) -> TurnStarted:
+        self._taking_turns()
         agent_config = self._agent(agent)
         now = self._now()
         session = Session(
@@ -420,6 +439,7 @@ class RobinautsController(Controller):
         new_question: bool,
         retries: uuid.UUID | None = None,
     ) -> Turn:
+        self._taking_turns()
         self._agent(session.agent)
         model_config = self._config.models.get(model)
         if model_config is None:

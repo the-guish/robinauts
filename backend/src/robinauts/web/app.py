@@ -9,12 +9,17 @@ provider by the ``/auth/`` routes, or the one user of the local development mode
 (``docs/specs/sign-in.md``); with nobody, it is 401. A write that carries the session cookie
 must carry ``Origin`` equal to ``public_url``, else 403; a write with a bearer alone need not.
 A controller operation that is not implemented answers 501.
+``/health`` says the process answers; ``/ready`` that it should be sent requests, which a
+process that is draining, or that cannot reach its database, should not. ``app.state.drain``
+is what ``robinauts start`` calls on SIGTERM: from then on ``/ready`` is 503, no turn starts
+here, and every open stream ends with a hint to attach again, to another replica.
 The shapes are the ones the frontend reads (``docs/specs/wire.md``); a turn's stream is
 AG-UI over SSE, its run id is the turn's id, and its thread id the session's.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -32,6 +37,7 @@ from robinauts.controller.composition import SecretLookup
 from robinauts.controller.contract.domain import (
     ApiToken,
     ControllerError,
+    DrainingError,
     Identity,
     InvalidValueError,
     Message,
@@ -52,7 +58,7 @@ from robinauts.controller.contract.domain import (
     UnknownModelError,
     User,
 )
-from robinauts.controller.contract.ports import Controller, Credentials
+from robinauts.controller.contract.ports import Controller, Credentials, Operations
 from robinauts.web import agui
 from robinauts.web.cookies import Cookies
 from robinauts.web.logs import loggable
@@ -79,7 +85,10 @@ STATUS_OF: dict[type[ControllerError], int] = {
     UnknownModelError: 422,
     TurnActiveError: 409,
     NoActiveTurnError: 404,
+    DrainingError: 503,
 }
+
+STOPPING = "this replica is stopping: the request goes to another"
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 SIGN_IN_PAGE = "/ui/#/sign-in?error="
@@ -350,10 +359,14 @@ def ended_badly_view(turn: Turn | None) -> EndedBadlyView | None:
 
 
 def event_stream(
-    session_id: uuid.UUID, turn_id: uuid.UUID, events: AsyncIterator[NumberedEvent]
+    session_id: uuid.UUID,
+    turn_id: uuid.UUID,
+    events: AsyncIterator[NumberedEvent],
+    stopping: asyncio.Event | None = None,
 ) -> StreamingResponse:
+    chunks = agui.kept_alive(agui.stream(str(session_id), str(turn_id), events))
     return StreamingResponse(
-        agui.kept_alive(agui.stream(str(session_id), str(turn_id), events)),
+        chunks if stopping is None else agui.until(chunks, stopping),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-store",
@@ -371,8 +384,13 @@ def create_app(
     sign_in: SignInConfig | None,
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
+    operations: Operations | None = None,
 ) -> FastAPI:
-    """``sign_in`` is ``None`` in the local development mode."""
+    """``sign_in`` is ``None`` in the local development mode. ``operations`` is what
+    ``/ready`` and the drain ask, the controller's own when it offers them."""
+    if operations is None and isinstance(controller, Operations):
+        operations = controller
+    stopping = asyncio.Event()
     exchange: Exchange | None = None
     flow: SignIn | None = None
     if sign_in is not None:
@@ -468,6 +486,8 @@ def create_app(
     async def watched(
         user: User, session_id: uuid.UUID, turn_id: uuid.UUID, after: int
     ) -> StreamingResponse:
+        if stopping.is_set():
+            raise Refused(503, "Draining", STOPPING)
         events = controller.watch_turn(user, session_id, turn_id, after=after)
         # The refusals happen inside the generator: ask for the first event here, so that
         # they answer with a status rather than a broken stream.
@@ -480,7 +500,7 @@ def create_app(
             async for event in events:
                 yield event
 
-        return event_stream(session_id, turn_id, chained())
+        return event_stream(session_id, turn_id, chained(), stopping)
 
     # --- sign-in -----------------------------------------------------------------
 
@@ -728,6 +748,25 @@ def create_app(
     async def health() -> dict[str, str]:
         # That this process answers, and nothing about the database or the providers.
         return {"status": "ok"}
+
+    @app.get("/ready", include_in_schema=False)
+    async def ready() -> JSONResponse:
+        # Whether to send it requests: not while it drains, nor while it cannot reach its
+        # database. The problems name no address and no secret.
+        problems = ["draining"] if stopping.is_set() else []
+        if operations is not None and not problems:
+            problems = list((await operations.readiness()).problems)
+        if problems:
+            return JSONResponse({"status": "not ready", "problems": problems}, status_code=503)
+        return JSONResponse({"status": "ready"})
+
+    async def drain() -> None:
+        """Stop taking work and end the streams, then let the turns here finish, bounded."""
+        stopping.set()
+        if operations is not None:
+            await operations.drain()
+
+    app.state.drain = drain
 
     # --- the interface ---------------------------------------------------------
 

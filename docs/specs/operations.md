@@ -16,15 +16,23 @@ What an internal platform team deploys and controls.
 - Upgrades: install the new wheel, bring the schema up to date, restart.
   Until the first release the schema is edited in place and the database
   is recreated; after that, migrations upgrade it in place.
-- A restart ends the runs that are in flight: each is marked interrupted,
-  and what it had answered is kept as a failed answer, which Retry starts
-  over. A run whose process died is ended the same way within about two
-  minutes: its lease is no longer renewed, and the next reader ends it from
-  the events it had published. Letting them
-  **drain** for a bounded time first is planned; the bounded window a
-  shutdown has today is for ending them and giving back what the process
-  holds, not for finishing them. Several backend processes may run against
-  the one database.
+- **A stop drains first.** On the first SIGTERM (or SIGINT) the process
+  answers `/ready` with 503, starts no turn (a request for one is 503, and
+  goes to another replica), and ends every open stream with a hint to
+  attach again, which the interface does, elsewhere. The runs in flight get
+  `[work] drain_seconds` (30 s) to finish; those still going are then marked
+  interrupted, and what each had answered is kept as a failed answer, which
+  Retry starts over. Only then does the server stop, waiting at most 10 s
+  for requests still open and a few seconds for each run to write its end. A
+  second signal stops it at once. A run whose process died is ended the same
+  way within about two minutes: its lease is no longer renewed, and the next
+  reader ends it from the events it had published. Several backend processes
+  may run against the one database.
+- **Health.** `/health` answers whether the process answers, and reads
+  nothing. `/ready` answers whether it should be sent requests: 200, or 503
+  with the problems (draining, the database not answering within a second,
+  the listener or the work connection not open), in words that name no
+  address and no secret.
 - Outbound traffic: the identity providers at sign-in, the model providers
   the operator configured, and the MCP tool servers the operator configured.
   Nothing else.

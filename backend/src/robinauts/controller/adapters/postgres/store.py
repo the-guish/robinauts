@@ -25,7 +25,7 @@ from typing import Any
 
 import asyncpg
 
-from robinauts.controller.adapters.postgres.pool import codecs, open_pool
+from robinauts.controller.adapters.postgres.pool import OPENING_FAILURES, codecs, open_pool
 from robinauts.controller.adapters.postgres.schema import check_schema
 from robinauts.controller.contract.domain import (
     Role,
@@ -52,6 +52,9 @@ CHANNEL = "robinauts_turns"
 
 CANCEL_CHANNEL = "robinauts_cancel"
 """Where a cancel asked for is announced, to whichever pod runs the turn: ``<turn>``."""
+
+READY_SECONDS = 1.0
+"""How long the database has to answer a readiness check."""
 
 LISTENER_CHECK = 5.0
 """How often a follower of the cancels makes sure the listener is still there."""
@@ -194,6 +197,22 @@ class PostgresStore(Store, WorkQueue):
         if self._owns_pool and self._pool is not None:
             pool, self._pool = self._pool, None  # type: ignore[assignment]
             await pool.close()
+
+    async def problems(self) -> list[str]:
+        found = []
+        try:
+            async with asyncio.timeout(READY_SECONDS):
+                await self._pool.fetchval("SELECT 1")
+        except (TimeoutError, *OPENING_FAILURES):
+            found.append("the database did not answer")
+        if self._listener is None or self._listener.is_closed():
+            found.append("the listener is not connected")
+        try:
+            async with asyncio.timeout(READY_SECONDS):
+                await self._working_on(lambda connection: connection.fetchval("SELECT 1"))
+        except (TimeoutError, *OPENING_FAILURES):
+            found.append("the work connection is not open")
+        return found
 
     # --- users --------------------------------------------------------------
 

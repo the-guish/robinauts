@@ -11,6 +11,10 @@ import uuid
 from robinauts.controller.ports.dispatcher import CLOSE, TurnDispatcher, TurnRunner
 from robinauts.controller.ports.work import Held
 
+FINAL_WAIT = 5.0
+"""How long `close` waits for the turns it cancelled to write their end: a runner whose
+database is gone does not hold the stop up for ever."""
+
 
 class InProcessDispatcher(TurnDispatcher):
     def __init__(self, run: TurnRunner | None = None) -> None:
@@ -55,4 +59,4 @@ class InProcessDispatcher(TurnDispatcher):
         for task in pending:
             task.cancel(CLOSE)
         if pending:
-            await asyncio.wait(pending)
+            await asyncio.wait(pending, timeout=FINAL_WAIT)

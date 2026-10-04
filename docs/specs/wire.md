@@ -143,6 +143,12 @@ documented here, which is what "documented with the API" means for them.
   streams together, every 150 ms or so, joining the pieces of one message
   that arrive in a row into one `TEXT_MESSAGE_CONTENT`; anything else is
   written at once. A client sees the same text in fewer, larger deltas.
+- **A stopping process sends its streams away.** When a replica drains, each
+  of its open streams ends with SSE's `retry:` and `CUSTOM robinauts.reconnect
+  {"after_ms": …}` instead of the turn's end, and the client attaches again,
+  to another replica, after the last position it saw. A client reads an
+  unknown `CUSTOM` name as a no-op. A replica that is draining answers a turn
+  or a stream with 503.
 - **A client re-attaches for as long as the turn runs.** The interface waits
   half a second before its first try and doubles each wait to thirty seconds,
   spread a fifth either way; it tries at once when the network comes back or
