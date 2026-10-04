@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineFactory, installed
 from robinauts.controller.application.engines import build_engines
 from robinauts.controller.application.turns import run_turn
+from robinauts.controller.contract.context import WORK
 from robinauts.controller.contract.domain import (
     ActiveTurn,
     AgentListing,
@@ -403,6 +404,7 @@ class RobinautsController(Controller):
 
     async def run_turn(self, owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID) -> None:
         """Run the turn, from its ids alone: what a worker in another process would call."""
+        WORK.set(f"conversation={session_id} turn={turn_id}")  # this turn's task alone
         session = await self._store.get_session(owner, session_id)
         turn = await self._store.get_turn(owner, session_id, turn_id)
         if turn is None:

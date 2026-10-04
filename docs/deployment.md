@@ -586,15 +586,20 @@ command could not do what it was asked.
 
 ## 10. Operating
 
-**Logs.** stdout, so `journalctl -u robinauts`. `--log-level debug` on
+**Logs.** stdout, so `journalctl -u robinauts`. Every line of the
+platform's own names the process in brackets (`pod=`, the value of
+`ROBINAUTS_WORKER_ID`, or the host and the process id), and the
+conversation and the turn when it is written while a turn runs.
+`--log-level debug` on
 `robinauts start` for more; it never prints a conversation's content, a
 client secret or an API key. Turning a **vendor's** logger up in your own
 logging configuration would print request bodies, which is why the
 platform pins those loggers and removes `ANTHROPIC_LOG` at start-up.
 
-**Restart.** `systemctl restart robinauts`. Runs still in flight are ended
-and marked `interrupted`; their authors retry by sending the message
-again. A configuration change — an agent's engine, an agent's default
+**Restart.** `systemctl restart robinauts`. A stopping process drains
+first: it starts no new turn, ends its streams so that their clients
+attach again, and gives its running turns about ten seconds before it ends
+them as `interrupted`; their authors retry by sending the message again. A configuration change — an agent's engine, an agent's default
 model (for new conversations only), the allow list, a new agent — takes
 effect at the next restart, because the file is read once at start-up.
 
@@ -626,9 +631,44 @@ without:
   proxy in front is the rate limit until per-client limits arrive.
 - **Migrations.** As above.
 - **Usage reporting**, token budgets, audit export, retention and purge.
-- **Several backend processes.** One process, one machine.
-- **Draining runs on shutdown.** A restart interrupts them.
 - **A container image**, an SBOM and signed releases.
+
+## Several processes
+
+Two or more identical processes may serve one deployment from one
+PostgreSQL, behind a load balancer, for a handful of users: a stream, Stop
+and delete work whichever process a request lands on, and a process that
+dies leaves its conversations usable again within about two minutes. On
+Kubernetes:
+
+- **`robinauts db init` once, as a Job**, before the Deployment rolls out.
+  The server never changes the database; every replica refuses one that is
+  not this build's.
+- **No sticky sessions.** Any replica serves any request. A stream that
+  drops, or that a stopping replica ends, is attached to again, wherever
+  the load balancer sends it.
+- **The load balancer passes `Origin` through** unchanged, and the
+  `X-Forwarded-*` headers as above: a write with the session cookie is
+  refused without the browser's own `Origin`. Its idle timeout must be
+  over 15 s, the longest a stream stays silent.
+- **Probes.** Readiness on `GET /ready`, which answers 503 while the
+  replica stops or when the database does not answer within a second;
+  liveness on `GET /health`, which says only that the process answers.
+- **Stopping.** A `preStop` hook of `sleep 5`, so the replica is out of the
+  load balancer before `SIGTERM` reaches it, and
+  `terminationGracePeriodSeconds` of 45 to 60: on `SIGTERM` the replica
+  drains its streams at once and gives its running turns about ten
+  seconds. A replica killed outright leaves its turns to their leases,
+  which other replicas find expired within about two minutes.
+- **Connections.** Each replica holds at most `[database] pool_max`
+  connections (10 by default) and one more for `LISTEN`, so PostgreSQL's
+  `max_connections` must be at least N × (`pool_max` + 1), plus a few for
+  `db init` and for the operators: 30 for three replicas, with room.
+- **`ROBINAUTS_WORKER_ID`**, set to the pod's name, is what the log lines
+  name the replica by; without it, the host name and the process id.
+
+Every replica sweeps every five minutes and renews its own turns' leases
+every thirty seconds; nothing is elected and nothing else runs.
 
 ## The local development mode
 

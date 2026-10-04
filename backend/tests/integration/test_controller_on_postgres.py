@@ -9,13 +9,17 @@ import asyncio
 import hashlib
 import pathlib
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import asyncpg
 import pytest
 
 from aio import asyncio_test
 from controller_db import requires_postgres, temporary_schema, url
+from robinauts.agent_engines.contract.domain import Event
+from robinauts.agent_engines.echo_engine.engine import EchoEngine
 from robinauts.controller.composition import SCHEMA_READY, compose, init_database
 from robinauts.controller.contract.domain import (
     AgentConfig,
@@ -25,9 +29,12 @@ from robinauts.controller.contract.domain import (
     ModelConfig,
     ProviderConfig,
     ProviderKind,
+    SessionNotFoundError,
     StorageConfig,
     StorageKind,
     TextPart,
+    TurnEnded,
+    TurnState,
     UserSession,
 )
 from robinauts.web.cli import run
@@ -121,3 +128,50 @@ def test_db_init_without_a_database_url_is_refused(
         run(["db", "init"])
     assert left.value.code == 2
     assert "ROBINAUTS_DATABASE_URL is not set" in capsys.readouterr().err
+
+
+class Held(EchoEngine):
+    """Streams nothing until it is let go."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.gate = asyncio.Event()
+
+    async def stream(self, *args: Any, **kwargs: Any) -> AsyncGenerator[Event, None]:
+        await self.gate.wait()
+        async for event in super().stream(*args, **kwargs):
+            yield event
+
+
+@asyncio_test
+async def test_a_turn_running_in_one_process_is_stopped_and_deleted_through_another() -> None:
+    async with temporary_schema() as schema:
+        storage = StorageConfig(StorageKind.POSTGRES, url=dsn_in(schema.name))
+        first = compose(CONFIG, storage=storage, secret_for={}.get).controller
+        second = compose(CONFIG, storage=storage, secret_for={}.get).controller
+        await first.open()
+        await second.open()
+        try:
+            first._engines["echo"] = Held()
+            user = await first.ensure_user(Identity("local", "me"))
+            for ask in ("stop", "delete"):
+                started = await first.start_session(user, agent="echo", model="echo", text=ask)
+                sid, tid = started.session_id, started.turn_id
+                await first._store.wait_for_events(user.id, sid, tid, 0, 5.0)
+                if ask == "stop":
+                    await second.cancel_turn(user, sid, tid)
+                    watched = [e async for e in second.watch_turn(user, sid, tid)]
+                    assert watched[-1].event == TurnEnded(TurnState.CANCELLED)
+                else:
+                    await second.delete_session(user, sid)
+                    with pytest.raises(SessionNotFoundError):
+                        await first.open_session(user, sid)
+                    # The process running it was told, and its runner is gone.
+                    for _ in range(100):
+                        if not first._dispatcher.running():
+                            break
+                        await asyncio.sleep(0.05)
+                    assert first._dispatcher.running() == []
+        finally:
+            await first.close()
+            await second.close()

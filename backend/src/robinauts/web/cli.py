@@ -48,6 +48,7 @@ from robinauts.controller.composition import (
 )
 from robinauts.controller.contract.domain import Config, ConfigError
 from robinauts.web.app import create_app
+from robinauts.web.logs import FORMAT, Context
 from robinauts.web.sign_in import SIGN_IN_KEYS, SignInConfig, is_loopback, parse_sign_in
 
 REPO = Path(__file__).resolve().parents[4]
@@ -145,7 +146,9 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         print(refused, file=sys.stderr)
         return 1
     composed = compose(config, storage=storage_from(os.environ), secret_for=secret_for)
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO, format=FORMAT)
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(Context())
     if dev_no_sign_in:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
     draining = asyncio.Event()
