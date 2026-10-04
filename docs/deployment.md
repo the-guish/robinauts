@@ -201,6 +201,11 @@ max_output_tokens = 8192
 # lease_seconds = 90             # a turn of a process that went away, at most
 # heartbeat_seconds = 30         # renews them all, at most half the lease
 # drain_seconds = 30             # what a stop gives the turns running here
+#
+# What one process takes of PostgreSQL. Optional; these are the defaults.
+# [database]
+# pool_max = 10                  # the pool's connections at most
+# acquire_timeout_seconds = 5    # a request waits this long, then answers 503
 
 [agents.assistant]
 title = "Assistant"
@@ -260,6 +265,17 @@ Notes on what is and is not there:
   answering with another model; the log names the model.
 - A file with no `[agents]` table is a deployment with no agents: it
   starts, the picker is empty, and the log says so.
+- **Connections.** Each process holds a pool of at most
+  `[database] pool_max` connections (10), shared by requests, turn events
+  and the engines' checkpoints, and two of its own beside it: the listener
+  (`LISTEN robinauts_turns, robinauts_cancel`) and the work connection, which
+  renews the leases of its turns so that a busy pool never delays one. So
+  `N` processes need `N × (pool_max + 2)` connections, and two more for
+  `robinauts db init` and an operator: keep that below the server's
+  `max_connections` (100 by default, which is 8 processes at the default
+  `pool_max`). An operation that finds no connection of the pool free within
+  `acquire_timeout_seconds` answers 503 rather than queueing for ever, and a
+  turn's runner writes its batch again.
 
 ## 5. Register the redirect URI
 

@@ -35,6 +35,7 @@ from robinauts.agent_engines.contract.ports import AgentEngine
 from robinauts.controller.contract.domain import (
     AgentConfig,
     ArgumentsPiece,
+    BusyError,
     CallCompleted,
     CallStarted,
     Message,
@@ -73,6 +74,12 @@ PROCESS_STOPPED = "the process stopped"
 
 FLUSH_SECONDS = 0.15
 """How long a piece of text or reasoning is held, at most, before it is written."""
+
+BUSY_TRIES = 5
+"""How often a batch is written while the database has no connection free in time."""
+
+BUSY_BACKOFF = 0.5
+"""Seconds before the next try of a batch, times the tries so far."""
 
 DEADLINE_MARGIN = 10.0
 """Seconds of its deadline a turn must have left for the runner to claim it."""
@@ -122,19 +129,29 @@ class _Writer:
         self._schedule()
 
     async def append(self, *events: TurnEvent) -> None:
-        """What is held, then these, as one batch."""
+        """What is held, then these, as one batch. A batch the database had no connection
+        for in time is written again, the same documents at the same positions, which the
+        store takes as the same write."""
         self._raise_failed()
         async with self._lock:
             batch = self._numbered(self._take() + list(events))
-            if batch:
-                await self._store.append_events(
-                    self._owner,
-                    self._turn.session_id,
-                    self._turn.id,
-                    self._fence,
-                    batch,
-                    datetime.now(UTC),
-                )
+            if not batch:
+                return
+            for tried in range(BUSY_TRIES):
+                try:
+                    await self._store.append_events(
+                        self._owner,
+                        self._turn.session_id,
+                        self._turn.id,
+                        self._fence,
+                        batch,
+                        datetime.now(UTC),
+                    )
+                    return
+                except BusyError:
+                    if tried == BUSY_TRIES - 1:
+                        raise
+                    await asyncio.sleep(BUSY_BACKOFF * (tried + 1))
 
     async def last(self, *events: TurnEvent) -> list[StoredEvent]:
         """What is held, then the events a finish writes, numbered after the ones written."""

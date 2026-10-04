@@ -23,6 +23,7 @@ from robinauts.controller.adapters.memory.store import MemoryStore
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.contract.domain import (
     AgentConfig,
+    BusyError,
     DrainingError,
     Identity,
     MessageStarted,
@@ -640,4 +641,32 @@ async def test_a_draining_controller_is_not_ready_and_takes_no_new_turn() -> Non
     assert readiness.problems == ("this process is stopping",)
     with pytest.raises(DrainingError):
         await controller.start_session(user, agent="echo", model="echo", text="one")
+    await controller.close()
+
+
+class BusyStore(MemoryStore):
+    """A database whose pool had no connection free, twice, for the turn's writes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.refused = 0
+
+    async def append_events(self, *args: Any, **kwargs: Any) -> None:
+        if self.refused < 2:
+            self.refused += 1
+            raise BusyError("no connection was free")
+        await super().append_events(*args, **kwargs)
+
+
+@asyncio_test
+async def test_a_write_the_database_had_no_connection_for_is_tried_again() -> None:
+    busy = BusyStore()
+    controller = await over(busy)
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    await asyncio.wait_for(settled(controller, user, started), 10.0)
+    assert busy.refused == 2
+    turn = await busy.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert turn.state is TurnState.FINISHED
     await controller.close()

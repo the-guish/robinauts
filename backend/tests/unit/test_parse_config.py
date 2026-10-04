@@ -7,6 +7,7 @@ import pytest
 
 from robinauts.controller.contract.domain import (
     ConfigError,
+    DatabaseConfig,
     ProviderKind,
     ToolErrorBehavior,
     ToolServerAuth,
@@ -163,3 +164,14 @@ def test_work_must_be_a_table() -> None:
 def test_a_heartbeat_slower_than_half_the_lease_is_refused() -> None:
     with pytest.raises(ConfigError, match="heartbeat_seconds 50 is more than half"):
         parse_config({"work": {"lease_seconds": 90, "heartbeat_seconds": 50}})
+
+
+def test_the_database_table_sizes_the_pool_and_bounds_the_wait_for_it() -> None:
+    assert parse_config({}).database == DatabaseConfig(10, 5.0)
+    config = parse_config({"database": {"pool_max": 4, "acquire_timeout_seconds": 2}})
+    assert config.database == DatabaseConfig(pool_max=4, acquire_timeout_seconds=2.0)
+    with pytest.raises(ConfigError) as raised:
+        parse_config({"database": {"pool_max": 0, "url": "postgresql://"}})
+    message = str(raised.value)
+    assert "database.pool_max: 0 is not a whole number above zero" in message
+    assert "database: unknown key(s) url" in message

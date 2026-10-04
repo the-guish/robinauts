@@ -12,6 +12,7 @@ from robinauts.controller.contract.domain import (
     AgentConfig,
     Config,
     ConfigError,
+    DatabaseConfig,
     ModelConfig,
     ProviderConfig,
     ProviderKind,
@@ -106,6 +107,14 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
         max_model_calls=count,
         tool_error_behavior=ToolErrorBehavior,
     )
+    database = settings_table(
+        raw,
+        "database",
+        DatabaseConfig,
+        problems,
+        pool_max=count,
+        acquire_timeout_seconds=seconds,
+    )
     if work.heartbeat_seconds * 2 > work.lease_seconds:
         problems.append(
             f"work: heartbeat_seconds {work.heartbeat_seconds:g} is more than half of"
@@ -141,4 +150,4 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
             problems.append(f"agents.{agent.id}: engine {agent.engine!r} is not one of {ENGINES}")
     if problems:
         raise ConfigError("\n".join(problems))
-    return Config(providers, models, tool_servers, agents, work=work)
+    return Config(providers, models, tool_servers, agents, work=work, database=database)

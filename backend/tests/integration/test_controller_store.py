@@ -20,6 +20,7 @@ from robinauts.controller.adapters.postgres.pool import codecs, open_pool
 from robinauts.controller.adapters.postgres.schema import create_schema
 from robinauts.controller.adapters.postgres.store import PostgresStore
 from robinauts.controller.contract.domain import (
+    BusyError,
     Role,
     Session,
     SessionNotFoundError,
@@ -262,3 +263,17 @@ async def test_a_store_is_ready_when_its_database_and_connections_answer() -> No
             )
         finally:
             await nowhere.close()
+
+
+@asyncio_test
+async def test_a_pool_with_no_connection_free_in_time_is_busy_not_stuck() -> None:
+    async with temporary_schema(size=1) as schema:
+        store = PostgresStore(schema.pool, dsn=schema.dsn, acquire_timeout=0.2)
+        me, one, _, _ = await seeded(store)
+        try:
+            async with schema.pool.acquire():
+                with pytest.raises(BusyError):
+                    await asyncio.wait_for(store.get_session(me.id, one.id), 5.0)
+            assert await store.get_session(me.id, one.id) == one
+        finally:
+            await store.close()
