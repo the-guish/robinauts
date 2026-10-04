@@ -134,6 +134,9 @@ class Config:
     agents: Mapping[str, AgentConfig] = field(default_factory=dict)
     max_turn_seconds: float = 1200.0
     """``[work]``: how long a turn may run in all, however many calls it makes."""
+    pool_max: int = 10
+    """``[database]``: how many connections this process's pool may hold, the listener's
+    apart."""
 
 
 class StorageKind(StrEnum):

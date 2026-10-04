@@ -38,7 +38,9 @@ from robinauts.controller.ports.store import Store
 
 DATABASE_URL_VARIABLE = "ROBINAUTS_DATABASE_URL"
 
-CONTROLLER_TABLES = frozenset({"model_providers", "models", "tool_servers", "agents", "work"})
+CONTROLLER_TABLES = frozenset(
+    {"model_providers", "models", "tool_servers", "agents", "work", "database"}
+)
 """The file's tables that are the controller's, the ones `parse_config` reads."""
 
 SCHEMA_READY = "the database is at schema version {version} (schema.sql {digest})"
@@ -69,7 +71,7 @@ def compose(config: Config, *, storage: StorageConfig, secret_for: SecretLookup)
     if storage.kind is StorageKind.POSTGRES:
         if not storage.url:
             raise ConfigError(f"{DATABASE_URL_VARIABLE} is not set")
-        postgres = PostgresStore(dsn=storage.url)
+        postgres = PostgresStore(dsn=storage.url, pool_max=config.pool_max)
         store, credentials = postgres, PostgresCredentials(postgres)
     elif storage.kind is StorageKind.IN_MEMORY:
         memory = MemoryStore()

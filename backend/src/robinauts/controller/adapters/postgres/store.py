@@ -23,7 +23,7 @@ from datetime import datetime
 
 import asyncpg
 
-from robinauts.controller.adapters.postgres.pool import open_pool
+from robinauts.controller.adapters.postgres.pool import MAX_POOL_SIZE, MIN_POOL_SIZE, open_pool
 from robinauts.controller.adapters.postgres.schema import check_schema
 from robinauts.controller.contract.domain import (
     Role,
@@ -124,8 +124,14 @@ class PostgresStore(Store):
     """Over a pool it is given, which the giver closes, or over a dsn, from which ``open``
     makes its own pool, checks the schema, and ``close`` closes it."""
 
-    def __init__(self, pool: asyncpg.Pool | None = None, dsn: str | None = None) -> None:
+    def __init__(
+        self,
+        pool: asyncpg.Pool | None = None,
+        dsn: str | None = None,
+        pool_max: int = MAX_POOL_SIZE,
+    ) -> None:
         self._pool: asyncpg.Pool = pool  # type: ignore[assignment]
+        self._pool_max = pool_max
         self._owns_pool = pool is None
         self._dsn = dsn
         self._listener: asyncpg.Connection | None = None
@@ -142,7 +148,9 @@ class PostgresStore(Store):
         if self._owns_pool and self._pool is None:
             if self._dsn is None:
                 raise RuntimeError("a store opened from nothing needs the database's dsn")
-            self._pool = await open_pool(self._dsn)
+            self._pool = await open_pool(
+                self._dsn, min_size=min(MIN_POOL_SIZE, self._pool_max), max_size=self._pool_max
+            )
         await check_schema(self._pool)
         if self._dsn is not None:
             await self._listen()

@@ -202,6 +202,11 @@ system_prompt = "Play fair."
 # makes; timeout_seconds above bounds a single call to the model.
 [work]
 max_turn_seconds = 1200
+
+# How many connections this process's pool may hold; each process also keeps
+# one more, apart, for LISTEN.
+[database]
+pool_max = 10
 ```
 
 Notes on what is and is not there:

@@ -21,7 +21,7 @@ from robinauts.controller.contract.domain import (
 
 ENGINES = ("langchain", "pydantic-ai", "echo")
 
-SETTINGS = {"work": {"max_turn_seconds": 1200.0}}
+SETTINGS = {"work": {"max_turn_seconds": 1200.0}, "database": {"pool_max": 10}}
 """The tables of single settings, each key with its default: positive numbers all."""
 
 # An HTTP field name is a token (RFC 9110, section 5.1): nothing else can go on the wire.

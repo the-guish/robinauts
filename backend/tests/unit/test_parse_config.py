@@ -100,6 +100,7 @@ def test_a_header_on_another_auth_is_refused() -> None:
 def test_the_work_table_sets_the_turns_deadline_and_is_checked() -> None:
     assert parse_config({}).max_turn_seconds == 1200.0
     assert parse_config({"work": {"max_turn_seconds": 60}}).max_turn_seconds == 60.0
+    assert parse_config({"database": {"pool_max": 4}}).pool_max == 4
     with pytest.raises(ConfigError) as raised:
         parse_config({"work": {"max_turn_seconds": "soon", "colour": 1}})
     message = str(raised.value)
