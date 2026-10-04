@@ -94,7 +94,7 @@ class LangChainEngine(AgentEngine):
             checkpointer=self._memory.saver,
         )
         # A model call and its tool round are two steps of the graph.
-        limited: RunnableConfig = {**start, "recursion_limit": 2 * MODEL_CALLS_PER_TURN + 1}
+        limited: RunnableConfig = {**start, "recursion_limit": 2 * MODEL_CALLS_PER_TURN}
         stream = graph.astream(
             {"messages": [*fresh, HumanMessage(prompt)]},
             limited,
