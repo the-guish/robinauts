@@ -126,14 +126,12 @@ class StoreContract:
         event: StoredEvent,
         at: datetime = NOW,
     ) -> None:
-        await store.append_event(
+        await store.append_events(
             me.id,
             one.id,
             running.id,
-            event.position,
-            event.document,
+            [StoredEvent(event.position, event.document, event.expires_at)],
             at,
-            event.expires_at,
             fence=FENCE,
         )
 
@@ -486,8 +484,13 @@ class StoreContract:
         me, one, _, running = await self.started(store)
         for fence in (Fence("pod-b", 1), Fence(WORKER, 2)):
             with pytest.raises(TurnLostError):
-                await store.append_event(
-                    me.id, one.id, running.id, 1, piece(1).document, NOW, EXPIRY, fence=fence
+                await store.append_events(
+                    me.id,
+                    one.id,
+                    running.id,
+                    [StoredEvent(1, piece(1).document, EXPIRY)],
+                    NOW,
+                    fence=fence,
                 )
             with pytest.raises(TurnLostError):
                 await store.finish_turn(
@@ -544,3 +547,21 @@ class StoreContract:
         assert late.lost == {running.id}
         unchanged = await store.get_turn(me.id, one.id, running.id)
         assert unchanged == running
+
+    # --- batches ----------------------------------------------------------------
+
+    @store_test
+    async def test_a_batch_is_appended_whole_and_its_last_position_read_without_events(
+        self, store: Store
+    ) -> None:
+        me, one, _, running = await self.started(store)
+        assert await store.last_position(me.id, one.id, running.id) == 0
+        batch = [piece(1, "a"), piece(2, "b"), piece(3, "c")]
+        await store.append_events(me.id, one.id, running.id, batch, NOW, fence=FENCE)
+        assert await store.last_position(me.id, one.id, running.id) == 3
+        # The same batch again is the runner's own, acknowledged late.
+        await store.append_events(me.id, one.id, running.id, batch, NOW, fence=FENCE)
+        clash = [piece(3, "c"), piece(4, "d")]
+        with pytest.raises(TurnLostError):
+            await store.append_events(me.id, one.id, running.id, clash, NOW, fence=FENCE)
+        assert len(await store.events_after(me.id, one.id, running.id, 0)) == 3

@@ -29,7 +29,7 @@ from robinauts.controller.contract.domain import (
     TurnState,
     User,
 )
-from robinauts.controller.ports.store import Store, StoredMessage
+from robinauts.controller.ports.store import Store, StoredEvent, StoredMessage
 from robinauts.controller.ports.work import Held
 
 pytestmark = requires_postgres
@@ -98,7 +98,9 @@ async def test_an_append_waits_on_a_readers_end_and_then_inserts_nothing() -> No
                 NOW + timedelta(minutes=1),
             )
             appending = asyncio.create_task(
-                store.append_event(me.id, one.id, running.id, 1, DOCUMENT, NOW, EXPIRY, fence=FENCE)
+                store.append_events(
+                    me.id, one.id, running.id, [StoredEvent(1, DOCUMENT, EXPIRY)], NOW, fence=FENCE
+                )
             )
             await asyncio.sleep(0.3)
             assert not appending.done(), "the append did not wait on the reader's end"
@@ -149,7 +151,9 @@ async def test_a_hide_waits_on_a_starting_turn_which_it_then_hides_too() -> None
             await store.get_session(me.id, one.id)
         # The turn that started under it writes nothing, and its lease is not renewed.
         with pytest.raises(TurnLostError):
-            await store.append_event(me.id, one.id, started, 1, DOCUMENT, NOW, EXPIRY, fence=FENCE)
+            await store.append_events(
+                me.id, one.id, started, [StoredEvent(1, DOCUMENT, EXPIRY)], NOW, fence=FENCE
+            )
         beat = await store.heartbeat(WORKER, [Held(started, 1)], NOW, timedelta(minutes=1))
         assert beat.lost == {started}
         await store.close()
@@ -214,14 +218,12 @@ async def test_a_watcher_on_one_pool_is_woken_by_an_append_on_another() -> None:
 
             async def soon(position: int) -> None:
                 await asyncio.sleep(0.2)
-                await writer.append_event(
+                await writer.append_events(
                     me.id,
                     one.id,
                     running.id,
-                    position,
-                    DOCUMENT | {"position": position},
+                    [StoredEvent(position, DOCUMENT | {"position": position}, EXPIRY)],
                     NOW,
-                    EXPIRY,
                     fence=FENCE,
                 )
 
@@ -270,4 +272,22 @@ async def test_the_heartbeat_renews_leases_while_the_pool_is_exhausted() -> None
         renewed = await store.get_turn(me.id, one.id, running.id)
         assert renewed is not None
         assert renewed.lease_until == NOW + timedelta(minutes=5)
+        await store.close()
+
+
+@asyncio_test
+async def test_a_batch_is_announced_once() -> None:
+    async with temporary_schema() as schema:
+        store = PostgresStore(schema.pool, dsn=url())
+        me, one, _, running = await seeded(store)
+        heard: list[str] = []
+        listener = await asyncpg.connect(url())
+        await listener.add_listener("robinauts_turns", lambda *args: heard.append(args[-1]))
+        try:
+            batch = [StoredEvent(n, DOCUMENT | {"position": n}, EXPIRY) for n in (1, 2, 3)]
+            await store.append_events(me.id, one.id, running.id, batch, NOW, fence=FENCE)
+            await asyncio.sleep(0.3)
+        finally:
+            await listener.close()
+        assert heard == [f"{running.id} 3"]
         await store.close()

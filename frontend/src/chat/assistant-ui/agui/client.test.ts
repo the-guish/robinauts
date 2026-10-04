@@ -7,6 +7,8 @@ import { refusal } from "../../../test/api";
 import { event, streamed, streamHeaders, writable } from "../../../test/stream";
 import {
   attach,
+  backoff,
+  reconnectNow,
   RETRIES,
   startNewConversation,
   startTurn,
@@ -460,8 +462,8 @@ test("an ending is read whatever its id says", async () => {
 });
 
 test("the budget is spent on connections that do not deliver, not on time", async () => {
-  // A run answering for an hour over a flaky link reconnects more than four
-  // times; what is bounded is tries since the last event that arrived.
+  // A run answering for an hour over a flaky link reconnects more than
+  // `RETRIES` times; what is bounded is tries since the last event that arrived.
   let at = 0;
   const fetch = vi.fn<typeof globalThis.fetch>(() => {
     at += 1;
@@ -486,9 +488,9 @@ test("the budget is spent on connections that do not deliver, not on time", asyn
   const seen = [];
   for await (const each of attached.events) {
     seen.push(each);
-    if (seen.length === 6) break;
+    if (seen.length === RETRIES + 2) break;
   }
-  expect(seen).toHaveLength(6);
+  expect(seen).toHaveLength(RETRIES + 2);
   expect(fetch.mock.calls.length).toBeGreaterThan(RETRIES + 1);
 });
 
@@ -560,4 +562,90 @@ test("a request that never arrived is an ApiError, not a TypeError", async () =>
   );
   expect(failed).toBeInstanceOf(ApiError);
   expect((failed as ApiError).error).toBe("network_error");
+});
+
+test("the wait doubles from half a second to thirty, a quarter either way", () => {
+  expect(backoff(0, () => 0.5)).toBe(500);
+  expect(backoff(1, () => 0.5)).toBe(1000);
+  expect(backoff(5, () => 0.5)).toBe(16_000);
+  expect(backoff(6, () => 0.5)).toBe(30_000);
+  expect(backoff(40, () => 0.5)).toBe(30_000);
+  expect(backoff(0, () => 0)).toBe(375);
+  expect(backoff(0, () => 1)).toBe(625);
+});
+
+test("a stream that says nothing for too long is dropped and picked up again", async () => {
+  // A proxy that lost the connection without closing it: no byte, no end.
+  const { response } = writable({ headers: streamHeaders(RUN, CONVERSATION) });
+  const fetch = answering([
+    () => response,
+    () =>
+      streamed([finished(9)], { headers: streamHeaders(RUN, CONVERSATION) }),
+  ]);
+  const told: boolean[] = [];
+  const attached = await startNewConversation("helper", null, "x", {
+    ...at_once,
+    idleMs: 20,
+    onReconnecting: (now) => told.push(now),
+  });
+  const seen = await all(attached);
+  expect(seen.map((each) => each.event.type)).toEqual(["RUN_FINISHED"]);
+  expect(fetch).toHaveBeenCalledTimes(2);
+  // Said while it was picked up again, and taken back once it was.
+  expect(told).toEqual([true, false]);
+});
+
+test("a keep-alive is a stream that is alive", async () => {
+  const { response, write, close } = writable({
+    headers: streamHeaders(RUN, CONVERSATION),
+  });
+  const fetch = answering([() => response]);
+  const attached = await startNewConversation("helper", null, "x", {
+    ...at_once,
+    idleMs: 250,
+  });
+  const reading = all(attached);
+  // Longer, all told, than the stream may be quiet; never quiet that long.
+  for (let n = 0; n < 8; n += 1) {
+    await new Promise((done) => setTimeout(done, 50));
+    write(": keep-alive\n\n");
+  }
+  write(finished(9));
+  close();
+  expect((await reading).map((each) => each.event.type)).toEqual([
+    "RUN_FINISHED",
+  ]);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+test("reconnecting now cuts the wait short", async () => {
+  // With the clock stopped, the wait between two tries never ends by itself:
+  // only the nudge can end it.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const fetch = answering([
+      () => streamed([], { headers: streamHeaders(RUN, CONVERSATION) }),
+      () =>
+        streamed([finished(9)], {
+          headers: streamHeaders(RUN, CONVERSATION),
+        }),
+    ]);
+    let waiting = false;
+    const attached = await startNewConversation("helper", null, "x", {
+      onReconnecting: (now) => {
+        waiting = now;
+      },
+    });
+    const reading = all(attached);
+    for (let n = 0; n < 1000 && !waiting; n += 1) await Promise.resolve();
+    expect(waiting).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    reconnectNow();
+    expect((await reading).map((each) => each.event.type)).toEqual([
+      "RUN_FINISHED",
+    ]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
 });

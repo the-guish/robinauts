@@ -79,6 +79,8 @@ export interface SseBlock {
 export async function* blocks(
   body: ReadableStream<Uint8Array>,
   signal?: AbortSignal,
+  /** Told of every chunk that arrives, a keep-alive included. */
+  heard: () => void = () => undefined,
 ): AsyncGenerator<SseBlock> {
   // A caller that has already given up is not given a first block either.
   if (givenUp(signal)) throw signal?.reason;
@@ -101,6 +103,7 @@ export async function* blocks(
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      heard();
       // `stream: true`, because a chunk may end in the middle of the bytes
       // of one character and the rest of them is in the next one.
       buffer += decoder.decode(value, { stream: true });

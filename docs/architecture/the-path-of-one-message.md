@@ -172,13 +172,15 @@ the Messages API.
 ### 11. Text comes back
 
 The provider streams deltas. LangGraph yields `AIMessageChunk`s, the engine's
-`events_of` turns them into `TextDelta`s, and `run_turn` appends a `TextPiece` at the
-next position. Pieces that arrive within about 50 ms of each other should be merged
-into one event.
+`events_of` turns them into `TextDelta`s, and `run_turn` hands each to its writer as a
+`TextPiece`. The writer merges the pieces that arrive within 150 ms of the first into
+one event, and writes them, with anything else waiting, as one batch: one transaction
+and one `NOTIFY`, at the next positions. Any other event goes out at once, with the
+pieces before it.
 
-- **PostgreSQL:** an `INSERT … SELECT … FROM turns WHERE id = $turn AND state =
-  'running' AND lease_until > $now FOR SHARE OF turns`, and a `pg_notify`, for each
-  event. The lock waits on a reader ending the turn and then inserts nothing. No row
+- **PostgreSQL:** a `SELECT … FROM turns WHERE id = $turn AND state = 'running' AND
+  lease_until > $now AND worker_id = $me AND attempt = $attempt FOR SHARE OF turns`,
+  the batch's inserts, and one `pg_notify`, in one transaction for each batch. The lock waits on a reader ending the turn and then inserts nothing. No row
   inserted, or another document at that position, is `TurnLostError`, and the runner
   stops.
 - **AWS:** a conditional `PutItem` for each event, read back on a failed condition for

@@ -15,6 +15,7 @@ AG-UI over SSE, its run id is the turn's id, and its thread id the session's.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -70,6 +71,14 @@ from robinauts.web.sign_in import (
 )
 
 DEFAULT_PAGE = 30
+
+KEEP_ALIVE_SECONDS = 15.0
+"""How long a stream stays silent before it sends a keep-alive comment."""
+
+FIRST_EVENT_SECONDS = 1.0
+"""How long a stream waits for its first event before it sends its headers anyway: a
+refusal comes from the first read, which is at once, and a turn that is quiet for minutes
+must not leave a load balancer with a request that has not answered."""
 
 STATUS_OF: dict[type[ControllerError], int] = {
     InvalidValueError: 422,
@@ -353,7 +362,7 @@ def event_stream(
     session_id: uuid.UUID, turn_id: uuid.UUID, events: AsyncIterator[NumberedEvent]
 ) -> StreamingResponse:
     return StreamingResponse(
-        agui.stream(str(session_id), str(turn_id), events),
+        agui.kept_alive(agui.stream(str(session_id), str(turn_id), events), KEEP_ALIVE_SECONDS),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-store",
@@ -473,13 +482,22 @@ def create_app(
     ) -> StreamingResponse:
         events = controller.watch_turn(user, session_id, turn_id, after=after)
         # The refusals happen inside the generator: ask for the first event here, so that
-        # they answer with a status rather than a broken stream.
-        first = await anext(events, None)
+        # they answer with a status rather than a broken stream. A turn with nothing new to
+        # say is answered with its headers all the same, and its first event follows.
+        first = asyncio.ensure_future(anext(events, None))
+        await asyncio.wait({first}, timeout=FIRST_EVENT_SECONDS)
+        if first.done():
+            first.result()
 
         async def chained() -> AsyncIterator[NumberedEvent]:
-            if first is None:
+            try:
+                head = await first
+            finally:
+                if not first.done():
+                    first.cancel()
+            if head is None:
                 return
-            yield first
+            yield head
             async for event in events:
                 yield event
 

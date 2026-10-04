@@ -153,6 +153,11 @@ export interface ChatState {
    */
   notice: string | null;
   /**
+   * The stream of the run dropped and is being picked up again: what the
+   * Reconnect button is shown by. The run itself is not affected.
+   */
+  reconnecting: boolean;
+  /**
    * The thread as it was before the turn on its way changed it.
    *
    * A turn the server refuses is one that never happened, so what it did to
@@ -175,6 +180,7 @@ export const EMPTY: ChatState = {
   thinking: null,
   ended: null,
   notice: null,
+  reconnecting: false,
   before: null,
 };
 
@@ -351,6 +357,8 @@ export function turnStart(state: ChatState, messageId: string): string | null {
 export type ChatAction =
   /** An empty chat: nothing opened, nothing being read. */
   | { kind: "cleared" }
+  /** The run's stream dropped and is being picked up again, or is back. */
+  | { kind: "reconnecting"; now: boolean }
   /** That conversation is being read. */
   | { kind: "opening"; conversationId: string }
   /** It was read: this is what the server says it is. */
@@ -499,6 +507,10 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
       };
     case "told":
       return { ...state, notice: action.detail };
+    case "reconnecting":
+      return state.reconnecting === action.now
+        ? state
+        : { ...state, reconnecting: action.now };
     case "event":
       return applied(state, action.event);
     case "lost":

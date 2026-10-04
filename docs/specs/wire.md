@@ -136,6 +136,19 @@ documented here, which is what "documented with the API" means for them.
   sentence** — never the turn's stored error, which is written for an
   operator.
 
+**Streams through a load balancer.** A stream that has had nothing to say
+for fifteen seconds sends a comment line (`: keep-alive`), so that nothing in
+front of the deployment closes a quiet stream. A stream answers with its
+headers within a second whether or not the turn has anything new to say: a
+refusal is still a status, since it comes from the first read, and a turn
+quiet for minutes does not leave a request unanswered. The client re-attaches
+with `Last-Event-ID` when a stream drops before the turn is over, backing off
+from half a second to thirty with jitter, at once when the browser comes back
+online or the tab becomes visible, and when the person presses Reconnect; a
+stream that has sent no byte for 45 seconds is taken for dead and re-attached.
+A turn's text arrives in fewer, larger pieces than the model streamed: the
+runner merges what arrives within about 150 ms.
+
 **Not yet served.** The wire is the happy path today
 ([working-notes/echo-e2e-plan.md](../working-notes/echo-e2e-plan.md)); these
 hold as the rule and are not enforced yet:
@@ -147,8 +160,6 @@ hold as the rule and are not enforced yet:
   is not there and one in somebody else's conversation answer the same 404,
   and **before the stream begins**: a refusal is a status.
 - `Last-Event-ID` and `after` saying two different things is refused (422).
-- A comment line (`: keep-alive`) goes out while nothing is arriving, so
-  that nothing in front of the deployment closes a quiet stream.
 - **Every stream ends with an event saying the turn is over.** Re-attaching
   at or past the last position of a turn that has ended is answered with
   **how that turn really ended**, read from its record. A position a turn

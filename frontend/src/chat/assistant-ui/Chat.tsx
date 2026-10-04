@@ -18,6 +18,8 @@
  *   ended before it said anything, a cancellation, a turn the server refused
  *   (`docs/specs/wire.md`). Where there **is** a message, the Thread shows it
  *   under that message itself and this says nothing.
+ * - **A stream being picked up again**, with a button that tries at once
+ *   rather than at the end of the client's wait (`./agui/client.ts`).
  * - **A notice about what the person just did**, which is a different thing
  *   and outlives the run that follows it: a message that was not sent, a
  *   stop that did not reach the server. Only their next turn clears it.
@@ -31,6 +33,7 @@ import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { createContext, useContext, type ReactNode } from "react";
 
 import type { ChatProps } from "../index";
+import { reconnectNow } from "./agui/client";
 import { useChat } from "./runtime";
 import { ToolCall } from "./ToolCall";
 import { Thread } from "./vendor/components/assistant-ui/elements/thread.aui";
@@ -80,6 +83,22 @@ export function Chat(props: Readonly<ChatProps>) {
             <Thread components={COMPONENTS} />
           </WelcomeSlot.Provider>
         </div>
+        {state.reconnecting && (
+          <p
+            role="status"
+            data-reconnecting=""
+            className="mx-auto w-full max-w-3xl px-6 pb-4 text-sm text-muted-foreground"
+          >
+            The connection to this answer dropped; picking it up again.{" "}
+            <button
+              type="button"
+              className="underline underline-offset-2"
+              onClick={reconnectNow}
+            >
+              Reconnect now
+            </button>
+          </p>
+        )}
         {state.ended !== null && (
           <p
             role="status"

@@ -137,7 +137,7 @@ async def test_two_turns_of_one_session_number_their_events_from_one_each() -> N
     await settled(controller, user, again)
     for turn in (started.turn_id, again.turn_id):
         stored = await controller._store.events_after(user.id, started.session_id, turn, 0)
-        assert [p for p, _ in stored] == list(range(1, 10))
+        assert [p for p, _ in stored] == list(range(1, 9))
     await controller.close()
 
 

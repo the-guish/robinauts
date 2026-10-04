@@ -88,8 +88,9 @@ async def test_the_turn_stores_its_events_and_the_answer() -> None:
     assert turn.state is TurnState.FINISHED
     stored = await controller._store.events_after(user.id, sid, turn.id, 0)
     numbered = [event_from_document(d) for _, d in stored]
-    assert [n.position for n in numbered] == list(range(1, 10))
+    assert [n.position for n in numbered] == list(range(1, 9))
     events = [n.event for n in numbered]
+    # The echo's two pieces of text, a moment apart, are written as one.
     assert [type(e) for e in events] == [
         MessageStarted,
         CallStarted,
@@ -97,10 +98,12 @@ async def test_the_turn_stores_its_events_and_the_answer() -> None:
         CallCompleted,
         ResultLanded,
         TextPiece,
-        TextPiece,
         MessageCompleted,
         TurnEnded,
     ]
+    said = events[5]
+    assert isinstance(said, TextPiece)
+    assert said.text == "The tool said: hello"
     assert events[-1] == TurnEnded(TurnState.FINISHED)
     completed = events[-2]
     assert isinstance(completed, MessageCompleted)

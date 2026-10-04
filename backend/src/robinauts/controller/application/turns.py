@@ -68,6 +68,10 @@ from robinauts.controller.ports.store import Fence, Store, StoredEvent
 RETENTION = timedelta(hours=24)
 """How long a turn's events are kept after they are written, a constant for now."""
 
+FLUSH_SECONDS = 0.15
+"""How long a delta waits for the ones after it, so that they are written and announced
+together."""
+
 DEADLINE_MARGIN = 10.0
 """With less than this many seconds left before its deadline, the runner does not claim the
 turn."""
@@ -80,59 +84,131 @@ DEADLINE_PASSED = "deadline passed"
 
 
 class _Writer:
-    """The turn's events, numbered and written one at a time."""
+    """The turn's events, numbered and written in batches.
+
+    A delta (a piece of text, of reasoning or of a call's arguments) waits up to
+    ``FLUSH_SECONDS``, merged with the deltas before it of the same message, and goes out
+    with the next batch: one write and one announcement for many pieces. Any other event
+    goes out at once, with the deltas before it. A batch that failed in the background is
+    raised at the next append; the finish writes what is left whatever happened to it.
+    """
 
     def __init__(self, store: Store, owner: uuid.UUID, turn: Turn) -> None:
         self._store = store
         self._owner = owner
         self._turn = turn
         self._fence = Fence(turn.worker_id or "", turn.attempt)
+        self._pending: list[TurnEvent] = []
+        self._lock = asyncio.Lock()
+        self._timer: asyncio.Task[None] | None = None
+        self._failed: BaseException | None = None
         self.position = 0
 
     async def append(self, event: TurnEvent) -> None:
-        self.position += 1
+        self._raise_failure()
+        if isinstance(event, DELTAS):
+            _merged(self._pending, event)
+            if self._timer is None:
+                self._timer = asyncio.create_task(self._flush_later())
+            return
+        self._pending.append(event)
+        async with self._lock:
+            self._stop_timer()
+            events, self._pending = self._pending, []
+            await self._write(events)
+
+    async def _flush_later(self) -> None:
+        await asyncio.sleep(FLUSH_SECONDS)
+        # Before the lock, with no wait between: an append or a finish that finds no timer
+        # takes the deltas itself.
+        self._timer = None
+        try:
+            async with self._lock:
+                events, self._pending = self._pending, []
+                if events:
+                    await self._write(events)
+        except Exception as failed:
+            self._failed = failed
+
+    async def _write(self, events: list[TurnEvent]) -> None:
         now = datetime.now(UTC)
-        await self._store.append_event(
+        await self._store.append_events(
             self._owner,
             self._turn.session_id,
             self._turn.id,
-            self.position,
-            event_to_document(self._turn.id, self.position, event),
+            self._numbered(events, now),
             now,
-            now + RETENTION,
             fence=self._fence,
         )
 
-    def last(self, *events: TurnEvent) -> list[StoredEvent]:
-        """The events a finish writes, numbered after the ones appended."""
+    def _numbered(self, events: Sequence[TurnEvent], now: datetime) -> list[StoredEvent]:
         stored = []
-        now = datetime.now(UTC)
         for event in events:
             self.position += 1
             document = event_to_document(self._turn.id, self.position, event)
             stored.append(StoredEvent(self.position, document, now + RETENTION))
         return stored
 
+    def _stop_timer(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+
+    def _raise_failure(self) -> None:
+        if self._failed is not None:
+            failed, self._failed = self._failed, None
+            raise failed
+
+    def close(self) -> None:
+        """Drop what is still waiting: the turn is not this runner's any more."""
+        self._stop_timer()
+        self._pending = []
+
     async def finish(
         self,
         state: TurnState,
         error: str | None,
         answer: Message | None,
-        events: Sequence[StoredEvent],
+        *last: TurnEvent,
     ) -> None:
-        now = datetime.now(UTC)
-        await self._store.finish_turn(
-            self._owner,
-            self._turn.session_id,
-            self._turn.id,
-            state,
-            now,
-            error,
-            None if answer is None else stored_message(answer),
-            events,
-            now,
-            fence=self._fence,
-        )
+        """The answer, with the deltas still waiting and ``last`` as the last events."""
+        async with self._lock:
+            self._stop_timer()
+            # The end is the record that matters: a batch lost before it is not a reason to
+            # lose it too.
+            self._failed = None
+            events, self._pending = [*self._pending, *last], []
+            now = datetime.now(UTC)
+            await self._store.finish_turn(
+                self._owner,
+                self._turn.session_id,
+                self._turn.id,
+                state,
+                now,
+                error,
+                None if answer is None else stored_message(answer),
+                self._numbered(events, now),
+                now,
+                fence=self._fence,
+            )
+
+
+DELTAS = (TextPiece, ReasoningPiece, ArgumentsPiece)
+"""The events that arrive in many pieces, and are merged and written in batches."""
+
+
+def _merged(pending: list[TurnEvent], event: TextPiece | ReasoningPiece | ArgumentsPiece) -> None:
+    """A delta, onto the one before it when that is of the same kind and the same message, or
+    the same call."""
+    before = pending[-1] if pending else None
+    if isinstance(event, ArgumentsPiece):
+        if isinstance(before, ArgumentsPiece) and before.call_id == event.call_id:
+            pending[-1] = ArgumentsPiece(event.message_id, event.call_id, before.text + event.text)
+            return
+    elif type(before) is type(event) and before.message_id == event.message_id:
+        pending[-1] = type(event)(event.message_id, before.text + event.text)
+        return
+    pending.append(event)
 
 
 def _with_text(parts: list[MessagePart], text: str) -> None:
@@ -229,14 +305,20 @@ async def run_turn(
                         checkpoint_id=event.checkpoint_id,
                         turn_id=turn.id,
                     )
-                    last = writer.last(MessageCompleted(answer_id), TurnEnded(TurnState.FINISHED))
                     # Once the engine has handed the answer over, a cancellation must not
                     # lose it: the finish runs to its end whatever happens to this task.
                     finishing = asyncio.ensure_future(
-                        writer.finish(TurnState.FINISHED, None, answer, last)
+                        writer.finish(
+                            TurnState.FINISHED,
+                            None,
+                            answer,
+                            MessageCompleted(answer_id),
+                            TurnEnded(TurnState.FINISHED),
+                        )
                     )
                     await asyncio.shield(finishing)
     except LOST_WRITES:
+        writer.close()
         return
     except asyncio.CancelledError as exc:
         if finishing is not None:
@@ -249,6 +331,7 @@ async def run_turn(
             await _end(writer, TurnState.INTERRUPTED, None, failed())
         elif LOST not in exc.args:
             await _end(writer, TurnState.CANCELLED, None)
+        writer.close()
         raise
     except Exception as exc:
         # What it streamed before it failed is kept, as an answer marked failed: the
@@ -262,6 +345,6 @@ async def _end(
 ) -> None:
     """End a turn, with what it answered if anything; nothing more if the turn is lost."""
     try:
-        await writer.finish(state, error, answer, writer.last(TurnEnded(state)))
+        await writer.finish(state, error, answer, TurnEnded(state))
     except LOST_WRITES:
         return

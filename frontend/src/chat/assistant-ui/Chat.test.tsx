@@ -8,7 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { useEffect, type ReactNode } from "react";
-import { expect, expectTypeOf, test, vi } from "vitest";
+import { beforeEach, expect, expectTypeOf, test, vi } from "vitest";
 
 import { json, refusal, type Call } from "../../test/api";
 import type { Conversation } from "../../conversation/conversation";
@@ -29,6 +29,12 @@ import {
   type ConversationId,
   type ModelId,
 } from "../index";
+
+import { FIRST_BACKOFF_MS, RECONNECT } from "./agui/client";
+
+beforeEach(() => {
+  RECONNECT.firstMs = FIRST_BACKOFF_MS;
+});
 
 const RUN = "11111111-2222-4333-8444-555555555555";
 const CONVERSATION = id(1);
@@ -524,4 +530,56 @@ test("the welcome is not remounted by what is typed beside it", async () => {
   // Re-rendered, perhaps; remounted, no -- a `<select>` that is remounted
   // loses the focus, and the box beside it re-renders on every keystroke.
   expect(mounts).toBe(1);
+});
+
+test("a stream that dropped says so, and Reconnect now tries at once", async () => {
+  // The first stream drops before the run says it is over; the client waits
+  // before it tries again, and the button cuts that wait short.
+  const watched: Call[] = [];
+  stub((call) => {
+    if (call.url === "/api/turns") {
+      return streamed(
+        [
+          event(
+            "TEXT_MESSAGE_START",
+            { messageId: "m2", role: "assistant" },
+            2,
+          ),
+        ],
+        { headers: streamHeaders(RUN, CONVERSATION) },
+      );
+    }
+    if (call.url.endsWith("/events")) {
+      watched.push(call);
+      return streamed(
+        [
+          event(
+            "TEXT_MESSAGE_CONTENT",
+            { messageId: "m2", delta: "Because it is quiet then." },
+            3,
+          ),
+          event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 4),
+        ],
+        { headers: streamHeaders(RUN, CONVERSATION) },
+      );
+    }
+    if (call.url === `/api/conversations/${CONVERSATION}`) {
+      return json(opened(conversation(1), TREE));
+    }
+    return undefined;
+  });
+  // Long enough that only the button ends the wait.
+  RECONNECT.firstMs = 60_000;
+  draw();
+  await settle();
+  await send("Why do robins sing before dawn?");
+  const button = await screen.findByRole("button", { name: "Reconnect now" });
+  fireEvent.click(button);
+  await waitFor(() => {
+    expect(screen.getByText("Because it is quiet then.")).toBeInTheDocument();
+  });
+  expect(watched).toHaveLength(1);
+  expect(
+    screen.queryByRole("button", { name: "Reconnect now" }),
+  ).not.toBeInTheDocument();
 });

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright The Robinauts Authors
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 
 import { json, refusal, type Call } from "../../test/api";
 import {
@@ -40,6 +40,14 @@ import {
   type ChatMessage,
   type ChatState,
 } from "./state";
+
+import { RECONNECT } from "./agui/client";
+
+// A dropped stream is picked up again after a moment, not the half second a
+// person waits: these tests drive whole chats through dropped streams.
+beforeEach(() => {
+  RECONNECT.firstMs = 10;
+});
 
 const RUN = "11111111-2222-4333-8444-555555555555";
 const CONVERSATION = id(1);

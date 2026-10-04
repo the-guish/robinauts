@@ -384,6 +384,11 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     return conversationId === ours && state.conversationId === conversationId;
   }
 
+  /** What the client says while a dropped stream is picked up again. */
+  function onReconnecting(now: boolean): void {
+    dispatch({ kind: "reconnecting", now });
+  }
+
   /** Stop watching, and forget the conversation this chat began. */
   function stop(): void {
     ours = null;
@@ -443,7 +448,10 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     if (runId !== null && resume !== null) {
       void follow(
         (watched) =>
-          attach(conversationId, runId, resume.after, { signal: watched }),
+          attach(conversationId, runId, resume.after, {
+            signal: watched,
+            onReconnecting,
+          }),
         {
           watch: true,
           afterLoss,
@@ -607,7 +615,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
           startTurn(
             conversationId,
             { ...asked, modelId: props.modelId },
-            { signal },
+            { signal, onReconnecting },
           ),
         { text },
       );
@@ -625,6 +633,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
         // turn runs on the conversation's, which the server reads.
         const attached = await startNewConversation(agentId, modelId, text, {
           signal,
+          onReconnecting,
         });
         // **Only if this page is still the empty chat.** Somebody who opened
         // another conversation while the request was in the air is not to be
@@ -680,7 +689,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
         startTurn(
           conversationId,
           { text, edit: edited, modelId: props.modelId },
-          { signal },
+          { signal, onReconnecting },
         ),
       { text, editing: edited },
     );
@@ -721,7 +730,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
       startTurn(
         conversationId,
         retry ? { retry: regenerate, modelId } : { regenerate, modelId },
-        { signal },
+        { signal, onReconnecting },
       ),
     );
   }

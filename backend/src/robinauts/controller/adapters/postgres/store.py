@@ -69,15 +69,20 @@ _TURN_COLUMNS = (
 
 _VISIBLE = "SELECT 1 FROM sessions WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL"
 
-_APPEND = """
-INSERT INTO turn_events (turn_id, position, document, expires_at)
-SELECT t.id, $4, $5, $6
+_HELD = """
+SELECT 1
 FROM turns AS t
 JOIN sessions AS s ON s.id = t.session_id
 WHERE t.id = $3 AND t.session_id = $2 AND s.owner_id = $1 AND s.deleted_at IS NULL
-  AND t.state = 'running' AND t.lease_until > $7 AND t.worker_id = $8 AND t.attempt = $9
+  AND t.state = 'running' AND t.lease_until > $4 AND t.worker_id = $5 AND t.attempt = $6
 FOR SHARE OF t
 """
+"""The turn, running and held under the fence: locked against an end until the append
+commits."""
+
+_INSERT_EVENT = (
+    "INSERT INTO turn_events (turn_id, position, document, expires_at) VALUES ($1, $2, $3, $4)"
+)
 
 _HEARTBEAT = """
 UPDATE turns AS t
@@ -327,55 +332,66 @@ class PostgresStore(Store, WorkQueue):
                 raise TurnActiveError(str(turn.session_id)) from violated
             raise
 
-    async def append_event(
+    async def append_events(
         self,
         owner: uuid.UUID,
         session: uuid.UUID,
         turn: uuid.UUID,
-        position: int,
-        document: Document,
+        events: Sequence[StoredEvent],
         written_at: datetime,
-        expires_at: datetime,
         *,
         fence: Fence,
     ) -> None:
+        if not events:
+            return
         try:
             async with self._pool.acquire() as connection, connection.transaction():
-                status = await connection.execute(
-                    _APPEND,
-                    owner,
-                    session,
-                    turn,
-                    position,
-                    document,
-                    expires_at,
-                    written_at,
-                    fence.worker,
-                    fence.attempt,
+                held = await connection.fetchval(
+                    _HELD, owner, session, turn, written_at, fence.worker, fence.attempt
                 )
-                if _rows(status) == 0:
+                if held is None:
                     raise TurnLostError(f"turn {turn} is not running")
-                await connection.execute("SELECT pg_notify($1, $2)", CHANNEL, f"{turn} {position}")
+                await connection.executemany(
+                    _INSERT_EVENT,
+                    [(turn, e.position, e.document, e.expires_at) for e in events],
+                )
+                # One announcement for the batch, however many events it holds.
+                last = events[-1].position
+                await connection.execute("SELECT pg_notify($1, $2)", CHANNEL, f"{turn} {last}")
         except asyncpg.UniqueViolationError as violated:
             if violated.constraint_name != POSITION_TAKEN:
                 raise
-            # After the rollback: the same document is the runner's own write, acknowledged
+            # After the rollback: the same documents are the runner's own write, acknowledged
             # late; another is a second runner.
-            held = await self._pool.fetchval(
-                "SELECT e.document FROM turn_events AS e"
+            rows = await self._pool.fetch(
+                "SELECT e.position, e.document FROM turn_events AS e"
                 " JOIN turns AS t ON t.id = e.turn_id"
                 " JOIN sessions AS s ON s.id = t.session_id"
-                " WHERE e.turn_id = $3 AND e.position = $4 AND t.session_id = $2"
-                "   AND s.owner_id = $1",
+                " WHERE e.turn_id = $3 AND e.position = ANY($4::integer[])"
+                "   AND t.session_id = $2 AND s.owner_id = $1",
                 owner,
                 session,
                 turn,
-                position,
+                [e.position for e in events],
             )
-            if held != document:
+            stored = {row["position"]: row["document"] for row in rows}
+            if any(stored.get(e.position) != e.document for e in events):
                 raise TurnLostError(
-                    f"position {position} of turn {turn} holds another event"
+                    f"positions {events[0].position}-{events[-1].position} of turn {turn}"
+                    " hold other events"
                 ) from violated
+
+    async def last_position(self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID) -> int:
+        async with self._pool.acquire() as connection:
+            await self._visible(connection, owner, session)
+            found = await connection.fetchval(
+                "SELECT max(e.position) FROM turn_events AS e"
+                " JOIN turns AS t ON t.id = e.turn_id"
+                " WHERE t.id = $2 AND t.session_id = $1",
+                session,
+                turn,
+            )
+        return found or 0
 
     async def events_after(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, position: int
