@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import uuid
 from collections.abc import Sequence
 from contextlib import aclosing
@@ -65,6 +66,8 @@ from robinauts.controller.core.transcript import with_text
 from robinauts.controller.ports.dispatcher import StopReason
 from robinauts.controller.ports.store import Store, StoredEvent
 from robinauts.controller.ports.work import Fence
+
+log = logging.getLogger(__name__)
 
 RETENTION = timedelta(hours=24)
 """How long a turn's events are kept after they are written, a constant for now."""
@@ -256,7 +259,9 @@ async def run_turn(
         # The claim: alone, so that a runner refused writes nothing and runs no engine.
         await writer.append(MessageStarted(answer_id, parent_id=question.id))
     except TurnLostError:
+        log.warning("the turn is held elsewhere: this runner writes nothing")
         return
+    log.info("turn running, attempt %d, on %s", fence.attempt, turn.model)
     finishing: asyncio.Future[None] | None = None
 
     def failed() -> Message:
@@ -331,7 +336,9 @@ async def run_turn(
                         writer.finish(TurnState.FINISHED, None, answer, last)
                     )
                     await asyncio.shield(finishing)
+                    log.info("turn finished")
     except TurnLostError:
+        log.warning("the turn was lost: ended elsewhere, or its lease passed")
         return
     except asyncio.CancelledError as exc:
         if finishing is not None:
@@ -339,12 +346,16 @@ async def run_turn(
             if not finishing.cancelled():
                 finishing.exception()
         elif StopReason.CLOSE in exc.args:
+            log.info("turn interrupted: this process is stopping")
             await _end(writer, TurnState.INTERRUPTED, PROCESS_STOPPED, failed())
         elif StopReason.LOST not in exc.args:
+            log.info("turn cancelled")
             await _end(writer, TurnState.CANCELLED, None)
         raise
     except Exception as exc:
-        await _end(writer, TurnState.FAILED, clean_text(str(exc)), failed())
+        error = clean_text(str(exc))
+        log.warning("turn failed: %s: %s", type(exc).__name__, error)
+        await _end(writer, TurnState.FAILED, error, failed())
     finally:
         await writer.close()
 

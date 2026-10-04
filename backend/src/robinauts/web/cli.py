@@ -44,9 +44,12 @@ from robinauts.controller.composition import (
     load,
     read_tables,
     storage_from,
+    worker_from,
 )
 from robinauts.controller.contract.domain import Config, ConfigError
 from robinauts.web.app import create_app
+from robinauts.web.logs import FORMAT_VARIABLE, FORMATS
+from robinauts.web.logs import configure as configure_logging
 from robinauts.web.sign_in import SIGN_IN_KEYS, SignInConfig, is_loopback, parse_sign_in
 
 REPO = Path(__file__).resolve().parents[4]
@@ -155,8 +158,13 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     except ConfigError as refused:
         print(refused, file=sys.stderr)
         return 1
-    composed = compose(config, storage=storage_from(os.environ), secret_for=secret_for)
-    logging.basicConfig(level=logging.INFO)
+    form = os.environ.get(FORMAT_VARIABLE) or "text"
+    if form not in FORMATS:
+        print(f"{FORMAT_VARIABLE} is {form!r}, not one of {', '.join(FORMATS)}", file=sys.stderr)
+        return 1
+    pod = worker_from(os.environ)
+    composed = compose(config, storage=storage_from(os.environ), secret_for=secret_for, worker=pod)
+    configure_logging(pod, form)
     if dev_no_sign_in:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
     app = create_app(
@@ -168,7 +176,12 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         operations=composed.operations,
     )
     config = uvicorn.Config(
-        app, host=host, port=port, timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS
+        app,
+        host=host,
+        port=port,
+        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
+        # The process's own handler, which every line goes through: `configure_logging`.
+        log_config=None,
     )
     DrainingServer(config, app.state.drain).run()
     return 0

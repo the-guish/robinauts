@@ -18,6 +18,7 @@ from robinauts.controller.application.engines import build_engines
 from robinauts.controller.application.housekeeping import Housekeeper
 from robinauts.controller.application.turns import RETENTION, run_turn
 from robinauts.controller.application.work import WorkLoop
+from robinauts.controller.contract import logs
 from robinauts.controller.contract.domain import (
     ActiveTurn,
     AgentListing,
@@ -470,7 +471,7 @@ class RobinautsController(Controller, Operations):
                 position, event_to_document(turn.id, position, ended), now + RETENTION
             )
             try:
-                return await self._store.end_expired_turn(
+                ended = await self._store.end_expired_turn(
                     owner,
                     session.id,
                     turn.id,
@@ -482,6 +483,14 @@ class RobinautsController(Controller, Operations):
                 )
             except TurnLostError:
                 continue
+            if ended is not None:
+                with logs.about(session=session.id, turn=turn.id):
+                    log.warning(
+                        "turn ended %s: its lease, held by %s, had passed",
+                        state.value,
+                        turn.worker_id,
+                    )
+            return ended
         return None
 
     async def _end_if_running(self, owner: uuid.UUID, turn: Turn, state: TurnState) -> None:
@@ -545,6 +554,12 @@ class RobinautsController(Controller, Operations):
     ) -> None:
         """Run the turn's attempt, from its ids alone: what a worker in another process would
         call. A turn this process does not hold under that attempt is not run."""
+        with logs.about(session=session_id, turn=turn_id):
+            await self._run_turn(owner, session_id, turn_id, attempt)
+
+    async def _run_turn(
+        self, owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID, attempt: int
+    ) -> None:
         session = await self._store.get_session(owner, session_id)
         turn = await self._store.get_turn(owner, session_id, turn_id)
         if turn is None or (turn.worker_id, turn.attempt) != (self._worker, attempt):

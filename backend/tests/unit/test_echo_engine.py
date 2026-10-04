@@ -24,6 +24,7 @@ from robinauts.agent_engines.contract.domain import (
     ToolResult,
 )
 from robinauts.agent_engines.contract.ports import AgentEngine
+from robinauts.agent_engines.echo_engine import engine as echo_engine_module
 from robinauts.agent_engines.echo_engine.engine import ANSWER, POISONED, TOOL, EchoEngine
 
 AGENT = AgentDefinition(system_prompt="")
@@ -151,3 +152,21 @@ async def test_fork_carries_the_checkpoints_up_to_the_one_asked_and_forget_drops
 class TestEchoEngineMemory(EngineMemoryContract):
     async def new_engine(self) -> AgentEngine:
         return EchoEngine()
+
+
+@asyncio_test
+async def test_a_slow_prompt_answers_a_word_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(echo_engine_module, "SLOW_PAUSE", 0.01)
+    engine = EchoEngine()
+    session = uuid.uuid4()
+    await engine.create(session)
+    events = [
+        e
+        async for e in engine.stream(
+            session, AGENT, "slowly a b", model="m", checkpoint_id=None, timeout_seconds=1.0
+        )
+    ]
+    texts = [e.text for e in events if isinstance(e, TextDelta)]
+    assert texts == ["The tool said: ", "slowly ", "a ", "b"]
+    assert isinstance(events[-1], Done)
+    assert events[-1].text == "The tool said: slowly a b"

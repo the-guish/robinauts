@@ -4,8 +4,12 @@ What an internal platform team deploys and controls.
 
 ## Deployment
 
-- One backend process, which also serves the frontend; one PostgreSQL.
-  Nothing else (goal 6).
+- One or more identical backend processes, each of which serves the
+  frontend and runs turns; one PostgreSQL. Nothing else (goal 6). Any
+  process serves any conversation: a turn's stream, its Stop and its
+  conversation's delete work whichever process a request lands on, and no
+  load balancer affinity is needed ([deployment.md](../deployment.md),
+  "Several processes, and Kubernetes").
 - Installed from one Python wheel. A container image is planned.
 - PostgreSQL is always required. A documented one-command local Postgres
   covers development and demos.

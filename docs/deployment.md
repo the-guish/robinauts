@@ -329,6 +329,9 @@ Four kinds of variable, and three of them are secrets. Put them in
     ROBINAUTS_OKTA_SECRET=...
     ROBINAUTS_ANTHROPIC_KEY=...
 
+`ROBINAUTS_LOG_FORMAT` is `text`, one line per entry (the default), or
+`json`, one object per line, for a log collector.
+
 `ROBINAUTS_WORKER_ID` names the process as the holder of the turns it runs,
 which every write of a turn's runner names; it is not a secret. Left out it is
 `<host name>:<pid>`, which is unique on one machine; where processes come and
@@ -658,8 +661,77 @@ without:
   proxy in front is the rate limit until per-client limits arrive.
 - **Migrations.** As above.
 - **Usage reporting**, token budgets, audit export, retention and purge.
-- **Several backend processes.** One process, one machine.
 - **A container image**, an SBOM and signed releases.
+
+## 11. Several processes, and Kubernetes
+
+Any number of identical processes may serve one deployment, behind a load
+balancer, against the one database: every one serves the web and runs
+turns, and none holds anything the others need. A turn runs in the process
+that took its request; its stream, its Stop and its conversation's delete
+work through whichever process a request lands on, and a process that dies
+or is stopped leaves every conversation usable.
+
+- **The same wheel, configuration and environment everywhere**, but for
+  `ROBINAUTS_WORKER_ID`, which names each process as the holder of its
+  turns: on Kubernetes, the pod's name.
+- **`robinauts db init` runs once, as a Job before the rollout**, never in
+  every pod. Until the first release a change of schema is a stop-all
+  rollout (`strategy: Recreate`) and a new database; any other is a rolling
+  update with `maxUnavailable: 0`.
+- **Probes on the one port.** `readinessProbe` on `/ready`, which is 503
+  while the process stops or the database or its own connections are away;
+  `livenessProbe` on `/health`, which reads nothing.
+- **Stopping.** A `preStop` hook of `sleep 5` lets the pod leave the
+  Service's endpoints before `SIGTERM`; then the drain (§10) takes at most
+  `[work] drain_seconds` (30) and about 20 s more. Set
+  `terminationGracePeriodSeconds: 60`.
+- **Connections.** `N × (pool_max + 2) + 2` below the server's
+  `max_connections` (§4, "Connections").
+- **The load balancer** keeps no affinity (none is needed), passes `Host`
+  and `Origin` through untouched (the `Origin` of every write is compared
+  with `public_url`), does not buffer `text/event-stream`, and allows a
+  minute of silence on a connection: a stream says something every 15 s.
+- **A process that dies** leaves its turns running until their lease
+  passes (`[work] lease_seconds`, 90 s). The first reader to find one, or
+  the next sweep of any process (every five minutes), ends it as
+  interrupted, with what it had written kept as a failed answer; Retry
+  starts it over.
+- **Logs.** `ROBINAUTS_LOG_FORMAT=json` writes one JSON object per line,
+  with `pod`, and `session_id` and `turn_id` where a line is about a
+  conversation or a turn; the default is one line of text with the same.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: robinauts
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate          # Recreate when schema.sql changed
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector: {matchLabels: {app: robinauts}}
+  template:
+    metadata: {labels: {app: robinauts}}
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: robinauts
+          image: registry.example.com/robinauts:0.1.0   # the wheel, installed
+          args: ["robinauts", "start", "--host", "0.0.0.0", "--port", "8000"]
+          ports: [{containerPort: 8000}]
+          envFrom: [{secretRef: {name: robinauts-environment}}]
+          env:
+            - name: ROBINAUTS_WORKER_ID
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: ROBINAUTS_LOG_FORMAT
+              value: json
+          readinessProbe: {httpGet: {path: /ready, port: 8000}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /health, port: 8000}, periodSeconds: 10}
+          lifecycle:
+            preStop: {exec: {command: ["sleep", "5"]}}
+```
 
 ## The local development mode
 

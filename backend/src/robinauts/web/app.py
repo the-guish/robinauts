@@ -22,7 +22,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Header, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -30,6 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from robinauts.controller.composition import SecretLookup
+from robinauts.controller.contract import logs
 from robinauts.controller.contract.domain import (
     ApiToken,
     BusyError,
@@ -357,6 +358,32 @@ def ended_badly_view(turn: Turn | None) -> EndedBadlyView | None:
     return EndedBadlyView(run_id=turn.id, state=turn.state.value, ended_at=turn.ended_at)
 
 
+class About:
+    """Plain ASGI, so a stream goes through untouched: a request about a conversation, or one
+    of its turns, says so in every line logged while it is answered."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        ids = scope["path"].split("/")
+        conversation = ids[3] if ids[1:3] == ["api", "conversations"] and len(ids) > 3 else None
+        run = ids[5] if conversation is not None and len(ids) > 5 and ids[4] == "runs" else None
+        with logs.about(session=_uuid_or_none(conversation), turn=_uuid_or_none(run)):
+            await self.app(scope, receive, send)
+
+
+def _uuid_or_none(value: str | None) -> uuid.UUID | None:
+    """A uuid from a path, or ``None``: what a log line names is never a request's raw text."""
+    try:
+        return None if value is None else uuid.UUID(value)
+    except ValueError:
+        return None
+
+
 def event_stream(
     session_id: uuid.UUID,
     turn_id: uuid.UUID,
@@ -475,6 +502,8 @@ def create_app(
         dependencies=[Depends(same_origin)],
     )
     app.state.drain = drain
+
+    app.add_middleware(About)
 
     @app.exception_handler(Refused)
     async def not_let_in(request: Request, exc: Refused) -> JSONResponse:
@@ -737,7 +766,14 @@ def create_app(
         last_event_id: Annotated[str | None, Header()] = None,
         user: User = asking,
     ) -> StreamingResponse:
-        position = after if after is not None else int(last_event_id or 0)
+        if after is not None:
+            position = after
+        elif not last_event_id:
+            position = 0
+        elif last_event_id.isdigit():
+            position = int(last_event_id)
+        else:
+            raise InvalidValueError("Last-Event-ID is a position this deployment wrote, or none")
         return await watched(user, conversation_id, run_id, position)
 
     @app.post(

@@ -180,3 +180,15 @@ async def test_a_stop_of_a_run_that_has_ended_is_not_found() -> None:
         stopped = await http.post(f"/api/conversations/{cid}/runs/{rid}/cancel")
         assert stopped.status_code == 404
         assert stopped.json()["error"] == "NoActiveTurnError"
+
+
+@asyncio_test
+async def test_a_last_event_id_that_is_not_a_position_is_refused() -> None:
+    async with client() as http:
+        started = await http.post("/api/turns", json={"agent_id": "echo", "text": "hello"})
+        cid = started.headers["x-robinauts-conversation-id"]
+        rid = started.headers["x-robinauts-run-id"]
+        refused = await http.get(
+            f"/api/conversations/{cid}/runs/{rid}/events", headers={"last-event-id": '"}'}
+        )
+        assert refused.status_code == 422

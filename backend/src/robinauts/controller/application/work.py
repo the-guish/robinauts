@@ -22,6 +22,7 @@ import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
+from robinauts.controller.contract import logs
 from robinauts.controller.ports.dispatcher import StopReason, TurnDispatcher
 from robinauts.controller.ports.work import WorkQueue
 
@@ -74,7 +75,8 @@ class WorkLoop:
         still = set(self._dispatcher.held())
         for turn in renewed.lost([h for h in held if h in still]):
             if await self._dispatcher.stop(turn, StopReason.LOST):
-                log.warning("turn %s is no longer this process's: its lease was not renewed", turn)
+                with logs.about(turn=turn):
+                    log.warning("the turn is no longer this process's: its lease was not renewed")
         for turn, asked in renewed.turns.items():
             if asked is not None:
                 self._cancel(turn)

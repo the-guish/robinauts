@@ -9,12 +9,18 @@ that continues from no checkpoint, ``call-3`` on one that continues from the sec
 A prompt that starts with ``poison`` ends its turn badly instead: the tool returns an error and
 the engine raises, as a real engine does when a tool keeps failing.
 
+A prompt that starts with ``slowly`` answers its words one at a time, a second apart, after
+the tool's result: a turn that is long enough to watch, stop, or lose a process in the middle
+of, as the tests of several processes and a demo need.
+
 It keeps the contract's memory and nothing else: which sessions exist and which
 checkpoints each holds, in this process. No turn reads an earlier one.
 """
 
 from __future__ import annotations
 
+import asyncio
+import re
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -38,6 +44,9 @@ TOOL = "echo"
 ANSWER = "The tool said: "
 POISON = "poison"
 POISONED = "the message is poisoned"
+SLOWLY = "slowly"
+SLOW_PAUSE = 1.0
+"""Seconds between two words of a slow answer."""
 
 
 def echo(text: str) -> str:
@@ -96,7 +105,12 @@ class EchoEngine(AgentEngine):
         result = echo(prompt)
         yield ToolResult(call_id=call_id, name=TOOL, output=result)
         yield TextDelta(text=ANSWER)
-        yield TextDelta(text=result)
+        if prompt.startswith(SLOWLY):
+            for word in re.split(r"(?<=\s)", result):
+                await asyncio.sleep(SLOW_PAUSE)
+                yield TextDelta(text=word)
+        else:
+            yield TextDelta(text=result)
         new = str(uuid.uuid4())
         checkpoints.append(new)
         self._remembers[new] = remembered + 1
