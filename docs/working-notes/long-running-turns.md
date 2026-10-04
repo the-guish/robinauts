@@ -60,10 +60,88 @@ are:
   polls the HTTP API for work is not worth it here: higher cost, no gain while the
   workers can reach the database (§6).
 
-Rough size: Phases 0–3 of the roadmap, about **4–6 developer-weeks**, take 1–3 hour
-turns from "fragile" to "survive deploys, crashes and scale-downs, with a queue".
-Full scope with visibility, Pydantic AI parity and a role split is about
-**8–12 weeks** (§10).
+Rough size, after the review: Phases 0–3 of the roadmap, about **5–8
+developer-weeks**, take 1–3 hour turns from "fragile" to "survive deploys, crashes
+and scale-downs, with a queue". Phases 0–7 are about **9–13 weeks**, and external
+jobs add 2–3 (§10). The owner's decisions are recorded just below.
+
+## Decisions taken (2026-10-04)
+
+After a review by three agents (operations, agent engines, product and security),
+the owner decided:
+
+| # | Decision | Choice | What it changes |
+|---|---|---|---|
+| D1 | Where long turns run | **Kubernetes, N identical pods**, each web + worker | §5 applies in full. The role split (§6, option C) stays optional, for later |
+| D2 | Capacity | **Two groups.** *Live* work: about **10 running turns per user**, served first. *Background* work: **unlimited**, waits in the queue and runs on the capacity live work leaves | §4.2–4.3 below: a per-user live cap, a background group with no cap and a guaranteed share so it never starves, and no global queue position shown |
+| D3 | What makes work "background" | **Chosen per conversation when it starts**, in the UI and by a parameter of the API (`mode: live \| background` on `POST /api/turns`) | `sessions.mode`. A conversation's turns, callbacks included, belong to its group |
+| D4 | A message sent while a turn runs | **Queued behind it** | One *running* turn per conversation, any number queued in order. The queued question enters the message tree when its turn is claimed, under the branch tip. This is also what callbacks (§7.4) need |
+| D5 | Schema migrations | **At the first release** | Until then every phase that changes the schema (most do) is rolled out by recreating the database. "Survives deploys" therefore holds only for deploys that leave the schema alone, which is fine while nobody depends on the data. Migrations, +3–5 days, come before the release. Resuming a turn across builds also needs a rule: fingerprint each turn's graph configuration, and restart rather than resume when it changed |
+
+No preference was expressed on **tool safety**, so the recommended default
+stands: a tool call in flight at a crash, or one made by a callback turn with
+nobody watching, runs again only if the tool is read-only or idempotent, by MCP
+hints with a per-server operator override. Any other call reports "outcome
+unknown" to the model (§3.4, option 2). MCP's default `idempotentHint=false`
+makes this conservative for most servers.
+
+Defaults taken where the reviewers agreed, to revisit if they prove wrong:
+
+- **LangGraph leads.** Pydantic AI gets resume in Phase 4, with its native cancel
+  capture, P1 and P2 shipped together, and a `supports_resume` flag in the
+  contract suite. The second engine keeps the seam honest; it is not held to
+  parity in every phase.
+- **External jobs** use `call_me_back` and a callback turn (§7). The suspended
+  turn is an opt-in for later.
+- **Context policy:** clear old tool results at about 60% of the window, then
+  summarise at about 85%. The prompt cache TTL is set per agent, 1 h for long
+  agents. ADR 0005 needs an amendment, because LangChain's summarisation does not
+  always keep the question being answered.
+- **Budgets** (time, model calls, cost) are kept by the controller, because
+  middleware counters reset on resume. They ship in Phase 0 together with raising
+  `request_limit`, which is today's only spend cap. At the cap, the agent makes one
+  last call without tools to wrap up, then the UI offers "Continue".
+- **Notifications** stay in-app: badge, tab title, and the browser's Notification
+  API while a tab is open. No Web Push, whose relays would break "nothing phones
+  home". Email or Slack come with the "more channels" roadmap item. Notifications
+  never show answer text.
+- **Operator visibility:** `/metrics` on a separate port or behind a token, and a
+  `robinauts turns list|cancel` CLI. A metadata-only admin view comes with roles.
+
+### Corrections from the review, folded in below
+
+- **Engines.** `StepCommitted` comes from the saver's `aput`, not from the
+  `updates` stream, which fires before the writes are stored. The Pydantic AI
+  snapshot after a tool step must include the pending request that holds the tool
+  returns. The fresh-turn path pins its start checkpoint; today
+  `checkpoint_id=None` means "the thread's latest", which after a failed first
+  turn is partial state. Pydantic AI's default of one retry ends a turn on the
+  second error from a tool (`tool_error_behavior`); that is fixed in Phase 0. The
+  built-ins (`call_me_back`, `job_status`) are served by an in-process platform MCP
+  server, and the poller needs an MCP client of its own, because `ToolResult` drops
+  `structuredContent`.
+- **Operations.**
+  - `attempt` (fencing, +1 on every claim) is kept apart from `crashes` (+1 only
+    when an *expired* lease is re-claimed). A voluntary release on deploy then never
+    uses up `max_crashes`.
+  - Re-claims get jitter and a rate limit, so a fleet restart does not resume every
+    turn at once and draw 429s from the vendor.
+  - The heartbeat and the claim use their own connection, never the shared pool.
+  - The drain starts on `SIGTERM`, or on a `preStop` call to `/drain`, and closes
+    the SSE streams early with a reconnect hint. Uvicorn's wait for open
+    connections would otherwise use up the grace period.
+  - "More uvicorn workers per pod" does not work: `cli.py` passes an app object, so
+    scale with pods.
+  - Advisory locks are transaction-level (`pg_try_advisory_xact_lock`), so they
+    still work behind PgBouncer.
+  - Lambda's 15-minute cap rules the serverless layout out for long turns.
+- **Product and security.** Callback results are untrusted tool output, so they
+  reach the model as a delimited platform message, never as user text. The
+  per-user cap is enforced exactly, by one claimer at a time (§4.2). A soft delete
+  cancels a conversation's waits and jobs, and a purge removes their results. The
+  platform's own actions (polls, `cancel_tool`, callback turns) are recorded in the
+  audit log. A resume leaves a visible "resumed after a restart" marker rather
+  than silently removing text the person saw.
 
 ---
 
@@ -130,7 +208,7 @@ If nothing was kept, run again from the checkpoint.* The controller has to:
    events up to the last step boundary. Emit a `TurnResumed{attempt, rewind_to}`
    event so watchers drop partial text written after that boundary. Then continue
    numbering after the last stored position.
-5. **Bound** retries: `max_attempts`, say 3, then `interrupted`, as the store's
+5. **Bound** retries: `max_crashes`, say 3, then `interrupted`, as the store's
    `end_expired_turn` already ends an expired turn. This stops a poison turn (one
    that crashes the process every time) from cycling through the fleet.
 
@@ -201,14 +279,22 @@ else:   # fresh, or a resume with nothing kept: run again from the checkpoint
   (`langgraph/channels/delta.py`). It would need the saver to implement
   `get_delta_channel_history`, and its on-disk contract "is not yet stable".
   Pruning is the safer choice now. Revisit it when it leaves beta.
-- Emit `StepCommitted` from the `updates` stream mode. Each update is one finished
-  node, and with `sync` durability its checkpoint is already stored.
+- Emit `StepCommitted` from the saver's `aput`, once the step's checkpoint is
+  stored. Not from the `updates` stream: an update fires as each task's writes
+  land, and `aput_writes` is not awaited at that point.
+- Pin the fresh path's start checkpoint (today `checkpoint_id=None` resumes from the
+  thread's latest, partial state after a failed first turn). Fingerprint the
+  turn's graph configuration (model, tools, middleware), and restart rather than
+  resume when a deploy changed it (D5).
+- Before resuming, settle the in-flight tool calls by the tool-safety rule:
+  `aupdate_state(as_node="tools")` writes an "outcome unknown" `ToolMessage` for
+  each call that must not be repeated.
 - Turn on the middleware ADR 0005 promised: `SummarizationMiddleware` or
   `ContextEditingMiddleware` (B5) and `ModelRetryMiddleware` (B4). All of them are
   in the locked `langchain` (`langchain/agents/middleware/`). Under resume the
   summary is part of the checkpointed state, so it is not produced again.
 
-Estimated effort: **4–6 days** including a kill-the-process test (start a turn on
+Estimated effort: **7–10 days** (revised by the review) including a kill-the-process test (start a turn on
 the echo or stand-in provider, `SIGKILL` mid-tool, resume, assert the tool calls
 and the final transcript).
 
@@ -222,11 +308,17 @@ Verified in pydantic-ai-slim 2.47 (`pydantic_ai/_agent_graph.py:649-700`):
 - Where `h` ends in a `ModelRequest`, for example tool returns, it is **re-sent to
   the model** ("resuming without prompt").
 - A response cut off mid-stream (`state == 'interrupted'`) has its dangling tool
-  calls repaired with synthesised returns.
+  calls repaired with synthesised returns, but only when a new prompt is given.
+  Under `iter(None)` the cut-off calls run.
+- On cancel, Pydantic AI 2.47 keeps the returns of finished calls and fills in
+  "interrupted" returns for the rest (`_agent_graph.py:2345-2364`). That is the
+  native capture P2 builds on.
 
 **P1 — snapshot per node (recommended first step, about 3–4 days).** After each
 `ModelRequestNode` and each `CallToolsNode` finishes (the engine already iterates
-nodes in `run_of`), upsert `run.all_messages()` under one *in-progress* row per
+nodes in `run_of`), upsert `run.all_messages()`, plus the next node's pending
+`request` after a tool step, because the tool returns join the history only when
+the next model request runs, under one *in-progress* row per
 turn, `pydantic_ai_progress(session_id, turn_id, history, step)`, and emit
 `StepCommitted`. On resume, load it and call `iter(None, message_history=…)`. On
 `Done`, write the normal checkpoint and delete the progress row. A step whose tool
@@ -341,7 +433,8 @@ ALTER TABLE turns
   ADD COLUMN queued_at   timestamptz,
   ADD COLUMN claimed_at  timestamptz,
   ADD COLUMN worker_id   text,          -- which process holds it: visibility and fencing
-  ADD COLUMN attempt     integer NOT NULL DEFAULT 0,
+  ADD COLUMN attempt     integer NOT NULL DEFAULT 0,  -- +1 on every claim: fencing
+  ADD COLUMN crashes     integer NOT NULL DEFAULT 0,  -- +1 only when an expired lease is re-claimed
   ADD COLUMN deadline_at timestamptz,   -- the turn's own limit (B1), apart from the lease
   ADD COLUMN heartbeat_at timestamptz,
   ALTER COLUMN lease_until DROP NOT NULL;  -- a queued turn holds no lease yet
@@ -361,7 +454,7 @@ stateDiagram-v2
     running --> failed: engine error
     running --> cancelled: cancel_requested_at seen
     running --> running: lease expired or released, then re-claimed (attempt + 1, resume=True)
-    running --> interrupted: lease expired, no attempts left
+    running --> interrupted: lease expired, crash budget spent
     finished --> [*]
     failed --> [*]
     cancelled --> [*]
@@ -376,7 +469,7 @@ person's 50 batch turns cannot starve everyone.
 WITH next AS (
   SELECT t.id FROM turns t JOIN sessions s ON s.id = t.session_id
   WHERE (t.state = 'queued'
-         OR (t.state = 'running' AND t.lease_until < $now AND t.attempt < $max_attempts))
+         OR (t.state = 'running' AND t.lease_until < $now AND t.crashes < $max_crashes))
     AND s.deleted_at IS NULL
     AND (SELECT count(*) FROM turns r JOIN sessions rs ON rs.id = r.session_id
          WHERE r.state = 'running' AND rs.owner_id = s.owner_id) < $per_user
@@ -390,8 +483,53 @@ RETURNING t.id, t.session_id, t.attempt;   -- attempt > 1  ⇒  resume=True
 ```
 
 The same query covers the queue and crash recovery: an expired `running` turn is
-re-claimed, which is the resume path of §3. The per-user subquery is the simple
-version. A `user_running` counter or a window function scales better.
+re-claimed, which is the resume path of §3.
+
+**Revised after the review, with D2–D4.** The query above does not enforce the
+per-user cap. Its count runs before the update, a single batch can take several
+turns of one user, and two replicas race because `SKIP LOCKED` locks turns, not
+users. It also predates the two groups and queue-behind. The claim becomes:
+
+```sql
+-- One claimer at a time, fleet-wide: caps are exact, and a claim takes milliseconds.
+-- false means another replica is claiming: try again at the next tick.
+SELECT pg_try_advisory_xact_lock(<claim key>);
+WITH live AS (           -- live turns each user runs now
+  SELECT s.owner_id, count(*) AS n FROM turns r JOIN sessions s ON s.id = r.session_id
+  WHERE r.state = 'running' AND r.lease_until >= $now AND s.mode = 'live'
+  GROUP BY s.owner_id),
+ready AS (               -- per conversation: its expired turn, or else its oldest queued one,
+  SELECT DISTINCT ON (t.session_id)   -- and only if nothing in it runs (D4)
+         t.id, t.queued_at, s.owner_id, s.mode
+  FROM turns t JOIN sessions s ON s.id = t.session_id
+  WHERE s.deleted_at IS NULL
+    AND (t.state = 'queued' OR (t.state = 'running' AND t.lease_until < $now))
+    AND NOT EXISTS (SELECT 1 FROM turns x WHERE x.session_id = t.session_id
+                    AND x.state = 'running' AND x.lease_until >= $now)
+  ORDER BY t.session_id, t.queued_at),
+ranked AS (
+  SELECT r.*, row_number() OVER (PARTITION BY r.owner_id, r.mode ORDER BY r.queued_at) AS k
+  FROM ready r)
+SELECT ranked.id FROM ranked LEFT JOIN live USING (owner_id)
+WHERE ranked.mode = 'background' OR ranked.k <= $live_cap - coalesce(live.n, 0)
+ORDER BY (ranked.mode = 'background'), ranked.queued_at   -- live first (D2)
+LIMIT $capacity;
+-- then, in the same transaction:
+-- UPDATE turns SET state = 'running', worker_id = $me, attempt = attempt + 1,
+--        crashes = crashes + (state = 'running')::int, lease_until = $now + $lease ...
+-- WHERE id = ANY($claimed);
+```
+
+- **Background never starves.** A replica keeps a share of its slots, about 20%,
+  for background turns whenever they wait, however much live work there is.
+- **Queue-behind (D4).** A message sent while a turn runs creates a `queued` turn
+  holding the question's text. The message enters the tree when the turn is
+  claimed, under the branch tip, which is usually the answer that just finished.
+  So `turns_one_active_per_session` (above) is not added after all.
+  `turns_one_running_per_session` stays, and the claim's `NOT EXISTS` keeps the
+  order within a conversation.
+- `sessions.mode` (D3): `text NOT NULL DEFAULT 'live' CHECK (mode IN ('live',
+  'background'))`, set when the conversation is created.
 
 **Wake-ups.** `start_turn` does `NOTIFY robinauts_queue` in its transaction. A
 finishing turn does the same, because capacity just freed. Claimers also poll
@@ -447,19 +585,24 @@ holds its whole message list in memory, plus a serialised copy during each
 checkpoint write. A 2 h turn with 50 tool results of about 20 KB each is roughly
 5–10 MB live. A thousand of those is 5–10 GB, and every step also serialises the
 state on the single event-loop thread. Expect a comfortable 100–300 long turns per
-process. Scale out with replicas, or with more uvicorn workers per pod, which is
-the same thing once the queue exists. The load test listed in the README's
+process. Scale out with pods. More uvicorn workers per pod is not an option as
+the server is started today, because `cli.py` passes an app object, which uvicorn
+refuses to run with `workers`. The load test listed in the README's
 "Planned" section is the place to pin this down.
 
 ### 4.4 "…waiting…" in the UI
 
 - **Backend (B14).** Answer the POST at once. Send headers, `RUN_STARTED` and an
   AG-UI `CUSTOM` event such as `{name: "robinauts.turn_state", value: {state:
-  "queued", position: 7}}`, repeated when the position changes, and `: keep-alive`
+  "queued", reason: "live_cap" | "busy" | "background"}}`, and `: keep-alive`
   comments every 15 s. The watcher loop already wakes every 15 s (`WAIT_SECONDS`).
-  `MessageStarted` then marks the end of the wait.
+  `MessageStarted` then marks the end of the wait. The review advised the reason
+  rather than a global position: a position reveals how busy the deployment is,
+  jumps under caps and priorities, and costs a recount for every waiter at every
+  claim.
 - **Frontend.** Decode the event (`events.ts:176` drops unknown types today), add
-  `queued` to `ChatState`, and render "…waiting… (7 ahead)" in the status slot of
+  `queued` to `ChatState`, and render "…waiting… (you have 10 tasks running)" or "…waiting… (the system is busy)"
+  in the status slot of
   `Chat.tsx:83-100`. Stop works because `runId` is known. Treat a POST that fails
   with a network error or 5xx as *unknown*, not *refused*, and re-read the
   conversation before taking the question off the screen.
@@ -495,7 +638,7 @@ says several "may run". The table below is what stands between the two.
 | Cancel and delete of a turn on another replica | Needs work | 409 today (`controller.py:193-201, 320-321`). Use `cancel_requested_at` + `NOTIFY`, as in §4.2 |
 | Lease renewal | Needs work | The heartbeat of §4.2. After a `SIGKILL`, a turn stays `running` for timeout + 1 min, blocking the conversation |
 | Turn placement | Needs work | Turns run where the POST landed. There is no balancing of work and no limit (§4) |
-| Sweep (`turn_events`, expired `user_sessions` and `api_tokens`, hidden sessions whose purge died, expired leases) | **Blocker for long-running use** | `sweep()` is not implemented. Expired leases end only when someone reads that session. Implement it, in every replica, under `pg_try_advisory_lock` so the work is not duplicated. Correctness does not need the lock, since the deletes are idempotent |
+| Sweep (`turn_events`, expired `user_sessions` and `api_tokens`, hidden sessions whose purge died, expired leases) | **Blocker for long-running use** | `sweep()` is not implemented. Expired leases end only when someone reads that session. Implement it, in every replica, under `pg_try_advisory_xact_lock` so the work is not duplicated. Correctness does not need the lock, since the deletes are idempotent |
 | Connection budget | Needs work | Per replica: pool 2–10, fixed and not configurable (`pool.py:26-27`), plus 1 `LISTEN` connection. So 11 × N at peak: about N ≤ 8 replicas on the default `max_connections=100`. `pool.acquire` has no timeout. Make sizes configurable, and add an acquire timeout |
 | PgBouncer in transaction mode | Needs work | `LISTEN` through it gets no notifications. Watchers then fall back to the 15 s re-check, so streams stutter. asyncpg's named prepared statements need PgBouncer ≥ 1.21 with `max_prepared_statements`, or `statement_cache_size=0`. Give the listener its own direct URL |
 | Readiness | Needs work | `/health` is a constant (`app.py:709-712`). Add `/ready`: database ping, listener up, not draining. Add a `preStop` sleep so the pod leaves the endpoints before uvicorn closes |
@@ -522,8 +665,10 @@ instead.
 With a pull queue, *new* work goes to whoever has capacity. Running turns are
 moved only at **step boundaries**, by the same mechanism as crash recovery:
 
-- **Scale-down or deploy (`SIGTERM`).** Mark the process draining: readiness
-  answers 503, and the claim loop stops. Give running turns the grace window to
+- **Scale-down or deploy (`SIGTERM`).** Start the drain at once, on `SIGTERM` or a
+  `preStop` call to `/drain`, not in the lifespan shutdown, which runs only after
+  uvicorn has waited for the open streams. Readiness answers 503, the claim loop
+  stops, and the SSE streams close early with a reconnect hint. Give running turns the grace window to
   reach their next step boundary (LangGraph: `RunControl.request_drain()`, §3.2;
   Pydantic AI: stop iterating after the next node's snapshot). Then **release**
   them instead of interrupting them:
@@ -698,8 +843,10 @@ CREATE TABLE job_wait_members (wait_id uuid REFERENCES job_waits, job_id uuid RE
 ### 7.4 The callback turn
 
 - **Its message** is a platform-authored *notification*, a new message kind in
-  the transcript. The UI shows it as a card, and the model receives it as user
-  text built by `core` (like `prompt_after_failures` today), for example:
+  the transcript. The UI shows it as a card. The model receives it as a clearly
+  delimited **platform message**, never as user text, because job results are
+  untrusted tool output (`docs/specs/wire.md:70`). It is built by `core`, like
+  `prompt_after_failures` today, for example:
   "Callback (all ended): job 1 succeeded: <result>; job 2 failed: <error>". Or:
   "Callback (60 min limit reached): job 1 succeeded: <result>; job 2 still
   running, 60 min elapsed, id …". At the limit the agent decides: report, or call
@@ -711,10 +858,17 @@ CREATE TABLE job_wait_members (wait_id uuid REFERENCES job_waits, job_id uuid RE
   wait fires, the callback waits behind it. So the turn index changes again: one
   *running* turn per conversation, with the queued ones kept in order. The claim
   takes a conversation's oldest queued turn only when none of its turns runs.
-  Callback turns go before brand-new conversations' turns, so work already
-  started finishes first.
-- **Engines need nothing new.** For them a callback is an ordinary turn with a
-  prompt, on the same checkpoint chain.
+  A callback belongs to its conversation's group (D2, D3). In a live conversation
+  it counts toward the owner's live cap. It never outranks people who are present.
+- **Engines need little that is new.** For them a callback is an ordinary turn
+  with a prompt, on the same checkpoint chain. The built-in tools need an
+  in-process platform MCP server, because `AgentDefinition` names MCP servers
+  only. The poller needs an MCP client of its own, because `ToolResult` drops
+  `structuredContent`. That is about +2–3 days.
+- **Deletes and audit.** A soft delete cancels the conversation's waits and jobs,
+  so nothing keeps polling through the trash period. The purge removes their
+  results. Polls, cancels and callback turns are the platform's own actions, and
+  are recorded in the audit log.
 
 ### 7.5 The alternative: suspend the same turn
 
@@ -774,7 +928,8 @@ What an operator needs:
 
 - **Structured logs with `turn_id`, `session_id`, `worker_id` and `attempt`** on
   every runner and engine line.
-- **Metrics.** A `/metrics` endpoint that is *pulled*, so nothing phones home:
+- **Metrics.** A `/metrics` endpoint that is *pulled*, so nothing phones home,
+  served on a separate port or behind a token, never openly on the public origin:
   queue depth and age of the oldest queued turn, running turns per worker,
   admission state (memory %, loop lag, refusals), claims, resumes, lease losses,
   turn duration by outcome, event-write latency, `NOTIFY` rate, provider
@@ -813,19 +968,21 @@ included. It is rough, for ordering, not for commitments.
 
 | Phase | Content | Effort |
 |---|---|---|
-| **0. Quick wins** | Split `timeout_seconds` (per vendor call) from an agent-level `max_turn_seconds` (B1). Vendor retries or `ModelRetryMiddleware` (B4). Pydantic `UsageLimits` and LangGraph `recursion_limit` from config (B3). Summarisation or context editing in both engines (B5). SSE keep-alive (B10). Coalesce deltas over about 100–250 ms in `_Writer` (B8). `open_session` counts with `max(position)` (B9). Configurable pool size and acquire timeout. Refuse to start without a database URL in sign-in mode (§5.2) | 4–6 |
-| **1. Leases and cancel through the store** | Heartbeat tick per process, short lease, `deadline_at`, `worker_id` and `attempt` fencing (B2). Cancel and delete via `cancel_requested_at` + `NOTIFY` (B11). Frontend: 409 on cancel no longer shown as "did not arrive" | 4–6 |
-| **2. Queue and admission** | `queued` state, claim loop with `SKIP LOCKED`, wake-ups, admission signals and limits, per-user fairness. Web answers the POST at once with a `queued` event (B14). Frontend "…waiting…", patient reconnect and watchdog. Drain on `SIGTERM`, with a readiness probe | 8–12 |
-| **3. Resume (LangGraph) and release on shutdown** | `durability="sync"`, turn-tagged checkpoints, the resume path, `StepCommitted` and `TurnResumed` events, transcript rewind, `max_attempts`, release leases on drain. Saver index, transactional writes, pruning (B13). Kill tests | 6–9 |
-| **4. Resume (Pydantic AI)** | P1 snapshots and P2 per-call journal (§3.3) | 5–7 |
-| **5. Visibility** | `progress` and partial snapshot (B9), history badges, notifications, structured logs, `/metrics`, running-turns admin view | 6–10 |
+| **0. Quick wins** | Split `timeout_seconds` (per vendor call) from an agent-level `max_turn_seconds` (B1). Vendor retries or `ModelRetryMiddleware` (B4). Pydantic `UsageLimits` and LangGraph `recursion_limit` from config (B3). Summarisation or context editing in both engines (B5). SSE keep-alive (B10). Coalesce deltas over about 100–250 ms in `_Writer` (B8). `open_session` counts with `max(position)` (B9). Configurable pool size and acquire timeout. Refuse to start without a database URL in sign-in mode (§5.2). Controller budgets (time, calls, cost) with the wrap-up call. Pydantic AI `tool_error_behavior` | 5–7 |
+| **1. Leases and cancel through the store** | Heartbeat tick per process, short lease, `deadline_at`, `worker_id` and `attempt` fencing (B2). Cancel and delete via `cancel_requested_at` + `NOTIFY` (B11). Frontend: 409 on cancel no longer shown as "did not arrive". Heartbeat and claim on their own connection | 4–6 |
+| **2. Queue and admission** | `queued` state, claim loop with `SKIP LOCKED`, wake-ups, admission signals and limits, per-user fairness. Web answers the POST at once with a `queued` event (B14). Frontend "…waiting…", patient reconnect and watchdog. Drain on `SIGTERM`, with a readiness probe. `sessions.mode` live and background with a per-user live cap of about 10 and a background share (D2, D3). Queue-behind with questions entering the tree at claim (D4). Exact caps through one claimer at a time | 10–14 |
+| **3. Resume (LangGraph) and release on shutdown** | `durability="sync"`, turn-tagged checkpoints, the resume path, `StepCommitted` and `TurnResumed` events, transcript rewind, `max_crashes`, release leases on drain. Saver index, transactional writes, pruning (B13). `StepCommitted` from `aput`, pinned start, config fingerprint, hint-gated in-flight calls, `crashes` apart from `attempt`, re-claim jitter, the "resumed" marker. Kill tests | 8–12 |
+| **4. Resume (Pydantic AI)** | P1 snapshots (with the pending request), native cancel capture and P2, shipped together. A `supports_resume` flag in the contract suite (§3.3) | 6–8 |
+| **5. Visibility** | `progress` and partial snapshot (B9), history badges, notifications, structured logs, `/metrics` on a separate port or behind a token, `robinauts turns list\|cancel` CLI. A metadata-only admin view later, with roles | 6–10 |
 | **6. Role split** | `--role web\|worker\|all`, worker-only `/health` and `/metrics`, deployment docs with two Deployments and queue-depth autoscaling. Reconcile the deployment docs for several processes (§5.2) | 2–4 |
-| **7. Housekeeping** | `sweep()`: retention of `turn_events`, expired sign-in rows, purge of hidden sessions, checkpoint pruning, under `pg_try_advisory_lock` so one replica runs it (B12). Load test behind a load balancer (README "Planned") | 4–6 |
-| **8. External jobs** | Submit, poll and call back (§7): `tool_jobs`, `job_waits`, the poller in the claim loop, transactional fire, callback turns and notification messages, the `call_me_back` and `job_status` built-ins, the UI card, panel and badge. Then MCP tasks | 8–12 (+3–5) |
+| **7. Housekeeping** | `sweep()`: retention of `turn_events`, expired sign-in rows, purge of hidden sessions, checkpoint pruning, under `pg_try_advisory_xact_lock` so one replica runs it (B12). Load test behind a load balancer (README "Planned") | 4–6 |
+| **8. External jobs** | Submit, poll and call back (§7): `tool_jobs`, `job_waits`, the poller in the claim loop, transactional fire, callback turns and notification messages, the `call_me_back` and `job_status` built-ins on an in-process platform MCP server, the poller's own MCP client, a delimited platform message, cancel on soft delete, the audit log, the UI card, panel and badge. Then MCP tasks | 10–15 (+3–5) |
+| **M. Migrations** | Numbered expand/contract SQL migrations under the existing advisory lock, before the first release (D5) | 3–5 |
 
-Phases 0–3 ≈ **22–33 days** (about 4–6 weeks): long turns survive crashes,
-deploys and scale-downs, with a queue and limits. Phases 0–7 ≈ **39–60 days**.
-External jobs (phase 8) need Phase 2 and add 8–12 days.
+Phases 0–3 ≈ **27–39 days** (about 5–8 weeks): long turns survive crashes,
+deploys and scale-downs, with a queue and limits. Phases 0–7 ≈ **45–67 days**.
+External jobs (Phase 8) need Phase 2 and add 10–15 days. Migrations (M) come
+before the first release.
 Phases 0 and 1 are worth doing whatever is decided about the rest.
 
 ## 11. Open questions
@@ -843,13 +1000,15 @@ Phases 0 and 1 are worth doing whatever is decided about the rest.
    rate-limited one.
 5. **Memory accounting.** Pick the per-process limits from a load test, not from
    the 1000/80% example. The event loop, not RAM, may be the first limit.
-6. **Callback turn or suspended turn** for external jobs (§7.4–7.5)? The
-   callback turn keeps the conversation usable and needs nothing new from the
-   engines. Is a suspended turn needed for any agent?
-7. **The AWS layout** (`the-path-of-one-message.md`). Everything here is behind the
-   existing ports (store, dispatcher, engine storage). The claim loop is the
-   PostgreSQL dispatcher's business. A Lambda dispatcher would keep "invoke the
-   worker", with leases and resume unchanged.
+6. **Callback turn or suspended turn** for external jobs (§7.4–7.5)? Defaulted to
+   the callback turn. Is a suspended turn needed for any agent?
+7. **Retry of a long failed turn:** resume its partial work, or restart it? The
+   engine review suggests offering both, with resume as the default. That needs
+   an ADR 0005 amendment and checkpoint retention for failed turns.
+8. **The AWS layout** (`the-path-of-one-message.md`). Everything here is behind the
+   existing ports (store, dispatcher, engine storage), but Lambda's 15-minute cap
+   rules it out for long turns unless a turn is cut into Lambda-sized steps that
+   each resume from a checkpoint. Out of scope with D1.
 
 ---
 
