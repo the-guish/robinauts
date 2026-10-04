@@ -555,3 +555,27 @@ class StoreContract:
         assert [p for p, _ in stored] == [1, 2, 3]
         assert await store.last_position(me.id, one.id, running.id) == 3
         assert await store.last_position(me.id, one.id, uuid.uuid4()) == 0
+
+    # --- housekeeping -------------------------------------------------------
+
+    @store_test
+    async def test_the_sweep_deletes_expired_events_and_finds_expired_turns_and_hidden(
+        self, store: Store
+    ) -> None:
+        me, one, _, running = await self.started(store)
+        old = StoredEvent(1, piece(1).document, NOW - MINUTE)
+        await store.append_events(me.id, one.id, running.id, FENCE, [old, piece(2)], NOW)
+        deleted = await store.delete_expired(NOW, 1)
+        assert deleted is not None
+        assert deleted["turn_events"] == 1
+        assert [p for p, _ in await store.events_after(me.id, one.id, running.id, 0)] == [2]
+        assert await store.expired_turns(NOW, 10) == []
+        assert await store.expired_turns(NOW + 4 * MINUTE, 10) == [(me.id, running)]
+        await store.finish_turn(
+            me.id, one.id, running.id, FENCE, TurnState.FINISHED, NOW, None, None, [], NOW
+        )
+        assert await store.expired_turns(NOW + 4 * MINUTE, 10) == []
+        assert await store.hidden_sessions(NOW + MINUTE, 10) == []
+        await store.hide_session(me.id, one.id, NOW)
+        assert await store.hidden_sessions(NOW, 10) == []
+        assert await store.hidden_sessions(NOW + MINUTE, 10) == [one]

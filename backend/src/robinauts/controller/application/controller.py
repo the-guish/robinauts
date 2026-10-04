@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineFactory, installed
 from robinauts.controller.application.engines import build_engines
+from robinauts.controller.application.housekeeping import Housekeeper
 from robinauts.controller.application.turns import RETENTION, run_turn
 from robinauts.controller.application.work import WorkLoop
 from robinauts.controller.contract.domain import (
@@ -33,9 +34,11 @@ from robinauts.controller.contract.domain import (
     Readiness,
     Role,
     Session,
+    SessionNotFoundError,
     SessionPage,
     StorageConfig,
     StorageKind,
+    Swept,
     TextPart,
     Turn,
     TurnActiveError,
@@ -90,6 +93,16 @@ DELETE_WAIT = 10.0
 NO_POSITION = 2**31 - 1
 """A position past any event: waiting after it wakes on the turn's end alone."""
 
+SWEEP_SECONDS = 300.0
+"""How often each process sweeps."""
+
+SWEEP_BATCH = 1000
+"""What one task of a sweep takes at a time."""
+
+PURGE_AFTER = timedelta(minutes=10)
+"""How long a session stays hidden before the sweep finishes its purge: a delete purges at
+once, and one hidden for this long is one whose purge died."""
+
 FINAL_WAIT = 10.0
 """How long `close` waits for the turns it interrupted to write their end, before it leaves
 them to their leases: a database that does not answer must not hold the process."""
@@ -116,6 +129,7 @@ class RobinautsController(Controller, Operations):
         dispatcher: TurnDispatcher,
         work: WorkQueue,
         worker: str,
+        sweep_every: float = SWEEP_SECONDS,
         close_timeout: float | None = None,
         final_wait: float = FINAL_WAIT,
         cancel_wait: float = CANCEL_WAIT,
@@ -131,6 +145,7 @@ class RobinautsController(Controller, Operations):
         self._close_timeout = config.work.drain_seconds if close_timeout is None else close_timeout
         self._final_wait = final_wait
         self._draining = False
+        self._housekeeper = Housekeeper(self.sweep, every=sweep_every)
         self._cancel_wait = cancel_wait
         self._delete_wait = delete_wait
         self._now = now or (lambda: datetime.now(UTC))
@@ -163,6 +178,7 @@ class RobinautsController(Controller, Operations):
             setup=self._sets_up_engines(),
         )
         self._work_loop.start()
+        self._housekeeper.start()
 
     async def readiness(self) -> Readiness:
         problems = await self._store.readiness()
@@ -177,6 +193,7 @@ class RobinautsController(Controller, Operations):
 
     async def close(self) -> None:
         self._draining = True
+        await self._housekeeper.stop()
         # The heartbeat goes on, and cancels still arrive, while the turns this process runs
         # are given their time; those still running then end as interrupted.
         await self._dispatcher.close(self._close_timeout, self._final_wait)
@@ -611,8 +628,40 @@ class RobinautsController(Controller, Operations):
                 yield NumberedEvent(after, TurnEnded(state))
                 return
 
-    async def sweep(self) -> None:
-        raise NotImplementedError("sweep")
+    async def sweep(self) -> Swept:
+        now = self._now()
+        skipped: list[str] = []
+        deleted = await self._store.delete_expired(now, SWEEP_BATCH)
+        if deleted is None:
+            skipped.append("expired")
+        ended = 0
+        expired = await self._store.expired_turns(now, SWEEP_BATCH)
+        if expired is None:
+            skipped.append("turns")
+        for owner, turn in expired or ():
+            try:
+                if await self._interrupt(owner, turn) is not None:
+                    ended += 1
+            except SessionNotFoundError:
+                continue  # hidden meanwhile: the purge takes it
+        purged = 0
+        hidden = await self._store.hidden_sessions(now - PURGE_AFTER, SWEEP_BATCH)
+        if hidden is None:
+            skipped.append("purge")
+        for session in hidden or ():
+            await (await self._engine(session.engine)).forget(session.id)
+            await self._store.purge_session(session.owner_id, session.id)
+            purged += 1
+        counts = deleted or {}
+        return Swept(
+            events=counts.get("turn_events", 0),
+            user_sessions=counts.get("user_sessions", 0),
+            api_tokens=counts.get("api_tokens", 0),
+            pending_logins=counts.get("pending_logins", 0),
+            turns_ended=ended,
+            sessions_purged=purged,
+            skipped=tuple(skipped),
+        )
 
 
 def _encode_cursor(session: Session) -> str:

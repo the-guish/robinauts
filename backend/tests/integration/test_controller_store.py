@@ -277,3 +277,66 @@ async def test_a_pool_with_no_connection_free_in_time_is_busy_not_stuck() -> Non
             assert await store.get_session(me.id, one.id) == one
         finally:
             await store.close()
+
+
+@asyncio_test
+async def test_a_sweep_task_another_process_holds_is_left_to_it() -> None:
+    async with temporary_schema() as schema:
+        store = PostgresStore(schema.pool, dsn=schema.dsn)
+        holder = await raw(schema)
+        try:
+            holding = holder.transaction()
+            await holding.start()
+            await holder.execute(
+                "SELECT pg_advisory_xact_lock(hashtext('robinauts.sweep.expired'))"
+            )
+            assert await store.delete_expired(NOW, 10) is None
+            assert await store.expired_turns(NOW, 10) == []
+            await holding.rollback()
+            assert await store.delete_expired(NOW, 10) == {
+                "turn_events": 0,
+                "user_sessions": 0,
+                "api_tokens": 0,
+                "pending_logins": 0,
+            }
+        finally:
+            await holder.close()
+            await store.close()
+
+
+@asyncio_test
+async def test_two_processes_sweeping_at_once_delete_everything_expired_once() -> None:
+    async with temporary_schema(size=8) as schema:
+        first = PostgresStore(schema.pool, dsn=schema.dsn)
+        second = PostgresStore(schema.pool, dsn=schema.dsn)
+        me, one, _, running = await seeded(first)
+        expired = [
+            StoredEvent(n, DOCUMENT | {"position": n}, NOW - timedelta(minutes=1))
+            for n in range(1, 251)
+        ]
+        await first.append_events(me.id, one.id, running.id, FENCE, expired, NOW)
+        async with schema.pool.acquire() as connection:
+            for n in range(30):
+                await connection.execute(
+                    "INSERT INTO user_sessions (id, user_id, secret_hash, created_at, expires_at)"
+                    " VALUES ($1, $2, $3, $4, $5)",
+                    uuid.uuid4(),
+                    me.id,
+                    f"{n:064x}",
+                    NOW - timedelta(days=2),
+                    NOW - timedelta(days=1),
+                )
+        try:
+            results = await asyncio.gather(
+                *(store.delete_expired(NOW, 7) for store in (first, second, first, second))
+            )
+            done = [r for r in results if r is not None]
+            assert done
+            assert sum(r["turn_events"] for r in done) == 250
+            assert sum(r["user_sessions"] for r in done) == 30
+            async with schema.pool.acquire() as connection:
+                assert await connection.fetchval("SELECT count(*) FROM turn_events") == 0
+                assert await connection.fetchval("SELECT count(*) FROM user_sessions") == 0
+        finally:
+            await first.close()
+            await second.close()

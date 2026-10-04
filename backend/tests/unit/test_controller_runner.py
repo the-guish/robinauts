@@ -31,6 +31,7 @@ from robinauts.controller.contract.domain import (
     SessionNotFoundError,
     StorageConfig,
     StorageKind,
+    Swept,
     TextPart,
     ToolCallPart,
     ToolResultPart,
@@ -670,3 +671,36 @@ async def test_a_write_the_database_had_no_connection_for_is_tried_again() -> No
     assert turn is not None
     assert turn.state is TurnState.FINISHED
     await controller.close()
+
+
+@asyncio_test
+async def test_the_sweep_ends_expired_turns_purges_what_a_delete_left_and_deletes_events() -> None:
+    store = MemoryStore()
+    gone = await over(store, worker="pod-a")
+    gone._engines["echo"] = HangingEngine()
+    here = await over(store, worker="pod-b")
+    user = await gone.ensure_user(Identity("local", "me"))
+    started = await gone.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    while len(await store.events_after(user.id, sid, started.turn_id, 0)) < 6:
+        await store.wait_for_events(user.id, sid, started.turn_id, 0, 0.05)
+    await gone._work_loop.stop()
+    _, task = gone._dispatcher._tasks.pop(started.turn_id)
+    task.cancel(StopReason.LOST)
+    # A conversation whose delete hid it and died before the purge.
+    left = await here.start_session(user, agent="echo", model="echo", text="two")
+    await settled(here, user, left)
+    await store.hide_session(user.id, left.session_id, datetime.now(UTC))
+    assert await here.sweep() == Swept()
+    here._now = jumped(PAST_THE_LEASE)
+    swept = await here.sweep()
+    assert (swept.turns_ended, swept.sessions_purged) == (1, 1)
+    ended = await store.get_turn(user.id, sid, started.turn_id)
+    assert ended is not None
+    assert ended.state is TurnState.INTERRUPTED
+    assert message_from_document((await store.messages_of(user.id, sid))[-1]).failed
+    assert left.session_id not in store._sessions
+    here._now = jumped(timedelta(days=2))
+    assert (await here.sweep()).events == 7
+    await gone.close()
+    await here.close()

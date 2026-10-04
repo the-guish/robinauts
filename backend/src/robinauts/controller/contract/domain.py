@@ -206,6 +206,20 @@ class StorageConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class Swept:
+    """What one sweep did. A task another process was sweeping at the time is named in
+    ``skipped``, and left to it."""
+
+    events: int = 0
+    user_sessions: int = 0
+    api_tokens: int = 0
+    pending_logins: int = 0
+    turns_ended: int = 0
+    sessions_purged: int = 0
+    skipped: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class Readiness:
     """Whether this process should be sent requests, and if not, why not."""
 

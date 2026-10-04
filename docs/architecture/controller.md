@@ -55,4 +55,12 @@ signed in is web's own concern, the user session.
 
 Run by the process that holds the controller, on a schedule of its own, never by a shell.
 
-- `sweep`: delete what has expired, and forget its memory.
+- `sweep`: every process, every five minutes, the first at a random moment. It deletes the
+  turn events, user sessions, API tokens and pending logins past their expiry, a thousand at
+  a time; ends the turns whose lease has passed, storing what each had answered (as a reader
+  would); and finishes the purge of sessions hidden more than ten minutes ago, whose delete
+  died between the hide and the purge, forgetting their memory first. Each of the three is
+  taken by one process at a time, under a transaction-level advisory lock
+  (`pg_try_advisory_xact_lock`) of its own, which another process finding taken leaves the
+  task to; every task is safe to repeat, so the lock saves work and is not what keeps it
+  right.

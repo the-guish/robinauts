@@ -118,8 +118,9 @@ CREATE TABLE IF NOT EXISTS users (
 -- a purge. From the moment it is set, every read treats the session as not
 -- found and no turn may start on it. The purge then calls `forget` on the
 -- engine the row names and deletes the row, and the cascade takes its
--- messages and turns with it. Trash, in stage two, is a delay before the
--- purge, not a change of schema.
+-- messages and turns with it. A purge that died after the hide is finished
+-- by the sweep (`sessions_deleted_at_idx`). Trash, in stage two, is a delay
+-- before the purge, not a change of schema.
 --
 -- `owner_id` cascades: a user's sessions are private to them, and there is
 -- nobody else for them to belong to once the user is gone.
@@ -395,7 +396,7 @@ CREATE TABLE IF NOT EXISTS user_sessions (
 CREATE INDEX IF NOT EXISTS user_sessions_user_id_idx
     ON user_sessions (user_id);
 
--- What stage two's sweep deletes by: the sessions past their expiry.
+-- What the sweep deletes by: the sessions past their expiry.
 CREATE INDEX IF NOT EXISTS user_sessions_expires_at_idx
     ON user_sessions (expires_at);
 
@@ -424,7 +425,7 @@ CREATE TABLE IF NOT EXISTS pending_logins (
     expires_at timestamptz NOT NULL
 );
 
--- What beginning a sign-in deletes by, and stage two's sweep.
+-- What beginning a sign-in deletes by, and the sweep.
 CREATE INDEX IF NOT EXISTS pending_logins_expires_at_idx
     ON pending_logins (expires_at);
 
@@ -457,7 +458,7 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 CREATE INDEX IF NOT EXISTS api_tokens_user_id_idx
     ON api_tokens (user_id);
 
--- What stage two's sweep deletes by: the tokens past their expiry.
+-- What the sweep deletes by: the tokens past their expiry.
 CREATE INDEX IF NOT EXISTS api_tokens_expires_at_idx
     ON api_tokens (expires_at);
 

@@ -21,6 +21,7 @@ from robinauts.controller.contract.domain import (
     Readiness,
     Session,
     SessionPage,
+    Swept,
     TurnStarted,
     User,
     UserSession,
@@ -164,7 +165,11 @@ class Controller(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def sweep(self) -> None:
+    async def sweep(self) -> Swept:
+        """Delete what has expired (turn events, user sessions, API tokens, pending logins),
+        end the turns whose lease has passed, storing what each had answered, and finish
+        the purge of hidden sessions whose purge died. Run by every process on a schedule
+        of its own; each task is taken by one process at a time, and is safe to repeat."""
         raise NotImplementedError
 
 

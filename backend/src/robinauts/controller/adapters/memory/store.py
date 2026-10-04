@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import uuid
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import datetime, timedelta
 
 from robinauts.controller.contract.domain import (
@@ -304,6 +304,35 @@ class MemoryStore(Store, WorkQueue):
                 )
                 renewed[h.turn] = found.cancel_requested_at
         return Renewed(renewed)
+
+    async def delete_expired(self, now: datetime, batch: int) -> Mapping[str, int] | None:
+        """The turn events alone: sign-in's records in memory are the credentials' own."""
+        deleted = 0
+        for turn, events in self._events.items():
+            kept = [e for e in events if e.expires_at > now]
+            deleted += len(events) - len(kept)
+            self._events[turn] = kept
+        return {"turn_events": deleted}
+
+    async def expired_turns(self, now: datetime, limit: int) -> list[tuple[uuid.UUID, Turn]] | None:
+        expired = sorted(
+            (
+                t
+                for t in self._turns.values()
+                if t.state is TurnState.RUNNING
+                and t.lease_until < now
+                and t.session_id in self._sessions
+                and t.session_id not in self._hidden
+            ),
+            key=lambda t: (t.lease_until, t.id),
+        )
+        return [(self._sessions[t.session_id].owner_id, t) for t in expired[:limit]]
+
+    async def hidden_sessions(self, before: datetime, limit: int) -> list[Session] | None:
+        hidden = sorted(
+            (at, s) for s, at in self._hidden.items() if at < before and s in self._sessions
+        )
+        return [self._sessions[s] for _, s in hidden[:limit]]
 
     async def wait_for_events(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, after: int, timeout: float

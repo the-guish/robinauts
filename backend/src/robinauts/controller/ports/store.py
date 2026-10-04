@@ -207,3 +207,22 @@ class Store(ABC):
         """Wait until the turn has an event past ``after`` or has ended, or ``timeout``
         seconds have passed: true in the first two cases, false in the last. The caller reads
         the store again in every case."""
+
+    # --- housekeeping -------------------------------------------------------
+
+    @abstractmethod
+    async def delete_expired(self, now: datetime, batch: int) -> Mapping[str, int] | None:
+        """Delete, ``batch`` rows at a time, the turn events, user sessions, API tokens and
+        pending logins whose expiry has passed ``now``: how many of each, by table, or
+        ``None`` when another process is deleting them."""
+
+    @abstractmethod
+    async def expired_turns(self, now: datetime, limit: int) -> list[tuple[uuid.UUID, Turn]] | None:
+        """Up to ``limit`` running turns of visible sessions whose lease has passed ``now``,
+        oldest lease first, each with its session's owner; ``None`` when another process is
+        ending them."""
+
+    @abstractmethod
+    async def hidden_sessions(self, before: datetime, limit: int) -> list[Session] | None:
+        """Up to ``limit`` sessions hidden before ``before``, whose purge has not happened:
+        ``None`` when another process is purging them."""

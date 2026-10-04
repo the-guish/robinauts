@@ -19,7 +19,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from datetime import datetime, timedelta
 from typing import TypeVar
 
@@ -89,6 +89,24 @@ WHERE t.id = $3 AND t.session_id = $2 AND s.owner_id = $1 AND s.deleted_at IS NU
   AND t.state = 'running' AND t.lease_until > $4 AND t.worker_id = $5 AND t.attempt = $6
 FOR SHARE OF t
 """
+
+_EXPIRED = {
+    table: f"DELETE FROM {table} WHERE ({key}) IN"
+    f" (SELECT {key} FROM {table} WHERE expires_at <= $1 ORDER BY expires_at LIMIT $2)"
+    for table, key in (
+        ("turn_events", "turn_id, position"),
+        ("user_sessions", "id"),
+        ("api_tokens", "id"),
+        ("pending_logins", "state_hash"),
+    )
+}
+"""What the sweep deletes once it has expired, a batch at a time, by each table's key."""
+
+SWEEP_LOCK = "robinauts.sweep."
+"""The advisory locks of the sweep's tasks are this, and the task's name, hashed."""
+
+SWEEP_ROUNDS = 100
+"""Batches one sweep deletes of a table at most; the next sweep goes on."""
 
 _HEARTBEAT = """
 UPDATE turns AS t SET lease_until = $3, heartbeat_at = $2
@@ -598,6 +616,66 @@ class PostgresStore(Store, WorkQueue):
                     waiting.discard(woken)
                     if not waiting:
                         del self._waiters[turn]
+
+    # --- housekeeping -------------------------------------------------------
+
+    async def delete_expired(self, now: datetime, batch: int) -> Mapping[str, int] | None:
+        deleted: dict[str, int] = {}
+        for table, statement in _EXPIRED.items():
+            deleted[table] = 0
+            for _ in range(SWEEP_ROUNDS):
+                rows = await self._alone(
+                    "expired", lambda connection, q=statement: connection.execute(q, now, batch)
+                )
+                if rows is None:
+                    if not any(deleted.values()):
+                        return None
+                    return deleted
+                deleted[table] += _rows(rows)
+                if _rows(rows) < batch:
+                    break
+        return deleted
+
+    async def expired_turns(self, now: datetime, limit: int) -> list[tuple[uuid.UUID, Turn]] | None:
+        rows = await self._alone(
+            "turns",
+            lambda connection: connection.fetch(
+                f"SELECT s.owner_id, {', '.join('t.' + c for c in _TURN_COLUMNS.split(', '))}"
+                " FROM turns AS t JOIN sessions AS s ON s.id = t.session_id"
+                " WHERE t.state = 'running' AND t.lease_until < $1 AND s.deleted_at IS NULL"
+                " ORDER BY t.lease_until, t.id LIMIT $2",
+                now,
+                limit,
+            ),
+        )
+        return None if rows is None else [(row["owner_id"], _turn(row)) for row in rows]
+
+    async def hidden_sessions(self, before: datetime, limit: int) -> list[Session] | None:
+        rows = await self._alone(
+            "purge",
+            lambda connection: connection.fetch(
+                f"SELECT {_SESSION_COLUMNS} FROM sessions"
+                " WHERE deleted_at IS NOT NULL AND deleted_at < $1"
+                " ORDER BY deleted_at, id LIMIT $2",
+                before,
+                limit,
+            ),
+        )
+        return None if rows is None else [_session(row) for row in rows]
+
+    async def _alone(
+        self, task: str, work: Callable[[asyncpg.Connection], Awaitable[T]]
+    ) -> T | None:
+        """``work`` in a transaction that holds the sweep's lock on ``task``, taken without
+        waiting: ``None`` when another process holds it. Transaction-level, so that it is let
+        go with the transaction whatever happens, and holds behind a pooler too."""
+        async with self._acquire() as connection, connection.transaction():
+            alone = await connection.fetchval(
+                "SELECT pg_try_advisory_xact_lock(hashtext($1))", SWEEP_LOCK + task
+            )
+            if not alone:
+                return None
+            return await work(connection)
 
     # --- work ---------------------------------------------------------------
 
