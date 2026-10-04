@@ -12,6 +12,7 @@ from robinauts.controller.contract.domain import (
     AgentConfig,
     Config,
     ConfigError,
+    DatabaseConfig,
     ModelConfig,
     ProviderConfig,
     ProviderKind,
@@ -22,7 +23,7 @@ from robinauts.controller.contract.domain import (
 
 ENGINES = ("langchain", "pydantic-ai", "echo")
 
-TABLES = ("model_providers", "models", "tool_servers", "agents", "work")
+TABLES = ("model_providers", "models", "tool_servers", "agents", "work", "database")
 """The file's tables that are the controller's."""
 
 # An HTTP field name is a token (RFC 9110, section 5.1): nothing else can go on the wire.
@@ -67,6 +68,7 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
     tool_servers = build("tool_servers", ToolServerConfig, auth=ToolServerAuth)
     agents = build("agents", AgentConfig, tools=tuple)
     work = single("work", WorkConfig)
+    database = single("database", DatabaseConfig)
 
     for server in tool_servers.values():
         if server.auth is ToolServerAuth.HEADER:
@@ -100,7 +102,7 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
             problems.append(f"agents.{agent.id}: engine {agent.engine!r} is not one of {ENGINES}")
     if problems:
         raise ConfigError("\n".join(problems))
-    return Config(providers, models, tool_servers, agents, work)
+    return Config(providers, models, tool_servers, agents, work, database)
 
 
 def _positive(value: Any, *, integer: bool) -> bool:

@@ -7,6 +7,7 @@ import pytest
 
 from robinauts.controller.contract.domain import (
     ConfigError,
+    DatabaseConfig,
     ProviderKind,
     ToolServerAuth,
     WorkConfig,
@@ -135,3 +136,11 @@ def test_a_model_retries_its_vendor_calls_twice_unless_told() -> None:
         }
     )
     assert (config.models["m"].max_retries, config.models["n"].max_retries) == (2, 0)
+
+
+def test_the_database_share_has_defaults_and_takes_its_keys() -> None:
+    assert parse_config({}).database == DatabaseConfig(pool_max=10, acquire_timeout_seconds=5.0)
+    database = parse_config({"database": {"pool_max": 4, "acquire_timeout_seconds": 2.5}})
+    assert (database.database.pool_max, database.database.acquire_timeout_seconds) == (4, 2.5)
+    with pytest.raises(ConfigError, match="database.pool_max: 0 is not a whole number above 0"):
+        parse_config({"database": {"pool_max": 0}})

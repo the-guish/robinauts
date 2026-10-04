@@ -5,11 +5,14 @@
 
 from __future__ import annotations
 
+import time
+
 import asyncpg
 import pytest
 
 from aio import asyncio_test
-from controller_db import requires_postgres, temporary_schema
+from controller_db import requires_postgres, temporary_schema, url
+from robinauts.controller.adapters.postgres.pool import open_pool
 
 pytestmark = requires_postgres
 
@@ -37,3 +40,25 @@ async def test_a_number_json_cannot_write_is_refused_before_the_database_sees_it
         await schema.pool.execute("CREATE TABLE docs (b jsonb)")
         with pytest.raises(asyncpg.DataError, match="not JSON compliant"):
             await schema.pool.execute("INSERT INTO docs VALUES ($1)", {"x": float("nan")})
+
+
+@asyncio_test
+async def test_an_acquire_waits_no_longer_than_its_timeout() -> None:
+    async with temporary_schema(applied=False) as schema:
+        pool = await open_pool(
+            url(),
+            min_size=1,
+            max_size=1,
+            server_settings={"search_path": schema.name},
+            acquire_timeout=0.2,
+        )
+        try:
+            held = await pool.acquire()
+            before = time.monotonic()
+            with pytest.raises(TimeoutError):
+                await pool.fetchval("SELECT 1")
+            assert time.monotonic() - before < 2
+            await pool.release(held)
+            assert await pool.fetchval("SELECT 1") == 1
+        finally:
+            await pool.close()

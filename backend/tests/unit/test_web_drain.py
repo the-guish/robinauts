@@ -140,3 +140,19 @@ def test_a_stop_signal_starts_the_drain_before_uvicorn_stops() -> None:
 
     asyncio.run(go())
     assert drained == ["drained"]
+
+
+@asyncio_test
+async def test_a_pool_with_nothing_to_give_is_a_503() -> None:
+    composed, web = composed_app()
+
+    async def busy() -> None:
+        raise TimeoutError
+
+    async with web.router.lifespan_context(web):
+        composed.controller.list_agents = busy
+        transport = httpx.ASGITransport(app=web)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+            answered = await http.get("/api/agents")
+        assert answered.status_code == 503
+        assert answered.json() == {"error": "Busy", "detail": app.BUSY}

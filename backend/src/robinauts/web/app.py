@@ -98,6 +98,7 @@ TOKEN_LIFE = timedelta(days=90)
 NOT_SIGNED_IN = "nobody is signed in: sign in at /ui/"
 NOT_SAME_ORIGIN = "a write that carries the session cookie must carry Origin equal to public_url"
 UNKNOWN_TOKEN = "the API token is unknown, revoked or expired"
+BUSY = "the server is busy: try again"
 NO_SUCH_TOKEN = "you have no API token of that id"
 
 LOCAL_IDENTITY = Identity(provider=LOCAL_PROVIDER, subject="developer", name="Local development")
@@ -473,6 +474,11 @@ def create_app(
     @app.exception_handler(NotImplementedError)
     async def not_implemented(request: Request, exc: NotImplementedError) -> JSONResponse:
         return JSONResponse({"error": "NotImplemented", "detail": str(exc)}, status_code=501)
+
+    @app.exception_handler(TimeoutError)
+    async def busy(request: Request, exc: TimeoutError) -> JSONResponse:
+        # The pool had no connection to give within its acquire timeout.
+        return JSONResponse({"error": "Busy", "detail": BUSY}, status_code=503)
 
     @app.exception_handler(ControllerError)
     async def refused(request: Request, exc: ControllerError) -> JSONResponse:

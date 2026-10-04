@@ -85,7 +85,11 @@ def compose(
     if storage.kind is StorageKind.POSTGRES:
         if not storage.url:
             raise ConfigError(f"{DATABASE_URL_VARIABLE} is not set")
-        postgres = PostgresStore(dsn=storage.url)
+        postgres = PostgresStore(
+            dsn=storage.url,
+            pool_max=config.database.pool_max,
+            acquire_timeout=config.database.acquire_timeout_seconds,
+        )
         store, credentials = postgres, PostgresCredentials(postgres)
     elif storage.kind is StorageKind.IN_MEMORY:
         memory = MemoryStore()

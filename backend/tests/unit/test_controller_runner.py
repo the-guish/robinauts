@@ -21,6 +21,7 @@ from robinauts.agent_engines.echo_engine.engine import EchoEngine
 from robinauts.controller.adapters.dispatch import InProcessDispatcher
 from robinauts.controller.adapters.memory.store import MemoryStore
 from robinauts.controller.application import controller as controller_module
+from robinauts.controller.application import turns as turns_module
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.contract.domain import (
     AgentConfig,
@@ -516,4 +517,33 @@ async def test_a_turn_the_heartbeat_finds_lost_is_stopped_and_writes_nothing() -
     turn = await store.get_turn(user.id, sid, started.turn_id)
     assert turn is not None
     assert turn.state is TurnState.RUNNING
+    await controller.close()
+
+
+class BusyOnceStore(MemoryStore):
+    """A pool with no connection to give, the first time each write is asked."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.refused = 0
+
+    async def append_events(self, *args: Any, **kwargs: Any) -> None:
+        if self.refused < 2:
+            self.refused += 1
+            raise TimeoutError
+        await super().append_events(*args, **kwargs)
+
+
+@asyncio_test
+async def test_a_write_the_pool_timed_out_is_made_again(monkeypatch: Any) -> None:
+    monkeypatch.setattr(turns_module, "WRITE_RETRIES", (0.01, 0.01, 0.01))
+    store = BusyOnceStore()
+    controller = await over(store)
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    await settled(controller, user, started)
+    turn = await store.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert turn.state is TurnState.FINISHED
+    assert store.refused == 2
     await controller.close()

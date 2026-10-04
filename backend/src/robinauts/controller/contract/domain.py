@@ -153,12 +153,24 @@ class WorkConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class DatabaseConfig:
+    """``[database]``: this process's share of the database's connections. A process opens
+    at most ``pool_max`` + 2: the pool, the listening connection and the work connection."""
+
+    pool_max: int = 10
+    """The pool's largest size; it keeps two open, or fewer when this is less."""
+    acquire_timeout_seconds: float = 5.0
+    """How long anything waits for a connection of the pool before it gives up."""
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
     providers: Mapping[str, ProviderConfig] = field(default_factory=dict)
     models: Mapping[str, ModelConfig] = field(default_factory=dict)
     tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
     agents: Mapping[str, AgentConfig] = field(default_factory=dict)
     work: WorkConfig = field(default_factory=WorkConfig)
+    database: DatabaseConfig = field(default_factory=DatabaseConfig)
 
 
 class StorageKind(StrEnum):

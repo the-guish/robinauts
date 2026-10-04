@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import pathlib
 import uuid
@@ -21,6 +22,7 @@ from robinauts.controller.contract.domain import (
     AgentConfig,
     Config,
     ConfigError,
+    DatabaseConfig,
     Identity,
     ModelConfig,
     ProviderConfig,
@@ -135,4 +137,22 @@ async def test_ready_on_postgres_needs_the_database_and_both_connections() -> No
         store = composed.controller._store
         await store._listener.close()
         assert await composed.operations.readiness() == ("the listening connection is not open",)
+        await composed.controller.close()
+
+
+@asyncio_test
+async def test_the_pool_is_the_size_the_configuration_says() -> None:
+    async with temporary_schema() as schema:
+        config = dataclasses.replace(
+            CONFIG, database=DatabaseConfig(pool_max=3, acquire_timeout_seconds=1.5)
+        )
+        composed = compose(
+            config,
+            storage=StorageConfig(StorageKind.POSTGRES, url=dsn_in(schema.name)),
+            secret_for={}.get,
+        )
+        await composed.controller.open()
+        pool = composed.controller._store.pool
+        assert pool.get_max_size() == 3
+        assert pool.acquire_timeout == 1.5
         await composed.controller.close()

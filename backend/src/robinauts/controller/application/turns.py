@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import aclosing
 from datetime import UTC, datetime, timedelta
 
@@ -71,6 +71,9 @@ RETENTION = timedelta(hours=24)
 FLUSH_SECONDS = 0.15
 """How long a delta waits for the ones after it, so that they are written and announced
 together."""
+
+WRITE_RETRIES = (0.5, 1.0, 2.0)
+"""The waits before a write the pool timed out is made again."""
 
 DEADLINE_MARGIN = 10.0
 """With less than this many seconds left before its deadline, the runner does not claim the
@@ -132,13 +135,16 @@ class _Writer:
 
     async def _write(self, events: list[TurnEvent]) -> None:
         now = datetime.now(UTC)
-        await self._store.append_events(
-            self._owner,
-            self._turn.session_id,
-            self._turn.id,
-            self._numbered(events, now),
-            now,
-            fence=self._fence,
+        numbered = self._numbered(events, now)
+        await _patiently(
+            lambda: self._store.append_events(
+                self._owner,
+                self._turn.session_id,
+                self._turn.id,
+                numbered,
+                datetime.now(UTC),
+                fence=self._fence,
+            )
         )
 
     def _numbered(self, events: Sequence[TurnEvent], now: datetime) -> list[StoredEvent]:
@@ -179,18 +185,34 @@ class _Writer:
             self._failed = None
             events, self._pending = [*self._pending, *last], []
             now = datetime.now(UTC)
-            await self._store.finish_turn(
-                self._owner,
-                self._turn.session_id,
-                self._turn.id,
-                state,
-                now,
-                error,
-                None if answer is None else stored_message(answer),
-                self._numbered(events, now),
-                now,
-                fence=self._fence,
+            numbered = self._numbered(events, now)
+            stored = None if answer is None else stored_message(answer)
+            await _patiently(
+                lambda: self._store.finish_turn(
+                    self._owner,
+                    self._turn.session_id,
+                    self._turn.id,
+                    state,
+                    datetime.now(UTC),
+                    error,
+                    stored,
+                    numbered,
+                    now,
+                    fence=self._fence,
+                )
             )
+
+
+async def _patiently(write: Callable[[], Awaitable[None]]) -> None:
+    """A write, again when the pool had no connection to give in time: the same documents
+    at the same positions, which a write that did land after all accepts."""
+    for wait in WRITE_RETRIES:
+        try:
+            await write()
+            return
+        except TimeoutError:
+            await asyncio.sleep(wait)
+    await write()
 
 
 DELTAS = (TextPiece, ReasoningPiece, ArgumentsPiece)

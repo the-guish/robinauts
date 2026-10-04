@@ -45,22 +45,42 @@ async def codecs(connection: asyncpg.Connection) -> None:
         )
 
 
+class BoundedPool(asyncpg.Pool):
+    """A pool whose every acquire waits at most ``acquire_timeout`` seconds, its own and the
+    ones ``fetch``, ``execute`` and the rest make, the engines' included: a pool that stays
+    busy answers ``TimeoutError``, which a request turns into a 503, rather than a queue
+    nobody leaves."""
+
+    acquire_timeout: float | None = None
+
+    def acquire(self, *, timeout: float | None = None) -> Any:
+        return super().acquire(timeout=self.acquire_timeout if timeout is None else timeout)
+
+
 async def open_pool(
     dsn: str,
     *,
     min_size: int = MIN_POOL_SIZE,
     max_size: int = MAX_POOL_SIZE,
     server_settings: dict[str, str] | None = None,
+    acquire_timeout: float | None = None,
 ) -> asyncpg.Pool:
     """A pool for ``dsn`` on the running loop, with the codecs on every connection; the
     caller closes it on the same loop. ``ConfigError`` when the database will not open."""
+    pool = BoundedPool(
+        dsn,
+        connection_class=asyncpg.Connection,
+        record_class=asyncpg.Record,
+        min_size=min(min_size, max_size),
+        max_size=max_size,
+        max_queries=50000,
+        max_inactive_connection_lifetime=300.0,
+        loop=None,
+        init=codecs,
+        server_settings=server_settings,
+    )
+    pool.acquire_timeout = acquire_timeout
     try:
-        return await asyncpg.create_pool(
-            dsn,
-            min_size=min_size,
-            max_size=max_size,
-            server_settings=server_settings,
-            init=codecs,
-        )
+        return await pool
     except OPENING_FAILURES as refused:
         raise ConfigError(f"the database could not be opened: {refused}") from refused

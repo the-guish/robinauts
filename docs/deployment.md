@@ -102,6 +102,21 @@ The server never creates or changes the schema itself. It refuses to start
 against a database that is not the one the build was written against, and
 names the command that fixes it.
 
+**Connections.** Each server process opens a pool of at most `[database]
+pool_max` connections (10), keeping two open, plus two of its own outside
+the pool: one that listens for the notifications streams and cancels travel
+by, and one for the heartbeat, so that a busy pool never delays a lease.
+Anything that waits for a pool connection gives up after `[database]
+acquire_timeout_seconds` (5): a request is then answered 503, and a running
+turn's write is tried again. With N processes, keep
+
+    N × (pool_max + 2) + 2 < max_connections
+
+the last two being `robinauts db init` and one more command. PostgreSQL's
+default `max_connections` of 100 takes eight processes at the defaults. A
+connection pooler in transaction mode (PgBouncer) does not carry `LISTEN`:
+point the processes at the database itself.
+
 ## 4. The configuration file
 
 One TOML file describes the deployment: the sign-in half and the model
@@ -200,6 +215,11 @@ max_model_calls = 100     # the model calls one turn may make
 lease_seconds = 90        # a running turn's lease, past its last renewal
 heartbeat_seconds = 30    # how often a process renews the leases of its turns
 drain_seconds = 40        # how long a stopping process lets its turns finish
+
+# This process's share of the database's connections; see section 3.
+[database]
+pool_max = 10
+acquire_timeout_seconds = 5
 
 [agents.assistant]
 title = "Assistant"
