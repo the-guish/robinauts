@@ -154,8 +154,10 @@ CREATE INDEX IF NOT EXISTS sessions_deleted_at_idx
 -- ---------------------------------------------------------------------------
 
 -- One message of a session: a node of its tree. A question is stored before
--- its turn starts, and an answer when its turn ends: a failed turn's is marked
--- failed in its document. A cancelled or interrupted turn leaves none.
+-- its turn starts, and an answer when its turn ends: a failed or an
+-- interrupted turn's is marked failed in its document, and holds what the
+-- turn did. An interrupted turn whose runner went away has its answer rebuilt
+-- from its events by whoever ends it. A cancelled turn leaves none.
 --
 -- `document` is the whole message in the controller's versioned format
 -- (docs/architecture/data-model.md): the fields below again, its parts (text,
@@ -346,6 +348,7 @@ CREATE INDEX IF NOT EXISTS turns_worker_idx
 -- changes only a running turn whose lease has not passed, in the same
 -- transaction that writes its last events; a turn ended by its lease
 -- (`end_expired_turn`) writes no event at all, and a watcher reads the record.
+-- Its events are read once more then, to rebuild the answer it had started.
 -- So no index on the event's kind is needed to hold it.
 CREATE TABLE IF NOT EXISTS turn_events (
     turn_id uuid NOT NULL

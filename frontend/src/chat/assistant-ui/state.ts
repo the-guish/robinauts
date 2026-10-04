@@ -223,6 +223,16 @@ export const RUN_ERRORS = new Map<string, string>([
 const ENDED_SOMEHOW = "This answer did not finish.";
 
 /**
+ * What an answer an interrupted turn left behind says under it.
+ *
+ * The backend stores what such a turn did as a failed answer, rebuilt from
+ * its events when the process that ran it went away, so Retry is offered on
+ * it as on any failed answer, and starts the task again from the start.
+ */
+export const INTERRUPTED_ANSWER =
+  "This answer was interrupted when the server stopped. Retrying starts it again.";
+
+/**
  * What a second turn asked for while one is on its way is told.
  *
  * **One run at a time** (`docs/specs/runs.md`). It says that the message was
@@ -413,7 +423,6 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
         action.messages,
         action.runId,
         action.endedState ?? null,
-        action.endedBadly,
       ).map((fresh) => {
         const already = before.get(fresh.id);
         return already !== undefined && unchanged(already, fresh)
@@ -759,7 +768,11 @@ function applied(state: ChatState, event: AguiEvent): ChatState {
     case "RUN_ERROR": {
       if (state.runId === null && !anyRunning(state)) return state;
       const said = saidFor(event.code);
-      const after = ending(state, "failed", said);
+      const after = ending(
+        state,
+        "failed",
+        event.code === "interrupted" ? INTERRUPTED_ANSWER : said,
+      );
       // A run that failed before it announced anything has no message to put
       // the sentence on, so the thread says it instead.
       return state.writing === null ? { ...after, ended: said } : after;
@@ -1027,15 +1040,14 @@ function sameData(one: unknown, other: unknown): boolean {
  * **An answer whose calls were never answered** is the store's record of a
  * batch that did not finish: still running when it is the last message and
  * a run is in flight (its results are what the stream will bring), and
- * otherwise over the way the run was -- interrupted, with the sentence that
- * says so, or cancelled -- so that its calls are drawn as what they are. An
- * answer whose turn failed says so itself (`held`).
+ * otherwise over: drawn as cancelled, since only an answer the store marked
+ * failed is one Retry can name. An answer whose turn failed or was
+ * interrupted is stored as failed, and says so itself (`held`).
  */
 function folded(
   messages: readonly Message[],
   runId: string | null,
   endedState: string | null,
-  endedBadly: string | null,
 ): ChatMessage[] {
   const thread: ChatMessage[] = [];
   for (const message of messages) {
@@ -1050,23 +1062,23 @@ function folded(
     thread[thread.length - 1] = answered(answer, message);
   }
   return thread.map((message, at) => {
-    if (message.role !== "assistant" || message.state === "failed") {
-      return message;
+    const last = at === thread.length - 1;
+    if (message.role !== "assistant") return message;
+    if (message.state === "failed") {
+      // An interrupted turn stores what it did as a failed answer, which
+      // says how the turn really ended.
+      return last && endedState === "interrupted"
+        ? { ...message, detail: INTERRUPTED_ANSWER }
+        : message;
     }
     if (!unanswered(message)) return message;
-    if (at === thread.length - 1 && runId !== null) {
+    if (last && runId !== null) {
       return { ...message, state: "running" };
     }
-    const failed =
-      at === thread.length - 1 &&
-      (endedState === "failed" || endedState === "interrupted");
-    return failed
-      ? {
-          ...message,
-          state: "failed",
-          ...(endedBadly === null ? {} : { detail: endedBadly }),
-        }
-      : { ...message, state: "cancelled" };
+    // **Never `failed` unless the store says so**: Retry names a failed
+    // answer, and the backend retries only one it stored as failed. The
+    // sentence about how the run ended goes beside the thread (`ended`).
+    return { ...message, state: "cancelled" };
   });
 }
 

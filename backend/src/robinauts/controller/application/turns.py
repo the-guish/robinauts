@@ -163,6 +163,22 @@ async def run_turn(
     except TurnLostError:
         return
     finishing: asyncio.Future[None] | None = None
+
+    def failed() -> Message:
+        return Message(
+            answer_id,
+            session.id,
+            parent_id=question.id,
+            role=Role.ASSISTANT,
+            parts=tuple(parts),
+            created_at=datetime.now(UTC),
+            agent=session.agent,
+            engine=session.engine,
+            model=turn.model,
+            turn_id=turn.id,
+            failed=True,
+        )
+
     try:
         stream = engine.stream(
             session.id,
@@ -222,28 +238,18 @@ async def run_turn(
             await asyncio.wait({finishing})
             if not finishing.cancelled():
                 finishing.exception()
+        elif CLOSE in exc.args:
+            # The deployment stopped with the turn in it: what it did is kept, as when it
+            # fails, so that Retry can start it again.
+            await _end(writer, TurnState.INTERRUPTED, None, failed())
         elif LOST not in exc.args:
-            state = TurnState.INTERRUPTED if CLOSE in exc.args else TurnState.CANCELLED
-            await _end(writer, state, None)
+            await _end(writer, TurnState.CANCELLED, None)
         raise
     except Exception as exc:
         # What it streamed before it failed is kept, as an answer marked failed: the
         # thread shows it, and a reply hangs under it.
-        failed = Message(
-            answer_id,
-            session.id,
-            parent_id=question.id,
-            role=Role.ASSISTANT,
-            parts=tuple(parts),
-            created_at=datetime.now(UTC),
-            agent=session.agent,
-            engine=session.engine,
-            model=turn.model,
-            turn_id=turn.id,
-            failed=True,
-        )
         error = DEADLINE_PASSED if isinstance(exc, TimeoutError) else clean_text(str(exc))
-        await _end(writer, TurnState.FAILED, error, failed)
+        await _end(writer, TurnState.FAILED, error, failed())
 
 
 async def _end(

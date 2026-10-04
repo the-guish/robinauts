@@ -58,6 +58,7 @@ from robinauts.controller.core.engine_settings import (
 )
 from robinauts.controller.core.failures import prompt_after_failures
 from robinauts.controller.core.titles import title_from_text
+from robinauts.controller.core.transcript import partial_answer
 from robinauts.controller.ports.dispatcher import CANCEL, TurnDispatcher
 from robinauts.controller.ports.store import Cursor, Fence, Store, StoredEvent
 from robinauts.controller.ports.work import WorkQueue
@@ -181,7 +182,7 @@ class RobinautsController(Controller):
 
     async def open_session(self, user: User, session_id: uuid.UUID) -> OpenedSession:
         session = await self._store.get_session(user.id, session_id)
-        await self._store.end_expired_turn(user.id, session_id, self._now())
+        await self._end_expired(user.id, session_id)
         messages = await self._messages(user.id, session_id)
         by_id = {m.id: m for m in messages}
         thread = [messages[-1]]
@@ -206,7 +207,7 @@ class RobinautsController(Controller):
 
     async def delete_session(self, user: User, session_id: uuid.UUID) -> None:
         session = await self._store.get_session(user.id, session_id)
-        await self._store.end_expired_turn(user.id, session_id, self._now())
+        await self._end_expired(user.id, session_id)
         running = await self._store.active_turn(user.id, session_id)
         if running is not None and await self._dispatcher.stop(running.id, CANCEL):
             await self._end_if_running(user, running, TurnState.CANCELLED)
@@ -329,7 +330,7 @@ class RobinautsController(Controller):
         self, user: User, session_id: uuid.UUID, turn_id: uuid.UUID | None = None
     ) -> None:
         await self._store.get_session(user.id, session_id)
-        await self._store.end_expired_turn(user.id, session_id, self._now())
+        await self._end_expired(user.id, session_id)
         running = await self._store.active_turn(user.id, session_id)
         if running is None or (turn_id is not None and running.id != turn_id):
             raise NoActiveTurnError(str(session_id))
@@ -370,7 +371,7 @@ class RobinautsController(Controller):
         if model_config is None:
             raise UnknownModelError(model)
         now = self._now()
-        await self._store.end_expired_turn(user.id, session.id, now)
+        await self._end_expired(user.id, session.id)
         work = self._config.work
         # Held from the start, at attempt 1, by this process, which runs it.
         turn = Turn(
@@ -443,6 +444,35 @@ class RobinautsController(Controller):
             self._config.work.max_model_calls,
         )
 
+    async def _end_expired(self, owner: uuid.UUID, session_id: uuid.UUID) -> Turn | None:
+        """End the session's running turn as ``interrupted`` if its lease has passed: its
+        runner went away. What it did, rebuilt from its events, is stored as a failed answer,
+        so that the thread shows it and Retry starts it again."""
+        running = await self._store.active_turn(owner, session_id)
+        now = self._now()
+        if running is None or running.lease_until >= now:
+            return None
+        session = await self._store.get_session(owner, session_id)
+        events = await self._store.events_after(owner, session_id, running.id, 0)
+        partial = partial_answer(event_from_document(d).event for _, d in events)
+        answer = None
+        if partial is not None:
+            answer = Message(
+                partial.message_id,
+                session_id,
+                parent_id=partial.parent_id,
+                role=Role.ASSISTANT,
+                parts=partial.parts,
+                created_at=now,
+                agent=session.agent,
+                engine=session.engine,
+                model=running.model,
+                turn_id=running.id,
+                failed=True,
+            )
+        stored = None if answer is None else stored_message(answer)
+        return await self._store.end_expired_turn(owner, session_id, running.id, now, stored)
+
     async def _fail_unrunnable(self, owner: uuid.UUID, turn: Turn, error: str) -> None:
         now = self._now()
         ended = event_to_document(turn.id, 1, TurnEnded(TurnState.FAILED))
@@ -487,7 +517,7 @@ class RobinautsController(Controller):
             await self._store.wait_for_events(user.id, session_id, turn.id, after, WAIT_SECONDS)
             if await self._store.events_after(user.id, session_id, turn.id, after):
                 continue
-            await self._store.end_expired_turn(user.id, session_id, self._now())
+            await self._end_expired(user.id, session_id)
             current = await self._store.get_turn(user.id, session_id, turn.id)
             if current is None or current.state is not TurnState.RUNNING:
                 # Ended with no `turn_ended` event of its own, by a reader: the record says

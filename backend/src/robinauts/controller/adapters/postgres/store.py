@@ -84,10 +84,10 @@ RETURNING t.id
 
 _END_EXPIRED = f"""
 UPDATE turns AS t
-SET state = 'interrupted', ended_at = $3, error = 'lease expired'
+SET state = 'interrupted', ended_at = $4, error = 'lease expired'
 FROM sessions AS s
 WHERE s.id = t.session_id AND s.id = $2 AND s.owner_id = $1 AND s.deleted_at IS NULL
-  AND t.state = 'running' AND t.lease_until < $3
+  AND t.id = $3 AND t.state = 'running' AND t.lease_until < $4
 RETURNING {", ".join("t." + c for c in _TURN_COLUMNS.split(", "))}
 """
 
@@ -436,10 +436,28 @@ class PostgresStore(Store, WorkQueue):
             raise
 
     async def end_expired_turn(
-        self, owner: uuid.UUID, session: uuid.UUID, now: datetime
+        self,
+        owner: uuid.UUID,
+        session: uuid.UUID,
+        turn: uuid.UUID,
+        now: datetime,
+        answer: StoredMessage | None,
     ) -> Turn | None:
-        row = await self._pool.fetchrow(_END_EXPIRED, owner, session, now)
-        return None if row is None else _turn(row)
+        async with self._pool.acquire() as connection, connection.transaction():
+            # The session row first, then the turn, as in every write of both.
+            held = await connection.fetchval(_VISIBLE + " FOR NO KEY UPDATE", session, owner)
+            if held is None:
+                return None
+            row = await connection.fetchrow(_END_EXPIRED, owner, session, turn, now)
+            if row is None:
+                return None
+            await connection.execute(
+                "UPDATE sessions SET updated_at = $2 WHERE id = $1", session, now
+            )
+            if answer is not None:
+                await self._insert_message(connection, answer)
+            await connection.execute("SELECT pg_notify($1, $2)", CHANNEL, f"{turn} end")
+        return _turn(row)
 
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:
         async with self._pool.acquire() as connection:

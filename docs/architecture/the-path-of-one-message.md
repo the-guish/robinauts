@@ -270,8 +270,8 @@ the client sees the terminal event and stops.
 - **The runner dies**, whether the process crashed or the Lambda was killed. Its lease
   runs out. The next read that finds the turn (`open_session`, `watch_turn`,
   `start_turn`, `cancel_turn`, `delete_session`) ends it as `interrupted` through
-  `end_expired_turn`, in the record alone, and the UI shows it as `ended_badly` once
-  stage two serves it. A watcher that finds the turn ended with no `turn_ended` event
+  `end_expired_turn`, storing what it had done, rebuilt from its events, as a failed
+  answer that Retry starts again; the UI shows how it ended from `ended_badly`. A watcher that finds the turn ended with no `turn_ended` event
   supplies one from the record. A runner that was slow rather than dead finds its
   next write refused, by the lease or by the end, and stops.
 - **A second runner is dispatched for the turn**, which an async invocation allows.

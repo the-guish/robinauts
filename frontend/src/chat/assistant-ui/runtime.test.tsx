@@ -27,6 +27,7 @@ import {
 } from "./runtime";
 import {
   EMPTY,
+  INTERRUPTED_ANSWER,
   reduce,
   ONE_AT_A_TIME,
   ONE_AT_A_TIME_ANSWER,
@@ -436,6 +437,41 @@ test("a run cancelled in the middle of a batch leaves the call without a result"
   expect(failed.messages[1]?.detail).toBe(saidFor("failed"));
 });
 
+test("opened, an interrupted turn's stored answer is failed and says it was interrupted", () => {
+  // The backend stores what an interrupted turn did as a failed answer, so
+  // that Retry names something it can retry.
+  const stored = [
+    message("m1", "user", "why?"),
+    {
+      ...calling("m2", "Looking.", [
+        { call_id: "toolu_01", name: "github__search", arguments: {} },
+      ]),
+      failed: true,
+    },
+  ];
+  const interrupted = after({
+    kind: "opened",
+    conversationId: CONVERSATION,
+    messages: stored,
+    runId: null,
+    endedBadly: "interrupted",
+    endedState: "interrupted",
+  });
+  expect(interrupted.messages[1]?.state).toBe("failed");
+  expect(interrupted.messages[1]?.detail).toBe(INTERRUPTED_ANSWER);
+  // Said once, on the answer.
+  expect(interrupted.ended).toBeNull();
+  // In a stream, the answer being written is marked the same way.
+  const streaming = after(
+    asked,
+    started,
+    sent({ type: "TEXT_MESSAGE_START", messageId: ANSWER, role: "assistant" }),
+    sent({ type: "RUN_ERROR", code: "interrupted", message: "x" }),
+  );
+  expect(streaming.messages[1]?.state).toBe("failed");
+  expect(streaming.messages[1]?.detail).toBe(INTERRUPTED_ANSWER);
+});
+
 test("opened, an answer that holds its own results has them on its calls", () => {
   const answer = calling("m2", "", [
     { call_id: "call-1", name: "echo", arguments: { text: "hi" } },
@@ -493,8 +529,10 @@ test("opened, an answer whose calls were never answered is shown as the run left
     endedBadly: "went wrong",
     endedState: "failed",
   });
-  expect(failed.messages[1]?.state).toBe("failed");
-  expect(failed.messages[1]?.detail).toBe("went wrong");
+  // Not stored as failed, so not one Retry could name: the run's sentence is
+  // beside the thread instead.
+  expect(failed.messages[1]?.state).toBe("cancelled");
+  expect(failed.ended).toBe("went wrong");
   // Earlier in the thread, whatever the last run did: that batch is over.
   const earlier = after({
     kind: "opened",
@@ -745,7 +783,10 @@ test("a run that failed says so on the answer, one sentence per code", () => {
     );
     const failed = state.messages.find((each) => each.id === ANSWER);
     expect(failed?.state).toBe("failed");
-    expect(failed?.detail).toBe(saidFor(code));
+    // An interrupted answer is stored as failed, and Retry starts it again.
+    expect(failed?.detail).toBe(
+      code === "interrupted" ? INTERRUPTED_ANSWER : saidFor(code),
+    );
     // Never the backend's own sentence, and never the run's stored error.
     expect(failed?.detail).not.toContain("whatever");
     expect(state.runId).toBeNull();

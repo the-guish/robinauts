@@ -217,16 +217,24 @@ class MemoryStore(Store, WorkQueue):
         await self._notify()
 
     async def end_expired_turn(
-        self, owner: uuid.UUID, session: uuid.UUID, now: datetime
+        self,
+        owner: uuid.UUID,
+        session: uuid.UUID,
+        turn: uuid.UUID,
+        now: datetime,
+        answer: StoredMessage | None,
     ) -> Turn | None:
         self._visible(owner, session)
         running = self._running(session)
-        if running is None or running.lease_until >= now:
+        if running is None or running.id != turn or running.lease_until >= now:
             return None
         ended = dataclasses.replace(
             running, state=TurnState.INTERRUPTED, ended_at=now, error="lease expired"
         )
         self._turns[running.id] = ended
+        self._sessions[session] = dataclasses.replace(self._sessions[session], updated_at=now)
+        if answer is not None:
+            self._messages[session].append(answer)
         await self._notify()
         return ended
 

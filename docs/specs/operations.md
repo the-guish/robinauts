@@ -17,7 +17,9 @@ What an internal platform team deploys and controls.
   Until the first release the schema is edited in place and the database
   is recreated; after that, migrations upgrade it in place.
 - A restart ends the runs that are in flight: each is marked interrupted,
-  and its author retries it by sending the message again. Letting them
+  and what it had done is kept as a failed answer, which its author retries
+  with Retry, starting the task again. A run whose process died is ended the
+  same way once its lease passes, by whoever reads it next. Letting them
   **drain** for a bounded time first is planned; the bounded window a
   shutdown has today is for ending them and giving back what the process
   holds, not for finishing them. Several backend processes may run against

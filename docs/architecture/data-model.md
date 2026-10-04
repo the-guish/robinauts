@@ -60,8 +60,11 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   message, whose `parent_id` is the question and whose document names the turn.
   A failed turn stores what it streamed before it failed, as an answer marked
   `failed`, with no checkpoint; a reply hangs under it, and the next turn continues
-  from the nearest answer above it that has a checkpoint. A cancelled or interrupted
-  turn stores none. Every answer comes from exactly one turn.
+  from the nearest answer above it that has a checkpoint. An interrupted turn stores
+  what it did the same way: its runner when the deployment stopped it, or, when its
+  runner went away, whoever ends it once its lease has passed, rebuilding the answer
+  from the turn's events (`controller.core.transcript`). A cancelled turn stores
+  none. Every answer comes from exactly one turn.
 - **A turn has its events**, numbered from 1.
 
 ## Rules every store keeps
@@ -111,7 +114,8 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   turn whose lease has passed is ended as `interrupted` by the next reader to find it
   (`open_session`, `start_turn`, `watch_turn`, `cancel_turn`, `delete_session`),
   through `end_expired_turn`: one conditional write that only a running turn takes,
-  on the record alone, and on the marker a store without a partial index keeps. No
+  with the answer rebuilt from its events beside it, and on the marker a store
+  without a partial index keeps. No
   event is written, since a `turn_ended` event is the runner's; a watcher that finds
   the turn ended with none supplies it from the record. A runner that outlives its
   lease has lost the turn whether or not a reader has found it: every write names

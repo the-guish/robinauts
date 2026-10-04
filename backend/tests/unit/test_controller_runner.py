@@ -36,7 +36,7 @@ from robinauts.controller.contract.domain import (
     TurnState,
     WorkConfig,
 )
-from robinauts.controller.core.documents import event_from_document
+from robinauts.controller.core.documents import event_from_document, message_from_document
 
 PAST_THE_LEASE = timedelta(hours=1)
 
@@ -171,7 +171,11 @@ async def test_a_runner_refused_mid_stream_writes_nothing_more() -> None:
     assert turn is not None
     assert turn.state is TurnState.INTERRUPTED
     assert len(await controller._store.events_after(user.id, sid, started.turn_id, 0)) == 1
-    assert len(await controller._store.messages_of(user.id, sid)) == 1
+    # The reader that ended it stored what it had started, empty, as a failed answer.
+    _, rebuilt = [
+        message_from_document(d) for d in await controller._store.messages_of(user.id, sid)
+    ]
+    assert (rebuilt.failed, rebuilt.parts, rebuilt.turn_id) == (True, (), started.turn_id)
     await controller.close()
 
 

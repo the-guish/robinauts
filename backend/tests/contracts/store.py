@@ -345,9 +345,16 @@ class StoreContract:
         asked = question(one.id)
         running = turn(one.id, asked.id, lease_until=NOW + MINUTE)
         await store.start_turn(me.id, running, asked)
-        assert await store.end_expired_turn(me.id, one.id, NOW + MINUTE / 2) is None
+        said = answer(one.id, asked.id, NOW + MINUTE)
+        assert (
+            await store.end_expired_turn(me.id, one.id, running.id, NOW + MINUTE / 2, None) is None
+        )
+        assert (
+            await store.end_expired_turn(me.id, one.id, uuid.uuid4(), NOW + 2 * MINUTE, None)
+            is None
+        )
         assert await store.active_turn(me.id, one.id) == running
-        ended = await store.end_expired_turn(me.id, one.id, NOW + 2 * MINUTE)
+        ended = await store.end_expired_turn(me.id, one.id, running.id, NOW + 2 * MINUTE, said)
         assert ended is not None
         assert (ended.id, ended.state, ended.ended_at) == (
             running.id,
@@ -356,7 +363,11 @@ class StoreContract:
         )
         assert await store.get_turn(me.id, one.id, running.id) == ended
         assert await store.active_turn(me.id, one.id) is None
-        assert await store.end_expired_turn(me.id, one.id, NOW + 3 * MINUTE) is None
+        assert (
+            await store.end_expired_turn(me.id, one.id, running.id, NOW + 3 * MINUTE, None) is None
+        )
+        assert await store.messages_of(me.id, one.id) == [asked.document, said.document]
+        assert (await store.get_session(me.id, one.id)).updated_at == NOW + 2 * MINUTE
 
     @store_test
     async def test_a_start_and_a_hide_succeed_after_an_expired_turn_is_ended(
@@ -366,12 +377,19 @@ class StoreContract:
         one = session(me.id)
         await store.add_session(one)
         asked = question(one.id)
-        await store.start_turn(me.id, turn(one.id, asked.id, lease_until=NOW + MINUTE), asked)
-        assert await store.end_expired_turn(me.id, one.id, NOW + 2 * MINUTE) is not None
+        first = turn(one.id, asked.id, lease_until=NOW + MINUTE)
+        await store.start_turn(me.id, first, asked)
+        assert (
+            await store.end_expired_turn(me.id, one.id, first.id, NOW + 2 * MINUTE, None)
+            is not None
+        )
         again = turn(one.id, asked.id, lease_until=NOW + 5 * MINUTE)
         await store.start_turn(me.id, again, None)
         assert await store.active_turn(me.id, one.id) == again
-        assert await store.end_expired_turn(me.id, one.id, NOW + 6 * MINUTE) is not None
+        assert (
+            await store.end_expired_turn(me.id, one.id, again.id, NOW + 6 * MINUTE, None)
+            is not None
+        )
         await store.hide_session(me.id, one.id, NOW + 6 * MINUTE)
         with pytest.raises(SessionNotFoundError):
             await store.get_session(me.id, one.id)
