@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import dataclasses
+import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -19,6 +20,9 @@ from robinauts.controller.contract.domain import (
 )
 
 ENGINES = ("langchain", "pydantic-ai", "echo")
+
+# An HTTP field name is a token (RFC 9110, section 5.1): nothing else can go on the wire.
+HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 
 
 def parse_config(raw: Mapping[str, Any]) -> Config:
@@ -43,6 +47,22 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
     tool_servers = build("tool_servers", ToolServerConfig, auth=ToolServerAuth)
     agents = build("agents", AgentConfig, tools=tuple)
 
+    for server in tool_servers.values():
+        if server.auth is ToolServerAuth.HEADER:
+            if not server.header:
+                problems.append(
+                    f'tool_servers.{server.id}: auth "header" needs `header`, '
+                    "the name of the header the secret is sent in"
+                )
+            elif not isinstance(server.header, str) or not HEADER_NAME.fullmatch(server.header):
+                problems.append(
+                    f"tool_servers.{server.id}: header {server.header!r} is not an HTTP header name"
+                )
+        elif server.header:
+            problems.append(
+                f'tool_servers.{server.id}: `header` is for auth "header" alone, '
+                f"not auth {server.auth.value!r}"
+            )
     for model in models.values():
         if model.provider not in providers:
             problems.append(f"models.{model.id}: provider {model.provider!r} is not configured")

@@ -68,6 +68,7 @@ class ModelConfig:
 class ToolServerAuth(StrEnum):
     BEARER = "bearer"
     BASIC = "basic"
+    HEADER = "header"
     NONE = "none"
 
 
@@ -79,6 +80,8 @@ class ToolServerConfig:
     auth: ToolServerAuth = ToolServerAuth.BEARER
     user: str = ""
     timeout_seconds: float = 60.0
+    # The header `auth = "header"` sends the secret in, as it is; set for that mode alone.
+    header: str = ""
 
 
 @dataclass(frozen=True, slots=True)

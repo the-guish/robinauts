@@ -46,3 +46,52 @@ def test_names_every_problem() -> None:
     assert "model_providers.p: unknown key(s) colour" in message
     assert "models.fast: provider 'q'" in message
     assert "agents.a: engine 'langgraph'" in message
+
+
+def test_a_header_server_names_its_header() -> None:
+    config = parse_config(
+        {
+            "tool_servers": {
+                "composio": {
+                    "url": "https://backend.composio.dev/v3/mcp/abc/mcp?user_id=ops",
+                    "auth": "header",
+                    "header": "x-api-key",
+                    "secret_env": "COMPOSIO_API_KEY",
+                }
+            }
+        }
+    )
+    server = config.tool_servers["composio"]
+    assert (server.auth, server.header) == (ToolServerAuth.HEADER, "x-api-key")
+
+
+def test_a_header_server_without_a_header_or_with_a_bad_one_is_refused() -> None:
+    with pytest.raises(ConfigError) as raised:
+        parse_config(
+            {
+                "tool_servers": {
+                    "none": {"url": "https://t", "auth": "header"},
+                    "bad": {"url": "https://t", "auth": "header", "header": "x-api-key: 1"},
+                    "odd": {"url": "https://t", "auth": "header", "header": 7},
+                }
+            }
+        )
+    message = str(raised.value)
+    assert 'tool_servers.none: auth "header" needs `header`' in message
+    assert "tool_servers.bad: header 'x-api-key: 1' is not an HTTP header name" in message
+    assert "tool_servers.odd: header 7 is not an HTTP header name" in message
+
+
+def test_a_header_on_another_auth_is_refused() -> None:
+    with pytest.raises(ConfigError) as raised:
+        parse_config(
+            {
+                "tool_servers": {
+                    "gh": {"url": "https://t", "header": "x-api-key"},
+                    "wiki": {"url": "https://t", "auth": "basic", "header": "x-api-key"},
+                }
+            }
+        )
+    message = str(raised.value)
+    assert "tool_servers.gh: `header` is for auth \"header\" alone, not auth 'bearer'" in message
+    assert "tool_servers.wiki: `header` is for auth \"header\" alone, not auth 'basic'" in message

@@ -26,6 +26,8 @@ def toolset_for(server: ToolServerConfig, settings: EngineSettings) -> MCPToolse
     elif server.auth is ToolServerAuth.BASIC:
         pair = f"{server.user}:{settings.tool_secrets.secret_for(server.id)}"
         headers["Authorization"] = f"Basic {base64.b64encode(pair.encode()).decode('ascii')}"
+    elif server.auth is ToolServerAuth.HEADER:
+        headers[server.header] = settings.tool_secrets.secret_for(server.id)
     # Nothing connects here: the agent's run opens the session and closes it when the run ends.
     return MCPToolset(
         server.url,

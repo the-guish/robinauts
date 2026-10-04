@@ -74,6 +74,7 @@ def engine_settings(config: domain.Config, secret_for: SecretLookup) -> EngineSe
                 engine_domain.ToolServerAuth(t.auth.value),
                 t.user,
                 t.timeout_seconds,
+                t.header,
             )
             for t in config.tool_servers.values()
         },

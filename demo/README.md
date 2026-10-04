@@ -192,7 +192,7 @@ one, and the id no longer says which model wrote them.
 
 ## Tools
 
-The configuration the demo writes can hold two MCP tool servers and a `tools`
+The configuration the demo writes can hold three MCP tool servers and a `tools`
 line under each agent ([robinauts.toml.in](robinauts.toml.in)); an agent whose
 `tools` names a server can call what that server offers, and the chat shows each call behind a
 tool-call toggle above the answer -- the tool's name, its arguments and what
@@ -224,6 +224,21 @@ as the line is on. What the request carries is no credential and nothing that
 names you, but it does carry what the model wrote for the tool -- the search
 query it composed from your question -- and the deployment's address, as any
 request does.
+
+**Composio's hosted MCP servers take their key in `x-api-key`.** The
+`[tool_servers.composio]` table in `robinauts.toml.in` is written for that,
+with `auth = "header"` and `header = "x-api-key"`. In Composio's dashboard,
+create an MCP server from the toolkits you want and copy its id into the URL
+in place of `SERVER_ID`, and take the project's API key from the project's
+settings; export the key as `COMPOSIO_API_KEY` in the shell that runs
+`start.sh`, which, unlike GitHub's token, stays in the script's environment.
+Put a Composio user id in place of `USER_ID`: the tools act through the
+accounts that user has connected in Composio. **That user is you**, the
+operator, for everybody who chats: a deployment is one identity to a tool
+server, so the `user_id` in the URL is not the person in the chat. Then take
+the `#` off the table, name `"composio"` in an agent's `tools` and restart, as
+for Microsoft Learn. The URL ends in `/mcp`, the server's streamable HTTP
+endpoint; the bare server URL answers with a redirect to it.
 
 ## Where the state lives
 

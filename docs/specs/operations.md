@@ -38,6 +38,21 @@ What an internal platform team deploys and controls.
   model wrote for the call, and nothing that names anyone. The client that
   connects is the agent framework's own MCP client, built from the server's
   table and nothing else.
+- **How a tool server's credential is sent** is its table's `auth`, and the
+  secret itself is always the value of the variable `secret_env` names, read
+  when a turn connects and never written in the file:
+  - `bearer` (the default): `Authorization: Bearer <secret>`.
+  - `basic`: `Authorization: Basic`, with the table's `user` and the secret
+    as the password.
+  - `header`: the secret as it is, in the header the table's `header` key
+    names, for a server that does not read `Authorization` at all, such as
+    Composio's, which takes `x-api-key`. A `header` table without a
+    `header` key, or with one that is not an HTTP header name, is refused at
+    start-up, and so is a `header` key on any other `auth`: it names where
+    the secret goes, and only this mode puts it anywhere but
+    `Authorization`. Headers sent beside the credential, such as a user id
+    some servers want next to a bearer, are not configurable yet.
+  - `none`: nothing.
 
 ## Configuration
 

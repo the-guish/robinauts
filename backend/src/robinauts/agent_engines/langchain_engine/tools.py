@@ -27,6 +27,8 @@ def connection_for(server: ToolServerConfig, settings: EngineSettings) -> Stream
     elif server.auth is ToolServerAuth.BASIC:
         pair = f"{server.user}:{settings.tool_secrets.secret_for(server.id)}"
         headers["Authorization"] = f"Basic {base64.b64encode(pair.encode()).decode('ascii')}"
+    elif server.auth is ToolServerAuth.HEADER:
+        headers[server.header] = settings.tool_secrets.secret_for(server.id)
     timeout = timedelta(seconds=server.timeout_seconds)
     return {
         "transport": "streamable_http",

@@ -148,6 +148,19 @@ def test_a_basic_server_is_reached_with_its_user_and_secret() -> None:
     assert secrets.asked == ["wiki"]
 
 
+def test_a_header_server_is_reached_with_its_secret_in_the_header_it_names() -> None:
+    secrets = FixedSecret()
+    server = ToolServerConfig(
+        id="composio",
+        url="https://mcp.example/composio",
+        auth=ToolServerAuth.HEADER,
+        header="x-api-key",
+    )
+    transport = toolset_for(server, tool_settings(secrets)).client.transport
+    assert transport.headers == {"x-api-key": "s3cret"}
+    assert secrets.asked == ["composio"]
+
+
 def test_a_public_server_carries_no_credential_and_asks_for_none() -> None:
     server = ToolServerConfig(id="docs", url="https://mcp.example/docs", auth=ToolServerAuth.NONE)
     assert toolset_for(server, tool_settings(NoSecrets())).client.transport.headers == {}

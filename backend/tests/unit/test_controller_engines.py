@@ -5,13 +5,19 @@
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from collections.abc import AsyncGenerator
 
 import pytest
 
 from aio import asyncio_test
-from robinauts.agent_engines.contract.domain import AgentDefinition, Event, ProviderKind
+from robinauts.agent_engines.contract.domain import (
+    AgentDefinition,
+    Event,
+    ProviderKind,
+    ToolServerAuth,
+)
 from robinauts.agent_engines.contract.ports import (
     AgentEngine,
     EngineSettings,
@@ -103,6 +109,15 @@ def test_settings_carry_the_tables_without_agents_and_answer_secrets_by_id() -> 
     assert set(settings.models.tool_servers) == {"t"}
     assert settings.keys.key_for("acme") == "sk-1"
     assert settings.tool_secrets.secret_for("t") == "s-1"
+
+
+def test_settings_carry_a_header_server_with_its_header() -> None:
+    server = domain.ToolServerConfig(
+        "c", "https://c.example", "C_KEY", domain.ToolServerAuth.HEADER, header="x-api-key"
+    )
+    settings = engine_settings(dataclasses.replace(config(), tool_servers={"c": server}), ENV.get)
+    carried = settings.models.tool_servers["c"]
+    assert (carried.auth, carried.header) == (ToolServerAuth.HEADER, "x-api-key")
 
 
 def test_a_secret_the_environment_lacks_is_refused_by_name() -> None:

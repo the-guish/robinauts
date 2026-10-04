@@ -84,3 +84,20 @@ system_prompt = "You are the Robinauts demo assistant. Answer briefly, and play 
 # [tool_servers.learn]
 # url = "https://learn.microsoft.com/api/mcp"
 # auth = "none"
+#
+# Composio's hosted MCP servers take the key in a header of their own, not in
+# `Authorization`, so their table says which: `auth = "header"` and
+# `header = "x-api-key"`. The key is your Composio project's API key, read from
+# the variable `secret_env` names; export it in the shell that runs
+# demo/start.sh. Unlike GitHub's token, start.sh does not take it out of its
+# environment, so the tools it runs see it too. SERVER_ID is the MCP server's id in Composio, and `user_id` is the
+# Composio user whose connected accounts the tools act through. One deployment
+# is one identity to a tool server, so that user is yours, the operator's, for
+# every person who chats -- not the person in the chat. The URL ends in `/mcp`,
+# Composio's streamable HTTP endpoint, which the bare server URL redirects to.
+#
+# [tool_servers.composio]
+# url = "https://backend.composio.dev/v3/mcp/SERVER_ID/mcp?user_id=USER_ID"
+# auth = "header"
+# header = "x-api-key"
+# secret_env = "COMPOSIO_API_KEY"
