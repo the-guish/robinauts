@@ -42,7 +42,8 @@ signed in is web's own concern, the user session.
 - `send_message`: a message under a chosen parent, with the model. An edit is this under an
   earlier parent.
 - `regenerate_answer`: the answer to a question again, under the same question.
-- `cancel_turn`: stop the turn named, if this process runs it.
+- `cancel_turn`: stop the turn named, whichever process runs it: the request goes through the
+  store, and that process cancels the turn.
 - `watch_turn`: the events of the turn named, from a position, as they happen, ending with how
   it ended.
 

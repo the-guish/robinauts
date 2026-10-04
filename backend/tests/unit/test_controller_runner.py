@@ -31,7 +31,6 @@ from robinauts.controller.contract.domain import (
     TextPart,
     ToolCallPart,
     ToolResultPart,
-    TurnActiveError,
     TurnEnded,
     TurnState,
 )
@@ -254,19 +253,38 @@ async def test_a_cancel_before_the_runner_claimed_ends_the_turn_cancelled() -> N
 
 
 @asyncio_test
-async def test_a_cancel_of_a_turn_another_process_runs_is_refused() -> None:
+async def test_a_cancel_through_another_process_stops_the_turn_where_it_runs() -> None:
     store = MemoryStore()
     first = await over(store)
-    engine = GatedEngine()
-    first._engines["echo"] = engine
+    first._engines["echo"] = GatedEngine()
     second = await over(store)
     user = await first.ensure_user(Identity("local", "me"))
     started = await first.start_session(user, agent="echo", model="echo", text="one")
     await store.wait_for_events(user.id, started.session_id, started.turn_id, 0, 5.0)
-    with pytest.raises(TurnActiveError):
-        await second.cancel_turn(user, started.session_id, started.turn_id)
-    engine.gate.set()
-    await settled(second, user, started)
+    await second.cancel_turn(user, started.session_id, started.turn_id)
+    watched = [e async for e in second.watch_turn(user, started.session_id, started.turn_id)]
+    assert watched[-1].event == TurnEnded(TurnState.CANCELLED)
+    await first.close()
+    await second.close()
+
+
+@asyncio_test
+async def test_delete_through_another_process_hides_at_once_and_the_runner_stops() -> None:
+    store = MemoryStore()
+    first = await over(store)
+    first._engines["echo"] = GatedEngine()
+    second = await over(store)
+    user = await first.ensure_user(Identity("local", "me"))
+    started = await first.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    await store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
+    first._dispatcher.stop = lambda turn: None  # as if the request never reached it
+    await second.delete_session(user, sid)
+    with pytest.raises(SessionNotFoundError):
+        await second.open_session(user, sid)
+    first._engines["echo"].gate.set()
+    await asyncio.wait(set(first._dispatcher._tasks.values()))
+    assert store._turns[started.turn_id].state is TurnState.RUNNING
     await first.close()
     await second.close()
 

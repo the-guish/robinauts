@@ -33,9 +33,15 @@ class InProcessDispatcher(TurnDispatcher):
         task = self._tasks.get(turn)
         if task is None:
             return False
-        task.cancel()
+        self.stop(turn)
         await asyncio.wait({task})
         return True
+
+    def stop(self, turn: uuid.UUID) -> None:
+        task = self._tasks.get(turn)
+        # Once only: a second cancel would cut short the runner ending its turn.
+        if task is not None and not task.cancelling():
+            task.cancel()
 
     def running(self) -> list[uuid.UUID]:
         return list(self._tasks)

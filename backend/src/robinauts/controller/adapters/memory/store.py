@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import uuid
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from datetime import datetime
 
 from robinauts.controller.contract.domain import (
@@ -38,6 +38,8 @@ class MemoryStore(Store):
         self._messages: dict[uuid.UUID, list[StoredMessage]] = {}
         self._turns: dict[uuid.UUID, Turn] = {}
         self._events: dict[uuid.UUID, list[StoredEvent]] = {}
+        self._cancels: set[uuid.UUID] = set()
+        self._callbacks: list[Callable[[uuid.UUID], None]] = []
         self._changed = asyncio.Condition()
 
     async def open(self) -> None:
@@ -108,8 +110,6 @@ class MemoryStore(Store):
 
     async def hide_session(self, owner: uuid.UUID, session: uuid.UUID, at: datetime) -> None:
         self._visible(owner, session)
-        if self._running(session) is not None:
-            raise TurnActiveError(str(session))
         self._hidden[session] = at
         await self._notify()
 
@@ -215,12 +215,25 @@ class MemoryStore(Store):
         await self._notify()
         return ended
 
+    async def request_cancel(
+        self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, at: datetime
+    ) -> None:
+        self._visible(owner, session)
+        self._cancels.add(turn)
+        for callback in self._callbacks:
+            callback(turn)
+
+    def when_cancelled(self, callback: Callable[[uuid.UUID], None]) -> None:
+        self._callbacks.append(callback)
+
     async def renew_leases(self, turns: Collection[uuid.UUID], until: datetime) -> set[uuid.UUID]:
+        renewed = set()
         for turn in turns:
             found = self._turns.get(turn)
             if found is not None and found.state is TurnState.RUNNING:
                 self._turns[turn] = dataclasses.replace(found, lease_until=until)
-        return set()
+                renewed.add(turn)
+        return renewed & self._cancels
 
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:
         self._visible(owner, session)

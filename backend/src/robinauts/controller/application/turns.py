@@ -7,8 +7,9 @@ The runner numbers its turn's events from 1 and is their only writer. Its first 
 its claim on the turn: refused, it has lost the turn to another runner and runs no engine.
 Its deadline is ``max_turn_seconds`` from the turn's start; the process renews the turn's lease
 while it runs. On
-``TurnLostError`` from any write it closes the engine's stream and writes nothing more: the
-turn is another runner's, a reader ended it, or its lease has passed.
+``TurnLostError`` from any write, or ``SessionNotFoundError`` once the session is deleted, it
+closes the engine's stream and writes nothing more: the turn is another runner's, a reader
+ended it, or its lease has passed.
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ from robinauts.controller.contract.domain import (
     ResultLanded,
     Role,
     Session,
+    SessionNotFoundError,
     TextPart,
     TextPiece,
     ToolCallPart,
@@ -59,6 +61,9 @@ from robinauts.controller.core.documents import (
 )
 from robinauts.controller.ports.dispatcher import CLOSE
 from robinauts.controller.ports.store import Store, StoredEvent
+
+LOST = (TurnLostError, SessionNotFoundError)
+"""What a write raises when the turn is no longer this runner's to write."""
 
 RETENTION = timedelta(hours=24)
 """How long a turn's events are kept after they are written, a constant for now."""
@@ -147,7 +152,7 @@ async def run_turn(
     writer = _Writer(store, owner, turn)
     try:
         await writer.append(MessageStarted(answer_id, parent_id=question.id))
-    except TurnLostError:
+    except LOST:
         return
     finishing: asyncio.Future[None] | None = None
     try:
@@ -201,7 +206,7 @@ async def run_turn(
                         writer.finish(TurnState.FINISHED, None, answer, last)
                     )
                     await asyncio.shield(finishing)
-    except TurnLostError:
+    except LOST:
         return
     except asyncio.CancelledError as exc:
         if finishing is not None:
@@ -237,5 +242,5 @@ async def _end(
     """End a turn, with what it answered if anything; nothing more if the turn is lost."""
     try:
         await writer.finish(state, error, answer, writer.last(TurnEnded(state)))
-    except TurnLostError:
+    except LOST:
         return

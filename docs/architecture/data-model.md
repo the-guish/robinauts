@@ -87,13 +87,16 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   same turn is refused at position 1, before it has run the engine, because each
   runner mints the answer's id afresh and so no two claims are the same document.
 - **Deleting hides, then purges.** `deleted_at` makes a session not found and closes
-  it to turns. The hide is refused while a turn is running (`TurnActiveError`), so no
-  runner and no engine writes under a purge: the controller first ends a turn whose
-  lease has passed, cancels the turn it runs itself and waits for it to end, and a
-  turn run by another process is refused until stage two's cancel through the store.
-  The purge calls `forget` on the engine the session records, which may no longer be
-  the one its agent's configuration names, then deletes the session with its
-  messages, turns and events.
+  it to turns, and every write of a turn still running on it is refused. The
+  controller first requests the running turn's cancel; when it runs in this process it
+  waits for it to end and purges at once. A turn run by another process stops at its
+  next write, and the sweep purges the session once its turns have ended. The purge
+  calls `forget` on the engine the session records, which may no longer be the one its
+  agent's configuration names, then deletes the session with its messages, turns and
+  events.
+- **A cancel goes through the store.** `cancel_requested_at` is written on the running
+  turn and announced to every process (`NOTIFY robinauts_cancel`); the process running
+  the turn cancels it, or reads the request back with its next renewal of the lease.
 - **Events expire.** `expires_at` is set when an event is written, as that moment
   plus a retention of hours. Ending a turn touches none of its events. The answer is
   in `messages` and the outcome is in `turns`, so after a turn ends nothing reads its
@@ -109,8 +112,7 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   event is written, since a `turn_ended` event is the runner's; a watcher that finds
   the turn ended with none supplies it from the record. A runner that outlives its
   lease has lost the turn whether or not a reader has found it: every write names
-  its time, and the store refuses one past the lease. Renewing the lease for a long
-  turn, and reading back `cancel_requested_at` with each renewal, are stage two.
+  its time, and the store refuses one past the lease.
 - **No clocks and no ids in a store.** The controller mints every id and sets every
   time.
 - **A session and its records are addressed from the owner down.** Every operation on

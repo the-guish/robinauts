@@ -101,7 +101,7 @@ async def test_an_append_waits_on_a_readers_end_and_then_inserts_nothing() -> No
 
 
 @asyncio_test
-async def test_a_hide_waits_on_a_starting_turn_and_is_then_refused() -> None:
+async def test_a_hide_waits_on_a_starting_turn_and_then_hides_the_session() -> None:
     async with temporary_schema() as schema:
         store = PostgresStore(schema.pool, dsn=url())
         me, one, asked, running = await seeded(store)
@@ -128,12 +128,11 @@ async def test_a_hide_waits_on_a_starting_turn_and_is_then_refused() -> None:
             await asyncio.sleep(0.3)
             assert not hiding.done(), "the hide did not wait on the session's lock"
             await starting.commit()
-            with pytest.raises(TurnActiveError):
-                await hiding
+            await hiding
         finally:
             await starter.close()
-        assert await store.get_session(me.id, one.id) == one
-        assert await store.active_turn(me.id, one.id) is not None
+        with pytest.raises(SessionNotFoundError):
+            await store.get_session(me.id, one.id)
         await store.close()
 
 

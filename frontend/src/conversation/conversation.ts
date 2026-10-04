@@ -11,7 +11,7 @@
  * here is the shapes, the title rule, and the two calls about a conversation
  * that are neither a turn nor the panel's.
  */
-import { request } from "../api/client";
+import { ApiError, request } from "../api/client";
 import type { components } from "../api/schema";
 import type { ConversationId } from "../chat";
 
@@ -43,16 +43,27 @@ export function textOf(message: Message): string {
     .join("");
 }
 
-/** Stop the run that is in flight. */
+/**
+ * Stop the run that is in flight.
+ *
+ * **Any 2xx is the stop arriving**, whatever its body: the server accepts it
+ * at once (202) and the pod running the turn stops it, which the stream
+ * watching it then says.
+ */
 export async function cancelRun(
   id: ConversationId,
   runId: string,
 ): Promise<void> {
-  await request(
-    "post",
-    "/api/conversations/{conversation_id}/runs/{run_id}/cancel",
-    { path: { conversation_id: id, run_id: runId } },
-  );
+  try {
+    await request(
+      "post",
+      "/api/conversations/{conversation_id}/runs/{run_id}/cancel",
+      { path: { conversation_id: id, run_id: runId } },
+    );
+  } catch (failure) {
+    const status = failure instanceof ApiError ? failure.status : 0;
+    if (status < 200 || status > 299) throw failure;
+  }
 }
 
 /**

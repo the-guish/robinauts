@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -90,7 +90,8 @@ class Store(ABC):
 
     @abstractmethod
     async def hide_session(self, owner: uuid.UUID, session: uuid.UUID, at: datetime) -> None:
-        """From then on the session is not found. ``TurnActiveError`` while a turn runs."""
+        """From then on the session is not found, and every write of a turn still running on
+        it is refused."""
 
     @abstractmethod
     async def purge_session(self, owner: uuid.UUID, session: uuid.UUID) -> None:
@@ -153,6 +154,18 @@ class Store(ABC):
     ) -> Turn | None:
         """The session's running turn ended as ``interrupted`` if its lease has passed
         ``now``, by one conditional write, with no event; ``None`` otherwise."""
+
+    @abstractmethod
+    async def request_cancel(
+        self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, at: datetime
+    ) -> None:
+        """Record that the turn, if it runs, is to be cancelled, and tell every process's
+        ``when_cancelled`` callback."""
+
+    @abstractmethod
+    def when_cancelled(self, callback: Callable[[uuid.UUID], None]) -> None:
+        """Call ``callback`` with the turn's id for each cancel requested, by any process, from
+        ``open`` on; a request missed is read back by ``renew_leases``."""
 
     @abstractmethod
     async def renew_leases(self, turns: Collection[uuid.UUID], until: datetime) -> set[uuid.UUID]:

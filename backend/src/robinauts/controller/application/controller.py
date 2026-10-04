@@ -35,7 +35,6 @@ from robinauts.controller.contract.domain import (
     StorageKind,
     TextPart,
     Turn,
-    TurnActiveError,
     TurnEnded,
     TurnLostError,
     TurnStarted,
@@ -123,6 +122,7 @@ class RobinautsController(Controller):
             self._factories,
             setup=self._sets_up_engines(),
         )
+        self._store.when_cancelled(self._dispatcher.stop)
         self._chores = [
             asyncio.create_task(_every(HEARTBEAT_SECONDS, self._renew_leases, "renew the leases"))
         ]
@@ -130,7 +130,8 @@ class RobinautsController(Controller):
     async def _renew_leases(self) -> None:
         running = self._dispatcher.running()
         if running:
-            await self._store.renew_leases(running, self._now() + LEASE)
+            for turn in await self._store.renew_leases(running, self._now() + LEASE):
+                self._dispatcher.stop(turn)
 
     async def close(self) -> None:
         await self._dispatcher.close(self._close_timeout)
@@ -215,11 +216,18 @@ class RobinautsController(Controller):
         session = await self._store.get_session(user.id, session_id)
         await self._store.end_expired_turn(user.id, session_id, self._now())
         running = await self._store.active_turn(user.id, session_id)
-        if running is not None and await self._dispatcher.cancel(user.id, session_id, running.id):
-            await self._end_if_running(user, running, TurnState.CANCELLED)
+        if running is not None:
+            await self._cancel(user, running)
+            running = await self._store.active_turn(user.id, session_id)
         await self._store.hide_session(user.id, session_id, self._now())
-        await (await self._engine(session.engine)).forget(session_id)
-        await self._store.purge_session(user.id, session_id)
+        # A turn another process runs fails its next write on the hidden session and stops;
+        # the sweep purges the session once its turns have ended.
+        if running is None:
+            await self._purge(user.id, session)
+
+    async def _purge(self, owner: uuid.UUID, session: Session) -> None:
+        await (await self._engine(session.engine)).forget(session.id)
+        await self._store.purge_session(owner, session.id)
 
     async def fork_session(
         self, user: User, session_id: uuid.UUID, *, at_message: uuid.UUID
@@ -338,10 +346,14 @@ class RobinautsController(Controller):
         running = await self._store.active_turn(user.id, session_id)
         if running is None or (turn_id is not None and running.id != turn_id):
             raise NoActiveTurnError(str(session_id))
-        if not await self._dispatcher.cancel(user.id, session_id, running.id):
-            raise TurnActiveError(f"turn {running.id} runs in another process")
-        # A runner that never claimed the turn wrote nothing: the turn is ended here.
-        await self._end_if_running(user, running, TurnState.CANCELLED)
+        await self._cancel(user, running)
+
+    async def _cancel(self, user: User, running: Turn) -> None:
+        """Ask whichever process runs the turn to cancel it; when this one does, wait for it."""
+        await self._store.request_cancel(user.id, running.session_id, running.id, self._now())
+        if await self._dispatcher.cancel(user.id, running.session_id, running.id):
+            # A runner that never claimed the turn wrote nothing: the turn is ended here.
+            await self._end_if_running(user, running, TurnState.CANCELLED)
 
     async def _end_if_running(self, user: User, turn: Turn, state: TurnState) -> None:
         now = self._now()

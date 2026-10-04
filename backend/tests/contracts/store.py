@@ -168,18 +168,21 @@ class StoreContract:
         assert await store.get_session(me.id, one.id) == renamed
 
     @store_test
-    async def test_a_hide_is_refused_while_a_turn_runs_and_hides_the_session_after(
+    async def test_a_hide_while_a_turn_runs_refuses_the_turns_writes_and_hides_the_session(
         self, store: Store
     ) -> None:
         me, one, _, running = await self.started(store)
-        with pytest.raises(TurnActiveError):
-            await store.hide_session(me.id, one.id, NOW)
-        await store.finish_turn(
-            me.id, one.id, running.id, TurnState.CANCELLED, NOW, None, None, [piece(1)], NOW
-        )
         await store.hide_session(me.id, one.id, NOW)
+        with pytest.raises((TurnLostError, SessionNotFoundError)):
+            await self.append(store, me, one, running, piece(1))
+        with pytest.raises((TurnLostError, SessionNotFoundError)):
+            await store.finish_turn(
+                me.id, one.id, running.id, TurnState.CANCELLED, NOW, None, None, [], NOW
+            )
         with pytest.raises(SessionNotFoundError):
             await store.get_session(me.id, one.id)
+        with pytest.raises(SessionNotFoundError):
+            await store.hide_session(me.id, one.id, NOW)
         on_purged = turn(one.id, uuid.uuid4())
         with pytest.raises(SessionNotFoundError):
             await store.start_turn(me.id, on_purged, None)
@@ -325,6 +328,22 @@ class StoreContract:
         stopped = await store.get_turn(me.id, one.id, running.id)
         assert stopped is not None
         assert (stopped.state, stopped.lease_until) == (TurnState.FINISHED, NOW + 10 * MINUTE)
+
+    @store_test
+    async def test_a_cancel_request_is_told_and_read_back_with_the_lease(
+        self, store: Store
+    ) -> None:
+        told: list[uuid.UUID] = []
+        store.when_cancelled(told.append)
+        me, one, _, running = await self.started(store)
+        assert await store.renew_leases([running.id], NOW + MINUTE) == set()
+        await store.request_cancel(me.id, one.id, running.id, NOW)
+        for _ in range(50):
+            if told:
+                break
+            await asyncio.sleep(0.02)
+        assert told == [running.id]
+        assert await store.renew_leases([running.id], NOW + MINUTE) == {running.id}
 
     @store_test
     async def test_a_start_and_a_hide_succeed_after_an_expired_turn_is_ended(

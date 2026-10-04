@@ -29,6 +29,11 @@ class TurnDispatcher(ABC):
         false when the turn is not this process's."""
 
     @abstractmethod
+    def stop(self, turn: uuid.UUID) -> None:
+        """Cancel the turn if this process runs it and it is not being cancelled already, and
+        return at once."""
+
+    @abstractmethod
     def running(self) -> list[uuid.UUID]:
         """The turns this process runs."""
 

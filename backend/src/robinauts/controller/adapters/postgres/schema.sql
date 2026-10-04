@@ -113,12 +113,11 @@ CREATE TABLE IF NOT EXISTS users (
 -- partial unique index on `turns` below, and what is running is looked up
 -- there.
 --
--- `deleted_at` hides a session. It is set only while no turn is running, under
--- a lock on the row taken first, so that no runner and no engine writes under
--- a purge. From the moment it is set, every read treats the session as not
--- found and no turn may start on it. The purge then calls `forget` on the
--- engine the row names and deletes the row, and the cascade takes its
--- messages and turns with it. Trash, in stage two, is a delay before the
+-- `deleted_at` hides a session. From the moment it is set, every read treats
+-- the session as not found, no turn may start on it, and every write of a turn
+-- still running on it is refused. The purge, once its turns have ended, calls
+-- `forget` on the engine the row names and deletes the row, and the cascade
+-- takes its messages and turns with it. Trash, in stage two, is a delay before the
 -- purge, not a change of schema.
 --
 -- `owner_id` cascades: a user's sessions are private to them, and there is
@@ -240,9 +239,9 @@ CREATE INDEX IF NOT EXISTS messages_session_id_parent_id_idx
 -- running the turn moves it forward every 30 seconds, in one write for all of
 -- its turns. Every write of the runner's is refused past it, and a running turn
 -- whose lease has passed was left by a process that went away: the next reader
--- to find it ends it as `interrupted`, with no event. `cancel_requested_at`,
--- which a cancel from another process will set and the runner read back, is
--- not written yet. Both are set by the application's clock.
+-- to find it ends it as `interrupted`, with no event. `cancel_requested_at` is
+-- set by a cancel through any process, which also announces it, and is read
+-- back with each renewal. Both are set by the application's clock.
 CREATE TABLE IF NOT EXISTS turns (
     id uuid
         CONSTRAINT turns_pkey PRIMARY KEY,

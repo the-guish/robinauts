@@ -698,10 +698,15 @@ def create_app(
         position = after if after is not None else int(last_event_id or 0)
         return await watched(user, conversation_id, run_id, position)
 
-    @app.post("/api/conversations/{conversation_id}/runs/{run_id}/cancel", status_code=204)
+    @app.post(
+        "/api/conversations/{conversation_id}/runs/{run_id}/cancel",
+        status_code=202,
+        response_class=Response,
+    )
     async def cancel_turn(
         conversation_id: uuid.UUID, run_id: uuid.UUID, user: User = asking
     ) -> None:
+        # Accepted: the process running the turn cancels it, and its stream says so.
         await controller.cancel_turn(user, conversation_id, run_id)
 
     # --- liveness --------------------------------------------------------------
