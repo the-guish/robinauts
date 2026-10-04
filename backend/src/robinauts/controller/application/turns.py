@@ -68,28 +68,49 @@ LOST = (TurnLostError, SessionNotFoundError)
 RETENTION = timedelta(hours=24)
 """How long a turn's events are kept after they are written, a constant for now."""
 
+COALESCE_SECONDS = 0.15
+"""How long text and reasoning pieces wait for others, to be written in one batch."""
+
 
 class _Writer:
-    """The turn's events, numbered and written one at a time."""
+    """The turn's events, numbered and written in batches: text and reasoning pieces wait up to
+    ``COALESCE_SECONDS`` for what follows them, and every other event is written at once, with
+    whatever waited before it. A batch the waiting task failed to write fails the next call."""
 
     def __init__(self, store: Store, owner: uuid.UUID, turn: Turn) -> None:
         self._store = store
         self._owner = owner
         self._turn = turn
         self.position = 0
+        self._pending: list[StoredEvent] = []
+        self._writing = asyncio.Lock()
+        self._waiting: asyncio.Task[None] | None = None
+        self._failed: Exception | None = None
 
     async def append(self, event: TurnEvent) -> None:
-        self.position += 1
-        now = datetime.now(UTC)
-        await self._store.append_event(
-            self._owner,
-            self._turn.session_id,
-            self._turn.id,
-            self.position,
-            event_to_document(self._turn.id, self.position, event),
-            now,
-            now + RETENTION,
-        )
+        if self._failed is not None:
+            raise self._failed
+        self._pending.extend(self.last(event))
+        if not isinstance(event, TextPiece | ReasoningPiece):
+            await self._flush()
+        elif self._waiting is None:
+            self._waiting = asyncio.create_task(self._later())
+
+    async def _later(self) -> None:
+        await asyncio.sleep(COALESCE_SECONDS)
+        self._waiting = None
+        try:
+            await self._flush()
+        except Exception as failed:
+            self._failed = failed
+
+    async def _flush(self) -> None:
+        async with self._writing:
+            batch, self._pending = self._pending, []
+            if batch:
+                await self._store.append_events(
+                    self._owner, self._turn.session_id, self._turn.id, batch, datetime.now(UTC)
+                )
 
     def last(self, *events: TurnEvent) -> list[StoredEvent]:
         """The events a finish writes, numbered after the ones appended."""
@@ -108,6 +129,12 @@ class _Writer:
         answer: Message | None,
         events: Sequence[StoredEvent],
     ) -> None:
+        if self._waiting is not None:
+            self._waiting.cancel()
+            self._waiting = None
+        async with self._writing:
+            # What still waits goes with the finish, in its transaction.
+            events, self._pending = [*self._pending, *events], []
         now = datetime.now(UTC)
         await self._store.finish_turn(
             self._owner,

@@ -15,6 +15,7 @@ AG-UI over SSE, its run id is the turn's id, and its thread id the session's.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -70,6 +71,9 @@ from robinauts.web.sign_in import (
 )
 
 DEFAULT_PAGE = 30
+
+FIRST_EVENT_SECONDS = 1.0
+"""How long a stream's response waits for its first event before it starts without it."""
 
 STATUS_OF: dict[type[ControllerError], int] = {
     InvalidValueError: 422,
@@ -353,7 +357,7 @@ def event_stream(
     session_id: uuid.UUID, turn_id: uuid.UUID, events: AsyncIterator[NumberedEvent]
 ) -> StreamingResponse:
     return StreamingResponse(
-        agui.stream(str(session_id), str(turn_id), events),
+        agui.kept_alive(agui.stream(str(session_id), str(turn_id), events)),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-store",
@@ -459,14 +463,19 @@ def create_app(
         user: User, session_id: uuid.UUID, turn_id: uuid.UUID, after: int
     ) -> StreamingResponse:
         events = controller.watch_turn(user, session_id, turn_id, after=after)
-        # The refusals happen inside the generator: ask for the first event here, so that
-        # they answer with a status rather than a broken stream.
-        first = await anext(events, None)
+        # The refusals happen inside the generator, before it waits: ask for the first event
+        # here, so that they answer with a status rather than a broken stream, but not for
+        # longer than a refusal takes, so that a quiet turn has its headers at once.
+        first = asyncio.ensure_future(anext(events, None))
+        await asyncio.wait({first}, timeout=FIRST_EVENT_SECONDS)
+        if first.done():
+            first.result()
 
         async def chained() -> AsyncIterator[NumberedEvent]:
-            if first is None:
+            event = await first
+            if event is None:
                 return
-            yield first
+            yield event
             async for event in events:
                 yield event
 

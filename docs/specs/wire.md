@@ -136,6 +136,14 @@ documented here, which is what "documented with the API" means for them.
   which is not AG-UI's *interrupt* outcome). Its message is **a fixed
   sentence** — never the turn's stored error, which is written for an
   operator.
+- **A quiet stream says so.** After 15 seconds with nothing to send, a stream
+  sends a comment line (`: keep-alive`), so that nothing in front of the
+  deployment closes it as idle, and a re-attach to a turn that is quiet has
+  its response headers at once. The client takes 45 seconds without a byte
+  as a connection that went, and re-attaches, as it does after any drop:
+  after a wait that doubles from half a second up to thirty, with jitter,
+  or at once when the network comes back or the tab is shown again, for as
+  long as the turn runs. Only a refusal ends the watch.
 
 **Not yet served.** The wire is the happy path today
 ([working-notes/echo-e2e-plan.md](../working-notes/echo-e2e-plan.md)); these
@@ -148,8 +156,6 @@ hold as the rule and are not enforced yet:
   is not there and one in somebody else's conversation answer the same 404,
   and **before the stream begins**: a refusal is a status.
 - `Last-Event-ID` and `after` saying two different things is refused (422).
-- A comment line (`: keep-alive`) goes out while nothing is arriving, so
-  that nothing in front of the deployment closes a quiet stream.
 - **Every stream ends with an event saying the turn is over.** Re-attaching
   at or past the last position of a turn that has ended is answered with
   **how that turn really ended**, read from its record. A position a turn

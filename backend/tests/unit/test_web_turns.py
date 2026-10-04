@@ -5,19 +5,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from itertools import groupby
+from typing import Any
 
 import httpx
+from test_controller_runner import GatedEngine
 from test_controller_turns import CONFIG
 
 from aio import asyncio_test
 from robinauts.controller.composition import compose
 from robinauts.controller.contract.domain import StorageConfig, StorageKind
-from robinauts.web.app import create_app
+from robinauts.web import agui
+from robinauts.web.app import LOCAL_IDENTITY, create_app
 
 
 @asynccontextmanager
@@ -138,3 +142,50 @@ async def test_an_edit_names_the_message_and_a_reply_its_parent() -> None:
             f"/api/conversations/{cid}/turns", json={"text": "x", "edit": answer["id"]}
         )
         assert not_a_question.status_code == 404
+
+
+@asyncio_test
+async def test_a_quiet_stream_says_keep_alive_and_ends_with_its_chunks() -> None:
+    async def slow() -> AsyncIterator[str]:
+        yield "a"
+        await asyncio.sleep(0.12)
+        yield "b"
+
+    said = [chunk async for chunk in agui.kept_alive(slow(), every=0.05)]
+    assert said[0] == "a"
+    assert said[-1] == "b"
+    assert agui.KEEP_ALIVE in said
+
+
+@asyncio_test
+async def test_a_re_attach_to_a_quiet_turn_has_its_headers_at_once() -> None:
+    composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
+    app = create_app(
+        composed.controller, credentials=composed.credentials, sign_in=None, secret_for={}.get
+    )
+    async with app.router.lifespan_context(app):
+        engine = composed.controller._engines["echo"] = GatedEngine()
+        user = await composed.controller.ensure_user(LOCAL_IDENTITY)
+        started = await composed.controller.start_session(
+            user, agent="echo", model="echo", text="hello"
+        )
+        path = f"/api/conversations/{started.session_id}/runs/{started.turn_id}/events"
+        sent: list[dict[str, Any]] = []
+        headed = asyncio.Event()
+
+        async def send(message: dict[str, Any]) -> None:
+            sent.append(message)
+            headed.set()
+
+        async def receive() -> dict[str, Any]:
+            await asyncio.Event().wait()
+            return {}
+
+        scope = {"type": "http", "method": "GET", "path": path, "query_string": b"after=1"}
+        scope |= {"headers": [], "http_version": "1.1", "scheme": "http"}
+        serving = asyncio.create_task(app(scope, receive, send))
+        await asyncio.wait_for(headed.wait(), 3.0)
+        assert sent[0]["type"] == "http.response.start"
+        assert sent[0]["status"] == 200
+        engine.gate.set()
+        await asyncio.wait_for(serving, 5.0)

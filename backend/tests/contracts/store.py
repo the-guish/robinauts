@@ -112,9 +112,7 @@ class StoreContract:
         event: StoredEvent,
         at: datetime = NOW,
     ) -> None:
-        await store.append_event(
-            me.id, one.id, running.id, event.position, event.document, at, event.expires_at
-        )
+        await store.append_events(me.id, one.id, running.id, [event], at)
 
     # --- users --------------------------------------------------------------
 
@@ -222,6 +220,19 @@ class StoreContract:
         with pytest.raises(TurnLostError):
             await self.append(store, me, one, running, other)
         assert len(await store.events_after(me.id, one.id, running.id, 0)) == 3
+
+    @store_test
+    async def test_a_batch_of_events_is_written_whole_or_not_at_all(self, store: Store) -> None:
+        me, one, _, running = await self.started(store)
+        assert await store.last_position(me.id, one.id, running.id) == 0
+        batch = [piece(1), piece(2), piece(3)]
+        await store.append_events(me.id, one.id, running.id, batch, NOW)
+        await store.append_events(me.id, one.id, running.id, batch, NOW)
+        with pytest.raises(TurnLostError):
+            await store.append_events(me.id, one.id, running.id, [piece(3, "y"), piece(4)], NOW)
+        assert await store.last_position(me.id, one.id, running.id) == 3
+        stored = await store.events_after(me.id, one.id, running.id, 0)
+        assert stored == [(e.position, e.document) for e in batch]
 
     @store_test
     async def test_a_finished_turn_keeps_its_answer_and_its_last_events(self, store: Store) -> None:

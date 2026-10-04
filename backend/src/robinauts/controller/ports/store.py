@@ -111,19 +111,21 @@ class Store(ABC):
         ``TurnActiveError`` while the session has a running turn."""
 
     @abstractmethod
-    async def append_event(
+    async def append_events(
         self,
         owner: uuid.UUID,
         session: uuid.UUID,
         turn: uuid.UUID,
-        position: int,
-        document: Document,
+        events: Sequence[StoredEvent],
         written_at: datetime,
-        expires_at: datetime,
     ) -> None:
-        """The same document again at a position it has is accepted. Another document there,
-        or any append on a turn that is not running or whose lease has passed ``written_at``,
-        is ``TurnLostError``."""
+        """All of them or none, with one wake-up for the watchers. The same documents again at
+        positions they have are accepted. Another document there, or any append on a turn
+        that is not running or whose lease has passed ``written_at``, is ``TurnLostError``."""
+
+    @abstractmethod
+    async def last_position(self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID) -> int:
+        """The position of the turn's last event, 0 before its first."""
 
     @abstractmethod
     async def events_after(
