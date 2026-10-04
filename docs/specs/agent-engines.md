@@ -103,9 +103,10 @@ Every engine is built by one function with the same inputs and the same
 output, so that a caller adds an engine by a name and a function. The
 function receives:
 
-- **Settings**: the configured models, providers and tool servers; a way to
-  ask for a provider's key; a way to ask for a tool server's secret. Keys and
-  secrets are asked for, never handed over in the open.
+- **Settings**: the configured models, providers and tool servers; how many
+  model calls one turn may make; a way to ask for a provider's key; a way to
+  ask for a tool server's secret. Keys and secrets are asked for, never
+  handed over in the open.
 - **Storage**: which kind, and what that kind needs. PostgreSQL with a
   connection pool; local with a folder; or in-memory with nothing, for
   tests.

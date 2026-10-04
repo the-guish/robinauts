@@ -54,6 +54,7 @@ SETTINGS = EngineSettings(
     ),
     keys=Keys(),
     tool_secrets=NoSecrets(),
+    max_model_calls_per_turn=200,
 )
 
 

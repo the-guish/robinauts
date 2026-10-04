@@ -38,8 +38,10 @@ from robinauts.controller.ports.store import Store
 
 DATABASE_URL_VARIABLE = "ROBINAUTS_DATABASE_URL"
 
-CONTROLLER_TABLES = frozenset({"model_providers", "models", "tool_servers", "agents"})
-"""The file's tables that are the controller's, the ones `parse_config` reads."""
+CONTROLLER_KEYS = frozenset(
+    {"max_model_calls_per_turn", "model_providers", "models", "tool_servers", "agents"}
+)
+"""The file's top-level keys that are the controller's, the ones `parse_config` reads."""
 
 SCHEMA_READY = "the database is at schema version {version} (schema.sql {digest})"
 """What `db init` says whether it created the schema or found it there: the command's

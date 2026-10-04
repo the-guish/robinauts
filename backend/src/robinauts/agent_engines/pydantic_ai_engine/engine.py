@@ -30,7 +30,6 @@ from pydantic_ai.messages import (
 )
 
 from robinauts.agent_engines.contract.domain import (
-    MODEL_CALLS_PER_TURN,
     AgentDefinition,
     CheckpointNotFoundError,
     Done,
@@ -94,7 +93,8 @@ class PydanticAIEngine(AgentEngine):
         )
         # The deadline bounds the run, not the caller's handling of what is yielded.
         deadline = asyncio.get_running_loop().time() + timeout_seconds
-        async with aclosing(run_of(runner, prompt, history)) as items:
+        calls = self._settings.max_model_calls_per_turn
+        async with aclosing(run_of(runner, prompt, history, calls)) as items:
             while True:
                 async with asyncio.timeout_at(deadline):
                     item = await anext(items, None)
@@ -116,9 +116,9 @@ class PydanticAIEngine(AgentEngine):
 
 
 async def run_of(
-    runner: Agent[None, str], prompt: str, history: list[ModelMessage] | None
+    runner: Agent[None, str], prompt: str, history: list[ModelMessage] | None, calls: int
 ) -> AsyncIterator[AgentStreamEvent | AgentRunResult[str]]:
-    limits = UsageLimits(request_limit=MODEL_CALLS_PER_TURN)
+    limits = UsageLimits(request_limit=calls)
     async with runner.iter(prompt, message_history=history, usage_limits=limits) as run:
         async for node in run:
             if Agent.is_model_request_node(node) or Agent.is_call_tools_node(node):

@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from robinauts.agent_engines.contract.domain import ProviderKind, ToolServerAuth
@@ -35,6 +37,12 @@ def test_settings_carry_the_tables_without_agents_and_answer_secrets_by_id() -> 
     assert (header.auth, header.header) == (ToolServerAuth.HEADER, "x-api-key")
     assert settings.keys.key_for("acme") == "sk-1"
     assert settings.tool_secrets.secret_for("t") == "s-1"
+
+
+def test_settings_carry_the_bound_on_a_turn_s_model_calls() -> None:
+    assert engine_settings(CONFIG, {}.get).max_model_calls_per_turn == 200
+    bounded = dataclasses.replace(CONFIG, max_model_calls_per_turn=60)
+    assert engine_settings(bounded, {}.get).max_model_calls_per_turn == 60
 
 
 def test_a_secret_the_environment_lacks_is_refused_by_name() -> None:

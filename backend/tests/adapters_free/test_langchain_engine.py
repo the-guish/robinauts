@@ -136,7 +136,9 @@ class FixedSecret(ToolSecretLookup):
 
 
 def tool_settings(secrets: ToolSecretLookup) -> EngineSettings:
-    return EngineSettings(models=ModelsConfig(), keys=Keys(), tool_secrets=secrets)
+    return EngineSettings(
+        models=ModelsConfig(), keys=Keys(), tool_secrets=secrets, max_model_calls_per_turn=200
+    )
 
 
 def test_a_bearer_server_is_reached_with_its_secret_as_a_bearer_token() -> None:

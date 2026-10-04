@@ -46,7 +46,8 @@ class _ToolSecrets(ToolSecretLookup):
 
 
 def engine_settings(config: domain.Config, secret_for: SecretLookup) -> EngineSettings:
-    """The controller's configuration as the engines take it: the same tables, no agents."""
+    """The controller's configuration as the engines take it: the same tables, no agents, and
+    the bound on a turn's model calls."""
     models = engine_domain.ModelsConfig(
         providers={
             p.id: engine_domain.ModelProviderConfig(
@@ -81,7 +82,10 @@ def engine_settings(config: domain.Config, secret_for: SecretLookup) -> EngineSe
         },
     )
     return EngineSettings(
-        models=models, keys=_Keys(config, secret_for), tool_secrets=_ToolSecrets(config, secret_for)
+        models=models,
+        keys=_Keys(config, secret_for),
+        tool_secrets=_ToolSecrets(config, secret_for),
+        max_model_calls_per_turn=config.max_model_calls_per_turn,
     )
 
 

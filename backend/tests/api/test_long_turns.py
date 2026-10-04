@@ -2,7 +2,7 @@
 # Copyright The Robinauts Authors
 
 """A long turn through each engine: many tool rounds, a vendor's error on the way, and the
-bound on the model calls one turn may make (``docs/specs/operations.md``)."""
+bound on the model calls one turn may make, which ``util.stack`` sets."""
 
 from __future__ import annotations
 
@@ -13,14 +13,11 @@ import pytest
 
 from util.controller_db import requires_postgres
 from util.fake_openai import CallTool, FakeLocalGPTServer, FakeModel, Overloaded
+from util.stack import MAX_MODEL_CALLS_PER_TURN
 
 pytestmark = requires_postgres
 
 ROUNDS = 50
-
-MODEL_CALLS_PER_TURN = 200
-"""The bound the operator is promised, written out rather than imported: this is what the
-server does, whatever the code calls it."""
 
 AGENTS = ["langchain_tools", "pydantic_ai_tools"]
 
@@ -64,20 +61,20 @@ def test_a_turn_outlasts_a_vendor_error_and_fifty_tool_rounds(
     assert len(local_gpt.received) == ROUNDS + 2
 
 
-@pytest.mark.parametrize("fake_model", [(MODEL_CALLS_PER_TURN - 1, True)], indirect=True)
+@pytest.mark.parametrize("fake_model", [(MAX_MODEL_CALLS_PER_TURN - 1, True)], indirect=True)
 @pytest.mark.parametrize("agent", AGENTS)
 def test_a_turn_may_make_every_model_call_of_the_bound(
     api: httpx.Client, local_gpt: FakeLocalGPTServer, agent: str
 ) -> None:
     assert '"RUN_FINISHED"' in last_event(api, agent)
     # The answer is the bound's last call; the request that failed and was retried is not one.
-    assert len(local_gpt.received) == MODEL_CALLS_PER_TURN + 1
+    assert len(local_gpt.received) == MAX_MODEL_CALLS_PER_TURN + 1
 
 
-@pytest.mark.parametrize("fake_model", [(MODEL_CALLS_PER_TURN, False)], indirect=True)
+@pytest.mark.parametrize("fake_model", [(MAX_MODEL_CALLS_PER_TURN, False)], indirect=True)
 @pytest.mark.parametrize("agent", AGENTS)
 def test_a_turn_that_needs_one_model_call_more_fails(
     api: httpx.Client, local_gpt: FakeLocalGPTServer, agent: str
 ) -> None:
     assert '"RUN_ERROR"' in last_event(api, agent)
-    assert len(local_gpt.received) == MODEL_CALLS_PER_TURN
+    assert len(local_gpt.received) == MAX_MODEL_CALLS_PER_TURN

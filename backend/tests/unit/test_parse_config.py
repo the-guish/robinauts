@@ -129,3 +129,17 @@ def test_an_agent_naming_a_tool_server_twice_is_refused() -> None:
     }
     with pytest.raises(ConfigError, match=re.escape("agents.a: tool server(s) named twice: t")):
         parse_config(raw)
+
+
+def test_a_turn_may_make_200_model_calls_unless_the_file_says_otherwise() -> None:
+    assert parse_config({}).max_model_calls_per_turn == 200
+    assert parse_config({"max_model_calls_per_turn": 60}).max_model_calls_per_turn == 60
+
+
+@pytest.mark.parametrize("calls", [0, -1, 1.5, "60", True])
+def test_a_bound_on_model_calls_that_is_not_a_whole_number_of_one_or_more_is_refused(
+    calls: object,
+) -> None:
+    problem = f"max_model_calls_per_turn: a whole number of 1 or more, not {calls!r}"
+    with pytest.raises(ConfigError, match=re.escape(problem)):
+        parse_config({"max_model_calls_per_turn": calls})

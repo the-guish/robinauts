@@ -9,6 +9,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from robinauts.controller.contract.domain import (
+    MODEL_CALLS_PER_TURN,
     AgentConfig,
     Config,
     ConfigError,
@@ -52,6 +53,10 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
     models = build("models", ModelConfig)
     tool_servers = build("tool_servers", ToolServerConfig, auth=ToolServerAuth, exclude=_names)
     agents = build("agents", AgentConfig, tools=tuple)
+    calls = raw.get("max_model_calls_per_turn", MODEL_CALLS_PER_TURN)
+    # A bool is an int to Python, and `true` is not a number of calls.
+    if isinstance(calls, bool) or not isinstance(calls, int) or calls < 1:
+        problems.append(f"max_model_calls_per_turn: a whole number of 1 or more, not {calls!r}")
 
     for server in tool_servers.values():
         if server.auth is ToolServerAuth.HEADER:
@@ -84,4 +89,4 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
             problems.append(f"agents.{agent.id}: engine {agent.engine!r} is not one of {ENGINES}")
     if problems:
         raise ConfigError("\n".join(problems))
-    return Config(providers, models, tool_servers, agents)
+    return Config(providers, models, tool_servers, agents, calls)

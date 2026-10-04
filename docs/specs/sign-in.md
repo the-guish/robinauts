@@ -107,7 +107,7 @@ With providers configured and no allow entry, start-up fails.
   on** — only the argument the starting command passes — so nothing a
   process inherits can turn sign-in off in a deployment.
 - It may still be given the **configuration file** (`ROBINAUTS_CONFIG`),
-  and then **only its model tables are read**: the chat is developed in
+  and then **only its model half is read**: the chat is developed in
   this mode ([frontend.md](frontend.md)) and a chat needs an agent. A file that also holds sign-in tables — `public_url`,
   `session_hours`, `providers`, `allow`, `admin` — is what "cannot be
   combined" refuses,

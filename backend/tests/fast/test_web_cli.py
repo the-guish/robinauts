@@ -53,6 +53,13 @@ def test_a_start_is_refused_with_its_reason(
         serving(tables, {}, host=host, dev_no_sign_in=mode)
 
 
+def test_the_bound_on_model_calls_is_the_controller_s_key() -> None:
+    config, _, _ = serving(
+        {"max_model_calls_per_turn": 60}, {}, host="127.0.0.1", dev_no_sign_in=True
+    )
+    assert config.max_model_calls_per_turn == 60
+
+
 @pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost"])
 def test_the_mode_serves_a_loopback_host(host: str) -> None:
     _, _, sign_in = serving({}, {}, host=host, dev_no_sign_in=True)

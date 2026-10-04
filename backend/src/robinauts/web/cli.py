@@ -34,7 +34,7 @@ from typing import Any
 import uvicorn
 
 from robinauts.controller.composition import (
-    CONTROLLER_TABLES,
+    CONTROLLER_KEYS,
     DATABASE_URL_VARIABLE,
     SecretLookup,
     compose,
@@ -81,9 +81,9 @@ def serving(
     sign-in's, ``None`` in the local development mode. ``ConfigError`` names every problem of
     a start that is refused."""
     problems = [
-        f"{key}: unknown key, neither a table of the controller's nor of sign-in's"
+        f"{key}: unknown key, neither the controller's nor sign-in's"
         for key in tables
-        if key not in CONTROLLER_TABLES | SIGN_IN_KEYS
+        if key not in CONTROLLER_KEYS | SIGN_IN_KEYS
     ]
     sign_in = None
     if dev_no_sign_in:

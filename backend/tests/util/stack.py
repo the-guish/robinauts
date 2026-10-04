@@ -6,8 +6,9 @@ schema of its own in PostgreSQL, configured with one agent per engine on models 
 ``FakeLocalGPTServer`` serves.
 
 Given an MCP server, the configuration also has one agent per engine with that server's tools,
-``<engine>_tools``. The schema is made in the PostgreSQL that ``ROBINAUTS_TEST_DATABASE_URL``
-names and dropped afterwards.
+``<engine>_tools``. A turn may make ``MAX_MODEL_CALLS_PER_TURN`` model calls, fewer than the
+default, so that a test can reach the bound quickly. The schema is made in the PostgreSQL that
+``ROBINAUTS_TEST_DATABASE_URL`` names and dropped afterwards.
 """
 
 from __future__ import annotations
@@ -37,7 +38,11 @@ AGENTS = ("langchain", "pydantic_ai")
 
 SYSTEM_PROMPT = "You are a robinaut."
 
+MAX_MODEL_CALLS_PER_TURN = 60
+
 CONFIG = """
+max_model_calls_per_turn = {max_model_calls_per_turn}
+
 [model_providers.local_gpt]
 kind = "openai-compatible"
 base_url = "{base_url}"
@@ -90,7 +95,11 @@ API_KEY = {"LOCAL_GPT_KEY": "not-a-real-key"}
 
 
 def config_for(base_url: str, tools_url: str | None = None) -> str:
-    config = CONFIG.format(base_url=base_url, system_prompt=SYSTEM_PROMPT)
+    config = CONFIG.format(
+        base_url=base_url,
+        system_prompt=SYSTEM_PROMPT,
+        max_model_calls_per_turn=MAX_MODEL_CALLS_PER_TURN,
+    )
     if tools_url is not None:
         config += TOOLS_CONFIG.format(tools_url=tools_url, system_prompt=SYSTEM_PROMPT)
     return config

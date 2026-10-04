@@ -123,6 +123,7 @@ def tool_settings(secrets: ToolSecretLookup, *servers: ToolServerConfig) -> Engi
         models=ModelsConfig(tool_servers={server.id: server for server in servers}),
         keys=Keys(),
         tool_secrets=secrets,
+        max_model_calls_per_turn=200,
     )
 
 

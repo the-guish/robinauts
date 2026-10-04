@@ -124,6 +124,12 @@ public_url = "https://robinauts.example.com"
 # identity provider.
 session_hours = 12
 
+# How many times one answer may call the model: once per tool round, so this
+# is how many tool rounds a long task may take. 200 when left out; an answer
+# that needs more fails. Like the two keys above, it goes before the first
+# [table].
+# max_model_calls_per_turn = 200
+
 [providers.google]
 title = "Google"
 issuer = "https://accounts.google.com"
@@ -667,6 +673,8 @@ engine = "pydantic-ai"
 | `allow: no entry, so nobody could sign in` | providers configured, allow list empty | add at least one `[[allow]]` |
 | `allow N: group needs providers.<id>.groups_claim …` | a `group` entry with no claim named | add `groups_claim`, and the `groups` scope |
 | `no database: set ROBINAUTS_DATABASE_URL …` | the variable is unset | set it; the url is never a command-line flag |
+| `max_model_calls_per_turn: a whole number of 1 or more, not …` | a zero, a negative number, a fraction, or a number in quotes | write a whole number without quotes, or leave the key out for 200 |
+| an answer to a long task, one with many tool calls, ends as "did not finish" | the task needed more model calls than `max_model_calls_per_turn` allows, 200 unless set | raise it, or ask for the task in smaller parts |
 | `the database could not be opened: …` | no server there, no such database, credentials refused | the driver's own sentence says which; the url is never echoed |
 | `the database has no Robinauts schema; this build needs schema version N` | `db init` was not run | run `robinauts db init` |
 | `the database is at schema version M; this build needs schema version N` | the wheel and the database disagree | there are no migrations before the first release: recreate the database and `db init` |

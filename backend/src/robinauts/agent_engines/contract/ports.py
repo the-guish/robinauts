@@ -44,6 +44,8 @@ class EngineSettings:
     models: ModelsConfig
     keys: ProviderKeyLookup
     tool_secrets: ToolSecretLookup
+    max_model_calls_per_turn: int
+    """How many model calls one turn may make, so how many tool rounds it may take."""
 
 
 class StorageKind(Enum):

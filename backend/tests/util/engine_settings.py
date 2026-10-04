@@ -38,4 +38,5 @@ def settings_for(kind: ProviderKind, base_url: str | None = None) -> EngineSetti
         models=ModelsConfig(providers={"p": provider}, models={"m": model}),
         keys=Keys(),
         tool_secrets=NoSecrets(),
+        max_model_calls_per_turn=200,
     )

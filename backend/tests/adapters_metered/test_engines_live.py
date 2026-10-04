@@ -73,6 +73,7 @@ async def one_real_turn(
         models=ModelsConfig(providers={provider.id: provider}, models={"m": model}),
         keys=Key(key),
         tool_secrets=NoSecrets(),
+        max_model_calls_per_turn=200,
     )
     engine = new_engine(settings)
     await engine.setup()

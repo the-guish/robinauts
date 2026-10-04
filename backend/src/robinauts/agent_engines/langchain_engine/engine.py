@@ -28,7 +28,6 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 from robinauts.agent_engines.contract.domain import (
-    MODEL_CALLS_PER_TURN,
     AgentDefinition,
     CheckpointNotFoundError,
     Done,
@@ -94,7 +93,8 @@ class LangChainEngine(AgentEngine):
             checkpointer=self._memory.saver,
         )
         # A model call and its tool round are two steps of the graph.
-        limited: RunnableConfig = {**start, "recursion_limit": 2 * MODEL_CALLS_PER_TURN}
+        calls = self._settings.max_model_calls_per_turn
+        limited: RunnableConfig = {**start, "recursion_limit": 2 * calls}
         stream = graph.astream(
             {"messages": [*fresh, HumanMessage(prompt)]},
             limited,

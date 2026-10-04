@@ -74,8 +74,9 @@ What an internal platform team deploys and controls.
   admins ([sign-in.md](sign-in.md)); model providers, models, agents and
   the MCP tool servers agents may use; limits and retention (below).
 - The **local development mode** ([sign-in.md](sign-in.md)) may be given the
-  same file and reads only its model tables; a file that also holds sign-in
-  tables is a start-up refusal there.
+  same file and reads only its model half: the model tables and
+  `max_model_calls_per_turn`; a file that also holds sign-in tables is a
+  start-up refusal there.
 - Unknown keys are errors, and all problems are reported at once, at
   start-up.
 
@@ -86,6 +87,9 @@ All optional, all set by the operator:
 - requests per minute per user;
 - a maximum attachment size;
 - timeouts for a model call, a tool call and a whole run;
+- how many model calls one turn may make, `max_model_calls_per_turn`, 200
+  when not set: a model call per tool round, so it bounds how many tool
+  rounds an answer takes, and an answer that needs more fails;
 - a model's `context_window`, in tokens, which is what the frameworks keep
   a conversation's history within
   ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)):
@@ -95,9 +99,9 @@ All optional, all set by the operator:
   and is shown to the user. It depends on usage recording and arrives with
   it.
 
-Two bounds are fixed and are not settings. A turn may make 200 model calls,
-one per tool round. A model call that fails with a 429, a 5xx, a timeout or
-a lost connection is retried twice before the turn fails.
+One bound is fixed and is not a setting: a model call that fails with a
+429, a 5xx, a timeout or a lost connection is retried twice before the turn
+fails. A retried call counts once against `max_model_calls_per_turn`.
 
 ## Retention
 

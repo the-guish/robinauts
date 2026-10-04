@@ -128,12 +128,18 @@ class AgentConfig:
     tools: tuple[str, ...] = ()
 
 
+MODEL_CALLS_PER_TURN = 200
+"""How many model calls one turn may make, so how many tool rounds it may take, when the
+configuration's ``max_model_calls_per_turn`` is not set."""
+
+
 @dataclass(frozen=True, slots=True)
 class Config:
     providers: Mapping[str, ProviderConfig] = field(default_factory=dict)
     models: Mapping[str, ModelConfig] = field(default_factory=dict)
     tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
     agents: Mapping[str, AgentConfig] = field(default_factory=dict)
+    max_model_calls_per_turn: int = MODEL_CALLS_PER_TURN
 
 
 class StorageKind(StrEnum):
