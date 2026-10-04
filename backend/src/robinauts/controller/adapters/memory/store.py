@@ -49,6 +49,9 @@ class MemoryStore(Store, WorkQueue):
     async def close(self) -> None:
         """Nothing to release."""
 
+    async def health(self, timeout: float) -> list[str]:
+        return []
+
     # --- helpers ------------------------------------------------------------
 
     def _visible(self, owner: uuid.UUID, session: uuid.UUID) -> Session:

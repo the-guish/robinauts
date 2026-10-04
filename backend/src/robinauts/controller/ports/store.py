@@ -72,6 +72,12 @@ class Store(ABC):
         """Release what ``open`` took."""
         raise NotImplementedError
 
+    @abstractmethod
+    async def health(self, timeout: float) -> list[str]:
+        """What keeps the store from serving, within ``timeout`` seconds: the database not
+        answering, a connection of its own not open. Nothing when it is well."""
+        raise NotImplementedError
+
     # --- users --------------------------------------------------------------
 
     @abstractmethod

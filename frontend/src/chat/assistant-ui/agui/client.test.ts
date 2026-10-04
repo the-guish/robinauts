@@ -649,3 +649,49 @@ test("reconnecting now cuts the wait short", async () => {
     vi.useRealTimers();
   }
 });
+
+test("a stream a stopping server ends with a hint is re-attached as it says", async () => {
+  const hint = [
+    "retry: 1000",
+    "event: CUSTOM",
+    `data: ${JSON.stringify({
+      type: "CUSTOM",
+      name: "robinauts.reconnect",
+      value: { after_ms: 1000 },
+    })}`,
+    "",
+    "",
+  ].join("\n");
+  const ending = () => {
+    const { response, write, close } = writable({
+      headers: streamHeaders(RUN, CONVERSATION),
+    });
+    write(
+      event("TEXT_MESSAGE_START", { messageId: "m", role: "assistant" }, 2),
+    );
+    write(hint);
+    close();
+    return response;
+  };
+  // More hints than tries: none is spent on a stream the server ended.
+  const fetch = answering([
+    ...Array.from({ length: RETRIES + 2 }, () => ending),
+    () =>
+      streamed([finished(9)], { headers: streamHeaders(RUN, CONVERSATION) }),
+  ]);
+  const waits: number[] = [];
+  const told: boolean[] = [];
+  const attached = await startNewConversation("helper", null, "x", {
+    wait: (ms) => {
+      waits.push(ms);
+      return Promise.resolve();
+    },
+    onReconnecting: (now) => told.push(now),
+  });
+  const seen = await all(attached);
+  expect(seen.at(-1)?.event.type).toBe("RUN_FINISHED");
+  expect(fetch).toHaveBeenCalledTimes(RETRIES + 3);
+  expect(waits.every((ms) => ms === 1000)).toBe(true);
+  // Nothing to say about a connection the server handed on.
+  expect(told).toEqual([]);
+});

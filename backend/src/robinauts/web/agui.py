@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from asyncio import FIRST_COMPLETED
 from collections.abc import AsyncIterator
 
 from ag_ui.core import (
     BaseEvent,
+    CustomEvent,
     ReasoningMessageContentEvent,
     ReasoningMessageEndEvent,
     ReasoningMessageStartEvent,
@@ -48,6 +50,10 @@ from robinauts.controller.contract.domain import (
 )
 
 ENCODER = EventEncoder()
+
+RECONNECT = "robinauts.reconnect"
+RECONNECT_AFTER_MS = 1000
+"""How soon a client re-attaches to a stream a stopping process closed."""
 
 KEEP_ALIVE = ": keep-alive\n\n"
 """An SSE comment: bytes on a quiet connection, so that nothing between the browser and the
@@ -129,14 +135,30 @@ async def stream(
             yield sse(sent, position if index == len(wire) - 1 else None)
 
 
-async def kept_alive(chunks: AsyncIterator[str], every: float) -> AsyncIterator[str]:
-    """The chunks, with ``KEEP_ALIVE`` after every ``every`` seconds without one."""
+def reconnect(after_ms: int) -> str:
+    """The end of a stream the server closes before its turn is over: the SSE ``retry:``
+    field, and ``CUSTOM robinauts.reconnect``, which tells a client to re-attach, through
+    another process, after that long."""
+    hint = CustomEvent(name=RECONNECT, value={"after_ms": after_ms})
+    return f"retry: {after_ms}\n" + sse(hint)
+
+
+async def kept_alive(
+    chunks: AsyncIterator[str], every: float, stop: asyncio.Event | None = None
+) -> AsyncIterator[str]:
+    """The chunks, with ``KEEP_ALIVE`` after every ``every`` seconds without one; ended with
+    ``reconnect`` as soon as ``stop`` is set."""
     pending: asyncio.Future[str] | None = None
+    stopping = asyncio.ensure_future(stop.wait()) if stop is not None else None
     try:
         while True:
             if pending is None:
                 pending = asyncio.ensure_future(anext(chunks))
-            done, _ = await asyncio.wait({pending}, timeout=every)
+            waiting = {pending} if stopping is None else {pending, stopping}
+            done, _ = await asyncio.wait(waiting, timeout=every, return_when=FIRST_COMPLETED)
+            if stopping is not None and stopping in done and pending not in done:
+                yield reconnect(RECONNECT_AFTER_MS)
+                return
             if not done:
                 yield KEEP_ALIVE
                 continue
@@ -147,6 +169,8 @@ async def kept_alive(chunks: AsyncIterator[str], every: float) -> AsyncIterator[
                 return
             yield chunk
     finally:
+        if stopping is not None:
+            stopping.cancel()
         if pending is not None:
             pending.cancel()
             with contextlib.suppress(BaseException):

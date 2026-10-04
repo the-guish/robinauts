@@ -26,10 +26,12 @@ import asyncio
 import importlib.metadata
 import logging
 import os
+import socket
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from importlib import resources
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 import uvicorn
@@ -51,9 +53,41 @@ from robinauts.web.sign_in import SIGN_IN_KEYS, SignInConfig, is_loopback, parse
 
 REPO = Path(__file__).resolve().parents[4]
 
-GRACEFUL_SHUTDOWN_SECONDS = 20
-"""How long uvicorn waits for open streams on a stop before it closes them, so that the
-controller's `close`, which runs after, still runs inside a service's stop timeout."""
+GRACEFUL_SHUTDOWN_SECONDS = 10
+"""How long uvicorn waits for open requests on a stop before it closes them. The streams end
+at once, when the drain starts; the controller's `close`, which runs after, gives the turns
+running here `[work] drain_seconds` to finish, and its last waits ten seconds more."""
+
+
+class DrainingServer(uvicorn.Server):
+    """uvicorn's server, whose stop signal (`SIGTERM`, `SIGINT`) starts the app's drain first:
+    `/ready` answers 503, no turn is taken, and every stream ends with a hint to re-attach,
+    so that uvicorn has no long connection left to wait for."""
+
+    def __init__(self, config: uvicorn.Config, drain: Callable[[], None]) -> None:
+        super().__init__(config)
+        self._drain = drain
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    async def startup(self, sockets: list[socket.socket] | None = None) -> None:
+        self._loop = asyncio.get_running_loop()
+        await super().startup(sockets)
+
+    def handle_exit(self, sig: int, frame: FrameType | None) -> None:
+        # A signal handler: the drain is handed to the loop rather than run in the middle of
+        # whatever the loop was doing.
+        if self._loop is not None and not self.should_exit:
+            self._loop.call_soon_threadsafe(self._drain)
+        super().handle_exit(sig, frame)
+
+
+def serve(app: Any, host: str, port: int) -> None:
+    """Serve the app until a stop signal, draining it first."""
+    config = uvicorn.Config(
+        app, host=host, port=port, timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS
+    )
+    DrainingServer(config, app.state.drain).run()
+
 
 NO_PROVIDER = (
     "no identity provider is configured: name one in [providers], or start with"
@@ -134,18 +168,15 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     logging.basicConfig(level=logging.INFO)
     if dev_no_sign_in:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
-    uvicorn.run(
-        create_app(
-            composed.controller,
-            credentials=composed.credentials,
-            sign_in=sign_in,
-            secret_for=secret_for,
-            ui_dir=ui_dir,
-        ),
-        host=host,
-        port=port,
-        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
+    app = create_app(
+        composed.controller,
+        credentials=composed.credentials,
+        sign_in=sign_in,
+        secret_for=secret_for,
+        ui_dir=ui_dir,
+        operations=composed.operations,
     )
+    serve(app, host, port)
     return 0
 
 

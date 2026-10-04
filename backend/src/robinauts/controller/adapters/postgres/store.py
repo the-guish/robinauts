@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 
 import asyncpg
 
-from robinauts.controller.adapters.postgres.pool import open_pool
+from robinauts.controller.adapters.postgres.pool import OPENING_FAILURES, open_pool
 from robinauts.controller.adapters.postgres.schema import check_schema
 from robinauts.controller.adapters.postgres.work import WorkConnection
 from robinauts.controller.contract.domain import (
@@ -184,6 +184,7 @@ class PostgresStore(Store, WorkQueue):
             self._pool = await open_pool(self._dsn)
         await check_schema(self._pool)
         await self._work_connection().connect()
+        await self._listen()
         return self._pool
 
     async def close(self) -> None:
@@ -196,6 +197,18 @@ class PostgresStore(Store, WorkQueue):
         if self._owns_pool and self._pool is not None:
             pool, self._pool = self._pool, None  # type: ignore[assignment]
             await pool.close()
+
+    async def health(self, timeout: float) -> list[str]:
+        problems = []
+        try:
+            await asyncio.wait_for(self._pool.fetchval("SELECT 1"), timeout)
+        except (TimeoutError, *OPENING_FAILURES) as failed:
+            problems.append(f"the database does not answer: {type(failed).__name__}")
+        if self._listener is None or self._listener.is_closed():
+            problems.append("the listening connection is not open")
+        if self._work is None or not self._work.open:
+            problems.append("the work connection is not open")
+        return problems
 
     # --- users --------------------------------------------------------------
 

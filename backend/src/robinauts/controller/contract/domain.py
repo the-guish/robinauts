@@ -59,6 +59,11 @@ class TurnActiveError(ControllerError):
     """A turn asked for while the session already has one running."""
 
 
+class DrainingError(ControllerError):
+    """A turn asked of a process that is stopping: another process of the deployment takes
+    it, so it is to be asked again."""
+
+
 class TurnLostError(ControllerError):
     """A runner's write refused: the turn is no longer running, its lease has passed, or
     another runner holds the position. The runner writes nothing more."""
@@ -142,6 +147,9 @@ class WorkConfig:
     """How long a running turn's lease lasts past its last renewal."""
     heartbeat_seconds: float = 30.0
     """How often this process renews the leases of the turns it runs, in one write."""
+    drain_seconds: float = 40.0
+    """How long a stopping process gives the turns it runs to finish, before it ends them
+    as interrupted."""
 
 
 @dataclass(frozen=True, slots=True)

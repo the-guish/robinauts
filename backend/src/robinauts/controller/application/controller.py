@@ -9,6 +9,7 @@ import asyncio
 import base64
 import contextlib
 import dataclasses
+import logging
 import uuid
 from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime, timedelta
@@ -21,6 +22,7 @@ from robinauts.controller.contract.domain import (
     ActiveTurn,
     AgentListing,
     Config,
+    DrainingError,
     Identity,
     InvalidValueError,
     Message,
@@ -46,7 +48,7 @@ from robinauts.controller.contract.domain import (
     UnknownModelError,
     User,
 )
-from robinauts.controller.contract.ports import Controller
+from robinauts.controller.contract.ports import Controller, Operations
 from robinauts.controller.core.documents import (
     event_from_document,
     event_to_document,
@@ -74,18 +76,26 @@ CANCEL_WAIT = 5.0
 LAST_POSITION = 2**31 - 1
 """A position past any event's."""
 
-CLOSE_TIMEOUT = 10.0
-"""How long `close` waits for the turns this process runs before it interrupts them."""
+FINAL_WAIT = 10.0
+"""How long `close` waits for anything after the turns: interrupted turns' last writes, and
+the store letting its connections go. A database that does not answer must not hold a
+stopping process until it is killed."""
+
+READY_WAIT = 1.0
+"""How long the readiness check waits for the database."""
 
 ENDED_BADLY = frozenset({TurnState.FAILED, TurnState.CANCELLED, TurnState.INTERRUPTED})
 """How a turn may end that opening its session says so."""
+
+
+log = logging.getLogger(__name__)
 
 
 def _text(message: Message) -> str:
     return "".join(p.text for p in message.parts if isinstance(p, TextPart))
 
 
-class RobinautsController(Controller):
+class RobinautsController(Controller, Operations):
     def __init__(
         self,
         config: Config,
@@ -96,7 +106,7 @@ class RobinautsController(Controller):
         dispatcher: TurnDispatcher,
         work: WorkQueue,
         worker_id: str,
-        close_timeout: float = CLOSE_TIMEOUT,
+        close_timeout: float | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._config = config
@@ -104,7 +114,8 @@ class RobinautsController(Controller):
         self._storage = storage
         self._secret_for = secret_for
         self._dispatcher = dispatcher
-        self._close_timeout = close_timeout
+        self._close_timeout = config.work.drain_seconds if close_timeout is None else close_timeout
+        self._draining = False
         self._now = now or (lambda: datetime.now(UTC))
         self._worker = worker_id
         self._work_loop = WorkLoop(
@@ -137,10 +148,26 @@ class RobinautsController(Controller):
         self._work_loop.start()
 
     async def close(self) -> None:
+        """Give the turns running here their bounded window to finish, then end the rest as
+        interrupted, and let everything go, each wait bounded."""
+        self._draining = True
         await self._dispatcher.close(self._close_timeout)
         await self._work_loop.stop()
         self._engines = {}
-        await self._store.close()
+        try:
+            await asyncio.wait_for(self._store.close(), FINAL_WAIT)
+        except TimeoutError:
+            log.warning("the store did not close within %s s; stopping all the same", FINAL_WAIT)
+
+    async def readiness(self) -> tuple[str, ...]:
+        problems = ["this process is stopping"] if self._draining else []
+        problems += await self._store.health(READY_WAIT)
+        return tuple(problems)
+
+    def drain(self) -> None:
+        if not self._draining:
+            log.info("draining: no new turn is taken here")
+        self._draining = True
 
     async def _engine(self, name: str) -> AgentEngine:
         """The engine of that name: built at `open` for the agents, or on demand for a session
@@ -405,6 +432,8 @@ class RobinautsController(Controller):
         model_config = self._config.models.get(model)
         if model_config is None:
             raise UnknownModelError(model)
+        if self._draining:
+            raise DrainingError("this process is stopping: ask again")
         now = self._now()
         await self._end_expired(user.id, session.id)
         work = self._config.work

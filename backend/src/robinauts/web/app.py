@@ -33,6 +33,7 @@ from robinauts.controller.composition import SecretLookup
 from robinauts.controller.contract.domain import (
     ApiToken,
     ControllerError,
+    DrainingError,
     Identity,
     InvalidValueError,
     Message,
@@ -53,7 +54,7 @@ from robinauts.controller.contract.domain import (
     UnknownModelError,
     User,
 )
-from robinauts.controller.contract.ports import Controller, Credentials
+from robinauts.controller.contract.ports import Controller, Credentials, Operations
 from robinauts.web import agui
 from robinauts.web.cookies import Cookies
 from robinauts.web.logs import loggable
@@ -88,6 +89,7 @@ STATUS_OF: dict[type[ControllerError], int] = {
     UnknownModelError: 422,
     TurnActiveError: 409,
     NoActiveTurnError: 404,
+    DrainingError: 503,
 }
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -359,10 +361,16 @@ def ended_badly_view(turn: Turn | None) -> EndedBadlyView | None:
 
 
 def event_stream(
-    session_id: uuid.UUID, turn_id: uuid.UUID, events: AsyncIterator[NumberedEvent]
+    session_id: uuid.UUID,
+    turn_id: uuid.UUID,
+    events: AsyncIterator[NumberedEvent],
+    stop: asyncio.Event | None = None,
 ) -> StreamingResponse:
+    """The turn's stream, kept alive, and ended with a reconnect hint once ``stop`` is set."""
     return StreamingResponse(
-        agui.kept_alive(agui.stream(str(session_id), str(turn_id), events), KEEP_ALIVE_SECONDS),
+        agui.kept_alive(
+            agui.stream(str(session_id), str(turn_id), events), KEEP_ALIVE_SECONDS, stop
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-store",
@@ -380,8 +388,11 @@ def create_app(
     sign_in: SignInConfig | None,
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
+    operations: Operations | None = None,
 ) -> FastAPI:
-    """``sign_in`` is ``None`` in the local development mode."""
+    """``sign_in`` is ``None`` in the local development mode. ``app.state.drain()`` starts
+    the drain of a stopping process: ``/ready`` answers 503, no turn is taken, and every
+    stream ends at once with a hint to re-attach, through another process."""
     exchange: Exchange | None = None
     flow: SignIn | None = None
     if sign_in is not None:
@@ -389,6 +400,12 @@ def create_app(
         flow = SignIn(sign_in, credentials=credentials, exchange=exchange, controller=controller)
         cookies = Cookies(sign_in.public_url)
     local_user: User | None = None
+    draining = asyncio.Event()
+
+    def drain() -> None:
+        draining.set()
+        if operations is not None:
+            operations.drain()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -447,6 +464,7 @@ def create_app(
         responses={"default": {"model": ErrorResponse, "description": "A refusal"}},
         dependencies=[Depends(same_origin)],
     )
+    app.state.drain = drain
 
     @app.exception_handler(Refused)
     async def not_let_in(request: Request, exc: Refused) -> JSONResponse:
@@ -501,7 +519,7 @@ def create_app(
             async for event in events:
                 yield event
 
-        return event_stream(session_id, turn_id, chained())
+        return event_stream(session_id, turn_id, chained(), draining)
 
     # --- sign-in -----------------------------------------------------------------
 
@@ -747,6 +765,17 @@ def create_app(
     async def health() -> dict[str, str]:
         # That this process answers, and nothing about the database or the providers.
         return {"status": "ok"}
+
+    @app.get("/ready", include_in_schema=False)
+    async def ready() -> JSONResponse:
+        # Whether to send this process work: the database answers, its connections are
+        # open, and it is not stopping.
+        problems = list(await operations.readiness()) if operations is not None else []
+        if draining.is_set() and not problems:
+            problems.append("this process is stopping")
+        if problems:
+            return JSONResponse({"status": "not ready", "problems": problems}, status_code=503)
+        return JSONResponse({"status": "ready"})
 
     # --- the interface ---------------------------------------------------------
 

@@ -16,14 +16,20 @@ What an internal platform team deploys and controls.
 - Upgrades: install the new wheel, bring the schema up to date, restart.
   Until the first release the schema is edited in place and the database
   is recreated; after that, migrations upgrade it in place.
-- A restart ends the runs that are in flight: each is marked interrupted,
-  and what it had done is kept as a failed answer, which its author retries
-  with Retry, starting the task again. A run whose process died is ended the
-  same way once its lease passes, by whoever reads it next. Letting them
-  **drain** for a bounded time first is planned; the bounded window a
-  shutdown has today is for ending them and giving back what the process
-  holds, not for finishing them. Several backend processes may run against
-  the one database.
+- **A stop drains.** On `SIGTERM` a process stops taking turns (a new one is
+  answered 503, to be asked again elsewhere), `/ready` answers 503, and its
+  streams end at once with a hint to re-attach, which the interface follows
+  to another process. The runs in flight get `[work] drain_seconds` (40) to
+  finish; those still going then are marked interrupted, and what each had
+  done is kept as a failed answer, which its author retries with Retry,
+  starting the task again. Every wait after that is bounded, a database that
+  does not answer included. A run whose process died is ended the same way
+  once its lease passes, by whoever reads it next. Several backend processes
+  may run against the one database.
+- **Probes.** `/health` says the process answers, and reads nothing.
+  `/ready` says whether to send it work: the database answers within a
+  second, its listening and work connections are open, and it is not
+  stopping.
 - Outbound traffic: the identity providers at sign-in, the model providers
   the operator configured, and the MCP tool servers the operator configured.
   Nothing else.

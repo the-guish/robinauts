@@ -167,6 +167,23 @@ class Controller(ABC):
         raise NotImplementedError
 
 
+class Operations(ABC):
+    """What the deployment asks of a process, rather than a person: whether it may be sent
+    work, and that it stop taking any."""
+
+    @abstractmethod
+    async def readiness(self) -> tuple[str, ...]:
+        """What keeps this process from serving, each said for an operator: nothing when it
+        is ready. A stopping process is never ready."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def drain(self) -> None:
+        """Stop taking turns, from now on: a new one is ``DrainingError``. The turns running
+        here carry on, until ``close`` gives them their bounded window to finish."""
+        raise NotImplementedError
+
+
 class Credentials(ABC):
     """Where sign-in keeps its records: user sessions, sign-ins in progress and API tokens
     (``docs/specs/sign-in.md``). A secret never reaches it: a record holds the SHA-256 hex of

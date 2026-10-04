@@ -121,3 +121,18 @@ def test_db_init_without_a_database_url_is_refused(
         run(["db", "init"])
     assert left.value.code == 2
     assert "ROBINAUTS_DATABASE_URL is not set" in capsys.readouterr().err
+
+
+@asyncio_test
+async def test_ready_on_postgres_needs_the_database_and_both_connections() -> None:
+    async with temporary_schema() as schema:
+        dsn = dsn_in(schema.name)
+        composed = compose(
+            CONFIG, storage=StorageConfig(StorageKind.POSTGRES, url=dsn), secret_for={}.get
+        )
+        await composed.controller.open()
+        assert await composed.operations.readiness() == ()
+        store = composed.controller._store
+        await store._listener.close()
+        assert await composed.operations.readiness() == ("the listening connection is not open",)
+        await composed.controller.close()

@@ -11,6 +11,9 @@ import uuid
 from robinauts.controller.ports.dispatcher import CLOSE, TurnDispatcher, TurnRunner
 from robinauts.controller.ports.work import Held
 
+LAST_WRITES = 10.0
+"""How long turns stopped by a close have to write how they ended."""
+
 
 class InProcessDispatcher(TurnDispatcher):
     def __init__(self, run: TurnRunner | None = None) -> None:
@@ -54,4 +57,6 @@ class InProcessDispatcher(TurnDispatcher):
         for task in pending:
             task.cancel(CLOSE)
         if pending:
-            await asyncio.wait(pending)
+            # Their last writes, bounded: a database that does not answer must not hold the
+            # process until it is killed.
+            await asyncio.wait(pending, timeout=LAST_WRITES)

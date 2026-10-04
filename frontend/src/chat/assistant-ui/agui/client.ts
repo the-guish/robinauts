@@ -336,6 +336,7 @@ async function* following(
   try {
     for (;;) {
       let carried = false;
+      let hinted: number | null = null;
       // **One connection's own abort**, so that a stream that went quiet can be
       // dropped without the watch: the watcher's signal still ends both.
       const connection = new AbortController();
@@ -359,6 +360,15 @@ async function* following(
         );
         reconnected(false);
         for await (const block of blocks(body, connection.signal, heard)) {
+          // **A server that is stopping says where to go**: it ends the
+          // stream with this, and another server carries on from the same
+          // position, so the wait is the one it names and no try is spent.
+          const hint =
+            block.event === "CUSTOM" ? reconnectAfter(block.data) : null;
+          if (hint !== null) {
+            hinted = hint;
+            continue;
+          }
           const event = decode(block.data);
           if (event === null) continue;
           const over = isTerminal(event);
@@ -421,6 +431,11 @@ async function* following(
       }
       body = null;
       if (carried) tries = 0;
+      if (hinted !== null) {
+        await wait(hinted);
+        hinted = null;
+        continue;
+      }
       // Here three ways -- the body ended, reading it threw, or the request for
       // it did -- and none of them is the run saying it is over. So the
       // connection went and the run did not: it is picked up where it was left
@@ -434,6 +449,25 @@ async function* following(
     }
   } finally {
     reconnected(false);
+  }
+}
+
+/** The name of the event a stopping server ends a stream with. */
+export const RECONNECT_EVENT = "robinauts.reconnect";
+
+/** How long that event says to wait before re-attaching; `null` for any other. */
+function reconnectAfter(data: string): number | null {
+  try {
+    const read: unknown = JSON.parse(data);
+    if (typeof read !== "object" || read === null) return null;
+    const { name, value } = read as { name?: unknown; value?: unknown };
+    if (name !== RECONNECT_EVENT) return null;
+    const after = (value as { after_ms?: unknown } | null)?.after_ms;
+    return typeof after === "number" && after >= 0 && after <= 60_000
+      ? after
+      : 0;
+  } catch {
+    return null;
   }
 }
 

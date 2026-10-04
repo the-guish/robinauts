@@ -147,7 +147,12 @@ from half a second to thirty with jitter, at once when the browser comes back
 online or the tab becomes visible, and when the person presses Reconnect; a
 stream that has sent no byte for 45 seconds is taken for dead and re-attached.
 A turn's text arrives in fewer, larger pieces than the model streamed: the
-runner merges what arrives within about 150 ms.
+runner merges what arrives within about 150 ms. A process that is stopping
+ends its streams with an SSE `retry: 1000` and `CUSTOM robinauts.reconnect`
+`{"after_ms": 1000}`, which carries no `id:`; the client re-attaches after
+that long, through another process, without counting it as a failed try. A
+turn asked of a stopping process is answered 503, `DrainingError`: ask
+again.
 
 **Not yet served.** The wire is the happy path today
 ([working-notes/echo-e2e-plan.md](../working-notes/echo-e2e-plan.md)); these
