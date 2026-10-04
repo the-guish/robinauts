@@ -28,9 +28,12 @@ until the frontend is revisited.
   messages end at `follows`: a UI appends what streams in to the end of the
   list.
 - A turn is cancelled by an explicit request, naming the conversation and the
-  turn. Cancelling a turn that another process of the deployment runs is
-  refused (409) until cancelling goes through the store, and so is deleting a
-  conversation while a turn runs: stop the turn first.
+  turn, whichever process of the deployment the request lands on: the stop
+  goes through the store to the process that runs the turn. It answers 204
+  once the turn has ended, and 202 when the stop is recorded and the turn
+  ends a moment later; the stream says how it ended either way. Deleting a
+  conversation while a turn runs stops the turn first, the same way, and is
+  refused (409) only when the turn has not ended within a few seconds.
 - The request names the conversation and **either** a new user message with
   the message it hangs under — nothing for the first, the parent of the
   message being replaced for an edit — **or** the assistant message whose
@@ -83,7 +86,7 @@ documented here, which is what "documented with the API" means for them.
 | `POST /api/turns` | `{"agent_id": str, "model_id": str\|null, "text": str}` | the stream of the turn answering the first question of a **new** conversation |
 | `POST /api/conversations/{id}/turns` | `{"text": str, "parent_id": uuid, "model_id": str\|null}` **or** `{"text": str, "edit": uuid, "model_id": str\|null}` **or** `{"regenerate": uuid, "model_id": str\|null}` **or** `{"retry": uuid, "model_id": str\|null}` | the stream of the turn it began |
 | `GET /api/conversations/{id}/runs/{run_id}/events?after=<position>` | — | the stream of that turn from `after`; `Last-Event-ID` says the same thing, and is read when `after` is absent; a run that is not in that conversation answers 404, as one in somebody else's does |
-| `POST /api/conversations/{id}/runs/{run_id}/cancel` | — | 204; the turn ends as cancelled. 409 for a turn another process runs |
+| `POST /api/conversations/{id}/runs/{run_id}/cancel` | — | 204 when the turn has ended as cancelled; 202 when the stop is recorded and the process that runs it ends it soon. Never 409 |
 
 - `parent_id` is the message a reply hangs under. `edit` is the question a
   new version replaces: the backend hangs the new one under that question's

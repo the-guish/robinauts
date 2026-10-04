@@ -76,6 +76,7 @@ import {
   ONE_AT_A_TIME_ANSWER,
   reduce,
   STOP_DID_NOT_ARRIVE,
+  STOP_REFUSED,
   storedParent,
   turnStart,
   under,
@@ -734,19 +735,31 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     if (conversationId === null || runId === null) return;
     try {
       await cancelRun(conversationId, runId);
-    } catch {
-      // **Nothing about the run changed**, and the stream watching it is
-      // still watching: the request failed, so nothing was cancelled and the
-      // answer carries on arriving. Forgetting the run here would leave it
-      // writing into a thread that thinks nothing is happening -- and would
-      // leave an answer hanging under a question a later refusal could take
-      // off the screen.
-      dispatch({ kind: "told", detail: STOP_DID_NOT_ARRIVE });
+    } catch (failure) {
+      // **A run that is no longer running** (404) has ended on its own, and
+      // the stream watching it says how: there is nothing to tell.
+      if (failure instanceof ApiError && failure.status === 404) return;
+      // Otherwise **nothing about the run changed**, and the stream watching
+      // it is still watching: nothing was cancelled and the answer carries on
+      // arriving. Forgetting the run here would leave it writing into a
+      // thread that thinks nothing is happening -- and would leave an answer
+      // hanging under a question a later refusal could take off the screen.
+      // A request that never arrived, or a server that failed it, is told
+      // apart from one the server answered with a no.
+      const arrived =
+        failure instanceof ApiError &&
+        failure.status >= 400 &&
+        failure.status < 500;
+      dispatch({
+        kind: "told",
+        detail: arrived ? STOP_REFUSED : STOP_DID_NOT_ARRIVE,
+      });
       return;
     }
-    // Nothing else: a cancellation is not a failure, and the stream this is
-    // already watching ends with `RUN_FINISHED` and AG-UI's `cancelled`
-    // outcome (`docs/specs/wire.md`).
+    // Nothing else, whether the run has ended (204) or the replica that runs
+    // it is ending it (202): a cancellation is not a failure, and the stream
+    // this is already watching ends with `RUN_FINISHED` and AG-UI's
+    // `cancelled` outcome (`docs/specs/wire.md`).
   }
 
   return {

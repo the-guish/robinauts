@@ -1033,6 +1033,9 @@
           }
         ],
         "responses": {
+          "202": {
+            "description": "The stop is recorded; the pod running the turn ends it soon"
+          },
           "204": {
             "description": "Successful Response"
           },

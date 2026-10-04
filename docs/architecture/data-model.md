@@ -92,8 +92,14 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
 - **Deleting hides, then purges.** `deleted_at` makes a session not found and closes
   it to turns. The hide is refused while a turn is running (`TurnActiveError`), so no
   runner and no engine writes under a purge: the controller first ends a turn whose
-  lease has passed, cancels the turn it runs itself and waits for it to end, and a
-  turn run by another process is refused until stage two's cancel through the store.
+  lease has passed, then asks for the running turn's cancel and waits a few seconds for
+  it to end, wherever it runs; the delete is refused only if it has not.
+- **A cancel goes through the store.** `request_cancel` sets `cancel_requested_at` on
+  the running turn and sends `NOTIFY robinauts_cancel '<turn>'`. The pod that runs the
+  turn hears it and stops its runner at once, which ends the turn as `cancelled`; a
+  signal it missed comes back with its next heartbeat, which reads
+  `cancel_requested_at`. A turn whose cancel was asked for and whose lease then passes
+  ends as `cancelled`, not `interrupted`, and keeps no answer.
   The purge calls `forget` on the engine the session records, which may no longer be
   the one its agent's configuration names, then deletes the session with its
   messages, turns and events.

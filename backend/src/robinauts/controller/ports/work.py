@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -42,3 +42,14 @@ class WorkQueue(ABC):
         """Renew to ``now + lease`` the lease of each turn held that is still running, still
         that worker's at that attempt, and whose lease has not passed ``now``, and set its
         ``heartbeat_at``, in one operation. The others are lost."""
+
+    @abstractmethod
+    async def end_cancelled(self, worker: str, held: Held, now: datetime) -> bool:
+        """End as ``cancelled`` a turn still running and still that worker's at that attempt,
+        whose runner was stopped before it could end it: true when it did."""
+
+    @abstractmethod
+    def cancel_signals(self) -> AsyncIterator[uuid.UUID]:
+        """The turns whose cancel is asked for from the moment this is called, from any pod,
+        as they are asked for. A hint, which can be missed: the heartbeat reads every cancel
+        back."""

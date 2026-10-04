@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import uuid
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from datetime import datetime, timedelta
 
 from robinauts.controller.contract.domain import (
@@ -45,6 +45,7 @@ class MemoryStore(Store, WorkQueue):
         self._turns: dict[uuid.UUID, Turn] = {}
         self._events: dict[uuid.UUID, list[StoredEvent]] = {}
         self._changed = asyncio.Condition()
+        self._cancels: set[asyncio.Queue[uuid.UUID]] = set()
 
     async def open(self) -> None:
         """Nothing to open: the engines keep their memory in this process too."""
@@ -234,6 +235,11 @@ class MemoryStore(Store, WorkQueue):
         running = self._running(session)
         if running is None or running.lease_until >= now or turn not in (None, running.id):
             return None
+        if running.cancel_requested_at is not None:
+            ended = dataclasses.replace(running, state=TurnState.CANCELLED, ended_at=now)
+            self._turns[running.id] = ended
+            await self._notify()
+            return ended
         if answer is not None:
             self._messages[session].append(answer)
         ended = dataclasses.replace(
@@ -242,6 +248,20 @@ class MemoryStore(Store, WorkQueue):
         self._turns[running.id] = ended
         await self._notify()
         return ended
+
+    async def request_cancel(
+        self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, now: datetime
+    ) -> Turn | None:
+        self._visible(owner, session)
+        found = self._turn_of(session, turn)
+        if found is None or found.state is not TurnState.RUNNING:
+            return None
+        if found.cancel_requested_at is None:
+            found = dataclasses.replace(found, cancel_requested_at=now)
+            self._turns[turn] = found
+        for queue in self._cancels:
+            queue.put_nowait(turn)
+        return found
 
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:
         self._visible(owner, session)
@@ -278,6 +298,31 @@ class MemoryStore(Store, WorkQueue):
             if found.cancel_requested_at is not None:
                 cancelled.add(found.id)
         return HeartbeatResult(frozenset(lost), frozenset(cancelled))
+
+    async def end_cancelled(self, worker: str, held: Held, now: datetime) -> bool:
+        found = self._turns.get(held.turn_id)
+        if (
+            found is None
+            or found.state is not TurnState.RUNNING
+            or (found.worker_id, found.attempt) != (worker, held.attempt)
+        ):
+            return False
+        self._turns[found.id] = dataclasses.replace(found, state=TurnState.CANCELLED, ended_at=now)
+        await self._notify()
+        return True
+
+    def cancel_signals(self) -> AsyncIterator[uuid.UUID]:
+        queue: asyncio.Queue[uuid.UUID] = asyncio.Queue()
+        self._cancels.add(queue)
+
+        async def signals() -> AsyncIterator[uuid.UUID]:
+            try:
+                while True:
+                    yield await queue.get()
+            finally:
+                self._cancels.discard(queue)
+
+        return signals()
 
     async def wait_for_events(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, after: int, timeout: float

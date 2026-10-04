@@ -150,3 +150,23 @@ async def test_an_agent_this_replica_does_not_know_is_not_found() -> None:
             "/api/turns", json={"agent_id": "gone", "model_id": "echo", "text": "hello"}
         )
         assert named.status_code == 404
+
+
+@asyncio_test
+async def test_a_stop_answers_204_once_ended_and_202_while_another_pod_ends_it() -> None:
+    composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
+    app = create_app(
+        composed.controller, credentials=composed.credentials, sign_in=None, secret_for={}.get
+    )
+    ended = [True, False]
+
+    async def cancel_turn(*_: object) -> bool:
+        return ended.pop(0)
+
+    composed.controller.cancel_turn = cancel_turn  # type: ignore[method-assign]
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+            path = f"/api/conversations/{uuid.uuid4()}/runs/{uuid.uuid4()}/cancel"
+            assert (await http.post(path)).status_code == 204
+            assert (await http.post(path)).status_code == 202

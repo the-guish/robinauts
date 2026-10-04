@@ -8,7 +8,8 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -20,18 +21,19 @@ from robinauts.agent_engines.contract.domain import Done, Event, TextDelta, Tool
 from robinauts.agent_engines.echo_engine.engine import EchoEngine
 from robinauts.controller.adapters.dispatch import InProcessDispatcher
 from robinauts.controller.adapters.memory.store import MemoryStore
+from robinauts.controller.application import controller as controller_module
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.contract.domain import (
     AgentConfig,
     Identity,
     NumberedEvent,
+    Role,
     SessionNotFoundError,
     StorageConfig,
     StorageKind,
     TextPart,
     ToolCallPart,
     ToolResultPart,
-    TurnActiveError,
     TurnEnded,
     TurnState,
     WorkConfig,
@@ -95,8 +97,25 @@ async def over(store: Store, **options: Any) -> RobinautsController:
     return controller
 
 
+@contextmanager
+def patched_wait(seconds: float) -> Iterator[None]:
+    """A cancel's wait for another pod, shortened."""
+    kept = controller_module.STOP_WAIT
+    controller_module.STOP_WAIT = seconds
+    try:
+        yield
+    finally:
+        controller_module.STOP_WAIT = kept
+
+
 def jumped(by: timedelta) -> Any:
     return lambda: datetime.now(UTC) + by
+
+
+async def released(pod: Any) -> None:
+    """Until the pod's dispatcher holds nothing."""
+    while pod._dispatcher.held():
+        await asyncio.sleep(0.01)
 
 
 @asyncio_test
@@ -220,19 +239,45 @@ async def test_a_cancel_before_the_runner_claimed_ends_the_turn_cancelled() -> N
 
 
 @asyncio_test
-async def test_a_cancel_of_a_turn_another_process_runs_is_refused() -> None:
+async def test_a_cancel_asked_of_another_pod_stops_the_turn_where_it_runs() -> None:
     store = MemoryStore()
-    first = await over(store)
-    engine = GatedEngine()
-    first._engines["echo"] = engine
-    second = await over(store)
+    first = await over(store, worker_id="pod-a")
+    first._engines["echo"] = GatedEngine()
+    second = await over(store, worker_id="pod-b")
     user = await first.ensure_user(Identity("local", "me"))
     started = await first.start_session(user, agent="echo", model="echo", text="one")
     await store.wait_for_events(user.id, started.session_id, started.turn_id, 0, 5.0)
-    with pytest.raises(TurnActiveError):
-        await second.cancel_turn(user, started.session_id, started.turn_id)
-    engine.gate.set()
-    await settled(second, user, started)
+    assert await second.cancel_turn(user, started.session_id, started.turn_id) is True
+    turn = await store.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert (turn.state, turn.worker_id) == (TurnState.CANCELLED, "pod-a")
+    # Its runner wrote the end; the task is gone a moment later.
+    await asyncio.wait_for(released(first), 5.0)
+    await first.close()
+    await second.close()
+
+
+@asyncio_test
+async def test_a_cancel_no_pod_acts_on_is_recorded_and_ends_the_turn_with_its_lease() -> None:
+    store = MemoryStore()
+    first = await over(store, worker_id="pod-a")
+    first._engines["echo"] = GatedEngine()
+    second = await over(store, worker_id="pod-b")
+    user = await first.ensure_user(Identity("local", "me"))
+    started = await first.start_session(user, agent="echo", model="echo", text="one")
+    sid = started.session_id
+    await store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
+    # The pod that runs it is gone: it hears nothing and renews nothing.
+    await first._work.stop()
+    first._dispatcher._tasks[started.turn_id].cancel(LOST)
+    with patched_wait(0.05):
+        assert await second.cancel_turn(user, sid, started.turn_id) is False
+    second._now = jumped(PAST_THE_LEASE)
+    opened_session = await second.open_session(user, sid)
+    assert opened_session.ended_badly is not None
+    # Asked to stop, so it ends as stopped, and keeps no answer.
+    assert opened_session.ended_badly.state is TurnState.CANCELLED
+    assert [m.role for m in opened_session.messages] == [Role.USER]
     await first.close()
     await second.close()
 

@@ -708,11 +708,19 @@ def create_app(
         position = after if after is not None else int(last_event_id or 0)
         return await watched(user, conversation_id, run_id, position)
 
-    @app.post("/api/conversations/{conversation_id}/runs/{run_id}/cancel", status_code=204)
+    @app.post(
+        "/api/conversations/{conversation_id}/runs/{run_id}/cancel",
+        status_code=204,
+        responses={
+            202: {"description": "The stop is recorded; the pod running the turn ends it soon"}
+        },
+    )
     async def cancel_turn(
         conversation_id: uuid.UUID, run_id: uuid.UUID, user: User = asking
-    ) -> None:
-        await controller.cancel_turn(user, conversation_id, run_id)
+    ) -> Response:
+        # Whichever pod runs the turn: 204 once it has ended, 202 while its end is to come.
+        ended = await controller.cancel_turn(user, conversation_id, run_id)
+        return Response(status_code=204 if ended else 202)
 
     # --- liveness --------------------------------------------------------------
 

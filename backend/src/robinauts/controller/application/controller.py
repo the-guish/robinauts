@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import dataclasses
 import uuid
@@ -59,7 +60,7 @@ from robinauts.controller.core.engine_settings import (
 from robinauts.controller.core.failures import prompt_after_failures
 from robinauts.controller.core.titles import title_from_text
 from robinauts.controller.core.transcript import left_answer
-from robinauts.controller.ports.dispatcher import TurnDispatcher
+from robinauts.controller.ports.dispatcher import CANCEL, TurnDispatcher
 from robinauts.controller.ports.store import Cursor, Holder, Store
 from robinauts.controller.ports.work import WorkQueue
 
@@ -68,6 +69,12 @@ WAIT_SECONDS = 15.0
 
 CLOSE_TIMEOUT = 10.0
 """How long `close` waits for the turns this process runs before it interrupts them."""
+
+STOP_WAIT = 5.0
+"""How long a cancel, or a delete, waits for a turn another pod runs to end."""
+
+END_OF_EVENTS = 2**31 - 1
+"""A position no turn reaches: a wait past it is a wait for the turn's end."""
 
 ENDED_BADLY = frozenset({TurnState.FAILED, TurnState.CANCELLED, TurnState.INTERRUPTED})
 """How a turn may end that opening its session says so."""
@@ -213,8 +220,8 @@ class RobinautsController(Controller):
         session = await self._store.get_session(user.id, session_id)
         await self._end_expired(user.id, session_id)
         running = await self._store.active_turn(user.id, session_id)
-        if running is not None and await self._dispatcher.cancel(user.id, session_id, running.id):
-            await self._end_if_running(user, running, TurnState.CANCELLED)
+        if running is not None and not await self._stop(user, running):
+            raise TurnActiveError(f"turn {running.id} is still stopping: delete it again soon")
         await self._store.hide_session(user.id, session_id, self._now())
         await (await self._engine(session.engine)).forget(session_id)
         await self._store.purge_session(user.id, session_id)
@@ -338,16 +345,42 @@ class RobinautsController(Controller):
 
     async def cancel_turn(
         self, user: User, session_id: uuid.UUID, turn_id: uuid.UUID | None = None
-    ) -> None:
+    ) -> bool:
         await self._store.get_session(user.id, session_id)
         await self._end_expired(user.id, session_id)
         running = await self._store.active_turn(user.id, session_id)
         if running is None or (turn_id is not None and running.id != turn_id):
             raise NoActiveTurnError(str(session_id))
-        if not await self._dispatcher.cancel(user.id, session_id, running.id):
-            raise TurnActiveError(f"turn {running.id} runs in another process")
-        # A runner that never claimed the turn wrote nothing: the turn is ended here.
-        await self._end_if_running(user, running, TurnState.CANCELLED)
+        return await self._stop(user, running)
+
+    async def _stop(self, user: User, running: Turn) -> bool:
+        """Stop a running turn, whichever pod runs it, and wait a little for it to end: true
+        when it has."""
+        if await self._dispatcher.stop(running.id, CANCEL):
+            # A runner that never claimed the turn wrote nothing: the turn is ended here.
+            await self._end_if_running(user, running, TurnState.CANCELLED)
+            return True
+        # Another pod's, or no pod's: asked for through the store, which that pod hears at
+        # once or reads back at its next heartbeat, and a dead pod's ends with its lease.
+        if (
+            await self._store.request_cancel(user.id, running.session_id, running.id, self._now())
+            is None
+        ):
+            return True
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + STOP_WAIT
+        while True:
+            await self._end_expired(user.id, running.session_id)
+            current = await self._store.get_turn(user.id, running.session_id, running.id)
+            if current is None or current.state is not TurnState.RUNNING:
+                return True
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return False
+            # Woken by the turn's end, or by any of its events, and then read again.
+            await self._store.wait_for_events(
+                user.id, running.session_id, running.id, END_OF_EVENTS, remaining
+            )
 
     async def _end_expired(self, owner: uuid.UUID, session_id: uuid.UUID) -> Turn | None:
         """End the session's running turn if its lease has passed, keeping what it answered,

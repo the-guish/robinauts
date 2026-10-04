@@ -47,14 +47,6 @@ class InProcessDispatcher(TurnDispatcher):
         await asyncio.wait({task})
         return True
 
-    async def cancel(self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID) -> bool:
-        task = self._tasks.get(turn)
-        if task is None:
-            return False
-        task.cancel()
-        await asyncio.wait({task})
-        return True
-
     async def close(self, timeout: float) -> None:
         tasks = set(self._tasks.values())
         if not tasks:

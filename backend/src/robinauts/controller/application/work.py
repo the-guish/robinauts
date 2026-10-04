@@ -1,27 +1,36 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The work loop of a pod: the heartbeat that keeps the turns it runs its own.
+"""The work loop of a pod: the heartbeat that keeps the turns it runs its own, and the cancels
+asked for from any pod.
 
 Every ``heartbeat_seconds`` it renews, in one write, the lease of every turn the dispatcher
 holds, and stops the runner of each turn that write did not renew: that turn is no longer
 this pod's, and its runner writes nothing more. A heartbeat that fails is logged and tried
 again at the next tick; a pod that cannot reach the database loses its turns when their
 leases pass, which is what a pod that died does too.
+
+A cancel asked for on any pod reaches this one as a signal, and the runner of a turn it holds
+is stopped at once. A signal can be missed, with a listener that dropped; the heartbeat reads
+every cancel back, so a missed one waits at most until the next tick.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+import uuid
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timedelta
 
 from robinauts.controller.contract.domain import WorkConfig
-from robinauts.controller.ports.dispatcher import LOST, TurnDispatcher
-from robinauts.controller.ports.work import HeartbeatResult, WorkQueue
+from robinauts.controller.ports.dispatcher import CANCEL, LOST, TurnDispatcher
+from robinauts.controller.ports.work import HeartbeatResult, Held, WorkQueue
 
 log = logging.getLogger(__name__)
+
+FOLLOW_AGAIN = 1.0
+"""Seconds before the cancels are followed again after the signals failed."""
 
 
 class WorkLoop:
@@ -39,17 +48,39 @@ class WorkLoop:
         self._worker_id = worker_id
         self._work = work
         self._now = now
-        self._beating: asyncio.Task[None] | None = None
+        self._loops: list[asyncio.Task[None]] = []
+        self._stopping: set[asyncio.Task[None]] = set()
 
     def start(self) -> None:
-        if self._beating is None:
-            self._beating = asyncio.create_task(self._beat_for_ever())
+        if not self._loops:
+            signals = self._queue.cancel_signals()
+            self._loops = [
+                asyncio.create_task(self._beat_for_ever()),
+                asyncio.create_task(self._follow_cancels(signals)),
+            ]
 
     async def stop(self) -> None:
-        beating, self._beating = self._beating, None
-        if beating is not None:
-            beating.cancel()
-            await asyncio.wait({beating})
+        loops, self._loops = self._loops, []
+        for loop in loops:
+            loop.cancel()
+        if loops:
+            await asyncio.wait(loops)
+        if self._stopping:
+            await asyncio.wait(self._stopping)
+
+    def _cancel(self, turn: uuid.UUID) -> None:
+        """Stop the turn's runner, if this pod runs it, without waiting here for it to end."""
+        held = next((h for h in self._dispatcher.held() if h.turn_id == turn), None)
+        if held is None:
+            return
+        stopping = asyncio.create_task(self._cancelled(held))
+        self._stopping.add(stopping)
+        stopping.add_done_callback(self._stopping.discard)
+
+    async def _cancelled(self, held: Held) -> None:
+        if await self._dispatcher.stop(held.turn_id, CANCEL):
+            # A runner stopped before it began wrote no end of its own: it is written here.
+            await self._queue.end_cancelled(self._worker_id, held, self._now())
 
     async def beat(self) -> HeartbeatResult:
         """One heartbeat, now: the leases renewed, and the runners of lost turns stopped."""
@@ -62,7 +93,19 @@ class WorkLoop:
         for turn in result.lost:
             log.warning("turn %s is no longer this pod's: its runner stops", turn)
             await self._dispatcher.stop(turn, LOST)
+        for turn in result.cancelled - result.lost:
+            self._cancel(turn)
         return result
+
+    async def _follow_cancels(self, signals: AsyncIterator[uuid.UUID]) -> None:
+        while True:
+            try:
+                async for turn in signals:
+                    self._cancel(turn)
+            except Exception:
+                log.exception("the cancel signals failed; they are followed again")
+                await asyncio.sleep(FOLLOW_AGAIN)
+            signals = self._queue.cancel_signals()
 
     async def _beat_for_ever(self) -> None:
         while True:

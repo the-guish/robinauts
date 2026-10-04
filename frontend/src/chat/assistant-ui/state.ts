@@ -262,6 +262,18 @@ export const ONE_AT_A_TIME_ANSWER =
 export const STOP_DID_NOT_ARRIVE =
   "The stop did not reach the server, so the answer is still arriving.";
 
+/**
+ * What a stop the server answered and turned down is told.
+ *
+ * Not "did not reach": it did, and the server said no. A stop reaches the
+ * run whichever replica the request lands on (`docs/specs/wire.md`), so a
+ * refusal is the server's own answer -- a conversation no longer this
+ * person's, a request it could not read -- and the answer is unaffected by
+ * it. A run that has already ended is not a refusal at all (`onCancel`).
+ */
+export const STOP_REFUSED =
+  "The server could not stop this answer, so it is still arriving.";
+
 /** That code's sentence, and one for a code this build does not know. */
 export function saidFor(code: string): string {
   return RUN_ERRORS.get(code) ?? ENDED_SOMEHOW;

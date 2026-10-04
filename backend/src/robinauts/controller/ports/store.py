@@ -171,10 +171,18 @@ class Store(ABC):
         turn: uuid.UUID | None = None,
         answer: StoredMessage | None = None,
     ) -> Turn | None:
-        """The session's running turn, or that ``turn`` of it, ended as ``interrupted`` if its
-        lease has passed ``now``, by one conditional write, with no event, and with
-        ``answer`` stored in the same operation when one is given; ``None`` otherwise, and
-        then the answer is not stored."""
+        """The session's running turn, or that ``turn`` of it, ended if its lease has passed
+        ``now``, by one conditional write, with no event: as ``cancelled`` when its cancel was
+        asked for, else as ``interrupted`` and with ``answer`` stored in the same operation
+        when one is given. ``None`` when nothing ended, and then the answer is not stored."""
+
+    @abstractmethod
+    async def request_cancel(
+        self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, now: datetime
+    ) -> Turn | None:
+        """Ask for the running turn to stop: set its ``cancel_requested_at``, unless it is set
+        already, and signal the pod that runs it (``WorkQueue.cancel_signals``). The turn, or
+        ``None`` when it is not running."""
 
     @abstractmethod
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None: ...
