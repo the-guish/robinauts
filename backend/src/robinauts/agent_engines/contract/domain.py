@@ -39,6 +39,15 @@ class MissingSecretError(EngineError):
     pass
 
 
+VENDOR_RETRIES = 2
+"""How many times a vendor's client retries one call itself, with its own backoff: a 429 or a
+5xx in the middle of a long turn is not worth the turn."""
+
+MAX_MODEL_CALLS = 200
+"""How many model calls one turn may make, in both engines. Pydantic AI's own bound is 50,
+which a turn with many tools reaches; the turn's deadline is what really bounds it."""
+
+
 class ProviderKind(StrEnum):
     ANTHROPIC = "anthropic"
     ANTHROPIC_COMPATIBLE = "anthropic-compatible"

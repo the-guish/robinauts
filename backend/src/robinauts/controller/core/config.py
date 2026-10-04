@@ -21,6 +21,9 @@ from robinauts.controller.contract.domain import (
 
 ENGINES = ("langchain", "pydantic-ai", "echo")
 
+SETTINGS = {"work": {"max_turn_seconds": 1200.0}}
+"""The tables of single settings, each key with its default: positive numbers all."""
+
 # An HTTP field name is a token (RFC 9110, section 5.1): nothing else can go on the wire.
 HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 
@@ -74,6 +77,15 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
                 problems.append(f"agents.{agent.id}: tool server {tool!r} is not configured")
         if agent.engine not in ENGINES:
             problems.append(f"agents.{agent.id}: engine {agent.engine!r} is not one of {ENGINES}")
+    settings = {}
+    for table, defaults in SETTINGS.items():
+        for key, value in raw.get(table, {}).items():
+            if key not in defaults:
+                problems.append(f"{table}: unknown key {key}")
+            elif isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+                problems.append(f"{table}.{key}: {value!r} is not a positive number")
+            else:
+                settings[key] = type(defaults[key])(value)
     if problems:
         raise ConfigError("\n".join(problems))
-    return Config(providers, models, tool_servers, agents)
+    return Config(providers, models, tool_servers, agents, **settings)

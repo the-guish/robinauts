@@ -20,6 +20,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Too
 from langchain_core.runnables import RunnableConfig
 
 from robinauts.agent_engines.contract.domain import (
+    MAX_MODEL_CALLS,
     AgentDefinition,
     CheckpointNotFoundError,
     Done,
@@ -81,6 +82,8 @@ class LangChainEngine(AgentEngine):
             system_prompt=agent.system_prompt,
             checkpointer=self._memory.saver,
         )
+        # A step is a model call or a round of tool calls: n model calls take 2n - 1 steps.
+        start = {**start, "recursion_limit": 2 * MAX_MODEL_CALLS + 1}
         stream = graph.astream(
             {"messages": [HumanMessage(prompt)]}, start, stream_mode=["messages", "updates"]
         )

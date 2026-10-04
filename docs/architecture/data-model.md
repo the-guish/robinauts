@@ -100,7 +100,7 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   events but a late watcher. Until they expire, they are the only copy of a turn's
   reasoning, and of what a cancelled or interrupted turn streamed.
 - **A turn holds a lease.** `lease_until` is written with the turn, as its start plus
-  its timeout and a margin, and the runner's own deadline is set from it. A running
+  `max_turn_seconds` and a margin, and the runner's own deadline falls inside it. A running
   turn whose lease has passed is ended as `interrupted` by the next reader to find it
   (`open_session`, `start_turn`, `watch_turn`, `cancel_turn`, `delete_session`),
   through `end_expired_turn`: one conditional write that only a running turn takes,

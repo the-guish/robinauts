@@ -38,6 +38,7 @@ from contracts.engine import (
 )
 from engine_settings import Keys, NoSecrets, settings_for
 from robinauts.agent_engines.contract.domain import (
+    VENDOR_RETRIES,
     AgentDefinition,
     ModelsConfig,
     ProviderKind,
@@ -75,7 +76,11 @@ def test_an_anthropic_model_is_built_from_the_settings(
     assert model.model == "vendor-name"
     assert model.anthropic_api_key.get_secret_value() == "key-of-p"
     assert model.anthropic_api_url == endpoint
-    assert (model.max_retries, model.default_request_timeout, model.max_tokens) == (0, 7.0, 321)
+    assert (model.max_retries, model.default_request_timeout, model.max_tokens) == (
+        VENDOR_RETRIES,
+        7.0,
+        321,
+    )
 
 
 @pytest.mark.parametrize(
@@ -94,7 +99,11 @@ def test_an_openai_model_is_built_from_the_settings(
     assert model.openai_api_key is not None
     assert model.openai_api_key.get_secret_value() == "key-of-p"
     assert model.openai_api_base == endpoint
-    assert (model.max_retries, model.request_timeout, model.max_tokens) == (0, 7.0, 321)
+    assert (model.max_retries, model.request_timeout, model.max_tokens) == (
+        VENDOR_RETRIES,
+        7.0,
+        321,
+    )
 
 
 def test_a_model_not_in_the_settings_is_refused() -> None:

@@ -12,7 +12,11 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
-from robinauts.agent_engines.contract.domain import ProviderKind, UnknownModelError
+from robinauts.agent_engines.contract.domain import (
+    VENDOR_RETRIES,
+    ProviderKind,
+    UnknownModelError,
+)
 from robinauts.agent_engines.contract.ports import EngineSettings
 
 ENDPOINTS = {
@@ -42,7 +46,7 @@ def chat_model(model_id: str, settings: EngineSettings) -> BaseChatModel:
             api_key=key,
             base_url=endpoint,
             timeout=model.timeout_seconds,
-            max_retries=0,
+            max_retries=VENDOR_RETRIES,
             max_tokens=model.max_output_tokens,
         )
     return ChatOpenAI(
@@ -50,6 +54,6 @@ def chat_model(model_id: str, settings: EngineSettings) -> BaseChatModel:
         api_key=key,
         base_url=endpoint,
         timeout=model.timeout_seconds,
-        max_retries=0,
+        max_retries=VENDOR_RETRIES,
         max_tokens=model.max_output_tokens,
     )

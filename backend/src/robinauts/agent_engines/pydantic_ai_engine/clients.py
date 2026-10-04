@@ -16,7 +16,11 @@ from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
 
-from robinauts.agent_engines.contract.domain import ProviderKind, UnknownModelError
+from robinauts.agent_engines.contract.domain import (
+    VENDOR_RETRIES,
+    ProviderKind,
+    UnknownModelError,
+)
 from robinauts.agent_engines.contract.ports import EngineSettings
 
 ENDPOINTS = {
@@ -45,14 +49,17 @@ def chat_model(model_id: str, settings: EngineSettings) -> tuple[Model, ModelSet
         model_settings["max_tokens"] = model.max_output_tokens
     if provider.kind in ANTHROPIC_KINDS:
         anthropic = AsyncAnthropic(
-            api_key=key, base_url=endpoint, max_retries=0, timeout=model.timeout_seconds
+            api_key=key,
+            base_url=endpoint,
+            max_retries=VENDOR_RETRIES,
+            timeout=model.timeout_seconds,
         )
         return (
             AnthropicModel(model.name, provider=AnthropicProvider(anthropic_client=anthropic)),
             model_settings,
         )
     openai = AsyncOpenAI(
-        api_key=key, base_url=endpoint, max_retries=0, timeout=model.timeout_seconds
+        api_key=key, base_url=endpoint, max_retries=VENDOR_RETRIES, timeout=model.timeout_seconds
     )
     return (
         OpenAIChatModel(model.name, provider=OpenAIProvider(openai_client=openai)),

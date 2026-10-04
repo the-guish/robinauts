@@ -95,3 +95,13 @@ def test_a_header_on_another_auth_is_refused() -> None:
     message = str(raised.value)
     assert "tool_servers.gh: `header` is for auth \"header\" alone, not auth 'bearer'" in message
     assert "tool_servers.wiki: `header` is for auth \"header\" alone, not auth 'basic'" in message
+
+
+def test_the_work_table_sets_the_turns_deadline_and_is_checked() -> None:
+    assert parse_config({}).max_turn_seconds == 1200.0
+    assert parse_config({"work": {"max_turn_seconds": 60}}).max_turn_seconds == 60.0
+    with pytest.raises(ConfigError) as raised:
+        parse_config({"work": {"max_turn_seconds": "soon", "colour": 1}})
+    message = str(raised.value)
+    assert "work.max_turn_seconds: 'soon' is not a positive number" in message
+    assert "work: unknown key colour" in message

@@ -197,6 +197,11 @@ title = "Assistant"
 model = "sonnet"
 engine = "langgraph"
 system_prompt = "Play fair."
+
+# How long one turn may run in all, however many model and tool calls it
+# makes; timeout_seconds above bounds a single call to the model.
+[work]
+max_turn_seconds = 1200
 ```
 
 Notes on what is and is not there:

@@ -132,6 +132,8 @@ class Config:
     models: Mapping[str, ModelConfig] = field(default_factory=dict)
     tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
     agents: Mapping[str, AgentConfig] = field(default_factory=dict)
+    max_turn_seconds: float = 1200.0
+    """``[work]``: how long a turn may run in all, however many calls it makes."""
 
 
 class StorageKind(StrEnum):

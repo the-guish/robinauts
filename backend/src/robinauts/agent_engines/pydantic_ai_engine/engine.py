@@ -14,7 +14,7 @@ import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator
 from contextlib import aclosing
 
-from pydantic_ai import Agent, AgentRunResult
+from pydantic_ai import Agent, AgentRunResult, UsageLimits
 from pydantic_ai.messages import (
     AgentStreamEvent,
     FunctionToolCallEvent,
@@ -30,6 +30,7 @@ from pydantic_ai.messages import (
 )
 
 from robinauts.agent_engines.contract.domain import (
+    MAX_MODEL_CALLS,
     AgentDefinition,
     CheckpointNotFoundError,
     Done,
@@ -117,7 +118,8 @@ class PydanticAIEngine(AgentEngine):
 async def run_of(
     runner: Agent[None, str], prompt: str, history: list[ModelMessage] | None
 ) -> AsyncIterator[AgentStreamEvent | AgentRunResult[str]]:
-    async with runner.iter(prompt, message_history=history) as run:
+    limits = UsageLimits(request_limit=MAX_MODEL_CALLS)
+    async with runner.iter(prompt, message_history=history, usage_limits=limits) as run:
         async for node in run:
             if Agent.is_model_request_node(node) or Agent.is_call_tools_node(node):
                 async with node.stream(run.ctx) as events:
