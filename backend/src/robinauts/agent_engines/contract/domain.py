@@ -60,9 +60,13 @@ class ModelConfig:
     provider: str
     name: str
     timeout_seconds: float = 120.0
+    """One call to the vendor, never the turn."""
     max_output_tokens: int | None = None
     context_window: int | None = None
     title: str = ""
+    max_retries: int = 2
+    """Retries of one call by the vendor's SDK, with its backoff, on a 429, a 529 or a
+    dropped connection."""
 
 
 class ToolServerAuth(StrEnum):
@@ -89,6 +93,26 @@ class ModelsConfig:
     providers: Mapping[str, ModelProviderConfig] = field(default_factory=dict)
     models: Mapping[str, ModelConfig] = field(default_factory=dict)
     tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
+
+
+class ToolErrorBehavior(StrEnum):
+    """What a tool's error does to a turn, where the framework leaves it open."""
+
+    FAILED = "failed"
+    """Back to the model as a failed result; never ends the turn."""
+    RETRY = "retry"
+    """Back to the model as a retry prompt, which spends the tool's retries; the error after
+    the last ends the turn."""
+    ERROR = "error"
+    """Ends the turn."""
+
+
+@dataclass(frozen=True, slots=True)
+class RunLimits:
+    """The bounds of one turn that an engine enforces itself."""
+
+    max_model_calls: int = 100
+    tool_error_behavior: ToolErrorBehavior = ToolErrorBehavior.FAILED
 
 
 @dataclass(frozen=True, slots=True)

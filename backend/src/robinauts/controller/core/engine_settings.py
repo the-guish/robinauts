@@ -63,6 +63,7 @@ def engine_settings(config: domain.Config, secret_for: SecretLookup) -> EngineSe
                 m.max_output_tokens,
                 m.context_window,
                 m.title,
+                m.max_retries,
             )
             for m in config.models.values()
         },
@@ -79,8 +80,15 @@ def engine_settings(config: domain.Config, secret_for: SecretLookup) -> EngineSe
             for t in config.tool_servers.values()
         },
     )
+    limits = engine_domain.RunLimits(
+        max_model_calls=config.work.max_model_calls,
+        tool_error_behavior=engine_domain.ToolErrorBehavior(config.work.tool_error_behavior.value),
+    )
     return EngineSettings(
-        models=models, keys=_Keys(config, secret_for), tool_secrets=_ToolSecrets(config, secret_for)
+        models=models,
+        keys=_Keys(config, secret_for),
+        tool_secrets=_ToolSecrets(config, secret_for),
+        limits=limits,
     )
 
 

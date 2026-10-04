@@ -81,8 +81,14 @@ class LangChainEngine(AgentEngine):
             system_prompt=agent.system_prompt,
             checkpointer=self._memory.saver,
         )
+        # A graph step is a call to the model or a round of tool calls, one after the other,
+        # so the model's n-th call is the graph's step 2n - 1.
+        limited: RunnableConfig = {
+            **start,
+            "recursion_limit": 2 * self._settings.limits.max_model_calls - 1,
+        }
         stream = graph.astream(
-            {"messages": [HumanMessage(prompt)]}, start, stream_mode=["messages", "updates"]
+            {"messages": [HumanMessage(prompt)]}, limited, stream_mode=["messages", "updates"]
         )
         # The deadline bounds the run, not the caller's handling of what is yielded.
         deadline = asyncio.get_running_loop().time() + timeout_seconds

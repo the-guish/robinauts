@@ -5,7 +5,8 @@
 
 The runner numbers its turn's events from 1 and is their only writer. Its first append is
 its claim on the turn: refused, it has lost the turn to another runner and runs no engine.
-Its deadline comes from the turn's lease, never more than the model's timeout. On
+Its deadline is the turn's ``deadline_at``, kept short of the lease; each call to the
+vendor is bounded by the model's own timeout, inside the engine. On
 ``TurnLostError`` from any write it closes the engine's stream and writes nothing more: the
 turn is another runner's, a reader ended it, or its lease has passed.
 """
@@ -138,9 +139,11 @@ async def run_turn(
     prompt: str,
     agent_config: AgentConfig,
     checkpoint_id: str | None,
-    model_timeout: float,
 ) -> None:
-    remaining = (turn.lease_until - datetime.now(UTC)).total_seconds() - DEADLINE_MARGIN
+    now = datetime.now(UTC)
+    remaining = (turn.lease_until - now).total_seconds() - DEADLINE_MARGIN
+    if turn.deadline_at is not None:
+        remaining = min(remaining, (turn.deadline_at - now).total_seconds())
     if remaining <= 0:
         return
     answer_id = uuid.uuid4()
@@ -159,7 +162,7 @@ async def run_turn(
             prompt,
             model=turn.model,
             checkpoint_id=checkpoint_id,
-            timeout_seconds=min(model_timeout, remaining),
+            timeout_seconds=remaining,
         )
         async with aclosing(stream) as events:
             async for event in events:

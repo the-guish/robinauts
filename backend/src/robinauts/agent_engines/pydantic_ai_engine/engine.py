@@ -14,7 +14,7 @@ import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator
 from contextlib import aclosing
 
-from pydantic_ai import Agent, AgentRunResult
+from pydantic_ai import Agent, AgentRunResult, UsageLimits
 from pydantic_ai.messages import (
     AgentStreamEvent,
     FunctionToolCallEvent,
@@ -93,7 +93,8 @@ class PydanticAIEngine(AgentEngine):
         )
         # The deadline bounds the run, not the caller's handling of what is yielded.
         deadline = asyncio.get_running_loop().time() + timeout_seconds
-        async with aclosing(run_of(runner, prompt, history)) as items:
+        limits = UsageLimits(request_limit=self._settings.limits.max_model_calls)
+        async with aclosing(run_of(runner, prompt, history, limits)) as items:
             while True:
                 async with asyncio.timeout_at(deadline):
                     item = await anext(items, None)
@@ -115,9 +116,12 @@ class PydanticAIEngine(AgentEngine):
 
 
 async def run_of(
-    runner: Agent[None, str], prompt: str, history: list[ModelMessage] | None
+    runner: Agent[None, str],
+    prompt: str,
+    history: list[ModelMessage] | None,
+    limits: UsageLimits,
 ) -> AsyncIterator[AgentStreamEvent | AgentRunResult[str]]:
-    async with runner.iter(prompt, message_history=history) as run:
+    async with runner.iter(prompt, message_history=history, usage_limits=limits) as run:
         async for node in run:
             if Agent.is_model_request_node(node) or Agent.is_call_tools_node(node):
                 async with node.stream(run.ctx) as events:

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import json
 import re
 from collections.abc import AsyncIterator
@@ -41,6 +42,8 @@ from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
     ModelsConfig,
     ProviderKind,
+    RunLimits,
+    ToolErrorBehavior,
     ToolServerAuth,
     ToolServerConfig,
     UnknownModelError,
@@ -77,7 +80,7 @@ def test_an_anthropic_model_is_built_from_the_settings(
     assert isinstance(client, AsyncAnthropic)
     assert client.api_key == "key-of-p"
     assert str(client.base_url).rstrip("/") == endpoint
-    assert (client.max_retries, client.timeout) == (0, 7.0)
+    assert (client.max_retries, client.timeout) == (3, 7.0)
     assert model_settings == {"timeout": 7.0, "max_tokens": 321}
 
 
@@ -98,7 +101,7 @@ def test_an_openai_model_is_built_from_the_settings(
     assert isinstance(client, AsyncOpenAI)
     assert client.api_key == "key-of-p"
     assert str(client.base_url).rstrip("/") == endpoint
-    assert (client.max_retries, client.timeout) == (0, 7.0)
+    assert (client.max_retries, client.timeout) == (3, 7.0)
     assert model_settings == {"timeout": 7.0, "max_tokens": 321}
 
 
@@ -161,6 +164,16 @@ def test_a_header_server_is_reached_with_its_secret_in_the_header_it_names() -> 
     assert secrets.asked == ["composio"]
 
 
+def test_a_tool_error_goes_back_to_the_model_as_configured() -> None:
+    server = ToolServerConfig(id="gh", url="https://mcp.example/gh", auth=ToolServerAuth.NONE)
+    settings = tool_settings(NoSecrets(), server)
+    assert toolset_for(server, settings).tool_error_behavior == "failed"
+    retrying = dataclasses.replace(
+        settings, limits=RunLimits(tool_error_behavior=ToolErrorBehavior.RETRY)
+    )
+    assert toolset_for(server, retrying).tool_error_behavior == "retry"
+
+
 def test_a_public_server_carries_no_credential_and_asks_for_none() -> None:
     server = ToolServerConfig(id="docs", url="https://mcp.example/docs", auth=ToolServerAuth.NONE)
     assert toolset_for(server, tool_settings(NoSecrets())).client.transport.headers == {}
@@ -218,10 +231,11 @@ def scripted(script: Script) -> FunctionModel:
             await asyncio.sleep(3600)
         last = messages[-1]
         answered = isinstance(last, ModelRequest) and isinstance(last.parts[-1], ToolReturnPart)
-        if script is Script.TOOL_ROUND and not answered:
-            yield {
-                0: DeltaToolCall(name="add", json_args=json.dumps(ARGUMENTS), tool_call_id=CALL_ID)
-            }
+        looping = script is Script.TOOL_LOOP
+        if looping or (script is Script.TOOL_ROUND and not answered):
+            call_id = f"{CALL_ID}-{len(messages)}" if looping else CALL_ID
+            arguments = json.dumps(ARGUMENTS)
+            yield {0: DeltaToolCall(name="add", json_args=arguments, tool_call_id=call_id)}
             return
         for piece in re.split(r"(\s)", ANSWER):
             yield piece

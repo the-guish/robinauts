@@ -10,6 +10,7 @@ from robinauts.agent_engines.contract.domain import (
     ModelProviderConfig,
     ModelsConfig,
     ProviderKind,
+    RunLimits,
 )
 from robinauts.agent_engines.contract.ports import (
     EngineSettings,
@@ -28,14 +29,25 @@ class NoSecrets(ToolSecretLookup):
         raise AssertionError(server_id)
 
 
+MAX_MODEL_CALLS = 4
+"""The turn's call limit in these settings: low, so that a loop reaches it at once."""
+
+
 def settings_for(kind: ProviderKind, base_url: str | None = None) -> EngineSettings:
-    """One provider ``p`` of that kind and one model ``m`` on it, with a timeout and a limit."""
+    """One provider ``p`` of that kind and one model ``m`` on it, with a timeout, a limit and
+    retries, and a turn limited to ``MAX_MODEL_CALLS`` calls to the model."""
     provider = ModelProviderConfig(id="p", kind=kind, api_key_env="", base_url=base_url)
     model = ModelConfig(
-        id="m", provider="p", name="vendor-name", timeout_seconds=7.0, max_output_tokens=321
+        id="m",
+        provider="p",
+        name="vendor-name",
+        timeout_seconds=7.0,
+        max_output_tokens=321,
+        max_retries=3,
     )
     return EngineSettings(
         models=ModelsConfig(providers={"p": provider}, models={"m": model}),
         keys=Keys(),
         tool_secrets=NoSecrets(),
+        limits=RunLimits(max_model_calls=MAX_MODEL_CALLS),
     )

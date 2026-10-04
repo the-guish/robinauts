@@ -77,9 +77,10 @@ All optional, all set by the operator:
 
 - requests per minute per user;
 - a maximum attachment size;
-- timeouts for a model call, a tool call and a whole run; the bound on the
-  tool rounds one turn may take is each agent adapter's own default and is
-  not a setting;
+- timeouts for a model call (`models.<id>.timeout_seconds`, with the vendor
+  SDK's `max_retries`), a tool call (`tool_servers.<id>.timeout_seconds`) and
+  a whole turn (`[work] max_turn_seconds`), and the bound on the calls to
+  the model one turn may make (`[work] max_model_calls`);
 - a model's `context_window`, in tokens, which is what the frameworks keep
   a conversation's history within
   ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)):

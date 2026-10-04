@@ -34,11 +34,13 @@ from robinauts.controller.contract.domain import (
     TurnActiveError,
     TurnEnded,
     TurnState,
+    WorkConfig,
 )
 from robinauts.controller.core.documents import event_from_document
 from robinauts.controller.ports.store import Store
 
-FIVE_MINUTES = timedelta(minutes=5)
+PAST_THE_LEASE = timedelta(hours=1)
+"""Past any turn's lease: its deadline, `max_turn_seconds` after its start, and a margin."""
 
 
 class ScriptedEngine(EchoEngine):
@@ -79,8 +81,9 @@ class SlowFinishStore(MemoryStore):
 async def over(store: Store, **options: Any) -> RobinautsController:
     """A controller over that store, wired as the composition wires one."""
     dispatcher = InProcessDispatcher()
+    config = options.pop("config", CONFIG)
     controller = RobinautsController(
-        CONFIG,
+        config,
         store=store,
         storage=StorageConfig(StorageKind.IN_MEMORY),
         secret_for={}.get,
@@ -111,6 +114,40 @@ async def test_an_answer_keeps_its_parts_in_stream_order() -> None:
         TextPart("Done."),
     )
     assert answer.turn_id == started.turn_id
+    await controller.close()
+
+
+class TimedEngine(EchoEngine):
+    """Records the deadline it is handed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.timeouts: list[float] = []
+
+    async def stream(self, *args: Any, **kwargs: Any) -> AsyncGenerator[Event, None]:
+        self.timeouts.append(kwargs["timeout_seconds"])
+        async for event in super().stream(*args, **kwargs):
+            yield event
+
+
+@asyncio_test
+async def test_the_turns_deadline_is_its_own_and_not_the_models_timeout() -> None:
+    model = dataclasses.replace(CONFIG.models["echo"], timeout_seconds=30.0)
+    config = dataclasses.replace(
+        CONFIG, models={"echo": model}, work=WorkConfig(max_turn_seconds=3600.0)
+    )
+    controller = await over(MemoryStore(), config=config)
+    engine = TimedEngine()
+    controller._engines["echo"] = engine
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    await settled(controller, user, started)
+    turn = await controller._store.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert turn.deadline_at == turn.started_at + timedelta(hours=1)
+    assert turn.lease_until > turn.deadline_at
+    [timeout] = engine.timeouts
+    assert 3500 < timeout <= 3600
     await controller.close()
 
 
@@ -161,7 +198,7 @@ async def test_a_runner_refused_mid_stream_writes_nothing_more() -> None:
     sid = started.session_id
     await controller._store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
     task = controller._dispatcher._tasks[started.turn_id]
-    controller._now = jumped(FIVE_MINUTES)
+    controller._now = jumped(PAST_THE_LEASE)
     assert (await controller.open_session(user, sid)).active is None
     engine.gate.set()
     await task
@@ -182,7 +219,7 @@ async def test_a_turn_whose_lease_has_passed_is_interrupted_and_a_new_turn_start
     started = await controller.start_session(user, agent="echo", model="echo", text="one")
     sid = started.session_id
     await controller._store.wait_for_events(user.id, sid, started.turn_id, 0, 5.0)
-    controller._now = jumped(FIVE_MINUTES)
+    controller._now = jumped(PAST_THE_LEASE)
     watched = [e async for e in controller.watch_turn(user, sid, started.turn_id)]
     assert [type(n.event).__name__ for n in watched] == ["MessageStarted", "TurnEnded"]
     assert watched[-1].event == TurnEnded(TurnState.INTERRUPTED)

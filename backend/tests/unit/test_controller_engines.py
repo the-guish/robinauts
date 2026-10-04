@@ -16,6 +16,8 @@ from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
     Event,
     ProviderKind,
+    RunLimits,
+    ToolErrorBehavior,
     ToolServerAuth,
 )
 from robinauts.agent_engines.contract.ports import (
@@ -109,6 +111,17 @@ def test_settings_carry_the_tables_without_agents_and_answer_secrets_by_id() -> 
     assert set(settings.models.tool_servers) == {"t"}
     assert settings.keys.key_for("acme") == "sk-1"
     assert settings.tool_secrets.secret_for("t") == "s-1"
+
+
+def test_settings_carry_the_retries_and_the_turn_limits() -> None:
+    model = dataclasses.replace(config().models["m"], timeout_seconds=30.0, max_retries=5)
+    work = domain.WorkConfig(max_model_calls=7, tool_error_behavior=domain.ToolErrorBehavior.RETRY)
+    settings = engine_settings(
+        dataclasses.replace(config(), models={"m": model}, work=work), ENV.get
+    )
+    carried = settings.models.models["m"]
+    assert (carried.timeout_seconds, carried.max_retries) == (30.0, 5)
+    assert settings.limits == RunLimits(7, ToolErrorBehavior.RETRY)
 
 
 def test_settings_carry_a_header_server_with_its_header() -> None:

@@ -15,14 +15,62 @@ from robinauts.controller.contract.domain import (
     ModelConfig,
     ProviderConfig,
     ProviderKind,
+    ToolErrorBehavior,
     ToolServerAuth,
     ToolServerConfig,
+    WorkConfig,
 )
 
 ENGINES = ("langchain", "pydantic-ai", "echo")
 
 # An HTTP field name is a token (RFC 9110, section 5.1): nothing else can go on the wire.
 HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
+
+
+def seconds(value: Any) -> float:
+    """A number of seconds above zero."""
+    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+        raise ValueError(f"{value!r} is not a number of seconds above zero")
+    return float(value)
+
+
+def count(value: Any) -> int:
+    """A whole number above zero."""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{value!r} is not a whole number above zero")
+    return value
+
+
+def retries(value: Any) -> int:
+    """A whole number, zero or more."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{value!r} is not a whole number, zero or more")
+    return value
+
+
+def settings_table(
+    raw: Mapping[str, Any],
+    table: str,
+    cls: Any,
+    problems: list[str],
+    **convert: Callable[[Any], Any],
+) -> Any:
+    """A table of settings, such as ``[work]``: every key one of ``cls``'s fields, each
+    checked by its converter; the defaults where the table, or a key, is left out."""
+    fields = raw.get(table, {})
+    if not isinstance(fields, Mapping):
+        problems.append(f"{table}: a table of settings, not {fields!r}")
+        return cls()
+    known = {field.name for field in dataclasses.fields(cls)}
+    if unknown := sorted(set(fields) - known):
+        problems.append(f"{table}: unknown key(s) {', '.join(unknown)}")
+    values = {}
+    for key in sorted(set(fields) & known):
+        try:
+            values[key] = convert.get(key, lambda v: v)(fields[key])
+        except (TypeError, ValueError) as error:
+            problems.append(f"{table}.{key}: {error}")
+    return cls(**values)
 
 
 def parse_config(raw: Mapping[str, Any]) -> Config:
@@ -43,9 +91,18 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
         return built
 
     providers = build("model_providers", ProviderConfig, kind=ProviderKind)
-    models = build("models", ModelConfig)
+    models = build("models", ModelConfig, timeout_seconds=seconds, max_retries=retries)
     tool_servers = build("tool_servers", ToolServerConfig, auth=ToolServerAuth)
     agents = build("agents", AgentConfig, tools=tuple)
+    work = settings_table(
+        raw,
+        "work",
+        WorkConfig,
+        problems,
+        max_turn_seconds=seconds,
+        max_model_calls=count,
+        tool_error_behavior=ToolErrorBehavior,
+    )
 
     for server in tool_servers.values():
         if server.auth is ToolServerAuth.HEADER:
@@ -76,4 +133,4 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
             problems.append(f"agents.{agent.id}: engine {agent.engine!r} is not one of {ENGINES}")
     if problems:
         raise ConfigError("\n".join(problems))
-    return Config(providers, models, tool_servers, agents)
+    return Config(providers, models, tool_servers, agents, work=work)

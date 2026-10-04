@@ -92,9 +92,12 @@ class ModelConfig:
     provider: str
     name: str
     timeout_seconds: float = 120.0
+    """One call to the vendor, never the turn: ``WorkConfig.max_turn_seconds`` bounds that."""
     max_output_tokens: int | None = None
     context_window: int | None = None
     title: str = ""
+    max_retries: int = 2
+    """Retries of one call by the vendor's SDK, with its backoff."""
 
 
 class ToolServerAuth(StrEnum):
@@ -126,12 +129,33 @@ class AgentConfig:
     tools: tuple[str, ...] = ()
 
 
+class ToolErrorBehavior(StrEnum):
+    FAILED = "failed"
+    RETRY = "retry"
+    ERROR = "error"
+
+
+@dataclass(frozen=True, slots=True)
+class WorkConfig:
+    """The ``[work]`` table: how this process runs turns."""
+
+    max_turn_seconds: float = 1200.0
+    """A turn's deadline, from its start: the whole run, whatever its calls take."""
+    max_model_calls: int = 100
+    """Calls to the model in one turn, past which the engine ends it."""
+    tool_error_behavior: ToolErrorBehavior = ToolErrorBehavior.FAILED
+    """What a tool's error does where the engine's framework leaves it open: back to the
+    model as a failed result (``failed``), as a retry prompt that spends the tool's retries
+    (``retry``), or the end of the turn (``error``)."""
+
+
 @dataclass(frozen=True, slots=True)
 class Config:
     providers: Mapping[str, ProviderConfig] = field(default_factory=dict)
     models: Mapping[str, ModelConfig] = field(default_factory=dict)
     tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
     agents: Mapping[str, AgentConfig] = field(default_factory=dict)
+    work: WorkConfig = field(default_factory=WorkConfig)
 
 
 class StorageKind(StrEnum):
@@ -325,6 +349,8 @@ class Turn:
     """For the operator, on a turn that ended badly; never sent to a browser."""
     retries: uuid.UUID | None = None
     """The failed answer this turn tries again, which the model is told about."""
+    deadline_at: datetime | None = None
+    """When the run must have ended, whatever its lease: its start plus ``max_turn_seconds``."""
 
 
 @dataclass(frozen=True, slots=True)

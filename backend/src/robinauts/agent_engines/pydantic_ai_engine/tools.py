@@ -34,6 +34,7 @@ def toolset_for(server: ToolServerConfig, settings: EngineSettings) -> MCPToolse
         headers=headers,
         init_timeout=server.timeout_seconds,
         read_timeout=server.timeout_seconds,
+        tool_error_behavior=settings.limits.tool_error_behavior.value,
     )
 
 

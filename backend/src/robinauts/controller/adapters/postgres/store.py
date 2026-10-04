@@ -51,7 +51,8 @@ USER_EXISTS = "users_provider_subject_key"
 
 _SESSION_COLUMNS = "id, owner_id, agent, engine, title, created_at, updated_at"
 _TURN_COLUMNS = (
-    "id, session_id, follows, model, state, started_at, ended_at, error, lease_until, retries"
+    "id, session_id, follows, model, state, started_at, ended_at, error, lease_until, retries,"
+    " deadline_at"
 )
 
 _VISIBLE = "SELECT 1 FROM sessions WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL"
@@ -100,6 +101,7 @@ def _turn(row: asyncpg.Record) -> Turn:
         row["ended_at"],
         row["error"],
         row["retries"],
+        row["deadline_at"],
     )
 
 
@@ -265,7 +267,7 @@ class PostgresStore(Store):
                     await self._insert_message(connection, question)
                 await connection.execute(
                     f"INSERT INTO turns ({_TURN_COLUMNS})"
-                    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
                     turn.id,
                     turn.session_id,
                     turn.follows,
@@ -276,6 +278,7 @@ class PostgresStore(Store):
                     turn.error,
                     turn.lease_until,
                     turn.retries,
+                    turn.deadline_at,
                 )
         except asyncpg.UniqueViolationError as violated:
             if violated.constraint_name == ONE_RUNNING:
