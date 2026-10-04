@@ -243,7 +243,7 @@ class PostgresStore(Store, WorkQueue):
         except (TimeoutError, OSError, asyncpg.PostgresError, asyncpg.InterfaceError):
             problems.append("the database does not answer")
         try:
-            await asyncio.wait_for(self._listen(), READY_SECONDS)
+            await asyncio.wait_for(self._listener_alive(), READY_SECONDS * 3)
         except (TimeoutError, OSError, asyncpg.PostgresError, asyncpg.InterfaceError):
             problems.append("the listening connection is down")
         try:
@@ -711,10 +711,10 @@ class PostgresStore(Store, WorkQueue):
         try:
             while True:
                 try:
-                    await self._listen()
-                except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError):
+                    await self._listener_alive()
+                except (TimeoutError, asyncpg.PostgresError, asyncpg.InterfaceError, OSError):
                     # The database is away: the heartbeat reads the asks back once it is not.
-                    log.warning("the listening connection could not be opened; trying again")
+                    log.warning("the listening connection is down; trying again")
                 try:
                     yield await asyncio.wait_for(signals.get(), LISTENER_CHECK)
                 except TimeoutError:
@@ -805,10 +805,35 @@ class PostgresStore(Store, WorkQueue):
                 return
             if self._dsn is None:
                 raise RuntimeError("a store that waits for events needs the database's dsn")
-            listener = await asyncpg.connect(self._dsn)
+            listener = await asyncpg.connect(self._dsn, timeout=WORK_TIMEOUT)
             await listener.add_listener(CHANNEL, self._notified)
             await listener.add_listener(CANCEL_CHANNEL, self._cancel_notified)
             self._listener = listener
+            # What arrived while there was none is lost: every waiter reads the store again.
+            for waiting in self._waiters.values():
+                for woken in waiting:
+                    if not woken.done():
+                        woken.set_result(None)
+
+    async def _listener_alive(self) -> None:
+        """The listening connection, opened if it is not, and made to answer a statement within
+        ``READY_SECONDS``: one that only listens never speaks, so one a NAT or a load balancer
+        dropped without a word would look open for good. One that does not answer is dropped,
+        and the next call opens another."""
+        await self._listen()
+        if self._opening is None:
+            self._opening = asyncio.Lock()
+        async with self._opening:
+            listener = self._listener
+            if listener is None or listener.is_closed():
+                return
+            try:
+                await asyncio.wait_for(listener.fetchval("SELECT 1"), READY_SECONDS)
+            except (TimeoutError, OSError, asyncpg.PostgresError, asyncpg.InterfaceError):
+                if self._listener is listener:
+                    self._listener = None
+                listener.terminate()
+                raise
 
     def _notified(self, connection: object, pid: int, channel: str, payload: str) -> None:
         head, _, _ = payload.partition(" ")

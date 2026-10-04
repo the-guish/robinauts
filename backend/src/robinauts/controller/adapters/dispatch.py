@@ -36,8 +36,9 @@ class InProcessDispatcher(TurnDispatcher):
         if held is not None and held[1] is task:
             del self._tasks[turn]
         self._stopped.discard(task)
-        if not task.cancelled():
-            task.exception()
+        if not task.cancelled() and (error := task.exception()) is not None:
+            # The runner ends its own turn on every failure it can: this is one it could not.
+            log.error("the runner of turn %s ended with an error", turn, exc_info=error)
 
     def held(self) -> list[Held]:
         return [Held(turn, attempt) for turn, (attempt, _) in self._tasks.items()]

@@ -22,6 +22,7 @@ from robinauts.controller.contract import logs
 from robinauts.controller.contract.domain import (
     ActiveTurn,
     AgentListing,
+    BusyError,
     Config,
     DrainingError,
     Identity,
@@ -103,6 +104,12 @@ SWEEP_BATCH = 1000
 PURGE_AFTER = timedelta(minutes=10)
 """How long a session stays hidden before the sweep finishes its purge: a delete purges at
 once, and one hidden for this long is one whose purge died."""
+
+LOAD_TRIES = 5
+"""How often a runner loads what its turn runs on while the pool has no connection free."""
+
+LOAD_BACKOFF = 0.5
+"""Seconds before the next load, times the tries so far."""
 
 FINAL_WAIT = 10.0
 """How long `close` waits for the turns it interrupted to write their end, before it leaves
@@ -508,7 +515,9 @@ class RobinautsController(Controller, Operations):
             return ended
         return None
 
-    async def _end_if_running(self, owner: uuid.UUID, turn: Turn, state: TurnState) -> None:
+    async def _end_if_running(
+        self, owner: uuid.UUID, turn: Turn, state: TurnState, error: str | None = None
+    ) -> None:
         now = self._now()
         try:
             await self._store.finish_turn(
@@ -518,7 +527,7 @@ class RobinautsController(Controller, Operations):
                 Fence(self._worker, turn.attempt),
                 state,
                 now,
-                None,
+                error,
                 None,
                 [],
                 now,
@@ -571,7 +580,28 @@ class RobinautsController(Controller, Operations):
         call. A turn this process does not hold under that attempt is not run."""
         with logs.about(session=session_id, turn=turn_id):
             try:
-                await self._run_turn(owner, session_id, turn_id, attempt)
+                for tried in range(LOAD_TRIES):
+                    try:
+                        await self._run_turn(owner, session_id, turn_id, attempt)
+                        return
+                    except BusyError:
+                        # Only the loading reaches here busy: the runner retries its own
+                        # writes. Nothing was written yet, so it is tried again.
+                        if tried == LOAD_TRIES - 1:
+                            raise
+                        await asyncio.sleep(LOAD_BACKOFF * (tried + 1))
+            except Exception as failed:
+                # Failed before its runner claimed the turn, while loading what it runs on:
+                # said, and the turn ended failed now rather than left to its lease.
+                log.exception("the turn could not begin")
+                await self._end_unclaimed(
+                    owner,
+                    session_id,
+                    turn_id,
+                    attempt,
+                    TurnState.FAILED,
+                    error=f"it could not begin: {type(failed).__name__}",
+                )
             except asyncio.CancelledError as stopped:
                 # Stopped before its runner claimed the turn, as by a cancel from another
                 # process that arrived during the loading: the runner wrote nothing, so the
@@ -592,6 +622,7 @@ class RobinautsController(Controller, Operations):
         turn_id: uuid.UUID,
         attempt: int,
         state: TurnState,
+        error: str | None = None,
     ) -> None:
         """End the turn as ``state`` if it still runs, held here under ``attempt``, with no
         event of its runner's: nothing, when the runner ended it itself."""
@@ -603,7 +634,7 @@ class RobinautsController(Controller, Operations):
                 and (turn.worker_id, turn.attempt) == (self._worker, attempt)
                 and await self._store.last_position(owner, session_id, turn_id) == 0
             ):
-                await self._end_if_running(owner, turn, state)
+                await self._end_if_running(owner, turn, state, error)
         except Exception:
             log.exception("a turn stopped before its runner began could not be ended")
 

@@ -385,3 +385,38 @@ async def test_closing_a_store_whose_database_hangs_takes_one_bounded_wait(
     assert time.monotonic() - before < 1.0
     assert work.terminated
     assert listener.terminated
+
+
+@asyncio_test
+async def test_a_listening_connection_that_stopped_answering_is_dropped_and_opened_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(store_module, "READY_SECONDS", 0.2)
+    async with temporary_schema() as schema:
+        store = PostgresStore(schema.pool, dsn=schema.dsn)
+
+        class HalfOpen:
+            """Dropped by something between here and the database, without a word."""
+
+            terminated = False
+
+            def is_closed(self) -> bool:
+                return False
+
+            async def fetchval(self, *args: object, **kwargs: object) -> object:
+                await asyncio.sleep(3600)
+                return None
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+        dropped = HalfOpen()
+        store._listener = dropped  # type: ignore[assignment]
+        try:
+            assert "the listening connection is down" in await store.readiness()
+            assert dropped.terminated
+            assert store._listener is None
+            assert await store.readiness() == ()
+            assert store._listener is not None
+        finally:
+            await store.close()

@@ -20,6 +20,7 @@ from robinauts.agent_engines.contract.domain import Done, Event, TextDelta, Tool
 from robinauts.agent_engines.echo_engine.engine import EchoEngine
 from robinauts.controller.adapters.dispatch import InProcessDispatcher
 from robinauts.controller.adapters.memory.store import MemoryStore
+from robinauts.controller.application import controller as controller_module
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.contract.domain import (
     AgentConfig,
@@ -877,4 +878,55 @@ async def test_a_conversation_the_sweep_cannot_purge_does_not_stop_the_others() 
     swept = await controller.sweep()
     assert swept.sessions_purged == 1
     assert set(store._sessions) == {gone.id}
+    await controller.close()
+
+
+class BusyLoadStore(MemoryStore):
+    """A pool with no connection free for a runner's loading, ``refusals`` times."""
+
+    def __init__(self, refusals: int) -> None:
+        super().__init__()
+        self.refusals = refusals
+        self.loads = 0
+
+    async def messages_of(self, *args: Any, **kwargs: Any) -> Any:
+        self.loads += 1
+        if self.refusals:
+            self.refusals -= 1
+            raise BusyError("no connection was free")
+        return await super().messages_of(*args, **kwargs)
+
+
+@asyncio_test
+async def test_a_runner_whose_loading_found_the_pool_busy_loads_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(controller_module, "LOAD_BACKOFF", 0.01)
+    store = BusyLoadStore(refusals=2)
+    controller = await over(store)
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    await asyncio.wait_for(settled(controller, user, started), 5.0)
+    turn = await store.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert turn.state is TurnState.FINISHED
+    await controller.close()
+
+
+@asyncio_test
+async def test_a_runner_that_cannot_begin_ends_its_turn_failed_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(controller_module, "LOAD_BACKOFF", 0.01)
+    store = BusyLoadStore(refusals=100)
+    controller = await over(store)
+    user = await controller.ensure_user(Identity("local", "me"))
+    started = await controller.start_session(user, agent="echo", model="echo", text="one")
+    watched = await asyncio.wait_for(
+        anext(controller.watch_turn(user, started.session_id, started.turn_id)), 5.0
+    )
+    assert watched.event == TurnEnded(TurnState.FAILED)
+    turn = await store.get_turn(user.id, started.session_id, started.turn_id)
+    assert turn is not None
+    assert (turn.state, turn.error) == (TurnState.FAILED, "it could not begin: BusyError")
     await controller.close()
