@@ -35,7 +35,7 @@ from robinauts.controller.contract.domain import ConfigError
 SCHEMA_VERSION = 1
 """The schema this build was written against; frozen at 1 until the first release."""
 
-SCHEMA_SHA256 = "32e0fe1c88f50607a67dfd93f755bc85d1ce139fff890c13200530bfceff3afe"
+SCHEMA_SHA256 = "952305ff4f708f09fc19da4f69e59b3a4e7e96686f5d100e8062ad39e26db65f"
 """``schema.sql`` as this build was written against it, line endings normalised to LF."""
 
 SCHEMA_TABLES = (
@@ -193,8 +193,7 @@ async def _state(connection: asyncpg.Connection) -> tuple[_Tables, int | None, s
         )
     except asyncpg.exceptions.UndefinedColumnError as unreadable:
         raise ConfigError(
-            f"the database's schema_version table is not this build's: drop it and run"
-            f" `{COMMAND}`"
+            f"the database's schema_version table is not this build's: drop it and run `{COMMAND}`"
         ) from unreadable
     if row is None:
         return tables, None, None

@@ -56,8 +56,8 @@ id and time and encodes the whole message as a versioned document
 ### 4. The controller stores the question and starts the turn, atomically
 
 `store.start_turn(question, turn)` stores the question and creates a turn with its
-own id, in state `running`, with a `lease_until`, in one operation. If the session
-already has a running turn, it stores neither and raises `TurnActiveError`, which web
+own id, in state `queued`, with a `lease_until`, in one operation. If the session
+already has a queued or running turn, it stores neither and raises `TurnActiveError`, which web
 answers with 409; a hidden session is not found, 404. Today the question is stored
 first by `add_message`, and `start_turn(session, follows)` has no turn id.
 
@@ -68,9 +68,10 @@ first by `add_message`, and `start_turn(session, follows)` has no turn id.
     no two of them wait for each other.
   - `INSERT INTO messages (id, session_id, parent_id, role, created_at, document)`,
     with the document as `jsonb`.
-  - `INSERT INTO turns (…, state) VALUES (…, 'running')`. A violation of
-    `turns_one_running_per_session` means 409, and the transaction takes the question
+  - `INSERT INTO turns (…, state) VALUES (…, 'queued')`. A violation of
+    `turns_one_active_per_session` means 409, and the transaction takes the question
     back with it.
+  - `SELECT pg_notify('robinauts_queued', '<turn>')`.
 - **AWS:** one `TransactWriteItems`:
   - a `ConditionCheck` that the session item exists without `deleted_at`;
   - a `Put` of the question, with `SK = MSG#<created_at>#<id>` and the document as a
@@ -85,9 +86,11 @@ first by `add_message`, and `start_turn(session, follows)` has no turn id.
 
 The turn dispatcher port is given `(session_id, turn_id)`.
 
-- **PostgreSQL:** the in-process dispatcher calls `asyncio.create_task(run_turn(…))`
-  in the uvicorn process that took the request, as today. With several processes, the
-  one that got the request runs the turn.
+- **PostgreSQL:** every uvicorn process runs a worker that hears `robinauts_queued`.
+  The worker claims queued turns with one `UPDATE … FOR UPDATE SKIP LOCKED`, which
+  makes them `running` with a new lease. It hands each to the in-process dispatcher,
+  which calls `asyncio.create_task(run_turn(…))`. With several processes, the worker
+  that claims the turn first runs it, whichever process took the request.
 - **AWS:** `lambda:Invoke` with `InvocationType=Event` on the worker Lambda, with
   retries set to zero and the event's age bounded below the lease. It returns in
   milliseconds. A cold worker spends a few seconds importing the frameworks and the
@@ -232,7 +235,7 @@ All of that is one store operation. Today it is several calls.
   - `INSERT` the message and the two events;
   - `UPDATE turns SET state = 'finished', ended_at = … WHERE id = $turn AND state =
     'running' AND lease_until > $ended_at`. The turn leaves
-    `turns_one_running_per_session` by itself. No row means a reader ended the turn,
+    `turns_one_active_per_session` by itself. No row means a reader ended the turn,
     or its lease has passed: `TurnLostError`, the transaction rolled back, and the
     runner has nothing more to write;
   - `SELECT pg_notify('robinauts_turns', '<turn> end')`.

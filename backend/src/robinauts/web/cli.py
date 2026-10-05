@@ -132,8 +132,7 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
     uvicorn.run(
         create_app(
-            composed.controller,
-            credentials=composed.credentials,
+            composed,
             sign_in=sign_in,
             secret_for=secret_for,
             ui_dir=ui_dir,

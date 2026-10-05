@@ -123,9 +123,7 @@ async def test_everyday_use(agent: str) -> None:
         secret_for=secret_for,
         engines={name: lambda *_, built=built: built for name, built in engines.items()},
     )
-    app = create_app(
-        composed.controller, credentials=composed.credentials, sign_in=None, secret_for=secret_for
-    )
+    app = create_app(composed, sign_in=None, secret_for=secret_for)
     async with (
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as http,

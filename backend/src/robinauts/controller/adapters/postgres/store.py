@@ -11,7 +11,7 @@ translated by name. Watchers are woken by ``NOTIFY`` on one listening connection
 held apart from the pool, and read the store again in every case, so a notification lost
 with a dropped connection costs a timeout and nothing else. A request to stop a turn comes
 on the same connection, and one that is lost is read back with the next renewal of the
-turn's lease.
+turn's lease. So does a queued turn, which a worker that misses it finds at its next wait.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ import asyncpg
 from robinauts.controller.adapters.postgres.pool import COMMAND_TIMEOUT, open_pool
 from robinauts.controller.adapters.postgres.schema import check_schema
 from robinauts.controller.contract.domain import (
+    ACTIVE,
     Role,
     Session,
     SessionNotFoundError,
@@ -52,7 +53,10 @@ CHANNEL = "robinauts_turns"
 CANCEL_CHANNEL = "robinauts_cancel"
 """Where a request to stop a turn is announced: ``<turn>``."""
 
-ONE_RUNNING = "turns_one_running_per_session"
+QUEUED_CHANNEL = "robinauts_queued"
+"""Where a queued turn is announced: ``<turn>``."""
+
+ONE_ACTIVE = "turns_one_active_per_session"
 POSITION_TAKEN = "turn_events_pkey"
 USER_EXISTS = "users_provider_subject_key"
 
@@ -73,9 +77,9 @@ WHERE t.id = $3 AND t.session_id = $2 AND s.owner_id = $1 AND s.deleted_at IS NU
 FOR SHARE OF t
 """
 
-_NOT_RUNNING = """
+_NOT_ACTIVE = """
   AND NOT EXISTS (SELECT 1 FROM turns AS t WHERE t.session_id = s.id
-    AND t.state = 'running' AND t.lease_until > $1)
+    AND t.state IN ('queued', 'running') AND t.lease_until > $1)
 """
 
 _T_COLUMNS = ", ".join("t." + c for c in _TURN_COLUMNS.split(", "))
@@ -85,8 +89,28 @@ UPDATE turns AS t
 SET state = 'interrupted', ended_at = $3, error = 'lease expired'
 FROM sessions AS s
 WHERE s.id = t.session_id AND s.id = $2 AND s.owner_id = $1 AND s.deleted_at IS NULL
-  AND t.id = $4 AND t.state = 'running' AND t.lease_until < $3
+  AND t.id = $4 AND t.state IN ('queued', 'running') AND t.lease_until < $3
 RETURNING {_T_COLUMNS}
+"""
+
+_CLAIM = f"""
+UPDATE turns AS t
+SET state = 'running', lease_until = $2
+FROM sessions AS s
+WHERE s.id = t.session_id AND t.state = 'queued' AND t.id IN (
+  SELECT q.id FROM turns AS q
+  JOIN sessions AS qs ON qs.id = q.session_id
+  WHERE q.state = 'queued' AND q.lease_until > $1 AND qs.deleted_at IS NULL
+  ORDER BY q.started_at, q.id
+  LIMIT $3
+  FOR UPDATE OF q SKIP LOCKED
+)
+RETURNING s.owner_id, {_T_COLUMNS}
+"""
+
+_CLAIMABLE = """
+SELECT EXISTS (SELECT 1 FROM turns AS t JOIN sessions AS s ON s.id = t.session_id
+  WHERE t.state = 'queued' AND t.lease_until > $1 AND s.deleted_at IS NULL)
 """
 
 
@@ -138,6 +162,7 @@ class PostgresStore(Store):
         self._dsn = dsn
         self._listener: asyncpg.Connection | None = None
         self._waiters: dict[uuid.UUID, set[asyncio.Future[None]]] = {}
+        self._queued_waiters: set[asyncio.Future[None]] = set()
         self._stops: list[Callable[[uuid.UUID], object]] = []
         self._opening: asyncio.Lock | None = None
 
@@ -258,7 +283,7 @@ class PostgresStore(Store):
 
     async def purge_session(self, owner: uuid.UUID, session: uuid.UUID, now: datetime) -> bool:
         status = await self._pool.execute(
-            "DELETE FROM sessions AS s WHERE id = $2 AND owner_id = $3" + _NOT_RUNNING,
+            "DELETE FROM sessions AS s WHERE id = $2 AND owner_id = $3" + _NOT_ACTIVE,
             now,
             session,
             owner,
@@ -300,8 +325,12 @@ class PostgresStore(Store):
                     turn.lease_until,
                     turn.retries,
                 )
+                if turn.state is TurnState.QUEUED:
+                    await connection.execute(
+                        "SELECT pg_notify($1, $2)", QUEUED_CHANNEL, str(turn.id)
+                    )
         except asyncpg.UniqueViolationError as violated:
-            if violated.constraint_name == ONE_RUNNING:
+            if violated.constraint_name == ONE_ACTIVE:
                 raise TurnActiveError(str(turn.session_id)) from violated
             raise
 
@@ -444,20 +473,48 @@ class PostgresStore(Store):
         )
         return [row["id"] for row in rows if row["cancel_requested_at"] is not None]
 
+    async def claim_turns(
+        self, now: datetime, until: datetime, limit: int
+    ) -> list[tuple[uuid.UUID, Turn]]:
+        rows = await self._pool.fetch(_CLAIM, now, until, limit)
+        return [(row["owner_id"], _turn(row)) for row in rows]
+
+    async def wait_for_queued(self, now: datetime, timeout: float) -> bool:
+        await self._listen()
+        woken: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._queued_waiters.add(woken)
+        try:
+            if await self._pool.fetchval(_CLAIMABLE, now):
+                return True
+            try:
+                await asyncio.wait_for(asyncio.shield(woken), timeout)
+            except TimeoutError:
+                return False
+            return True
+        finally:
+            self._queued_waiters.discard(woken)
+
     async def request_cancel(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, at: datetime
     ) -> None:
         async with self._pool.acquire() as connection, connection.transaction():
-            status = await connection.execute(
-                "UPDATE turns AS t SET cancel_requested_at = $4 FROM sessions AS s"
+            # The state on the right of each SET is the one before the update.
+            state = await connection.fetchval(
+                "UPDATE turns AS t SET cancel_requested_at = $4,"
+                "   state = CASE WHEN t.state = 'queued' THEN 'cancelled' ELSE t.state END,"
+                "   ended_at = CASE WHEN t.state = 'queued' THEN $4 END"
+                " FROM sessions AS s"
                 " WHERE s.id = t.session_id AND s.id = $2 AND s.owner_id = $1"
-                "   AND s.deleted_at IS NULL AND t.id = $3 AND t.state = 'running'",
+                "   AND s.deleted_at IS NULL AND t.id = $3 AND t.state IN ('queued', 'running')"
+                " RETURNING t.state",
                 owner,
                 session,
                 turn,
                 at,
             )
-            if _rows(status) > 0:
+            if state == TurnState.CANCELLED.value:
+                await connection.execute("SELECT pg_notify($1, $2)", CHANNEL, f"{turn} end")
+            elif state == TurnState.RUNNING.value:
                 await connection.execute("SELECT pg_notify($1, $2)", CANCEL_CHANNEL, str(turn))
 
     async def listen_for_cancels(self, stop: Callable[[uuid.UUID], object]) -> None:
@@ -467,7 +524,7 @@ class PostgresStore(Store):
     async def hidden_sessions(self, now: datetime) -> list[Session]:
         rows = await self._pool.fetch(
             f"SELECT {_SESSION_COLUMNS} FROM sessions AS s"
-            " WHERE deleted_at IS NOT NULL" + _NOT_RUNNING,
+            " WHERE deleted_at IS NOT NULL" + _NOT_ACTIVE,
             now,
         )
         return [_session(row) for row in rows]
@@ -476,7 +533,8 @@ class PostgresStore(Store):
         rows = await self._pool.fetch(
             f"SELECT s.owner_id, {_T_COLUMNS} FROM turns AS t"
             " JOIN sessions AS s ON s.id = t.session_id"
-            " WHERE t.state = 'running' AND t.lease_until < $1 AND s.deleted_at IS NULL",
+            " WHERE t.state IN ('queued', 'running') AND t.lease_until < $1"
+            "   AND s.deleted_at IS NULL",
             now,
         )
         return [(row["owner_id"], _turn(row)) for row in rows]
@@ -485,7 +543,8 @@ class PostgresStore(Store):
         async with self._pool.acquire() as connection:
             await self._visible(connection, owner, session)
             row = await connection.fetchrow(
-                f"SELECT {_TURN_COLUMNS} FROM turns WHERE session_id = $1 AND state = 'running'",
+                f"SELECT {_TURN_COLUMNS} FROM turns"
+                " WHERE session_id = $1 AND state IN ('queued', 'running')",
                 session,
             )
         return None if row is None else _turn(row)
@@ -551,7 +610,7 @@ class PostgresStore(Store):
             turn,
             after,
         )
-        return row is None or row["more"] or row["state"] != TurnState.RUNNING.value
+        return row is None or row["more"] or TurnState(row["state"]) not in ACTIVE
 
     async def _listen(self) -> None:
         """The one listening connection, opened on first use, apart from the pool."""
@@ -567,6 +626,7 @@ class PostgresStore(Store):
             listener = await asyncpg.connect(self._dsn)
             await listener.add_listener(CHANNEL, self._notified)
             await listener.add_listener(CANCEL_CHANNEL, self._cancelled)
+            await listener.add_listener(QUEUED_CHANNEL, self._queued)
             self._listener = listener
 
     def _notified(self, connection: object, pid: int, channel: str, payload: str) -> None:
@@ -576,6 +636,11 @@ class PostgresStore(Store):
         except ValueError:
             return
         for woken in self._waiters.get(turn, ()):
+            if not woken.done():
+                woken.set_result(None)
+
+    def _queued(self, connection: object, pid: int, channel: str, payload: str) -> None:
+        for woken in self._queued_waiters:
             if not woken.done():
                 woken.set_result(None)
 

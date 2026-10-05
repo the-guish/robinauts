@@ -59,9 +59,7 @@ async def signed_in() -> AsyncIterator[tuple[httpx.AsyncClient, Composed, User, 
     """The app, a client, Ada, and the headers of her browser: her session cookie and the
     ``Origin`` a write with it needs."""
     composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
-    app = create_app(
-        composed.controller, credentials=composed.credentials, sign_in=SIGN_IN, secret_for={}.get
-    )
+    app = create_app(composed, sign_in=SIGN_IN, secret_for={}.get)
     async with app.router.lifespan_context(app):
         ada = await composed.controller.ensure_user(ADA)
         secret = random_secret()

@@ -13,6 +13,7 @@ from collections.abc import Callable, Sequence
 from datetime import datetime
 
 from robinauts.controller.contract.domain import (
+    ACTIVE,
     Session,
     SessionNotFoundError,
     Turn,
@@ -56,15 +57,21 @@ class MemoryStore(Store):
             raise SessionNotFoundError(str(session))
         return found
 
-    def _running(self, session: uuid.UUID) -> Turn | None:
+    def _active(self, session: uuid.UUID) -> Turn | None:
         return next(
-            (
-                t
-                for t in self._turns.values()
-                if t.session_id == session and t.state is TurnState.RUNNING
-            ),
+            (t for t in self._turns.values() if t.session_id == session and t.state in ACTIVE),
             None,
         )
+
+    def _claimable(self, now: datetime) -> list[Turn]:
+        queued = [
+            t
+            for t in self._turns.values()
+            if t.state is TurnState.QUEUED
+            and t.lease_until > now
+            and t.session_id not in self._hidden
+        ]
+        return sorted(queued, key=lambda t: (t.started_at, t.id))
 
     def _turn_of(self, session: uuid.UUID, turn: uuid.UUID) -> Turn | None:
         found = self._turns.get(turn)
@@ -138,7 +145,7 @@ class MemoryStore(Store):
         self, owner: uuid.UUID, turn: Turn, question: StoredMessage | None
     ) -> None:
         self._visible(owner, turn.session_id)
-        if self._running(turn.session_id) is not None:
+        if self._active(turn.session_id) is not None:
             raise TurnActiveError(str(turn.session_id))
         if question is not None:
             self._messages[turn.session_id].append(question)
@@ -212,13 +219,13 @@ class MemoryStore(Store):
         answer: StoredMessage | None = None,
     ) -> Turn | None:
         self._visible(owner, session)
-        running = self._running(session)
-        if running is None or running.id != turn or running.lease_until >= now:
+        active = self._active(session)
+        if active is None or active.id != turn or active.lease_until >= now:
             return None
         ended = dataclasses.replace(
-            running, state=TurnState.INTERRUPTED, ended_at=now, error="lease expired"
+            active, state=TurnState.INTERRUPTED, ended_at=now, error="lease expired"
         )
-        self._turns[running.id] = ended
+        self._turns[active.id] = ended
         if answer is not None:
             self._messages[session].append(answer)
         await self._notify()
@@ -235,15 +242,40 @@ class MemoryStore(Store):
                 renewed.append(turn)
         return [t for t in renewed if t in self._cancel_requested]
 
+    async def claim_turns(
+        self, now: datetime, until: datetime, limit: int
+    ) -> list[tuple[uuid.UUID, Turn]]:
+        claimed = []
+        for found in self._claimable(now)[:limit]:
+            running = dataclasses.replace(found, state=TurnState.RUNNING, lease_until=until)
+            self._turns[found.id] = running
+            claimed.append((self._sessions[found.session_id].owner_id, running))
+        return claimed
+
+    async def wait_for_queued(self, now: datetime, timeout: float) -> bool:
+        async with self._changed:
+            try:
+                await asyncio.wait_for(
+                    self._changed.wait_for(lambda: bool(self._claimable(now))), timeout
+                )
+            except TimeoutError:
+                return False
+            return True
+
     async def request_cancel(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, at: datetime
     ) -> None:
         self._visible(owner, session)
-        running = self._running(session)
-        if running is not None and running.id == turn:
-            self._cancel_requested.add(turn)
-            for stop in self._stops:
-                stop(turn)
+        active = self._active(session)
+        if active is None or active.id != turn:
+            return
+        self._cancel_requested.add(turn)
+        if active.state is TurnState.QUEUED:
+            self._turns[turn] = dataclasses.replace(active, state=TurnState.CANCELLED, ended_at=at)
+            await self._notify()
+            return
+        for stop in self._stops:
+            stop(turn)
 
     async def listen_for_cancels(self, stop: Callable[[uuid.UUID], object]) -> None:
         self._stops.append(stop)
@@ -252,22 +284,20 @@ class MemoryStore(Store):
         return [self._sessions[s] for s in self._hidden if not self._live(s, now)]
 
     def _live(self, session: uuid.UUID, now: datetime) -> bool:
-        """Whether a turn of the session runs with its lease not passed ``now``."""
-        running = self._running(session)
-        return running is not None and running.lease_until > now
+        """Whether a turn of the session is queued or runs with its lease not passed ``now``."""
+        active = self._active(session)
+        return active is not None and active.lease_until > now
 
     async def expired_turns(self, now: datetime) -> list[tuple[uuid.UUID, Turn]]:
         return [
             (self._sessions[t.session_id].owner_id, t)
             for t in self._turns.values()
-            if t.state is TurnState.RUNNING
-            and t.lease_until < now
-            and t.session_id not in self._hidden
+            if t.state in ACTIVE and t.lease_until < now and t.session_id not in self._hidden
         ]
 
     async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:
         self._visible(owner, session)
-        return self._running(session)
+        return self._active(session)
 
     async def latest_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:
         self._visible(owner, session)
@@ -283,7 +313,7 @@ class MemoryStore(Store):
     ) -> bool:
         def ready() -> bool:
             found = self._turns.get(turn)
-            if found is None or found.state is not TurnState.RUNNING:
+            if found is None or found.state not in ACTIVE:
                 return True
             return any(e.position > after for e in self._events.get(turn, ()))
 

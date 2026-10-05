@@ -68,14 +68,18 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
 
 ## Rules every store keeps
 
-- **At most one running turn per session**, held atomically by `start_turn`.
+- **At most one queued or running turn per session**, held atomically by `start_turn`.
   PostgreSQL holds it with a partial unique index on `turns (session_id) WHERE state
-  = 'running'`. A store without one holds it with a record keyed by the session,
+  IN ('queued', 'running')`. A store without one holds it with a record keyed by the session,
   written with the turn on condition that it does not exist, and removed in the same
   write as whatever ends the turn, `finish_turn` or `end_expired_turn`. There is no
   pointer to the running turn on the session: what is running is looked up.
 - **A question and its turn are stored in one operation**, so a question refused a
   turn is not left behind.
+- **A worker claims a queued turn.** A turn is stored `queued`. A worker's
+  `claim_turns` makes it `running`, with a new lease, in one operation. Each turn is
+  claimed once, whichever process asks. The worker then dispatches the turn in its own
+  process.
 - **A turn finishes in one operation:** its answer, its last events, its state, and
   the session's `updated_at`.
 - **The runner numbers its turn's events** and is their only writer, one at a time, so
@@ -95,8 +99,8 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   The purge calls `forget` on the engine the session records, which may no longer be
   the one its agent's configuration names, then deletes the session with its
   messages, turns and events.
-- **A cancel goes through the store.** It sets `cancel_requested_at` on the running
-  turn and announces it. The process that runs the turn cancels its task. A missed
+- **A cancel goes through the store.** It ends a queued turn as `cancelled` at once.
+  It sets `cancel_requested_at` on a running turn and announces it. The process that runs the turn cancels its task. A missed
   announcement is read back with the next renewal of the lease.
 - **Events expire.** `expires_at` is set when an event is written, as that moment
   plus a retention of hours. Ending a turn touches none of its events. The answer is
@@ -104,13 +108,13 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   events but a late watcher. Until they expire, they are the only copy of a turn's
   reasoning, and of what a cancelled turn streamed.
 - **A turn holds a lease.** `lease_until` is written with the turn, as its start plus
-  `lease_seconds`. The process that runs the turn renews it every `heartbeat_seconds`,
+  `lease_seconds`, and again by the claim. The process that runs the turn renews it every `heartbeat_seconds`,
   in one write for all its turns. The runner's deadline is apart: the turn's start
-  plus `max_turn_seconds`. A running turn whose lease has passed is ended as
+  plus `max_turn_seconds`. A queued or running turn whose lease has passed is ended as
   `interrupted` by the next reader to find it (`open_session`, `start_turn`,
   `watch_turn`, `cancel_turn`, `delete_session`), or by the sweep every
   `sweep_seconds`. Both go through `end_expired_turn`: one conditional write that only
-  a running turn takes, on the record, the marker a store without a partial index
+  a queued or running turn takes, on the record, the marker a store without a partial index
   keeps, and the answer, and that wakes the turn's watchers. No event is written,
   since a `turn_ended` event is the runner's; a watcher that finds the turn ended with
   none supplies it from the record. A runner that outlives its lease has lost the turn

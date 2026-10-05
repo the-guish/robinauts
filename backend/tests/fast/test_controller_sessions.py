@@ -14,7 +14,8 @@ from util.aio import asyncio_test
 
 @asyncio_test
 async def test_sessions_are_listed_a_page_at_a_time_none_twice() -> None:
-    controller = await opened()
+    lifecycle = await opened()
+    controller = lifecycle.composed.controller
     user = await controller.ensure_user(Identity("local", "me"))
     started = []
     for text in ("one", "two", "three"):
@@ -29,4 +30,4 @@ async def test_sessions_are_listed_a_page_at_a_time_none_twice() -> None:
     assert second.cursor is None
     with pytest.raises(InvalidValueError):
         await controller.list_sessions(user, limit=2, cursor="not a cursor")
-    await controller.close()
+    await lifecycle.stop()

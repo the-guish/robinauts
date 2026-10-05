@@ -319,10 +319,13 @@ def event_to_document(turn_id: uuid.UUID, position: int, event: TurnEvent) -> di
             }
             kind = "message_started"
         case TextPiece():
-            body, kind = {
-                "message_id": str(event.message_id),
-                "text": clean_text(event.text),
-            }, "text_piece"
+            body, kind = (
+                {
+                    "message_id": str(event.message_id),
+                    "text": clean_text(event.text),
+                },
+                "text_piece",
+            )
         case ReasoningPiece():
             body = {"message_id": str(event.message_id), "text": clean_text(event.text)}
             kind = "reasoning_piece"

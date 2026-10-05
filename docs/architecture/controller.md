@@ -18,6 +18,12 @@ signed in is web's own concern, the user session.
 - `close`: wait for the turns this process runs, bounded, interrupt the rest, and release the
   storage.
 
+## Worker
+
+The worker claims queued turns from the store and dispatches them in its process. It is
+not an operation of the controller. The shell starts it after `open` and stops it before
+`close` (`web/lifecycle.py`).
+
 ## Users
 
 - `ensure_user`: the user for an identity, created on first sight. Web passes the provider and

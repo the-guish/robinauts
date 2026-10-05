@@ -235,10 +235,14 @@ CREATE INDEX IF NOT EXISTS messages_session_id_parent_id_idx
 -- asked with, but a regeneration answers the same question on another model,
 -- so the turn records its own.
 --
+-- A turn is stored `queued`. A worker claims it by making it `running`, and
+-- dispatches it. A cancel ends a queued turn at once.
+--
 -- `lease_until` is written with the turn, as its start plus `lease_seconds`,
--- and renewed by the process that runs it. Every write of the runner's is
--- refused past it, and a running turn whose lease has passed was left by a
--- runner that went away: the next reader to find it, or the sweep, ends it as
+-- set again by the claim, and renewed by the process that runs it. Every write
+-- of the runner's is refused past it. A queued turn whose lease has passed was
+-- claimed by no worker in time, and a running one was left by a runner that
+-- went away: the next reader to find it, or the sweep, ends it as
 -- `interrupted`, with no event. `cancel_requested_at` is set by a cancel
 -- from any process, and read back with each renewal of the lease. Both are set
 -- by the application's clock.
@@ -254,7 +258,7 @@ CREATE TABLE IF NOT EXISTS turns (
     -- nothing else is a state.
     state text NOT NULL
         CONSTRAINT turns_state_is_a_state CHECK (
-            state IN ('running', 'finished', 'failed', 'cancelled', 'interrupted')
+            state IN ('queued', 'running', 'finished', 'failed', 'cancelled', 'interrupted')
         ),
     started_at timestamptz NOT NULL,
     ended_at timestamptz,
@@ -270,9 +274,9 @@ CREATE TABLE IF NOT EXISTS turns (
         REFERENCES messages (session_id, id),
     CONSTRAINT turns_retries_fkey FOREIGN KEY (session_id, retries)
         REFERENCES messages (session_id, id),
-    -- A turn has ended exactly when it is no longer running.
-    CONSTRAINT turns_ended_when_not_running CHECK (
-        (state = 'running') = (ended_at IS NULL)
+    -- A turn has ended exactly when it is no longer queued or running.
+    CONSTRAINT turns_ended_when_not_active CHECK (
+        (state IN ('queued', 'running')) = (ended_at IS NULL)
     ),
     -- Only a turn that ended badly says why.
     CONSTRAINT turns_error_only_when_failed CHECK (
@@ -280,13 +284,17 @@ CREATE TABLE IF NOT EXISTS turns (
     )
 );
 
--- **At most one running turn per session.** Two requests arriving together
+-- **At most one queued or running turn per session.** Two requests arriving together
 -- both insert, and only this index makes one of them fail. The store
 -- translates a violation of it, by name, into `TurnActiveError`. It is also
 -- what `active_turn` reads. Partial: a session has any number of turns that
 -- have ended.
-CREATE UNIQUE INDEX IF NOT EXISTS turns_one_running_per_session
-    ON turns (session_id) WHERE state = 'running';
+CREATE UNIQUE INDEX IF NOT EXISTS turns_one_active_per_session
+    ON turns (session_id) WHERE state IN ('queued', 'running');
+
+-- What a worker claims from: the queued turns, oldest first.
+CREATE INDEX IF NOT EXISTS turns_queued_idx
+    ON turns (started_at, id) WHERE state = 'queued';
 
 -- What opening a session reads to say how its last turn ended (`ended_badly`),
 -- and what the cascade from `sessions` deletes by: a session's turns, most
@@ -294,9 +302,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS turns_one_running_per_session
 CREATE INDEX IF NOT EXISTS turns_session_id_started_at_idx
     ON turns (session_id, started_at DESC, id DESC);
 
--- What the sweep reads: the running turns whose lease has passed.
+-- What the sweep reads: the queued or running turns whose lease has passed.
 CREATE INDEX IF NOT EXISTS turns_lease_until_idx
-    ON turns (lease_until) WHERE state = 'running';
+    ON turns (lease_until) WHERE state IN ('queued', 'running');
 
 
 -- ---------------------------------------------------------------------------

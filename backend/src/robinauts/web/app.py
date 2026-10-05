@@ -28,7 +28,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from robinauts.controller.composition import SecretLookup
+from robinauts.controller.composition import Composed, SecretLookup
 from robinauts.controller.contract.domain import (
     ApiToken,
     ControllerError,
@@ -52,9 +52,9 @@ from robinauts.controller.contract.domain import (
     UnknownModelError,
     User,
 )
-from robinauts.controller.contract.ports import Controller, Credentials
 from robinauts.web import agui
 from robinauts.web.cookies import Cookies
+from robinauts.web.lifecycle import Lifecycle
 from robinauts.web.logs import loggable
 from robinauts.web.oidc import Exchange
 from robinauts.web.sign_in import (
@@ -365,14 +365,15 @@ def event_stream(
 
 
 def create_app(
-    controller: Controller,
+    composed: Composed,
     *,
-    credentials: Credentials,
     sign_in: SignInConfig | None,
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
 ) -> FastAPI:
     """``sign_in`` is ``None`` in the local development mode."""
+    controller, credentials = composed.controller, composed.credentials
+    lifecycle = Lifecycle(composed)
     exchange: Exchange | None = None
     flow: SignIn | None = None
     if sign_in is not None:
@@ -384,13 +385,13 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         nonlocal local_user
-        await controller.open()
+        await lifecycle.start()
         if sign_in is None:
             local_user = await controller.ensure_user(LOCAL_IDENTITY)
         yield
         if exchange is not None:
             await exchange.aclose()
-        await controller.close()
+        await lifecycle.stop()
 
     # --- who is asking -----------------------------------------------------------
 

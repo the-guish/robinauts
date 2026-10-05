@@ -95,8 +95,9 @@ class Store(ABC):
 
     @abstractmethod
     async def purge_session(self, owner: uuid.UUID, session: uuid.UUID, now: datetime) -> bool:
-        """Delete the session with its messages, turns and events, unless a turn of it runs
-        with its lease not passed ``now``: true when it did, false also if it is gone."""
+        """Delete the session with its messages, turns and events, unless a turn of it is
+        queued or running with its lease not passed ``now``: true when it did, false also if it
+        is gone."""
 
     @abstractmethod
     async def messages_of(self, owner: uuid.UUID, session: uuid.UUID) -> list[Document]:
@@ -109,7 +110,21 @@ class Store(ABC):
         self, owner: uuid.UUID, turn: Turn, question: StoredMessage | None
     ) -> None:
         """Store the question, when there is one, and the turn, or neither:
-        ``TurnActiveError`` while the session has a running turn."""
+        ``TurnActiveError`` while the session has a queued or running turn. A queued turn
+        wakes every process waiting in ``wait_for_queued``."""
+
+    @abstractmethod
+    async def claim_turns(
+        self, now: datetime, until: datetime, limit: int
+    ) -> list[tuple[uuid.UUID, Turn]]:
+        """Up to ``limit`` queued turns of visible sessions, oldest first, whose lease has not
+        passed ``now``, made running with their lease until ``until``, with each session's
+        owner; in one operation. Each turn is claimed once, whichever process asks."""
+
+    @abstractmethod
+    async def wait_for_queued(self, now: datetime, timeout: float) -> bool:
+        """Wait until a turn ``claim_turns`` would claim is queued, or ``timeout`` seconds
+        have passed: true in the first case, false in the second."""
 
     @abstractmethod
     async def append_event(
@@ -158,7 +173,7 @@ class Store(ABC):
         now: datetime,
         answer: StoredMessage | None = None,
     ) -> Turn | None:
-        """The turn ended as ``interrupted`` if it is running and its lease has passed
+        """The turn ended as ``interrupted`` if it is queued or running and its lease has passed
         ``now``, with ``answer`` stored, in one operation, with no event, and its watchers
         woken; ``None`` otherwise."""
 
@@ -173,8 +188,9 @@ class Store(ABC):
     async def request_cancel(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, at: datetime
     ) -> None:
-        """Mark the turn, if it is running, as asked to stop, and tell every process that
-        listens with ``listen_for_cancels``."""
+        """End the turn as ``cancelled`` if it is queued, and wake its watchers. Mark it, if it
+        is running, as asked to stop, and tell every process that listens with
+        ``listen_for_cancels``."""
 
     @abstractmethod
     async def listen_for_cancels(self, stop: Callable[[uuid.UUID], object]) -> None:
@@ -182,16 +198,17 @@ class Store(ABC):
 
     @abstractmethod
     async def hidden_sessions(self, now: datetime) -> list[Session]:
-        """Every hidden session with no running turn whose lease has not passed ``now``: what
-        is left to purge."""
+        """Every hidden session with no queued or running turn whose lease has not passed
+        ``now``: what is left to purge."""
 
     @abstractmethod
     async def expired_turns(self, now: datetime) -> list[tuple[uuid.UUID, Turn]]:
-        """Every running turn of a visible session whose lease has passed ``now``, with the
-        session's owner."""
+        """Every queued or running turn of a visible session whose lease has passed ``now``,
+        with the session's owner."""
 
     @abstractmethod
-    async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None: ...
+    async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:
+        """The session's queued or running turn."""
 
     @abstractmethod
     async def latest_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:

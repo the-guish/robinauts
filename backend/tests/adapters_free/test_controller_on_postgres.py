@@ -29,6 +29,7 @@ from robinauts.controller.contract.domain import (
     UserSession,
 )
 from robinauts.web.cli import run
+from robinauts.web.lifecycle import Lifecycle
 from util.aio import asyncio_test
 from util.controller_db import requires_postgres, temporary_schema, url
 
@@ -64,7 +65,8 @@ async def test_start_refuses_a_database_with_no_schema_and_serves_after_db_init(
         assert said.startswith(SCHEMA_READY.split("{")[0])
         assert await init_database(dsn, CONFIG, {}.get) == said
 
-        await controller.open()
+        lifecycle = Lifecycle(composed)
+        await lifecycle.start()
         user = await controller.ensure_user(Identity("local", "me"))
         started = await controller.start_session(user, agent="echo", model="echo", text="hello")
         async for _ in controller.watch_turn(user, started.session_id, started.turn_id):
@@ -82,7 +84,7 @@ async def test_start_refuses_a_database_with_no_schema_and_serves_after_db_init(
         signed_in = UserSession(uuid.uuid4(), user.id, cookie, now, now + timedelta(hours=1))
         await composed.credentials.add_user_session(signed_in)
         assert await composed.credentials.resolve_user_session(cookie, now) == user
-        await controller.close()
+        await lifecycle.stop()
 
 
 def alone(statement: str) -> None:

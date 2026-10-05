@@ -315,11 +315,17 @@ class SessionPage:
 
 
 class TurnState(StrEnum):
+    QUEUED = "queued"
+    """Stored, and waiting for a worker to claim it."""
     RUNNING = "running"
     FINISHED = "finished"
     FAILED = "failed"
     CANCELLED = "cancelled"
     INTERRUPTED = "interrupted"
+
+
+ACTIVE = frozenset({TurnState.QUEUED, TurnState.RUNNING})
+"""The states of a turn that has not ended: a session has at most one turn in them."""
 
 
 @dataclass(frozen=True, slots=True)

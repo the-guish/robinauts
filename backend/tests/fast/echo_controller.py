@@ -19,6 +19,7 @@ from robinauts.controller.contract.domain import (
     User,
 )
 from robinauts.controller.contract.ports import Controller
+from robinauts.web.lifecycle import Lifecycle
 
 CONFIG = Config(
     providers={"echo": ProviderConfig("echo", ProviderKind.ANTHROPIC, "ECHO_API_KEY")},
@@ -29,14 +30,15 @@ CONFIG = Config(
 )
 
 
-async def opened(engine: AgentEngine | None = None) -> Controller:
-    """Opened on the echo engine, or on that engine in its place."""
+async def opened(engine: AgentEngine | None = None) -> Lifecycle:
+    """Started on the echo engine, or on that engine in its place; ``stop`` it after."""
     engines = None if engine is None else {"echo": lambda *_: engine}
-    controller = compose(
+    composed = compose(
         CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get, engines=engines
-    ).controller
-    await controller.open()
-    return controller
+    )
+    lifecycle = Lifecycle(composed)
+    await lifecycle.start()
+    return lifecycle
 
 
 async def settled(controller: Controller, user: User, started: TurnStarted) -> None:

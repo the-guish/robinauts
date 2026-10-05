@@ -17,6 +17,7 @@ from robinauts.agent_engines.contract.ports import AgentEngine, EngineFactory, i
 from robinauts.controller.application.engines import build_engines
 from robinauts.controller.application.turns import run_turn
 from robinauts.controller.contract.domain import (
+    ACTIVE,
     ActiveTurn,
     AgentListing,
     Config,
@@ -346,7 +347,8 @@ class RobinautsController(Controller):
         await self._cancel(user, running)
 
     async def _cancel(self, user: User, turn: Turn) -> None:
-        """Ask the turn to stop, wherever it runs, and wait for it if this process runs it."""
+        """Ask the turn to stop, wherever it runs, and wait for it if this process runs it. The
+        store ends a queued turn itself."""
         await self._store.request_cancel(user.id, turn.session_id, turn.id, self._now())
         if await self._dispatcher.cancel(user.id, turn.session_id, turn.id):
             # A runner that never claimed the turn wrote nothing: the turn is ended here.
@@ -383,14 +385,14 @@ class RobinautsController(Controller):
             session.id,
             follows=question.id,
             model=model,
-            state=TurnState.RUNNING,
+            state=TurnState.QUEUED,
             started_at=now,
             lease_until=now + timedelta(seconds=self._config.work.lease_seconds),
             retries=retries,
         )
         stored = stored_message(question) if new_question else None
+        # A worker claims the turn and dispatches it.
         await self._store.start_turn(user.id, turn, stored)
-        await self._dispatcher.dispatch(user.id, session.id, turn.id)
         return turn
 
     async def run_turn(self, owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID) -> None:
@@ -475,7 +477,7 @@ class RobinautsController(Controller):
                 continue
             await self._end_expired(await self._store.get_session(user.id, session_id))
             current = await self._store.get_turn(user.id, session_id, turn.id)
-            if current is None or current.state is not TurnState.RUNNING:
+            if current is None or current.state not in ACTIVE:
                 # Ended with no `turn_ended` event of its own, by a reader: the record says
                 # how, under the last position stored.
                 state = TurnState.INTERRUPTED if current is None else current.state
@@ -502,9 +504,10 @@ class RobinautsController(Controller):
                 self._dispatcher.stop(turn)
 
     async def _end_expired(self, session: Session, turn: Turn | None = None) -> None:
-        """End the session's running turn if its lease has passed, as ``interrupted``, and keep
-        what it had streamed as its answer, marked failed. A runner gone with its process
-        wrote no answer: the turn's events are what is left of it."""
+        """End the session's queued or running turn if its lease has passed, as
+        ``interrupted``, and keep what it had streamed as its answer, marked failed. A runner
+        gone with its process wrote no answer: the turn's events are what is left of it. A
+        queued turn no worker claimed in time has none."""
         now = self._now()
         if turn is None:
             turn = await self._store.active_turn(session.owner_id, session.id)

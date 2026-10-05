@@ -23,9 +23,7 @@ from util.aio import asyncio_test
 @asynccontextmanager
 async def client() -> AsyncIterator[httpx.AsyncClient]:
     composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
-    app = create_app(
-        composed.controller, credentials=composed.credentials, sign_in=None, secret_for={}.get
-    )
+    app = create_app(composed, sign_in=None, secret_for={}.get)
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
