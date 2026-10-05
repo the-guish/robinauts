@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 from util.fake_openai.server import CallTool
@@ -25,6 +26,20 @@ def last_question(messages: list[dict[str, Any]]) -> str:
 class EchoModel:
     def reply(self, messages: list[dict[str, Any]]) -> str:
         return last_question(messages)
+
+
+class HoldingEchoModel(EchoModel):
+    """An echo that holds the question ``hold`` until ``release`` is set."""
+
+    def __init__(self) -> None:
+        self.asked = threading.Event()
+        self.release = threading.Event()
+
+    def reply(self, messages: list[dict[str, Any]]) -> str:
+        if last_question(messages) == "hold":
+            self.asked.set()
+            self.release.wait(30)
+        return super().reply(messages)
 
 
 class PoisonEchoModel(EchoModel):

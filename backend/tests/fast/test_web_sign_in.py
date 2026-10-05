@@ -72,8 +72,7 @@ async def browser(stand_in: StandInProvider | None) -> AsyncIterator[httpx.Async
         secret_for = {SECRET_ENV: stand_in.client_secret}.get
     composed = compose(ECHO, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for=secret_for)
     app = create_app(
-        composed.controller,
-        credentials=composed.credentials,
+        composed,
         sign_in=sign_in,
         secret_for=secret_for,
     )

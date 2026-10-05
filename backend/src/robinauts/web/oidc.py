@@ -85,7 +85,7 @@ class Exchange:
     async def begin(self, provider_id: str, *, state: str, nonce: str, verifier: str) -> str:
         """The provider's authorization URL to send the browser to."""
         provider = self._provider(provider_id)
-        endpoints = await self._discovered(provider)
+        endpoints = await self._discover(provider)
         query = urlencode(
             {
                 "response_type": "code",
@@ -105,7 +105,7 @@ class Exchange:
     ) -> Claims:
         """The checked claims of the ID token the code is exchanged for."""
         provider = self._provider(provider_id)
-        endpoints = await self._discovered(provider)
+        endpoints = await self._discover(provider)
         secret = self._secret_for(provider.client_secret_env)
         if not secret:
             raise SignInError(
@@ -141,7 +141,7 @@ class Exchange:
     def _redirect_uri(self, provider: ProviderConfig) -> str:
         return f"{self._config.public_url}/auth/callback/{provider.id}"
 
-    async def _discovered(self, provider: ProviderConfig) -> _Endpoints:
+    async def _discover(self, provider: ProviderConfig) -> _Endpoints:
         if provider.id not in self._endpoints:
             what = f"discovery for {provider.id}"
             response = await self._send("GET", provider.issuer.rstrip("/") + DISCOVERY_PATH, what)

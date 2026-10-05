@@ -28,7 +28,7 @@ from robinauts.controller.contract.domain import (
 )
 from robinauts.controller.ports.store import Store, StoredMessage
 from util.aio import asyncio_test
-from util.contracts.store import StoreContract
+from util.contracts.store import StoreContract, turn
 from util.controller_db import TemporarySchema, requires_postgres, temporary_schema, url
 
 pytestmark = requires_postgres
@@ -60,8 +60,8 @@ async def seeded(store: Store) -> tuple[User, Session, StoredMessage, Turn]:
     one = Session(uuid.uuid4(), me.id, "a", "echo", NOW, NOW)
     await store.add_session(one)
     asked = StoredMessage(uuid.uuid4(), one.id, None, Role.USER, NOW, {"v": 1, "text": "hi"})
-    running = Turn(uuid.uuid4(), one.id, asked.id, "m", TurnState.RUNNING, NOW, LEASE)
-    await store.start_turn(me.id, running, asked)
+    running, task = turn(one.id, asked.id, lease_until=LEASE)
+    await store.queue_turn(me.id, running, task, asked)
     return me, one, asked, running
 
 
@@ -128,12 +128,12 @@ async def test_a_finish_and_a_start_raced_never_deadlock_and_the_finish_always_l
         me, one, asked, running = await seeded(store)
         started = 0
         for _ in range(20):
-            again = Turn(uuid.uuid4(), one.id, asked.id, "m", TurnState.RUNNING, NOW, LEASE)
+            again, again_task = turn(one.id, asked.id, lease_until=LEASE)
             finished, start = await asyncio.gather(
                 store.finish_turn(
                     me.id, one.id, running.id, TurnState.FINISHED, NOW, None, None, [], NOW
                 ),
-                store.start_turn(me.id, again, None),
+                store.queue_turn(me.id, again, again_task, None),
                 return_exceptions=True,
             )
             assert finished is None, finished
@@ -142,7 +142,7 @@ async def test_a_finish_and_a_start_raced_never_deadlock_and_the_finish_always_l
                 started += 1
                 running = again
             else:
-                await store.start_turn(me.id, again, None)
+                await store.queue_turn(me.id, again, again_task, None)
                 running = again
         assert started >= 0
         await store.close()

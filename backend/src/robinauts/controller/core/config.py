@@ -32,6 +32,10 @@ def _names(value: Any) -> tuple[str, ...]:
     return tuple(value)
 
 
+_MAX_TASKS = "max_running_tasks_per_worker"
+"""The one ``[work]`` key that counts turns rather than seconds."""
+
+
 def _positive(value: Any) -> bool:
     return isinstance(value, int | float) and not isinstance(value, bool) and value > 0
 
@@ -59,13 +63,17 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
     agents = build("agents", AgentConfig, tools=tuple)
 
     work = WorkConfig()
-    given = raw.get("work", {})
+    given = dict(raw.get("work", {}))
+    tasks = given.pop(_MAX_TASKS, work.max_running_tasks_per_worker)
     if unknown := sorted(set(given) - {field.name for field in dataclasses.fields(WorkConfig)}):
         problems.append(f"work: unknown key(s) {', '.join(unknown)}")
     elif wrong := sorted(key for key, value in given.items() if not _positive(value)):
         problems.append(f"work: {', '.join(wrong)} must be a positive number of seconds")
+    elif not (isinstance(tasks, int) and not isinstance(tasks, bool) and tasks > 0):
+        problems.append(f"work: {_MAX_TASKS} must be a positive whole number")
     else:
-        work = WorkConfig(**{key: float(value) for key, value in given.items()})
+        seconds = {key: float(value) for key, value in given.items()}
+        work = WorkConfig(**seconds, max_running_tasks_per_worker=tasks)
         if work.heartbeat_seconds * 2 > work.lease_seconds:
             problems.append("work: heartbeat_seconds must be at most half of lease_seconds")
 

@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import pytest
-from echo_controller import opened, settled
+from echo_controller import start_echo_controller, wait_for_turn_end
 
 from robinauts.controller.contract.domain import Identity, InvalidValueError
 from util.aio import asyncio_test
@@ -14,12 +14,13 @@ from util.aio import asyncio_test
 
 @asyncio_test
 async def test_sessions_are_listed_a_page_at_a_time_none_twice() -> None:
-    controller = await opened()
+    lifecycle = await start_echo_controller()
+    controller = lifecycle.composed.controller
     user = await controller.ensure_user(Identity("local", "me"))
     started = []
     for text in ("one", "two", "three"):
         turn = await controller.start_session(user, agent="echo", model="echo", text=text)
-        await settled(controller, user, turn)
+        await wait_for_turn_end(controller, user, turn)
         started.append(turn.session_id)
     first = await controller.list_sessions(user, limit=2)
     assert [s.id for s in first.sessions] == started[:0:-1]
@@ -29,4 +30,4 @@ async def test_sessions_are_listed_a_page_at_a_time_none_twice() -> None:
     assert second.cursor is None
     with pytest.raises(InvalidValueError):
         await controller.list_sessions(user, limit=2, cursor="not a cursor")
-    await controller.close()
+    await lifecycle.stop()

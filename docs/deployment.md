@@ -104,7 +104,7 @@ names the command that fixes it.
 
 Every query has 10 seconds to finish. A query that takes longer, such as
 one waiting on a lock held elsewhere, fails with `TimeoutError`. The log
-then shows a line such as `could not purge deleted session …` or
+then shows a line such as `could not end task …` or
 `turn … ended on an error`, followed by the traceback. A turn whose
 query timed out fails with "a call timed out before the turn's deadline"
 when its last write still lands. Otherwise it ends as interrupted once
@@ -213,6 +213,7 @@ max_turn_seconds = 1200
 lease_seconds = 90
 heartbeat_seconds = 30
 sweep_seconds = 300
+max_running_tasks_per_worker = 100
 ```
 
 Notes on what is and is not there:
@@ -269,7 +270,10 @@ Notes on what is and is not there:
   of each turn it runs every `heartbeat_seconds`. A turn whose server died is
   ended once its lease of `lease_seconds` has passed. The next request about
   its conversation ends it, or a sweep every `sweep_seconds` does.
-  `heartbeat_seconds` must be at most half of `lease_seconds`.
+  `heartbeat_seconds` must be at most half of `lease_seconds`. A server runs
+  at most `max_running_tasks_per_worker` turns at once, and the others wait
+  queued. A turn queued for 48 hours is ended. A turn's `max_turn_seconds`
+  counts from when a server takes it.
 - A file with no `[agents]` table is a deployment with no agents: it
   starts, the picker is empty, and the log says so.
 

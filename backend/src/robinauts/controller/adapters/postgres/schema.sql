@@ -213,6 +213,45 @@ CREATE INDEX IF NOT EXISTS messages_session_id_parent_id_idx
 
 
 -- ---------------------------------------------------------------------------
+-- Tasks.
+-- ---------------------------------------------------------------------------
+
+-- Work for a worker: what to do (`task_name`, `payload`), and who holds it. The
+-- one kind is `run_turn`, whose payload names the turn: `{"turn_id": "…"}`. A
+-- task is stored `queued`. A worker claims it by making it `running`, setting
+-- `claimed_at`. It is `done` once it needs no worker, however it ended: the
+-- outcome is its turn's.
+--
+-- `lease_until` means two things. On a queued task it is how long the task may
+-- wait: its creation plus 48 hours. The claim sets it to `lease_seconds` from
+-- then, the worker's lease, which the process that runs the task renews.
+-- Every write of the runner's is refused past it. `cancel_requested_at` is set
+-- by a cancel from any process, and read back with each renewal of the lease.
+-- All of them are set by the application's clock.
+CREATE TABLE IF NOT EXISTS tasks (
+    id uuid
+        CONSTRAINT tasks_pkey PRIMARY KEY,
+    task_name text NOT NULL,
+    payload jsonb NOT NULL,
+    -- The states of robinauts.controller.contract.domain.TaskState.
+    state text NOT NULL
+        CONSTRAINT tasks_state_is_a_state CHECK (state IN ('queued', 'running', 'done')),
+    created_at timestamptz NOT NULL,
+    lease_until timestamptz NOT NULL,
+    claimed_at timestamptz,
+    cancel_requested_at timestamptz
+);
+
+-- What a worker claims from: the queued tasks, oldest first.
+CREATE INDEX IF NOT EXISTS tasks_queued_idx
+    ON tasks (created_at, id) WHERE state = 'queued';
+
+-- What the sweep reads: the tasks not done whose lease has passed.
+CREATE INDEX IF NOT EXISTS tasks_lease_until_idx
+    ON tasks (lease_until) WHERE state <> 'done';
+
+
+-- ---------------------------------------------------------------------------
 -- Turns.
 -- ---------------------------------------------------------------------------
 
@@ -235,13 +274,12 @@ CREATE INDEX IF NOT EXISTS messages_session_id_parent_id_idx
 -- asked with, but a regeneration answers the same question on another model,
 -- so the turn records its own.
 --
--- `lease_until` is written with the turn, as its start plus `lease_seconds`,
--- and renewed by the process that runs it. Every write of the runner's is
--- refused past it, and a running turn whose lease has passed was left by a
--- runner that went away: the next reader to find it, or the sweep, ends it as
--- `interrupted`, with no event. `cancel_requested_at` is set by a cancel
--- from any process, and read back with each renewal of the lease. Both are set
--- by the application's clock.
+-- A turn is `active` until it ends. Whether it waits or runs is its task's,
+-- `task_id`, stored before it in the same transaction. A cancel ends a turn
+-- whose task is queued at once. An active turn whose task's lease has passed
+-- waited too long, or was left by a runner that went away: the next reader to
+-- find it, or the sweep, ends it as `interrupted`, with no event, and its task
+-- as `done`.
 CREATE TABLE IF NOT EXISTS turns (
     id uuid
         CONSTRAINT turns_pkey PRIMARY KEY,
@@ -254,25 +292,27 @@ CREATE TABLE IF NOT EXISTS turns (
     -- nothing else is a state.
     state text NOT NULL
         CONSTRAINT turns_state_is_a_state CHECK (
-            state IN ('running', 'finished', 'failed', 'cancelled', 'interrupted')
+            state IN ('active', 'finished', 'failed', 'cancelled', 'interrupted')
         ),
     started_at timestamptz NOT NULL,
     ended_at timestamptz,
     -- For the operator. Never sent to the browser, which is told a fixed
     -- sentence (docs/specs/wire.md).
     error text,
-    lease_until timestamptz NOT NULL,
-    cancel_requested_at timestamptz,
+    -- The task that runs the turn, one per turn.
+    task_id uuid NOT NULL
+        CONSTRAINT turns_task_id_fkey REFERENCES tasks (id)
+        CONSTRAINT turns_task_id_key UNIQUE,
     -- The failed answer a retry tries again: the model is told about it
     -- (docs/specs/ui.md). Null on every other turn.
-    retries uuid,
+    retries_message_id uuid,
     CONSTRAINT turns_follows_fkey FOREIGN KEY (session_id, follows)
         REFERENCES messages (session_id, id),
-    CONSTRAINT turns_retries_fkey FOREIGN KEY (session_id, retries)
+    CONSTRAINT turns_retries_fkey FOREIGN KEY (session_id, retries_message_id)
         REFERENCES messages (session_id, id),
-    -- A turn has ended exactly when it is no longer running.
-    CONSTRAINT turns_ended_when_not_running CHECK (
-        (state = 'running') = (ended_at IS NULL)
+    -- A turn has ended exactly when it is no longer active.
+    CONSTRAINT turns_ended_when_not_active CHECK (
+        (state = 'active') = (ended_at IS NULL)
     ),
     -- Only a turn that ended badly says why.
     CONSTRAINT turns_error_only_when_failed CHECK (
@@ -280,23 +320,19 @@ CREATE TABLE IF NOT EXISTS turns (
     )
 );
 
--- **At most one running turn per session.** Two requests arriving together
+-- **At most one active turn per session.** Two requests arriving together
 -- both insert, and only this index makes one of them fail. The store
 -- translates a violation of it, by name, into `TurnActiveError`. It is also
 -- what `active_turn` reads. Partial: a session has any number of turns that
 -- have ended.
-CREATE UNIQUE INDEX IF NOT EXISTS turns_one_running_per_session
-    ON turns (session_id) WHERE state = 'running';
+CREATE UNIQUE INDEX IF NOT EXISTS turns_one_active_per_session
+    ON turns (session_id) WHERE state = 'active';
 
 -- What opening a session reads to say how its last turn ended (`ended_badly`),
 -- and what the cascade from `sessions` deletes by: a session's turns, most
 -- recent first, ties broken by id.
 CREATE INDEX IF NOT EXISTS turns_session_id_started_at_idx
     ON turns (session_id, started_at DESC, id DESC);
-
--- What the sweep reads: the running turns whose lease has passed.
-CREATE INDEX IF NOT EXISTS turns_lease_until_idx
-    ON turns (lease_until) WHERE state = 'running';
 
 
 -- ---------------------------------------------------------------------------

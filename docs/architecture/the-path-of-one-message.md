@@ -55,10 +55,10 @@ id and time and encodes the whole message as a versioned document
 
 ### 4. The controller stores the question and starts the turn, atomically
 
-`store.start_turn(question, turn)` stores the question and creates a turn with its
-own id, in state `running`, with a `lease_until`, in one operation. If the session
-already has a running turn, it stores neither and raises `TurnActiveError`, which web
-answers with 409; a hidden session is not found, 404. Today the question is stored
+`store.queue_turn(turn, task, question)` stores the question, a `queued` task with
+its `lease_until`, and a turn with its own id, in state `active`, in one operation. If
+the session already has an active turn, it stores none of them and raises
+`TurnActiveError`, which web answers with 409; a hidden session is not found, 404. Today the question is stored
 first by `add_message`, and `start_turn(session, follows)` has no turn id.
 
 - **PostgreSQL:** one transaction:
@@ -68,9 +68,11 @@ first by `add_message`, and `start_turn(session, follows)` has no turn id.
     no two of them wait for each other.
   - `INSERT INTO messages (id, session_id, parent_id, role, created_at, document)`,
     with the document as `jsonb`.
-  - `INSERT INTO turns (…, state) VALUES (…, 'running')`. A violation of
-    `turns_one_running_per_session` means 409, and the transaction takes the question
-    back with it.
+  - `INSERT INTO tasks (…, state, payload) VALUES (…, 'queued', '{"turn_id": …}')`.
+  - `INSERT INTO turns (…, state, task_id) VALUES (…, 'active', …)`. A violation of
+    `turns_one_active_per_session` means 409, and the transaction takes the question
+    and the task back with it.
+  - `SELECT pg_notify('robinauts_queued', '<task>')`.
 - **AWS:** one `TransactWriteItems`:
   - a `ConditionCheck` that the session item exists without `deleted_at`;
   - a `Put` of the question, with `SK = MSG#<created_at>#<id>` and the document as a
@@ -83,11 +85,13 @@ first by `add_message`, and `start_turn(session, follows)` has no turn id.
 
 ### 5. The turn is dispatched
 
-The turn dispatcher port is given `(session_id, turn_id)`.
+A worker claims the task, whose payload names the turn, and runs it.
 
-- **PostgreSQL:** the in-process dispatcher calls `asyncio.create_task(run_turn(…))`
-  in the uvicorn process that took the request, as today. With several processes, the
-  one that got the request runs the turn.
+- **PostgreSQL:** every uvicorn process runs a worker that hears `robinauts_queued`.
+  The worker claims queued tasks with one `UPDATE … FOR UPDATE SKIP LOCKED`, which
+  makes them `running` with a new lease. It runs each as
+  `asyncio.create_task(run_task(…))` in its own process. With several processes, the
+  worker that claims the task first runs it, whichever process took the request.
 - **AWS:** `lambda:Invoke` with `InvocationType=Event` on the worker Lambda, with
   retries set to zero and the event's age bounded below the lease. It returns in
   milliseconds. A cold worker spends a few seconds importing the frameworks and the
@@ -96,7 +100,7 @@ The turn dispatcher port is given `(session_id, turn_id)`.
 
 ### 6. Web opens the stream
 
-`watched()` calls `controller.watch_turn(after=0)` and waits for the first event, so
+`stream_turn()` calls `controller.watch_turn(after=0)` and waits for the first event, so
 that a refusal is still answered with a status. It then answers `text/event-stream`
 and sends `RUN_STARTED` (`web/agui.py`).
 
@@ -121,9 +125,10 @@ returns without running the engine.
     `SELECT pg_notify('robinauts_turns', '<turn> 1')` in the same transaction,
     delivered on commit. The condition is what makes it a claim: a turn a reader has
     ended, or whose lease has passed, takes no first event.
-  - The lease tick is `UPDATE turns SET lease_until = … WHERE id = $turn AND state =
-    'running' RETURNING cancel_requested_at`. No row means the turn was ended by a
-    reader, and the runner stops.
+  - The lease tick is `UPDATE tasks SET lease_until = … WHERE id = ANY($tasks) AND state
+    = 'running' RETURNING id, cancel_requested_at`, one write for the worker's tasks. A
+    task the tick no longer renews was ended by a reader, and its runner's next write is
+    refused.
 - **AWS:**
   - The loads are one `Query` on the session's partition.
   - The event is a `PutItem` with `SK = EVT#<turn>#0000000001`, on condition
@@ -174,9 +179,9 @@ The provider streams deltas. LangGraph yields `AIMessageChunk`s, the engine's
 next position. Pieces that arrive within about 50 ms of each other should be merged
 into one event.
 
-- **PostgreSQL:** an `INSERT … SELECT … FROM turns WHERE id = $turn AND state =
-  'running' AND lease_until > $now FOR SHARE OF turns`, and a `pg_notify`, for each
-  event. The lock waits on a reader ending the turn and then inserts nothing. No row
+- **PostgreSQL:** an `INSERT … SELECT … FROM turns JOIN tasks WHERE turns.id = $turn
+  AND turns.state = 'active' AND tasks.state = 'running' AND tasks.lease_until > $now
+  FOR SHARE OF turns`, and a `pg_notify`, for each event. The lock waits on a reader ending the turn and then inserts nothing. No row
   inserted, or another document at that position, is `TurnLostError`, and the runner
   stops.
 - **AWS:** a conditional `PutItem` for each event, read back on a failed condition for
@@ -231,9 +236,10 @@ All of that is one store operation. Today it is several calls.
   - `UPDATE sessions SET updated_at = …`;
   - `INSERT` the message and the two events;
   - `UPDATE turns SET state = 'finished', ended_at = … WHERE id = $turn AND state =
-    'running' AND lease_until > $ended_at`. The turn leaves
-    `turns_one_running_per_session` by itself. No row means a reader ended the turn,
-    or its lease has passed: `TurnLostError`, the transaction rolled back, and the
+    'active'`, on condition that its task is `running` with `lease_until > $ended_at`,
+    then `UPDATE tasks SET state = 'done'`. The turn leaves
+    `turns_one_active_per_session` by itself. No row means a reader ended the turn,
+    or its task's lease has passed: `TurnLostError`, the transaction rolled back, and the
     runner has nothing more to write;
   - `SELECT pg_notify('robinauts_turns', '<turn> end')`.
 - **AWS:** one `TransactWriteItems`:
@@ -268,18 +274,18 @@ the client sees the terminal event and stops.
   tick. It cancels the engine's stream, and the turn ends as `cancelled`.
 - **The runner dies**, whether the process crashed or the Lambda was killed. Its lease
   runs out. The next read that finds the turn (`open_session`, `watch_turn`,
-  `start_turn`, `cancel_turn`, `delete_session`), or the sweep, ends it as `interrupted`
+  `queue_turn`, `cancel_turn`, `delete_session`), or the sweep, ends it as `interrupted`
   through `end_expired_turn`. It stores what the turn streamed, rebuilt from its events,
   as an answer marked failed. A watcher that finds the turn ended with no `turn_ended` event
   supplies one from the record. A runner that was slow rather than dead finds its
   next write refused, by the lease or by the end, and stops.
 - **A second runner is dispatched for the turn**, which an async invocation allows.
   Its `MessageStarted` is refused at position 1 and it returns without running the
-  engine. On PostgreSQL the dispatcher is in-process, and it does not happen.
+  engine. On PostgreSQL the worker that claims the task runs it, and it does not
+  happen.
 - **The session is deleted during the turn.** `delete_session` ends a turn whose
   lease has passed, asks a running turn to stop, and hides the session. A runner in
-  another process finds its next write refused, and stops. The purge waits until no
-  turn runs, so `forget` is the last word.
+  another process finds its next write refused, and stops.
 - **A tool returns a NUL**, or half a character. The encoder drops the one and
   replaces the other before the event is written, on both stores alike.
 - **A stream reaches a limit**, such as Lambda's 15 minutes or a proxy's timeout. The

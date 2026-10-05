@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from robinauts.controller.contract.domain import Role, Session, Turn, TurnState, User
+from robinauts.controller.contract.domain import Role, Session, Task, Turn, TurnState, User
 
 Document = Mapping[str, Any]
 """A message or an event, whole, as the encoder wrote it."""
@@ -95,8 +95,9 @@ class Store(ABC):
 
     @abstractmethod
     async def purge_session(self, owner: uuid.UUID, session: uuid.UUID, now: datetime) -> bool:
-        """Delete the session with its messages, turns and events, unless a turn of it runs
-        with its lease not passed ``now``: true when it did, false also if it is gone."""
+        """Delete the session with its messages, turns, their tasks and events, unless an active
+        turn of it has a task whose lease has not passed ``now``: true when it did, false also
+        if it is gone."""
 
     @abstractmethod
     async def messages_of(self, owner: uuid.UUID, session: uuid.UUID) -> list[Document]:
@@ -105,11 +106,31 @@ class Store(ABC):
     # --- turns --------------------------------------------------------------
 
     @abstractmethod
-    async def start_turn(
-        self, owner: uuid.UUID, turn: Turn, question: StoredMessage | None
+    async def queue_turn(
+        self, owner: uuid.UUID, turn: Turn, task: Task, question: StoredMessage | None
     ) -> None:
-        """Store the question, when there is one, and the turn, or neither:
-        ``TurnActiveError`` while the session has a running turn."""
+        """Store the question, when there is one, the task and the turn, or none of them:
+        ``TurnActiveError`` while the session has an active turn. A queued task wakes every
+        process waiting in ``wait_for_queued``."""
+
+    @abstractmethod
+    async def claim_tasks(self, now: datetime, until: datetime, limit: int) -> list[Task]:
+        """Up to ``limit`` queued tasks whose lease has not passed ``now``, oldest first, made
+        running, claimed at ``now`` with their lease until ``until``; in one operation. Each
+        task is claimed once, whichever process asks."""
+
+    @abstractmethod
+    async def wait_for_queued(self, now: datetime, timeout: float) -> bool:
+        """Wait until a task ``claim_tasks`` would claim is queued, or ``timeout`` seconds
+        have passed: true in the first case, false in the second."""
+
+    @abstractmethod
+    async def get_task(self, task: uuid.UUID) -> Task | None: ...
+
+    @abstractmethod
+    async def find_turn(self, turn: uuid.UUID) -> tuple[uuid.UUID, Turn] | None:
+        """The turn of a visible session, by its id alone, with the session's owner: what a
+        task names."""
 
     @abstractmethod
     async def append_event(
@@ -123,8 +144,8 @@ class Store(ABC):
         expires_at: datetime,
     ) -> None:
         """The same document again at a position it has is accepted. Another document there,
-        or any append on a turn that is not running or whose lease has passed ``written_at``,
-        is ``TurnLostError``."""
+        or any append on a turn that is not active, or whose task is not running or has a lease
+        passed ``written_at``, is ``TurnLostError``."""
 
     @abstractmethod
     async def events_after(
@@ -145,9 +166,9 @@ class Store(ABC):
         events: Sequence[StoredEvent],
         updated_at: datetime,
     ) -> None:
-        """The answer, the last events, the turn's state and the session's ``updated_at``, in
-        one operation, only while the turn is running and its lease has not passed
-        ``ended_at``: else ``TurnLostError``."""
+        """The answer, the last events, the turn's state, its task done and the session's
+        ``updated_at``, in one operation, only while the turn is active and its task runs with
+        a lease not passed ``ended_at``: else ``TurnLostError``."""
 
     @abstractmethod
     async def end_expired_turn(
@@ -158,44 +179,50 @@ class Store(ABC):
         now: datetime,
         answer: StoredMessage | None = None,
     ) -> Turn | None:
-        """The turn ended as ``interrupted`` if it is running and its lease has passed
-        ``now``, with ``answer`` stored, in one operation, with no event, and its watchers
-        woken; ``None`` otherwise."""
+        """The turn ended as ``interrupted`` if it is active and its task's lease has passed
+        ``now``, with ``answer`` stored and the task done, in one operation, with no event, and
+        its watchers woken; ``None`` otherwise. A queued task's lease is how long it may wait."""
 
     @abstractmethod
     async def renew_leases(
-        self, turns: Sequence[uuid.UUID], now: datetime, until: datetime
+        self, tasks: Sequence[uuid.UUID], now: datetime, until: datetime
     ) -> list[uuid.UUID]:
-        """Each of those turns that is running, with its lease not passed ``now``, holds it
+        """Each of those tasks that is running, with its lease not passed ``now``, holds it
         until ``until``; in one operation. The ones asked to stop, which a stop missed."""
 
     @abstractmethod
     async def request_cancel(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, at: datetime
     ) -> None:
-        """Mark the turn, if it is running, as asked to stop, and tell every process that
-        listens with ``listen_for_cancels``."""
+        """If the turn is active: with its task queued, end both, the turn as ``cancelled``,
+        and wake its watchers; with its task running, mark the task as asked to stop, and tell
+        every process that listens with ``listen_for_cancels``."""
 
     @abstractmethod
     async def listen_for_cancels(self, stop: Callable[[uuid.UUID], object]) -> None:
-        """From then on, call ``stop`` with each turn asked to stop, from any process."""
+        """From then on, call ``stop`` with each task asked to stop, from any process."""
 
     @abstractmethod
     async def hidden_sessions(self, now: datetime) -> list[Session]:
-        """Every hidden session with no running turn whose lease has not passed ``now``: what
-        is left to purge."""
+        """Every hidden session with no active turn whose task's lease has not passed
+        ``now``: what is left to purge."""
 
     @abstractmethod
-    async def expired_turns(self, now: datetime) -> list[tuple[uuid.UUID, Turn]]:
-        """Every running turn of a visible session whose lease has passed ``now``, with the
-        session's owner."""
+    async def expired_tasks(self, now: datetime) -> list[Task]:
+        """Every task not done whose lease has passed ``now``, of any kind."""
 
     @abstractmethod
-    async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None: ...
+    async def end_expired_task(self, task: uuid.UUID, now: datetime) -> bool:
+        """The task done, if it is not and its lease has passed ``now``: true when it was. A
+        turn of it is the caller's to end, with ``end_expired_turn``."""
+
+    @abstractmethod
+    async def active_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:
+        """The session's active turn."""
 
     @abstractmethod
     async def latest_turn(self, owner: uuid.UUID, session: uuid.UUID) -> Turn | None:
-        """The session's most recently started turn, running or not."""
+        """The session's most recently started turn, active or not."""
 
     @abstractmethod
     async def get_turn(

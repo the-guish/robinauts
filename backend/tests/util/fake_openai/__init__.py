@@ -8,7 +8,12 @@ so a test picks the behaviour by picking the model:
 ``FakeLocalGPTServer(EchoModel())``.
 """
 
-from util.fake_openai.echo_model import EchoModel, PoisonEchoModel, ToolEchoModel
+from util.fake_openai.echo_model import (
+    EchoModel,
+    HoldingEchoModel,
+    PoisonEchoModel,
+    ToolEchoModel,
+)
 from util.fake_openai.server import CallTool, FakeLocalGPTServer, FakeModel, Overloaded
 
 __all__ = [
@@ -16,6 +21,7 @@ __all__ = [
     "EchoModel",
     "FakeLocalGPTServer",
     "FakeModel",
+    "HoldingEchoModel",
     "Overloaded",
     "PoisonEchoModel",
     "ToolEchoModel",

@@ -91,16 +91,16 @@ class Api:
     async def start(self, agent: str, text: str) -> str:
         return await self.turn("/api/turns", agent_id=agent, text=text)
 
-    async def opened(self, cid: str) -> dict[str, Any]:
+    async def open_conversation(self, cid: str) -> dict[str, Any]:
         return await self.get(f"/api/conversations/{cid}")
 
     async def thread(self, cid: str) -> list[str]:
         """The text of each message, questions and answers in order."""
-        messages = (await self.opened(cid))["messages"]
+        messages = (await self.open_conversation(cid))["messages"]
         return ["".join(p["text"] for p in m["parts"] if p["kind"] == "text") for m in messages]
 
     async def message(self, cid: str, index: int) -> str:
-        return (await self.opened(cid))["messages"][index]["id"]
+        return (await self.open_conversation(cid))["messages"][index]["id"]
 
     async def history(self) -> list[str]:
         return [c["title"] for c in (await self.get("/api/conversations"))["items"]]
@@ -123,9 +123,7 @@ async def test_everyday_use(agent: str) -> None:
         secret_for=secret_for,
         engines={name: lambda *_, built=built: built for name, built in engines.items()},
     )
-    app = create_app(
-        composed.controller, credentials=composed.credentials, sign_in=None, secret_for=secret_for
-    )
+    app = create_app(composed, sign_in=None, secret_for=secret_for)
     async with (
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as http,
@@ -160,7 +158,7 @@ async def test_everyday_use(agent: str) -> None:
         # 1-2. A first message on the agent: answered by its engine, on this run, and listed
         #      under its title.
         a = await api.start(agent, "alpha one")
-        opened = await api.opened(a)
+        opened = await api.open_conversation(a)
         assert opened["run_id"] is None
         provenance = opened["messages"][1]["provenance"]
         assert (provenance["engine"], provenance["run_id"]) == (
@@ -199,7 +197,7 @@ async def test_everyday_use(agent: str) -> None:
             "TEXT_MESSAGE_END",
             "RUN_FINISHED",
         ]
-        answer = (await api.opened(a))["messages"][5]
+        answer = (await api.open_conversation(a))["messages"][5]
         assert answer["parts"] == [
             {"kind": "text", "text": "alpha "},
             {"kind": "tool_call", "call_id": "c1", "name": "add", "arguments": {"a": 1, "b": 2}},
@@ -248,7 +246,7 @@ async def test_everyday_use(agent: str) -> None:
 
         # 8. A has its edited thread and its own model.
         assert await api.thread(a) == echoed("alpha one", "alpha TWO")
-        assert (await api.opened(a))["conversation"]["model"] == "local_gpt"
+        assert (await api.open_conversation(a))["conversation"]["model"] == "local_gpt"
 
         # 9. A message in A goes on from the regenerated answer, to A's model.
         await api.turn(
@@ -259,10 +257,9 @@ async def test_everyday_use(agent: str) -> None:
 
         # --- Managing conversations ---------------------------------------------------------
 
-        # 10. Delete B: it leaves the list, and the engine forgets it.
+        # 10. Delete B: it leaves the list.
         assert (await http.delete(f"/api/conversations/{b}")).status_code == 204
         assert await api.history() == ["alpha one"]
-        engine.forget.assert_awaited_once_with(uuid.UUID(b))
 
         # 11. Rename A: the title is its first line, trimmed.
         renamed = await http.patch(
@@ -274,7 +271,7 @@ async def test_everyday_use(agent: str) -> None:
         # --- As left ------------------------------------------------------------------------
 
         # 12. A opens as it was left.
-        opened = await api.opened(a)
+        opened = await api.open_conversation(a)
         assert opened["conversation"]["title"] == "Project alpha"
         assert opened["conversation"]["model"] == "local_gpt"
         assert await api.thread(a) == echoed("alpha one", "alpha TWO", "alpha four")

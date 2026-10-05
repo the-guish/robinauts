@@ -2,10 +2,11 @@
 # Copyright The Robinauts Authors
 
 """Loads a configuration file, and builds a controller: the store for the storage asked, the
-dispatcher that runs its turns, and the application over them, with the credentials sign-in
-keeps on the same storage. The file holds web's tables beside the controller's, so web is
-handed the tables of one reading and parses its own. Also what `robinauts db init` does,
-since it is the one other thing that names the store and the engines together."""
+application over it, and the worker that claims and runs its turns, with the credentials
+sign-in keeps on the same storage. The file holds web's tables
+beside the controller's, so web is handed the tables of one reading and parses its own. Also
+what `robinauts db init` does, since it is the one other thing that names the store and the
+engines together."""
 
 from __future__ import annotations
 
@@ -18,7 +19,6 @@ from robinauts.agent_engines.contract.ports import EngineFactory, installed
 from robinauts.agent_engines.contract.ports import StorageConfig as EngineStorage
 from robinauts.agent_engines.contract.ports import StorageKind as EngineStorageKind
 from robinauts.controller.adapters.config_file import read_config
-from robinauts.controller.adapters.dispatch import InProcessDispatcher
 from robinauts.controller.adapters.memory.credentials import MemoryCredentials
 from robinauts.controller.adapters.memory.store import MemoryStore
 from robinauts.controller.adapters.postgres.credentials import PostgresCredentials
@@ -30,6 +30,7 @@ from robinauts.controller.adapters.postgres.schema import (
 )
 from robinauts.controller.adapters.postgres.store import PostgresStore
 from robinauts.controller.application.controller import RobinautsController
+from robinauts.controller.application.worker import Worker
 from robinauts.controller.contract.domain import Config, ConfigError, StorageConfig, StorageKind
 from robinauts.controller.contract.ports import Controller, Credentials
 from robinauts.controller.core.config import parse_config
@@ -56,11 +57,14 @@ def storage_from(environ: Mapping[str, str]) -> StorageConfig:
 
 @dataclass(frozen=True, slots=True)
 class Composed:
-    """The controller, and the credentials on its storage. The credentials open nothing: on
-    PostgreSQL they use the store's pool, which `controller.open` opens and `close` closes."""
+    """The controller, the credentials on its storage, and the worker. The credentials open
+    nothing: on PostgreSQL they use the store's pool, which `controller.open` opens and `close`
+    closes. The worker has a store of its own, which it opens at its start and closes at its
+    stop; it starts after `open` and stops before `close`, by the shell's hand."""
 
     controller: Controller
     credentials: Credentials
+    worker: Worker
 
 
 def compose(
@@ -72,29 +76,25 @@ def compose(
 ) -> Composed:
     """`engines` are the factories by engine name; the installed ones when not given."""
     store: Store
+    worker_store: Store
     credentials: Credentials
     if storage.kind is StorageKind.POSTGRES:
         if not storage.url:
             raise ConfigError(f"{DATABASE_URL_VARIABLE} is not set")
         postgres = PostgresStore(dsn=storage.url)
         store, credentials = postgres, PostgresCredentials(postgres)
+        # Its own pool and listener: it meets the controller in the database alone.
+        worker_store = PostgresStore(dsn=storage.url)
     elif storage.kind is StorageKind.IN_MEMORY:
         memory = MemoryStore()
         store, credentials = memory, MemoryCredentials(memory)
+        # The memory is the data: another instance would hold no turn.
+        worker_store = memory
     else:
         raise NotImplementedError(f"{storage.kind} storage")
-    dispatcher = InProcessDispatcher()
-    controller = RobinautsController(
-        config,
-        store=store,
-        storage=storage,
-        secret_for=secret_for,
-        dispatcher=dispatcher,
-        engines=engines,
-    )
-    # Handed over here, so that no adapter imports the application.
-    dispatcher.run = controller.run_turn
-    return Composed(controller, credentials)
+    controller = RobinautsController(config, store=store)
+    worker = Worker(worker_store, config, storage=storage, secret_for=secret_for, engines=engines)
+    return Composed(controller, credentials, worker)
 
 
 def build(config: Config, *, storage: StorageConfig, secret_for: SecretLookup) -> Controller:

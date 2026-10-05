@@ -10,7 +10,7 @@ Engines keep their memory apart, in storage of their own, and nothing here refer
 it (`docs/specs/agent-engines.md`). The controller keeps only the checkpoint id an
 engine hands back, on the answer, and the engine's name on the session and on the
 answer. A turn runs on the engine the session records, which holds its memory, and the
-purge forgets on it, whatever the agent's configuration names today; the controller
+purge forgets on it, whatever the agent's configuration names today; the worker
 builds that engine on demand when the configuration no longer names it. Moving an
 agent to another engine, and what its sessions then do, is stage two.
 
@@ -21,7 +21,8 @@ agent to another engine, and what its sessions then do, is stage two.
 | user | `id` | `provider` and `subject` (unique together), `name`, `email`, `created_at` | no |
 | session | `id` | `owner_id`, `agent`, `engine`, `title`, `created_at`, `updated_at`, `deleted_at` | no |
 | message | `id` | `session_id`, `parent_id`, `role`, `created_at` | **yes** |
-| turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `lease_until`, `cancel_requested_at`, `retries` | no |
+| turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `retries_message_id`, `task_id` | no |
+| task | `id` | `task_name`, `payload`, `state`, `created_at`, `lease_until`, `claimed_at`, `cancel_requested_at` | no |
 | turn event | `(turn_id, position)` | `expires_at` | **yes** |
 | user session | `id` | `user_id`, `secret_hash` (unique), `created_at`, `expires_at` | no |
 | pending login | `state_hash` | `provider`, `nonce`, `verifier`, `return_to`, `created_at`, `expires_at` | no |
@@ -43,7 +44,7 @@ inside it.
 user 1 ── N session 1 ── N message ── parent_id ──► message (same session)
                     │
                     └─ N turn ── follows ──► message (the question, same session)
-                           │
+                           │  └─ task_id ──► task (1 to 1)
                            └─ N turn event
 ```
 
@@ -68,53 +69,59 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
 
 ## Rules every store keeps
 
-- **At most one running turn per session**, held atomically by `start_turn`.
+- **At most one active turn per session**, held atomically by `queue_turn`.
   PostgreSQL holds it with a partial unique index on `turns (session_id) WHERE state
-  = 'running'`. A store without one holds it with a record keyed by the session,
+  = 'active'`. A store without one holds it with a record keyed by the session,
   written with the turn on condition that it does not exist, and removed in the same
   write as whatever ends the turn, `finish_turn` or `end_expired_turn`. There is no
-  pointer to the running turn on the session: what is running is looked up.
-- **A question and its turn are stored in one operation**, so a question refused a
-  turn is not left behind.
-- **A turn finishes in one operation:** its answer, its last events, its state, and
-  the session's `updated_at`.
+  pointer to the active turn on the session: what is active is looked up.
+- **A question, its task and its turn are stored in one operation**, the task before
+  the turn, which refers to it. A question refused a turn is not left behind, and
+  neither is its task.
+- **A worker claims a queued task.** A turn is stored `active`, with a `queued` task.
+  A worker's `claim_tasks` makes the task `running`, with a new lease, in one
+  operation. Each task is claimed once, whichever process asks. The worker then
+  dispatches it in its own process. The task's `payload` names its turn.
+- **A turn finishes in one operation:** its answer, its last events, its state, its
+  task `done`, and the session's `updated_at`.
 - **The runner numbers its turn's events** and is their only writer, one at a time, so
   positions commit in order. The store accepts the same document again at a position
   it has, since a write retried after a lost acknowledgement is not a second runner,
   and refuses another document there, or any append or finish on a turn that is no
-  longer running or whose lease has passed at the time of the write, with
+  longer active or whose task's lease has passed at the time of the write, with
   `TurnLostError`. A runner refused has lost its turn, to a second runner, to a reader
   that ended it, or to its own lease: it cancels its engine's stream and writes
   nothing more. **The first append is the claim:** a second runner dispatched for the
   same turn is refused at position 1, before it has run the engine, because each
   runner mints the answer's id afresh and so no two claims are the same document.
-- **Deleting hides, then purges.** `deleted_at` makes a session not found and closes
-  it to turns. The controller first asks a running turn to stop. The hide comes next,
-  and a runner in another process finds its next write refused. The purge waits until
-  no turn runs: at once when none ran or this process ended it, else by the sweep.
-  The purge calls `forget` on the engine the session records, which may no longer be
-  the one its agent's configuration names, then deletes the session with its
-  messages, turns and events.
-- **A cancel goes through the store.** It sets `cancel_requested_at` on the running
-  turn and announces it. The process that runs the turn cancels its task. A missed
+- **Deleting hides.** `deleted_at` makes a session not found and closes it to turns.
+  The controller first asks a running turn to stop. The hide comes next, and a runner
+  in another process finds its next write refused. The records and the engine's memory
+  stay. The purge, which calls `forget` and deletes the records, is deferred to a
+  background task.
+- **A cancel goes through the store.** It ends a turn whose task is queued as
+  `cancelled` at once, and the task as `done`. It sets `cancel_requested_at` on a
+  running task and announces it. The process that runs the task cancels it. A missed
   announcement is read back with the next renewal of the lease.
 - **Events expire.** `expires_at` is set when an event is written, as that moment
   plus a retention of hours. Ending a turn touches none of its events. The answer is
   in `messages` and the outcome is in `turns`, so after a turn ends nothing reads its
   events but a late watcher. Until they expire, they are the only copy of a turn's
   reasoning, and of what a cancelled turn streamed.
-- **A turn holds a lease.** `lease_until` is written with the turn, as its start plus
-  `lease_seconds`. The process that runs the turn renews it every `heartbeat_seconds`,
-  in one write for all its turns. The runner's deadline is apart: the turn's start
-  plus `max_turn_seconds`. A running turn whose lease has passed is ended as
-  `interrupted` by the next reader to find it (`open_session`, `start_turn`,
-  `watch_turn`, `cancel_turn`, `delete_session`), or by the sweep every
-  `sweep_seconds`. Both go through `end_expired_turn`: one conditional write that only
-  a running turn takes, on the record, the marker a store without a partial index
-  keeps, and the answer, and that wakes the turn's watchers. No event is written,
+- **A task holds a lease.** `lease_until` is written with the task, as its creation
+  plus 48 hours: how long a task may wait queued. The claim sets it to `lease_seconds`
+  from then, and sets `claimed_at`. The process that runs the task renews it every
+  `heartbeat_seconds`, in one write for all its tasks. The runner's deadline is apart:
+  the task's claim plus `max_turn_seconds`. An active turn whose task's lease has
+  passed is ended as `interrupted`, and its task as `done`, by the next reader to find
+  it (`open_session`, `queue_turn`, `watch_turn`, `cancel_turn`, `delete_session`), or
+  by the sweep every `sweep_seconds`. Both go through `end_expired_turn`: one
+  conditional write that only such a turn takes, on the record, its task, the marker a
+  store without a partial index keeps, and the answer, and that wakes the turn's
+  watchers. No event is written,
   since a `turn_ended` event is the runner's; a watcher that finds the turn ended with
-  none supplies it from the record. A runner that outlives its lease has lost the turn
-  whether or not a reader has found it: every write names its time, and the store
+  none supplies it from the record. A runner that outlives its task's lease has lost the
+  turn whether or not a reader has found it: every write names its time, and the store
   refuses one past the lease.
 - **No clocks and no ids in a store.** The controller mints every id and sets every
   time.

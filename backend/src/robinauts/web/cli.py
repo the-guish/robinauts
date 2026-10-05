@@ -44,7 +44,7 @@ from robinauts.controller.composition import (
     read_tables,
     storage_from,
 )
-from robinauts.controller.contract.domain import Config, ConfigError
+from robinauts.controller.contract.domain import Config, ConfigError, StorageKind
 from robinauts.web.app import create_app
 from robinauts.web.sign_in import SIGN_IN_KEYS, SignInConfig, is_loopback, parse_sign_in
 
@@ -126,17 +126,19 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     except ConfigError as refused:
         print(refused, file=sys.stderr)
         return 1
-    composed = compose(config, storage=storage_from(os.environ), secret_for=secret_for)
+    storage = storage_from(os.environ)
+    composed = compose(config, storage=storage, secret_for=secret_for)
     logging.basicConfig(level=logging.INFO)
     if dev_no_sign_in:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
     uvicorn.run(
         create_app(
-            composed.controller,
-            credentials=composed.credentials,
+            composed,
             sign_in=sign_in,
             secret_for=secret_for,
             ui_dir=ui_dir,
+            # A store in memory is this process's alone: its worker runs here.
+            spawn_worker_in_subprocess=storage.kind is StorageKind.POSTGRES,
         ),
         host=host,
         port=port,

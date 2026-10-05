@@ -129,3 +129,27 @@ def test_an_agent_naming_a_tool_server_twice_is_refused() -> None:
     }
     with pytest.raises(ConfigError, match=re.escape("agents.a: tool server(s) named twice: t")):
         parse_config(raw)
+
+
+@pytest.mark.parametrize(
+    ("given", "parsed", "problem"),
+    [
+        (None, 100, None),
+        (1, 1, None),
+        (250, 250, None),
+        (0, None, "must be a positive whole number"),
+        (-1, None, "must be a positive whole number"),
+        (1.5, None, "must be a positive whole number"),
+        (True, None, "must be a positive whole number"),
+        ("4", None, "must be a positive whole number"),
+    ],
+)
+def test_a_worker_runs_at_most_max_running_tasks_per_worker(
+    given: object, parsed: int | None, problem: str | None
+) -> None:
+    raw = {"work": {} if given is None else {"max_running_tasks_per_worker": given}}
+    if problem is None:
+        assert parse_config(raw).work.max_running_tasks_per_worker == parsed
+    else:
+        with pytest.raises(ConfigError, match=f"work: max_running_tasks_per_worker {problem}"):
+            parse_config(raw)

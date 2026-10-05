@@ -26,9 +26,7 @@ REGENERATE = "scripts/update-openapi.sh"
 def written() -> str:
     """The snapshot's one spelling, the one ``scripts/update-openapi.sh`` writes."""
     composed = compose(Config(), storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
-    app = create_app(
-        composed.controller, credentials=composed.credentials, sign_in=None, secret_for={}.get
-    )
+    app = create_app(composed, sign_in=None, secret_for={}.get)
     return json.dumps(app.openapi(), indent=2, sort_keys=True) + "\n"
 
 

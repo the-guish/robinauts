@@ -10,13 +10,13 @@ import base64
 import dataclasses
 import logging
 import uuid
-from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime, timedelta
 
-from robinauts.agent_engines.contract.ports import AgentEngine, EngineFactory, installed
-from robinauts.controller.application.engines import build_engines
-from robinauts.controller.application.turns import run_turn
+from robinauts.controller.application.intervals import run_at_intervals
+from robinauts.controller.application.turns import load_messages
 from robinauts.controller.contract.domain import (
+    RUN_TURN,
     ActiveTurn,
     AgentListing,
     Config,
@@ -30,35 +30,24 @@ from robinauts.controller.contract.domain import (
     OpenedSession,
     Role,
     Session,
-    SessionNotFoundError,
     SessionPage,
-    StorageConfig,
-    StorageKind,
+    Task,
+    TaskState,
     TextPart,
     Turn,
     TurnEnded,
-    TurnLostError,
     TurnStarted,
     TurnState,
-    UnknownEngineError,
     UnknownModelError,
     User,
 )
 from robinauts.controller.contract.ports import Controller
 from robinauts.controller.core.documents import (
     event_from_document,
-    message_from_document,
     stored_message,
 )
-from robinauts.controller.core.engine_settings import (
-    SecretLookup,
-    engine_settings,
-    engine_storage,
-)
-from robinauts.controller.core.failures import prompt_after_failures
 from robinauts.controller.core.partial import failed_answer, partial_answer
 from robinauts.controller.core.titles import title_from_text
-from robinauts.controller.ports.dispatcher import CLOSE, TurnDispatcher
 from robinauts.controller.ports.store import Cursor, Store
 
 _log = logging.getLogger(__name__)
@@ -67,15 +56,12 @@ EVENT_WAIT_TIMEOUT = 15.0
 """How long a watcher waits for an event before it reads the store again, and checks whether
 the turn's lease has passed."""
 
-CLOSE_TIMEOUT = 10.0
-"""How long `close` waits for the turns this process runs before it interrupts them."""
+MAX_QUEUED_TIME = timedelta(hours=48)
+"""How long a task may wait queued, written as its lease until a worker claims it: long enough
+to outlast an outage of the workers."""
 
 ENDED_BADLY = frozenset({TurnState.FAILED, TurnState.CANCELLED, TurnState.INTERRUPTED})
 """How a turn may end that opening its session says so."""
-
-
-def _text(message: Message) -> str:
-    return "".join(p.text for p in message.parts if isinstance(p, TextPart))
 
 
 class RobinautsController(Controller):
@@ -84,74 +70,27 @@ class RobinautsController(Controller):
         config: Config,
         *,
         store: Store,
-        storage: StorageConfig,
-        secret_for: SecretLookup,
-        dispatcher: TurnDispatcher,
-        close_timeout: float = CLOSE_TIMEOUT,
         event_wait_timeout: float = EVENT_WAIT_TIMEOUT,
         now: Callable[[], datetime] | None = None,
-        engines: Mapping[str, EngineFactory] | None = None,
     ) -> None:
         self._config = config
         self._store = store
-        self._storage = storage
-        self._secret_for = secret_for
-        self._dispatcher = dispatcher
-        self._close_timeout = close_timeout
         self._event_wait_timeout = event_wait_timeout
         self._now = now or (lambda: datetime.now(UTC))
-        self._engines: dict[str, AgentEngine] = {}
-        self._factories: dict[str, EngineFactory] = {}
-        self._given_engines = engines
-        self._handle: object | None = None
-        self._chores: list[asyncio.Task[None]] = []
-
-    def _sets_up_engines(self) -> bool:
-        """On PostgreSQL `robinauts db init` set the engines up; the server never does."""
-        return self._storage.kind is not StorageKind.POSTGRES
+        self._sweeping: asyncio.Task[None] | None = None
 
     async def open(self) -> None:
-        self._handle = await self._store.open()
-        self._factories = dict(installed() if self._given_engines is None else self._given_engines)
-        settings = engine_settings(self._config, self._secret_for)
-        self._engines = await build_engines(
-            self._config,
-            settings,
-            engine_storage(self._storage, self._handle),
-            self._factories,
-            setup=self._sets_up_engines(),
+        await self._store.open()
+        self._sweeping = asyncio.create_task(
+            run_at_intervals(self._config.work.sweep_seconds, self.sweep), name="sweep"
         )
-        await self._store.listen_for_cancels(self._dispatcher.stop)
-        work = self._config.work
-        self._chores = [
-            asyncio.create_task(_every(work.heartbeat_seconds, self._renew_leases)),
-            asyncio.create_task(_every(work.sweep_seconds, self.sweep)),
-        ]
 
     async def close(self) -> None:
-        # The leases are renewed until the last turn has ended.
-        await self._dispatcher.close(self._close_timeout)
-        for chore in self._chores:
-            chore.cancel()
-        await asyncio.gather(*self._chores, return_exceptions=True)
-        self._chores = []
-        self._engines = {}
+        sweeping, self._sweeping = self._sweeping, None
+        if sweeping is not None:
+            sweeping.cancel()
+            await asyncio.gather(sweeping, return_exceptions=True)
         await self._store.close()
-
-    async def _engine(self, name: str) -> AgentEngine:
-        """The engine of that name: built at `open` for the agents, or on demand for a session
-        whose engine the configuration no longer names."""
-        engine = self._engines.get(name)
-        if engine is None:
-            factory = self._factories.get(name)
-            if factory is None:
-                raise UnknownEngineError(f"engine {name!r}, which this build does not have")
-            settings = engine_settings(self._config, self._secret_for)
-            engine = factory(settings, engine_storage(self._storage, self._handle))
-            if self._sets_up_engines():
-                await engine.setup()
-            self._engines[name] = engine
-        return engine
 
     async def ensure_user(self, identity: Identity) -> User:
         user = User(
@@ -180,14 +119,10 @@ class RobinautsController(Controller):
         following = _encode_cursor(sessions[-1]) if len(sessions) == limit else None
         return SessionPage(tuple(sessions), cursor=following)
 
-    async def _messages(self, owner: uuid.UUID, session_id: uuid.UUID) -> list[Message]:
-        documents = await self._store.messages_of(owner, session_id)
-        return [message_from_document(d) for d in documents]
-
     async def open_session(self, user: User, session_id: uuid.UUID) -> OpenedSession:
         session = await self._store.get_session(user.id, session_id)
         await self._end_expired(session)
-        messages = await self._messages(user.id, session_id)
+        messages = await load_messages(self._store, user.id, session_id)
         by_id = {m.id: m for m in messages}
         thread = [messages[-1]]
         while thread[-1].parent_id is not None:
@@ -215,17 +150,9 @@ class RobinautsController(Controller):
         running = await self._store.active_turn(user.id, session_id)
         if running is not None:
             await self._cancel(user, running)
+        # A soft delete: the records and the engine's memory stay. A turn another process
+        # runs stops at its next write.
         await self._store.hide_session(user.id, session_id, self._now())
-        # A turn another process runs stops at its next write, and the sweep purges after.
-        if any(s.id == session_id for s in await self._store.hidden_sessions(self._now())):
-            await self._purge(session)
-
-    async def _purge(self, session: Session) -> None:
-        """Forget, then purge, a hidden session that no turn runs in with a live lease: none
-        can start any more, so none runs under the `forget`. A failed `forget` leaves the
-        session to the next sweep."""
-        await (await self._engine(session.engine)).forget(session.id)
-        await self._store.purge_session(session.owner_id, session.id, self._now())
 
     async def fork_session(
         self, user: User, session_id: uuid.UUID, *, at_message: uuid.UUID
@@ -256,8 +183,10 @@ class RobinautsController(Controller):
             model=model,
         )
         await self._store.add_session(session)
-        await (await self._engine(session.engine)).create(session.id)
-        turn = await self._start_turn(user, session, question, model, new_question=True)
+        # The worker creates the engine's session before it runs this first turn.
+        turn = await self._queue_turn(
+            user, session, question, model, new_question=True, create_session=True
+        )
         return TurnStarted(session.id, turn.id, question)
 
     async def send_message(
@@ -270,7 +199,7 @@ class RobinautsController(Controller):
         text: str,
     ) -> TurnStarted:
         session = await self._store.get_session(user.id, session_id)
-        messages = await self._messages(user.id, session_id)
+        messages = await load_messages(self._store, user.id, session_id)
         if all(m.id != parent_id for m in messages):
             raise MessageNotFoundError(str(parent_id))
         return await self._ask(user, session, parent_id, model, text)
@@ -285,7 +214,7 @@ class RobinautsController(Controller):
         text: str,
     ) -> TurnStarted:
         session = await self._store.get_session(user.id, session_id)
-        messages = await self._messages(user.id, session_id)
+        messages = await load_messages(self._store, user.id, session_id)
         edited = next((m for m in messages if m.id == message_id), None)
         if edited is None or edited.role is not Role.USER:
             raise MessageNotFoundError(str(message_id))
@@ -307,7 +236,7 @@ class RobinautsController(Controller):
             engine=session.engine,
             model=model,
         )
-        turn = await self._start_turn(user, session, question, model, new_question=True)
+        turn = await self._queue_turn(user, session, question, model, new_question=True)
         return TurnStarted(session.id, turn.id, question)
 
     async def regenerate_answer(
@@ -315,24 +244,29 @@ class RobinautsController(Controller):
     ) -> TurnStarted:
         session = await self._store.get_session(user.id, session_id)
         question = next(
-            (m for m in await self._messages(user.id, session_id) if m.id == question_id), None
+            (
+                m
+                for m in await load_messages(self._store, user.id, session_id)
+                if m.id == question_id
+            ),
+            None,
         )
         if question is None:
             raise MessageNotFoundError(str(question_id))
-        turn = await self._start_turn(user, session, question, model, new_question=False)
+        turn = await self._queue_turn(user, session, question, model, new_question=False)
         return TurnStarted(session_id, turn.id, question)
 
     async def retry_answer(
         self, user: User, session_id: uuid.UUID, *, answer_id: uuid.UUID, model: str
     ) -> TurnStarted:
         session = await self._store.get_session(user.id, session_id)
-        by_id = {m.id: m for m in await self._messages(user.id, session_id)}
+        by_id = {m.id: m for m in await load_messages(self._store, user.id, session_id)}
         failed = by_id.get(answer_id)
         if failed is None or not failed.failed or failed.parent_id is None:
             raise MessageNotFoundError(str(answer_id))
         question = by_id[failed.parent_id]
-        turn = await self._start_turn(
-            user, session, question, model, new_question=False, retries=failed.id
+        turn = await self._queue_turn(
+            user, session, question, model, new_question=False, retries_message_id=failed.id
         )
         return TurnStarted(session_id, turn.id, question)
 
@@ -346,24 +280,11 @@ class RobinautsController(Controller):
         await self._cancel(user, running)
 
     async def _cancel(self, user: User, turn: Turn) -> None:
-        """Ask the turn to stop, wherever it runs, and wait for it if this process runs it."""
+        """Ask the turn to stop, wherever it runs: the store ends a turn whose task is queued,
+        and announces a running one to the worker that runs it."""
         await self._store.request_cancel(user.id, turn.session_id, turn.id, self._now())
-        if await self._dispatcher.cancel(user.id, turn.session_id, turn.id):
-            # A runner that never claimed the turn wrote nothing: the turn is ended here.
-            await self._end_if_running(user.id, turn.session_id, turn.id, TurnState.CANCELLED)
 
-    async def _end_if_running(
-        self, owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID, state: TurnState
-    ) -> None:
-        now = self._now()
-        try:
-            await self._store.finish_turn(
-                owner, session_id, turn_id, state, now, None, None, [], now
-            )
-        except (TurnLostError, SessionNotFoundError):
-            return
-
-    async def _start_turn(
+    async def _queue_turn(
         self,
         user: User,
         session: Session,
@@ -371,80 +292,37 @@ class RobinautsController(Controller):
         model: str,
         *,
         new_question: bool,
-        retries: uuid.UUID | None = None,
+        retries_message_id: uuid.UUID | None = None,
+        create_session: bool = False,
     ) -> Turn:
         model_config = self._config.models.get(model)
         if model_config is None:
             raise UnknownModelError(model)
         await self._end_expired(session)
         now = self._now()
-        turn = Turn(
+        turn_id = uuid.uuid4()
+        task = Task(
             uuid.uuid4(),
+            RUN_TURN,
+            {"turn_id": str(turn_id), "create_session": create_session},
+            TaskState.QUEUED,
+            created_at=now,
+            lease_until=now + MAX_QUEUED_TIME,
+        )
+        turn = Turn(
+            turn_id,
             session.id,
             follows=question.id,
             model=model,
-            state=TurnState.RUNNING,
+            state=TurnState.ACTIVE,
             started_at=now,
-            lease_until=now + timedelta(seconds=self._config.work.lease_seconds),
-            retries=retries,
+            task_id=task.id,
+            retries_message_id=retries_message_id,
         )
         stored = stored_message(question) if new_question else None
-        await self._store.start_turn(user.id, turn, stored)
-        await self._dispatcher.dispatch(user.id, session.id, turn.id)
+        # A worker claims the task and dispatches it.
+        await self._store.queue_turn(user.id, turn, task, stored)
         return turn
-
-    async def run_turn(self, owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID) -> None:
-        """Run the turn, from its ids alone: what a worker in another process would call."""
-        try:
-            await self._run_turn(owner, session_id, turn_id)
-        except asyncio.CancelledError as exc:
-            # Cancelled before the runner's claim, the turn is ended here; after it, the
-            # runner has ended it already.
-            state = TurnState.INTERRUPTED if CLOSE in exc.args else TurnState.CANCELLED
-            await self._end_if_running(owner, session_id, turn_id, state)
-            raise
-
-    async def _run_turn(self, owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID) -> None:
-        session = await self._store.get_session(owner, session_id)
-        turn = await self._store.get_turn(owner, session_id, turn_id)
-        if turn is None:
-            return
-        by_id = {m.id: m for m in await self._messages(owner, session_id)}
-        question = by_id[turn.follows]
-        # The nearest answer up the thread that has a checkpoint: a failed answer has
-        # none, and continuing from nothing would start the engine's memory again.
-        checkpoint_id = None
-        above = question.parent_id
-        while above is not None and checkpoint_id is None:
-            checkpoint_id = by_id[above].checkpoint_id
-            above = by_id[above].parent_id
-        agent_config = self._config.agents[session.agent]
-        engine = await self._engine(session.engine)
-        # The failed exchanges between the last answer that finished and this question,
-        # oldest first: the engine remembers none of them, so the prompt carries them.
-        earlier: list[tuple[str, Message]] = []
-        above = question.parent_id
-        while above is not None and by_id[above].failed:
-            failed = by_id[above]
-            asked = by_id[failed.parent_id] if failed.parent_id is not None else None
-            if asked is None:
-                break
-            earlier.insert(0, (_text(asked), failed))
-            above = asked.parent_id
-        retried = None if turn.retries is None else by_id[turn.retries]
-        prompt = prompt_after_failures(_text(question), earlier, retried)
-        await run_turn(
-            self._store,
-            engine,
-            owner,
-            session,
-            turn,
-            question,
-            prompt,
-            agent_config,
-            checkpoint_id,
-            self._config.work.max_turn_seconds,
-        )
 
     async def watch_turn(
         self,
@@ -475,7 +353,7 @@ class RobinautsController(Controller):
                 continue
             await self._end_expired(await self._store.get_session(user.id, session_id))
             current = await self._store.get_turn(user.id, session_id, turn.id)
-            if current is None or current.state is not TurnState.RUNNING:
+            if current is None or current.state is not TurnState.ACTIVE:
                 # Ended with no `turn_ended` event of its own, by a reader: the record says
                 # how, under the last position stored.
                 state = TurnState.INTERRUPTED if current is None else current.state
@@ -483,49 +361,39 @@ class RobinautsController(Controller):
                 return
 
     async def sweep(self) -> None:
-        for owner, turn in await self._store.expired_turns(self._now()):
+        now = self._now()
+        for task in await self._store.expired_tasks(now):
             try:
-                await self._end_expired(await self._store.get_session(owner, turn.session_id), turn)
+                if task.name == RUN_TURN:
+                    found = await self._store.find_turn(uuid.UUID(task.payload["turn_id"]))
+                    if found is not None:
+                        owner, turn = found
+                        session = await self._store.get_session(owner, turn.session_id)
+                        await self._end_expired(session, turn)
+                        continue
+                # No turn to end: a task of another kind, or of a deleted session.
+                await self._store.end_expired_task(task.id, now)
             except Exception:
-                _log.exception("could not end turn %s, whose lease has passed", turn.id)
-        for session in await self._store.hidden_sessions(self._now()):
-            try:
-                await self._purge(session)
-            except Exception:
-                _log.exception("could not purge deleted session %s", session.id)
-
-    async def _renew_leases(self) -> None:
-        if turns := self._dispatcher.running():
-            now = self._now()
-            until = now + timedelta(seconds=self._config.work.lease_seconds)
-            for turn in await self._store.renew_leases(turns, now, until):
-                self._dispatcher.stop(turn)
+                _log.exception("could not end task %s, whose lease has passed", task.id)
 
     async def _end_expired(self, session: Session, turn: Turn | None = None) -> None:
-        """End the session's running turn if its lease has passed, as ``interrupted``, and keep
-        what it had streamed as its answer, marked failed. A runner gone with its process
-        wrote no answer: the turn's events are what is left of it."""
+        """End the session's active turn if its task's lease has passed, as ``interrupted``,
+        and keep what it had streamed as its answer, marked failed. A runner gone with its
+        process wrote no answer: the turn's events are what is left of it. A turn whose task
+        waited too long queued has none."""
         now = self._now()
         if turn is None:
             turn = await self._store.active_turn(session.owner_id, session.id)
-        if turn is None or turn.lease_until >= now:
+        if turn is None:
+            return
+        task = await self._store.get_task(turn.task_id)
+        if task is None or task.state is TaskState.DONE or task.lease_until >= now:
             return
         events = await self._store.events_after(session.owner_id, session.id, turn.id, 0)
         answer_id, parts = partial_answer(document for _, document in events)
         answer = failed_answer(answer_id or uuid.uuid4(), session, turn, parts, now)
         stored = stored_message(answer)
         await self._store.end_expired_turn(session.owner_id, session.id, turn.id, now, stored)
-
-
-async def _every(seconds: float, chore: Callable[[], Awaitable[None]]) -> None:
-    """Run the chore every so many seconds until cancelled; a failure is logged, and the next
-    run comes as usual."""
-    while True:
-        await asyncio.sleep(seconds)
-        try:
-            await chore()
-        except Exception:
-            _log.exception("%s failed", getattr(chore, "__name__", chore))
 
 
 def _encode_cursor(session: Session) -> str:
