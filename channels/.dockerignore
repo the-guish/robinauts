@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+#
+# The image is package.json, the lockfile, .npmrc and src/, and nothing else: above all not
+# .env, which holds the tokens, nor a local state/ directory.
+*
+!package.json
+!package-lock.json
+!.npmrc
+!src/

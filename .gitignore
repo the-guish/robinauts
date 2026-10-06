@@ -10,6 +10,11 @@ htmlcov/
 frontend/node_modules/
 frontend/dist/
 
+channels/node_modules/
+# The bridge's tokens, and which thread is which conversation when it runs outside a container.
+channels/.env
+channels/state/
+
 # The wheel, and what `uv build` writes into it. backend/hatch_build.py stages
 # the three licence files beside pyproject.toml while a wheel is being built
 # and removes them afterwards; these lines are what keeps a build that failed

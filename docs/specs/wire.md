@@ -157,6 +157,12 @@ hold as the rule and are not enforced yet:
 - A body is bounded at one mebibyte, refused with 413 on the declared length
   before a byte of it is read.
 
+## For chat platforms
+
+The bridges to chat platforms take AG-UI's stock run input instead of this
+profile, at `POST /api/channels/agents/{agent_id}/agui`, behind a secret shared
+with them: [channels.md](channels.md).
+
 ## Without streaming
 
 - A client that cannot stream starts a turn and obtains the result once the

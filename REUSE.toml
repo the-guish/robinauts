@@ -47,6 +47,19 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "The Robinauts Authors"
 SPDX-License-Identifier = "Apache-2.0"
 
+# The same kinds of file in channels/, the bridge to chat platforms.
+[[annotations]]
+path = [
+    "channels/README.md",
+    "channels/package.json",
+    "channels/package-lock.json",
+    "channels/tsconfig.json",
+    "channels/.nvmrc",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "The Robinauts Authors"
+SPDX-License-Identifier = "Apache-2.0"
+
 # The vendored chat components: somebody else's MIT source, copied in under
 # the rules of ADR 0001 and recorded in docs/legal/ip-clearance.md. They carry
 # no header because they carry no edit that is not listed in their README:

@@ -39,6 +39,28 @@ updates:
       prefix: "frontend"
 
   # The actions this repository's workflows run, pinned to commit SHAs.
+  # The bridge to chat platforms, and the Node image it runs on.
+  - package-ecosystem: "npm"
+    directory: "/channels"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 10
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "typescript"
+        versions: ["7.0.x"]
+    commit-message:
+      prefix: "channels"
+  - package-ecosystem: "docker"
+    directory: "/channels"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 10
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "channels"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

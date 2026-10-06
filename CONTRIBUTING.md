@@ -22,6 +22,7 @@ its own.
 
     backend/     the Python backend (the `robinauts` package)
     frontend/    the web UI (Vite, React, TypeScript)
+    channels/    the bridge to chat platforms, a container of its own (Node, TypeScript)
     docs/        specs, decisions, legal records, working notes
     scripts/     the checks, one script per gate, which CI runs as they are
 
@@ -56,6 +57,8 @@ or one at a time:
     scripts/check-audit.sh      pip-audit over the whole locked set
     scripts/check-frontend.sh   the frontend: format, lint, types, tests,
                                 the build with its licence gate, npm audit
+    scripts/check-channels.sh   the bridge to chat platforms: format, types,
+                                tests, npm audit
     scripts/check-e2e.sh        the interface in a browser (Playwright),
                                 over a server on both agent engines and
                                 PostgreSQL: the one ROBINAUTS_TEST_DATABASE_URL

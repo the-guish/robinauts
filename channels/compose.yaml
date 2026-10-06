@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+#
+# The bridge on a laptop, beside a Robinauts started there (README.md):
+#
+#     cp .env.example .env    # then fill it in
+#     docker compose up --build
+#
+# On Docker Desktop (macOS, Windows) the container reaches the laptop's own 127.0.0.1 as
+# host.docker.internal, which is where the backend's local development mode listens. On Linux
+# it does not: see README.md, "On Linux".
+services:
+  channels:
+    build: .
+    image: robinauts-channels
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - state:/data
+    restart: unless-stopped
+
+volumes:
+  state:

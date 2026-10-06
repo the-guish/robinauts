@@ -18,7 +18,7 @@ failed=""
 # `wheel` comes after `frontend`: it builds the bundle again, into the wheel,
 # and it reuses the node_modules the frontend's own gate has just installed
 # from the lock. `e2e` comes after both `tests` and `frontend`, as on CI.
-for check in lint tests licences audit frontend e2e wheel reuse dco; do
+for check in lint tests licences audit frontend channels e2e wheel reuse dco; do
     printf '\n=== %s ===\n' "$check"
     if ! "$root/scripts/check-$check.sh"; then
         failed="$failed $check"

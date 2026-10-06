@@ -176,8 +176,9 @@ topic documents listed under [Documents](#documents).
   [the-path-of-one-message.md](../architecture/the-path-of-one-message.md),
   [agent-engines.md](agent-engines.md), [wire.md](wire.md).
 - **Channels.** One API for every delivery channel. The web UI is the
-  first client; a mobile application and a Slack bridge are planned, and
-  consume the same agents and conversations through the same API.
+  first client; a mobile application is planned. Telegram and Slack are a
+  proof of concept, `channels/`, on CopilotKit's Channels SDK over AG-UI's
+  stock run input. [channels.md](channels.md).
 - **Open source.** Apache-2.0 throughout, DCO, provenance records,
   dependency gates. [open-source.md](open-source.md).
 
@@ -213,6 +214,7 @@ hard, the decision is taken with them in mind.
 | [privacy.md](privacy.md) | visibility, projects, sharing, admins, retention, leavers, audit |
 | [agent-engines.md](agent-engines.md) | the agent engines: their contract, the turn, the memory |
 | [wire.md](wire.md) | the UI-to-backend protocol |
+| [channels.md](channels.md) | chat platforms as clients: the bridge, its endpoint (proof of concept) |
 | [frontend.md](frontend.md) | the interface, build, supply chain, packaging |
 | [operations.md](operations.md) | deployment, configuration, limits, usage (planned) |
 | [open-source.md](open-source.md) | licence, contributions, dependency policy, checks |

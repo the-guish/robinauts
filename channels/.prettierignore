@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+package-lock.json
+state/
+# The Markdown follows the repository's own style, as the root's does.
+*.md
