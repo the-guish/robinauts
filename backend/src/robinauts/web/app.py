@@ -11,6 +11,10 @@ must carry ``Origin`` equal to ``public_url``, else 403; a write with a bearer a
 A controller operation that is not implemented answers 501.
 The shapes are the ones the frontend reads (``docs/specs/wire.md``); a turn's stream is
 AG-UI over SSE, its run id is the turn's id, and its thread id the session's.
+
+With ``channels`` configured, ``/api/channels/`` serves the bridges to chat platforms: AG-UI's
+own run input, for the platform user the bridge names, behind a secret shared with the bridges
+rather than a user's credentials (``web/channels.py``).
 """
 
 from __future__ import annotations
@@ -48,11 +52,13 @@ from robinauts.controller.contract.domain import (
     ToolResultPart,
     Turn,
     TurnActiveError,
+    TurnStarted,
     UnknownAgentError,
     UnknownModelError,
     User,
 )
 from robinauts.web import agui
+from robinauts.web.channels import ChannelRunInput, ChannelsConfig
 from robinauts.web.cookies import Cookies
 from robinauts.web.lifecycle import Lifecycle
 from robinauts.web.logs import loggable
@@ -88,6 +94,7 @@ NOT_SIGNED_IN = "nobody is signed in: sign in at /ui/"
 NOT_SAME_ORIGIN = "a write that carries the session cookie must carry Origin equal to public_url"
 UNKNOWN_TOKEN = "the API token is unknown, revoked or expired"
 NO_SUCH_TOKEN = "you have no API token of that id"
+NOT_A_BRIDGE = "the channels endpoint takes the secret shared with the bridges, as a bearer"
 
 LOCAL_IDENTITY = Identity(provider=LOCAL_PROVIDER, subject="developer", name="Local development")
 """The one user of the local development mode, under a provider no configuration can name
@@ -350,10 +357,18 @@ def ended_badly_view(turn: Turn | None) -> EndedBadlyView | None:
 
 
 def event_stream(
-    session_id: uuid.UUID, turn_id: uuid.UUID, events: AsyncIterator[NumberedEvent]
+    session_id: uuid.UUID,
+    turn_id: uuid.UUID,
+    events: AsyncIterator[NumberedEvent],
+    *,
+    stock_run_id: str | None = None,
 ) -> StreamingResponse:
+    """``stock_run_id``: the run id a stock AG-UI client chose, which its stream carries in
+    place of the turn's; the turn's is in the headers either way."""
+    stock = stock_run_id is not None
+    run_id = stock_run_id if stock else str(turn_id)
     return StreamingResponse(
-        agui.stream(str(session_id), str(turn_id), events),
+        agui.stream(str(session_id), run_id, events, stock=stock),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-store",
@@ -371,9 +386,11 @@ def create_app(
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
     spawn_worker_in_subprocess: bool = False,
+    channels: ChannelsConfig | None = None,
 ) -> FastAPI:
     """``sign_in`` is ``None`` in the local development mode. ``spawn_worker_in_subprocess``
-    runs the worker in a process of its own."""
+    runs the worker in a process of its own. ``channels`` serves the bridges' endpoint, which
+    is not served without it."""
     controller, credentials = composed.controller, composed.credentials
     lifecycle = Lifecycle(composed, spawn_worker_in_subprocess=spawn_worker_in_subprocess)
     exchange: Exchange | None = None
@@ -459,7 +476,12 @@ def create_app(
         return next(a.default_model for a in await controller.list_agents() if a.id == agent)
 
     async def stream_turn(
-        user: User, session_id: uuid.UUID, turn_id: uuid.UUID, after: int
+        user: User,
+        session_id: uuid.UUID,
+        turn_id: uuid.UUID,
+        after: int,
+        *,
+        stock_run_id: str | None = None,
     ) -> StreamingResponse:
         events = controller.watch_turn(user, session_id, turn_id, after=after)
         # The refusals happen inside the generator: ask for the first event here, so that
@@ -473,7 +495,7 @@ def create_app(
             async for event in events:
                 yield event
 
-        return event_stream(session_id, turn_id, chain_events())
+        return event_stream(session_id, turn_id, chain_events(), stock_run_id=stock_run_id)
 
     # --- sign-in -----------------------------------------------------------------
 
@@ -706,6 +728,70 @@ def create_app(
         conversation_id: uuid.UUID, run_id: uuid.UUID, user: User = asking
     ) -> None:
         await controller.cancel_turn(user, conversation_id, run_id)
+
+    # --- channels: AG-UI's own run input, from a bridge -------------------------
+
+    if channels is not None:
+
+        def bridge(request: Request) -> None:
+            if not channels.admits(request.headers.get("authorization", "")):
+                raise Refused(401, "Unauthorized", NOT_A_BRIDGE)
+
+        @app.post(
+            "/api/channels/agents/{agent_id}/agui",
+            include_in_schema=False,
+            dependencies=[Depends(bridge)],
+        )
+        async def channel_turn(agent_id: str, body: ChannelRunInput) -> StreamingResponse:
+            """A turn of the conversation ``threadId`` names, or of a new one."""
+            if agent_id not in {a.id for a in await controller.list_agents()}:
+                raise UnknownAgentError(agent_id)
+            text = body.question()
+            if not text.strip():
+                raise InvalidValueError("the last user message of the run input has no text")
+            user = await controller.ensure_user(body.identity())
+            chosen = body.forwarded_props.robinauts.model_id
+            started = await channel_message(
+                user, agent_id, body.conversation(), model_id=chosen, text=text
+            )
+            log.info(
+                "channel turn %s of conversation %s for user %s",
+                started.turn_id,
+                started.session_id,
+                user.id,
+            )
+            return await stream_turn(
+                user, started.session_id, started.turn_id, 0, stock_run_id=body.run_id
+            )
+
+        async def channel_message(
+            user: User,
+            agent_id: str,
+            conversation: uuid.UUID | None,
+            *,
+            model_id: str | None,
+            text: str,
+        ) -> TurnStarted:
+            """A new conversation, or a message at the end of the one named: under its last
+            answer, or in place of a question nobody answered, as the interface does."""
+            if conversation is None:
+                model = model_id or await default_model(agent_id)
+                return await controller.start_session(user, agent=agent_id, model=model, text=text)
+            opened = await controller.open_session(user, conversation)
+            if opened.session.agent != agent_id:
+                # This agent has no such conversation: the bridge starts a new one.
+                raise SessionNotFoundError(str(conversation))
+            model = model_id or model_of(opened, await default_model(agent_id))
+            if not opened.messages:
+                raise InvalidValueError("the conversation has no message to answer under")
+            last = opened.messages[-1]
+            if last.role is Role.USER:
+                return await controller.edit_message(
+                    user, conversation, message_id=last.id, model=model, text=text
+                )
+            return await controller.send_message(
+                user, conversation, parent_id=last.id, model=model, text=text
+            )
 
     # --- liveness --------------------------------------------------------------
 

@@ -72,3 +72,19 @@ def test_a_refused_start_exits_before_it_binds(
     assert exited.value.code == 1
     assert "cannot be combined" in capsys.readouterr().err
     serve.assert_not_called()
+
+
+def test_a_channels_secret_too_short_to_be_one_refuses_the_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "robinauts.toml"
+    path.write_text("")
+    monkeypatch.setenv("ROBINAUTS_CONFIG", str(path))
+    monkeypatch.setenv("ROBINAUTS_CHANNELS_SECRET", "changeme")
+    serve = create_autospec(uvicorn.run, spec_set=True)
+    monkeypatch.setattr(uvicorn, "run", serve)
+    with pytest.raises(SystemExit) as exited:
+        run(["start", "--dev-no-sign-in"])
+    assert exited.value.code == 1
+    assert "ROBINAUTS_CHANNELS_SECRET" in capsys.readouterr().err
+    serve.assert_not_called()

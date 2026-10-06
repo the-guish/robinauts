@@ -15,7 +15,8 @@ development mode, for the mode's one local user. The interface is the directory
 this checkout when it is built. Storage is the PostgreSQL ``ROBINAUTS_DATABASE_URL`` names,
 which a start with sign-in needs; the local development mode is in memory without it. The
 sign-in records are kept on the same storage. The server never changes the database: it
-refuses one that is not this build's and names the command.
+refuses one that is not this build's and names the command. ``ROBINAUTS_CHANNELS_SECRET``, when
+set, serves the bridges to chat platforms (``web/channels.py``).
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ from robinauts.controller.composition import (
 )
 from robinauts.controller.contract.domain import Config, ConfigError, StorageKind
 from robinauts.web.app import create_app
+from robinauts.web.channels import channels_config
 from robinauts.web.sign_in import SIGN_IN_KEYS, SignInConfig, is_loopback, parse_sign_in
 
 REPO = Path(__file__).resolve().parents[4]
@@ -60,6 +62,7 @@ NO_PROVIDER = (
 )
 NO_DATABASE = f"no database: set {DATABASE_URL_VARIABLE} to the PostgreSQL this deployment uses"
 SIGN_IN_OFF = "sign-in is off: the local development mode, one local user, loopback only"
+CHANNELS_ON = "the channels endpoint is served, to the bridges holding ROBINAUTS_CHANNELS_SECRET"
 
 
 def interface() -> Path:
@@ -123,6 +126,7 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         config, secret_for, sign_in = serving(
             tables, os.environ, host=host, dev_no_sign_in=dev_no_sign_in
         )
+        channels = channels_config(os.environ)
     except ConfigError as refused:
         print(refused, file=sys.stderr)
         return 1
@@ -131,6 +135,8 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     logging.basicConfig(level=logging.INFO)
     if dev_no_sign_in:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
+    if channels is not None:
+        logging.getLogger(__name__).info(CHANNELS_ON)
     uvicorn.run(
         create_app(
             composed,
@@ -139,6 +145,7 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
             ui_dir=ui_dir,
             # A store in memory is this process's alone: its worker runs here.
             spawn_worker_in_subprocess=storage.kind is StorageKind.POSTGRES,
+            channels=channels,
         ),
         host=host,
         port=port,
