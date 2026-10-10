@@ -22,6 +22,7 @@ its own.
 
     backend/     the Python backend (the `robinauts` package)
     frontend/    the web UI (Vite, React, TypeScript)
+    clients/     programs that reach the API from outside: the connectors to chat platforms
     docs/        specs, decisions, architecture, legal records
     scripts/     the checks, one script per gate, which CI runs as they are
 

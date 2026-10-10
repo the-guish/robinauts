@@ -1,0 +1,150 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+
+# The connectors: chat platforms reaching a Robinauts deployment through its HTTP API
+# (docs/clients/connectors/working-notes/warm-up/plan.md). A distribution of its own, apart from
+# the server's `robinauts`: neither imports the other.
+
+[project]
+name = "robinauts-connectors"
+version = "0.1.0"
+description = "Chat platforms, Slack and Telegram first, reaching a Robinauts deployment."
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "The Robinauts Authors" }]
+dependencies = [
+    # The Robinauts API, and the platforms that have no library of their own.
+    "httpx>=0.28",
+    # The events of a turn's stream: the same types the backend encodes them with.
+    "ag-ui-protocol>=1.0,<2",
+]
+
+# A platform is an extra; `webhook` is the serve runner, which every platform that can only be
+# served pulls in itself. Slack and Telegram connect without it, and serve with it.
+[project.optional-dependencies]
+webhook = ["fastapi>=0.141,<0.142", "uvicorn>=0.52.4,<0.55"]
+# Socket Mode over aiohttp; the Events API with [webhook].
+slack = ["slack-bolt>=1.30,<2", "slack-sdk>=3.40,<4", "aiohttp>=3.12"]
+# Long polling; Telegram's webhook with [webhook].
+telegram = ["aiogram>=3.31,<4"]
+
+[project.scripts]
+robinauts-connectors = "robinauts_connectors.cli:run"
+
+# How a connector is found, these two and any an outside distribution registers.
+[project.entry-points."robinauts.connectors"]
+slack = "robinauts_connectors.slack:SlackConnector"
+telegram = "robinauts_connectors.telegram:TelegramConnector"
+
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.6", "black>=24.0", "import-linter>=2.0"]
+
+[tool.uv]
+# As the backend's: the platforms the project runs on, and the only ones the lock resolves for.
+environments = ["sys_platform == 'linux'", "sys_platform == 'darwin'"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/robinauts_connectors"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "PT018"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["robinauts_connectors"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error"]
+
+# ---------------------------------------------------------------------------
+# Import rules (plan.md, "Imports"). Anything not allowed is forbidden; the source of each
+# rule is the whole package, so a module added tomorrow is inside it.
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_package = "robinauts_connectors"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "nothing imports the server"
+type = "forbidden"
+source_modules = ["robinauts_connectors"]
+forbidden_modules = ["robinauts"]
+
+[[tool.importlinter.contracts]]
+name = "no platform imports another"
+type = "independence"
+modules = ["robinauts_connectors.slack", "robinauts_connectors.telegram"]
+
+[[tool.importlinter.contracts]]
+name = "the core imports no platform"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = [
+    "robinauts_connectors.domain",
+    "robinauts_connectors.connector",
+    "robinauts_connectors.bridge",
+    "robinauts_connectors.api",
+    "robinauts_connectors.links",
+    "robinauts_connectors.settings",
+    "robinauts_connectors.registry",
+    "robinauts_connectors.connect",
+    "robinauts_connectors.serve",
+    "robinauts_connectors.cli",
+]
+# The platforms are found through their entry points, never imported by name.
+forbidden_modules = ["robinauts_connectors.slack", "robinauts_connectors.telegram"]
+
+[[tool.importlinter.contracts]]
+name = "aiogram only under telegram"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts_connectors"]
+forbidden_modules = ["aiogram"]
+ignore_imports = [
+    "robinauts_connectors.telegram -> *",
+    "robinauts_connectors.telegram.** -> *",
+]
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "slack_bolt and slack_sdk only under slack"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts_connectors"]
+forbidden_modules = ["slack_bolt", "slack_sdk"]
+ignore_imports = [
+    "robinauts_connectors.slack -> *",
+    "robinauts_connectors.slack.** -> *",
+]
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "FastAPI, Starlette and uvicorn only in the serve runner"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts_connectors"]
+forbidden_modules = ["fastapi", "starlette", "uvicorn"]
+ignore_imports = ["robinauts_connectors.serve -> *"]
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "ag_ui and httpx only in the API client"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts_connectors"]
+forbidden_modules = ["ag_ui", "httpx"]
+ignore_imports = ["robinauts_connectors.api -> *"]
+unmatched_ignore_imports_alerting = "none"

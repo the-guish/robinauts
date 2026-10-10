@@ -47,6 +47,18 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "The Robinauts Authors"
 SPDX-License-Identifier = "Apache-2.0"
 
+# The clients' files that carry no comment syntax or are written by a tool:
+# the Markdown, as the root's, and the connectors' lockfile.
+[[annotations]]
+path = [
+    "clients/README.md",
+    "clients/connectors/README.md",
+    "clients/connectors/uv.lock",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "The Robinauts Authors"
+SPDX-License-Identifier = "Apache-2.0"
+
 # The vendored chat components: somebody else's MIT source, copied in under
 # the rules of ADR 0001 and recorded in docs/legal/ip-clearance.md. They carry
 # no header because they carry no edit that is not listed in their README:
