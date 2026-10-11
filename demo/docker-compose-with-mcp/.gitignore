@@ -1,0 +1,4 @@
+# What the demo makes while it runs, and the one file that holds keys.
+.state/
+agents-fs/
+.env
