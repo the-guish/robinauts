@@ -179,6 +179,32 @@ Both are pinned to an exact version in
 Dependabot does not see them. The licence gate itself needs no tool at all:
 it is the Python standard library.
 
+## Packages from git
+
+`kataloop-core` and `uni-llm-client`, the kataloop engine's loop and model
+client ([ADR 0006](docs/adr/0006-kataloop-engine.md)), are our own and not
+released yet, so `backend/pyproject.toml` takes each from its repository at
+one commit (`[tool.uv.sources]`) and the lock records that commit. Both state
+`License-Expression: Apache-2.0`, and they bring nothing the lock did not hold
+but each other: `uni-llm-client` needs `httpx2` 2.16, which moved `httpx2`
+and `httpcore2` (both BSD-3-Clause) from the 2.13 the vendors' clients had
+locked (checked 2026-10-24, at the commits the lock pins).
+
+The gate holds them to the policy like everything else, with one difference
+in where it reads them: no index serves them, so their metadata is the
+environment's, which uv built from the pinned commit, or nothing at all — a
+package locked from git and not installed is one the gate cannot read, and
+it fails. And uv builds them from source, which `--no-build` refuses: CI's
+`uv sync --locked --no-build`, and this gate's own `uv run --locked
+--no-build`, cannot install them, so until the releases the gate runs here
+as `uv run --locked python scripts/licence_gate.py` after a plain `uv sync
+--locked`. A release turns each into a version from PyPI, read like any
+other, and this section goes.
+
+`kataloop` itself, the package that adds kataloop's MCP toolbox, is not
+locked: it needs `mcp` 2.3 or later, and `langchain-mcp-adapters` needs `mcp`
+below 2 (see ["Known exclusions"](#known-exclusions)).
+
 ## Restricted dependencies in use
 
 Three things in each row below are checked against reality on every run, so a
@@ -388,4 +414,5 @@ then, the by-hand list is the record.
 | `langgraph-checkpoint-postgres` | MIT, but depends on `psycopg` | cannot be adopted as it is, and is not needed: the model's memory is a column of the platform's own schema ([ADR 0002](docs/adr/0002-conversation-persistence.md), [ADR 0005](docs/adr/0005-the-framework-owns-the-loop-and-the-memory.md)) |
 | `mcp` (the MCP Python SDK), `langchain-mcp-adapters`, `fastmcp-slim` | MIT; `mcp` requires `pywin32` on Windows, which the lock does not resolve for | **adopted** (2026-09-30; [ADR 0005](docs/adr/0005-the-framework-owns-the-loop-and-the-memory.md)): both agent frameworks' MCP clients are built on the SDK, and the tool loop is theirs now, so the client of our own over `httpx` that stood in for it is gone. The whole tree passes -- `jsonschema` and what it brings, `pyjwt`, `sse-starlette`, `httpx-sse`, `python-multipart`, `cryptography` (`Apache-2.0 OR BSD-3-Clause`), `cffi` (`MIT-0`, allowed by the decision above), `pycparser` (BSD-3-Clause), and what is in the lock already (checked 2026-09-30, at `mcp` 1.30.0). It was known to fail on two packages until then: `MIT-0` settled one, and the row below records the other |
 | `pywin32` | the classifier `License :: OSI Approved :: Python Software Foundation License` and `PSF` in the free-text field, which name a family and no licence. The licence files the 312 wheel ships (read 2026-09-30) are the three-clause BSD text for `win32`, `com` and `pythonwin`, MIT for the MAPI stub library, an HPND-style notice for Scintilla, the Python licence stack for the IDLE-derived code -- and the **LGPL-2.1** text as `adodbapi/license.txt`, for the `adodbapi` package the wheel carries | **not locked**: `mcp` needs it on Windows alone (`sys_platform == "win32"`, for the job objects of its stdio transport, which the platform never uses -- its tool servers are reached over HTTP), and the lock is resolved for Linux and macOS only. That is the decision the wheel forced. The gate fails closed on the metadata, and the runtime exception by name that the project owner asked for first, the twin of the `colorama` row the development-only table had, could not be written: an exception never covers a forbidden licence, LGPL is forbidden in any version, transitively, development-only included, and a row signs what a person read. So the owner chose the platforms over the exception (2026-09-30), and `colorama` and `pywin32-ctypes`, Windows-only too, left the lock with it. The gate does not read platform markers, on purpose: what the lock has is checked whole, and what it does not have is not supported |
+| `kataloop`, with `mcp` 2 | Apache-2.0; `mcp` 2.3 is MIT | **not locked**, for want of a resolution rather than a licence: `kataloop` requires `mcp>=2.3,<3`, and `langchain-mcp-adapters`, the LangChain engine's MCP client, requires `mcp<2.0.0` in 0.3.2, its latest release. uv resolves both only by taking `langchain-mcp-adapters` back to 0.3.1, which states no bound and does not import on `mcp` 2 (tried 2026-10-24), so the LangChain engine would leave the build. The kataloop engine takes `kataloop-core` instead, and reaches its tool servers through a toolbox of its own over the `mcp` 1 SDK already locked ([ADR 0006](docs/adr/0006-kataloop-engine.md)) |
 | `pgserver` | no licence metadata published: the wheel carries the Apache-2.0 text as its `LICENSE` and states no identifier anywhere, so the gate fails closed | not a dependency, and cannot become one. The tests take the URL of a PostgreSQL they are given, and `demo/` runs this as a **tool** in a throwaway environment (`uv run --with pgserver==<version>`), as `reuse` and `pip-audit` are run: nothing imports it and it is not in `backend/uv.lock` ([demo/README.md](demo/README.md)) |

@@ -20,6 +20,17 @@ dependencies = [
     "asyncpg>=0.30",
     "fastapi>=0.141,<0.142",
     "httpx>=0.28",
+    # The loop, the memory and the context management of the kataloop engine
+    # (docs/specs/agent-engines.md, docs/adr/0006-kataloop-engine.md): our own
+    # library, Apache-2.0, from git until it is released ([tool.uv.sources]).
+    # `kataloop-core` and not `kataloop`, the package that adds kataloop's MCP
+    # toolbox: that one needs `mcp` 2.3 or later, and `langchain-mcp-adapters`,
+    # the LangChain engine's MCP client, needs `mcp` below 2 (0.3.2, its latest
+    # release, says so; 0.3.1 does not, and fails to import on 2). One
+    # environment holds one `mcp`, so the kataloop engine reaches its tool
+    # servers through a toolbox of its own over the `mcp` 1 SDK the other two
+    # engines' clients already lock, until it can take kataloop's.
+    "kataloop-core",
     # `create_agent` and the middleware the LangGraph engine runs a turn on
     # (docs/specs/agents.md, "A turn"), and the framework's own MCP client.
     "langchain>=1.4,<2",
@@ -40,10 +51,21 @@ dependencies = [
     "langchain-openai>=1.6.2,<1.6.7",
     "langgraph>=1.2,<2",
     "langsmith>=0.3.45,<1",
+    # The MCP SDK, which the kataloop engine's toolbox reaches the tool servers
+    # through (docs/adr/0006-kataloop-engine.md), and which the other two
+    # engines' MCP clients bring: imported, so a direct dependency, pinned below
+    # 2, whose API the toolbox is not written for.
+    "mcp>=1.30,<2",
     "openai>=3.14.1,<3.20",
     # The `mcp` extra brings the framework's MCP client (fastmcp), which is how
     # that engine reaches the tool servers (docs/specs/agents.md, "Tools").
     "pydantic-ai-slim[anthropic,mcp,openai]>=2.47,<3",
+    # The model client kataloop reaches the vendors through, which the kataloop
+    # engine imports to build it with the provider's key and endpoint: a direct
+    # dependency for the reason `anthropic` is, and named here although
+    # `kataloop-core` brings it, because uv does not follow a git dependency's
+    # own sources. Apache-2.0, ours, from git until it is released.
+    "uni-llm-client",
     # The ASGI server `robinauts start` runs (docs/specs/backend.md, "Web"),
     # imported by `robinauts.web.cli` and by nothing else -- the import-linter
     # contract below has named it since before it was a dependency. BSD-3-Clause,
@@ -93,6 +115,18 @@ environments = [
     "sys_platform == 'linux'",
     "sys_platform == 'darwin'",
 ]
+
+# Our own packages that are not released yet, each at the commit the kataloop
+# engine was written against (docs/adr/0006-kataloop-engine.md). A release
+# turns each into a version bound above and its line here goes. Until then the
+# lock holds git sources, which CI's `uv sync --locked --no-build`, the
+# hash-pinned requirements of the wheel and the audit of the registry's
+# packages all refuse. `kataloop`, with its MCP toolbox, is the same repository
+# and commit, subdirectory packages/python/kataloop, once `mcp` 2 can be locked
+# here (above).
+[tool.uv.sources]
+kataloop-core = { git = "https://github.com/the-guish/kataloop", rev = "c181da74b55d753a1a5d233711218e4d79f1c695", subdirectory = "packages/python/kataloop-core" }
+uni-llm-client = { git = "https://github.com/the-guish/uni-llm-client", rev = "351c55f9a2da6e7826d54e0394d72a1d58dba72c", subdirectory = "packages/python" }
 
 [project.scripts]
 robinauts = "robinauts.web.cli:run"
