@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""Engine settings for the tests of both engines: a made-up key per provider, no tool secrets."""
+"""Engine settings for the engines' tests: a made-up key per provider, no tool secrets."""
 
 from __future__ import annotations
 

@@ -85,3 +85,7 @@ def test_pydantic_ai_resume(server: str, page: Page, local_gpt: FakeLocalGPTServ
 
 def test_langchain_resume(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
     aux_resume("langchain_tools", server, page, local_gpt)
+
+
+def test_kataloop_resume(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+    aux_resume("kataloop_tools", server, page, local_gpt)

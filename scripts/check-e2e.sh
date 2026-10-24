@@ -4,7 +4,7 @@
 #
 # The interface in a real browser: backend/tests/e2e/, which a plain test run
 # does not collect. It builds the interface, installs Playwright's Chromium and
-# runs the tests against a real server on both agent engines, over a model
+# runs the tests against a real server on every agent engine, over a model
 # server and an MCP server the tests run on this machine, so none needs a key.
 # Slower than the rest of the suite, so CI runs it after the fast tests.
 # Further arguments are passed on to pytest.

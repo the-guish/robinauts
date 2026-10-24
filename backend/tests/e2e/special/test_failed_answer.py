@@ -91,3 +91,7 @@ def test_pydantic_ai_failed_answer(server: str, page: Page, local_gpt: FakeLocal
 
 def test_langchain_failed_answer(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
     aux_failed_answer("langchain", server, page, local_gpt)
+
+
+def test_kataloop_failed_answer(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+    aux_failed_answer("kataloop", server, page, local_gpt)

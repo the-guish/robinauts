@@ -163,3 +163,7 @@ def test_langchain_master_journey(server: str, page: Page, local_gpt: FakeLocalG
 
 def test_pydantic_ai_master_journey(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
     aux_master_journey("pydantic_ai", server, page, local_gpt)
+
+
+def test_kataloop_master_journey(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+    aux_master_journey("kataloop", server, page, local_gpt)

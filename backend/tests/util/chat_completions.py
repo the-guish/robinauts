@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""OpenAI's Chat Completions on the wire, for both engines' tests: a vendor a test writes.
+"""OpenAI's Chat Completions on the wire, for the engines' tests: a vendor a test writes.
 
 The engines' own tests run a turn over a chat model they script, which proves
 the agent, the loop, the stream and the mapping and says nothing about the one
@@ -13,8 +13,8 @@ that answers from a script and keeps every request -- so the request is the
 real one, byte for byte, the stream is parsed by the real SDK and the real
 framework, and nothing leaves the process.
 
-Written without either framework, and named after the protocol rather than an
-engine: both engines' tests use it, and the discard test is that deleting an
+Written without any framework, and named after the protocol rather than an
+engine: every engine's tests use it, and the discard test is that deleting an
 adapter breaks its own tests and nothing else (``docs/layout.md``).
 """
 

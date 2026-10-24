@@ -55,3 +55,7 @@ def test_pydantic_ai_first_message(server: str, page: Page, local_gpt: FakeLocal
 
 def test_langchain_first_message(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
     aux_first_message("langchain", server, page, local_gpt)
+
+
+def test_kataloop_first_message(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+    aux_first_message("kataloop", server, page, local_gpt)

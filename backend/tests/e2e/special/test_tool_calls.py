@@ -116,3 +116,7 @@ def test_pydantic_ai_tool_calls(server: str, page: Page, local_gpt: FakeLocalGPT
 
 def test_langchain_tool_calls(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
     aux_tool_calls("langchain", server, page, local_gpt)
+
+
+def test_kataloop_tool_calls(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+    aux_tool_calls("kataloop", server, page, local_gpt)
