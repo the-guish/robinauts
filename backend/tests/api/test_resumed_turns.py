@@ -2,8 +2,8 @@
 # Copyright The Robinauts Authors
 
 """A server killed in the middle of a turn: the next server ends the turn as interrupted, and
-leaves it so. Asked to resume it, it goes on from the rounds its engine saved, in both
-engines."""
+leaves it so. Asked to resume it, it goes on from the rounds its engine saved, in the engines
+that keep their memory in PostgreSQL."""
 
 from __future__ import annotations
 
@@ -121,6 +121,8 @@ def wait_for(condition: Any, seconds: float = 30.0) -> Any:
     raise AssertionError("not in time")
 
 
+# Not kataloop: its memory is in the worker's process until `kataloop[postgres]`, so the server
+# that resumes the turn has no session to resume it from.
 @pytest.mark.parametrize("agent", ["langchain_counter", "pydantic_ai_counter"])
 def test_a_crashed_turn_waits_until_asked_to_resume(
     model_server: FakeLocalGPTServer, counter_url: str, tmp_path: Path, agent: str

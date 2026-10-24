@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""A turn that ended early is resumed from the rounds it saved, in both engines: each on its
-memory on PostgreSQL, a model server over HTTP and a real MCP server."""
+"""A turn that ended early is resumed from the rounds it saved, in every engine: each on its
+memory on PostgreSQL, a model server over HTTP and a real MCP server. kataloop's memory is in
+this process whatever the storage, until ``kataloop[postgres]``: the test keeps one engine, so it
+holds what the turn saved all the same."""
 
 from __future__ import annotations
 
@@ -23,7 +25,13 @@ from robinauts.agent_engines.contract.domain import (
     ToolServerAuth,
     ToolServerConfig,
 )
-from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings
+from robinauts.agent_engines.contract.ports import (
+    AgentEngine,
+    EngineSettings,
+    StorageConfig,
+    StorageKind,
+)
+from robinauts.agent_engines.kataloop_engine import init_kataloop
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
 from robinauts.agent_engines.langchain_engine.memory import PostgresMemory as LangChainMemory
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
@@ -103,8 +111,9 @@ ENGINES = pytest.mark.parametrize(
     [
         lambda s, pool: LangChainEngine(s, LangChainMemory(pool)),
         lambda s, pool: PydanticAIEngine(s, PydanticAIMemory(pool)),
+        lambda s, pool: init_kataloop(s, StorageConfig(StorageKind.POSTGRES, {"pool": pool})),
     ],
-    ids=["langchain", "pydantic-ai"],
+    ids=["langchain", "pydantic-ai", "kataloop"],
 )
 
 

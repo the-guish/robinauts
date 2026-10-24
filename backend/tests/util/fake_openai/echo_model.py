@@ -23,6 +23,21 @@ def last_question(messages: list[dict[str, Any]]) -> str:
     return text_of(next(m for m in reversed(messages) if m["role"] == "user"))
 
 
+LANGCHAIN_SUMMARY = "<role>\nContext Extraction Assistant"
+"""How LangChain's summarisation prompt begins, the last message of the request for a summary."""
+
+KATALOOP_SUMMARY = "The user's message is a conversation between a user and you, the assistant."
+"""The first sentence of kataloop's summary prompt, the system prompt of its summary call."""
+
+
+def asks_for_a_summary(messages: list[dict[str, Any]]) -> bool:
+    """Whether the request is an engine asking for a summary of the older conversation."""
+    if LANGCHAIN_SUMMARY in text_of(messages[-1]):
+        return True
+    first = messages[0]
+    return first["role"] == "system" and text_of(first).startswith(KATALOOP_SUMMARY)
+
+
 class EchoModel:
     def reply(self, messages: list[dict[str, Any]]) -> str:
         return last_question(messages)

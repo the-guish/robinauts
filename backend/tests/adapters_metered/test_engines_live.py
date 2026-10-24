@@ -26,7 +26,14 @@ from robinauts.agent_engines.contract.domain import (
     ProviderKind,
     TextDelta,
 )
-from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings, ProviderKeyLookup
+from robinauts.agent_engines.contract.ports import (
+    AgentEngine,
+    EngineSettings,
+    ProviderKeyLookup,
+    StorageConfig,
+    StorageKind,
+)
+from robinauts.agent_engines.kataloop_engine import init_kataloop
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
 from robinauts.agent_engines.langchain_engine.memory import InProcessMemory as LangChainMemory
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
@@ -48,10 +55,14 @@ def pydantic_ai(settings: EngineSettings) -> AgentEngine:
     return PydanticAIEngine(settings, PydanticAIMemory())
 
 
+def kataloop(settings: EngineSettings) -> AgentEngine:
+    return init_kataloop(settings, StorageConfig(StorageKind.IN_MEMORY, {}))
+
+
 NewEngine = Callable[[EngineSettings], AgentEngine]
 
 ENGINES = pytest.mark.parametrize(
-    "new_engine", [langchain, pydantic_ai], ids=["langchain", "pydantic-ai"]
+    "new_engine", [langchain, pydantic_ai, kataloop], ids=["langchain", "pydantic-ai", "kataloop"]
 )
 
 

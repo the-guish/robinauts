@@ -50,6 +50,13 @@ system_prompt = "{system_prompt}"
 model = "local_gpt"
 engine = "pydantic-ai"
 tools = ["flaky"]
+
+[agents.kataloop_flaky]
+title = "kataloop, flaky tools"
+system_prompt = "{system_prompt}"
+model = "local_gpt"
+engine = "kataloop"
+tools = ["flaky"]
 """
 
 
@@ -129,7 +136,7 @@ def last_event(started: httpx.Response) -> str:
     return [line for line in started.text.splitlines() if line.startswith("data: ")][-1]
 
 
-@pytest.mark.parametrize("agent", ["langchain_flaky", "pydantic_ai_flaky"])
+@pytest.mark.parametrize("agent", ["langchain_flaky", "pydantic_ai_flaky", "kataloop_flaky"])
 def test_a_turn_goes_on_through_rate_limits_and_failing_tools(
     flaky_stack: tuple[str, str], model_server: FakeLocalGPTServer, agent: str
 ) -> None:

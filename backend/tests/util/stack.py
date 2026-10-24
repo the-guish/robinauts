@@ -32,7 +32,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 ROBINAUTS = Path(sys.executable).with_name("robinauts")
 
-AGENTS = ("langchain", "pydantic_ai")
+AGENTS = ("langchain", "pydantic_ai", "kataloop")
 """The agents of the configuration, one per engine, without tools."""
 
 SYSTEM_PROMPT = "You are a robinaut."
@@ -64,6 +64,12 @@ title = "Pydantic AI"
 system_prompt = "{system_prompt}"
 model = "local_gpt"
 engine = "pydantic-ai"
+
+[agents.kataloop]
+title = "kataloop"
+system_prompt = "{system_prompt}"
+model = "local_gpt"
+engine = "kataloop"
 """
 
 TOOLS_CONFIG = """
@@ -83,6 +89,13 @@ title = "Pydantic AI with tools"
 system_prompt = "{system_prompt}"
 model = "local_gpt"
 engine = "pydantic-ai"
+tools = ["tools"]
+
+[agents.kataloop_tools]
+title = "kataloop with tools"
+system_prompt = "{system_prompt}"
+model = "local_gpt"
+engine = "kataloop"
 tools = ["tools"]
 """
 

@@ -58,17 +58,28 @@ async def test_an_engine_that_cannot_run_the_agent_is_refused_by_name(
         await build(config(engine, kind), {"fake": anthropic_only})
 
 
+@asyncio_test
+async def test_a_kataloop_agent_on_openai_itself_is_refused_by_name() -> None:
+    # uni-llm-client, kataloop's model client, has no OpenAI kind yet.
+    with pytest.raises(domain.UnreachableProviderError, match="engine 'kataloop' cannot reach"):
+        await build(config("kataloop", domain.ProviderKind.OPENAI), installed())
+
+
 @pytest.mark.parametrize(
-    ("engine", "built_as"),
+    ("engine", "built_as", "reaches_openai"),
     [
-        ("langchain", "LangChainEngine"),
-        ("pydantic-ai", "PydanticAIEngine"),
-        ("echo", "EchoEngine"),
+        ("langchain", "LangChainEngine", True),
+        ("pydantic-ai", "PydanticAIEngine", True),
+        # uni-llm-client has no OpenAI kind yet.
+        ("kataloop", "KataloopEngine", False),
+        ("echo", "EchoEngine", True),
     ],
 )
 @asyncio_test
-async def test_an_installed_engine_is_built_by_name(engine: str, built_as: str) -> None:
-    assert set(installed()) == {"langchain", "pydantic-ai", "echo"}
+async def test_an_installed_engine_is_built_by_name(
+    engine: str, built_as: str, reaches_openai: bool
+) -> None:
+    assert set(installed()) == {"langchain", "pydantic-ai", "kataloop", "echo"}
     engines = await build(config(engine), installed())
     assert type(engines[engine]).__name__ == built_as
-    assert ProviderKind.OPENAI in engines[engine].kinds()
+    assert (ProviderKind.OPENAI in engines[engine].kinds()) is reaches_openai

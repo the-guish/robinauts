@@ -2,7 +2,7 @@
 # Copyright The Robinauts Authors
 
 """A turn whose engine says nothing for ``stalled_after_seconds`` is stopped as failed; one that
-keeps saying something runs on past it, in both engines."""
+keeps saying something runs on past it, in every engine."""
 
 from __future__ import annotations
 
@@ -45,6 +45,13 @@ title = "Pydantic AI, napping"
 system_prompt = "{{system_prompt}}"
 model = "local_gpt"
 engine = "pydantic-ai"
+tools = ["naps"]
+
+[agents.kataloop_naps]
+title = "kataloop, napping"
+system_prompt = "{{system_prompt}}"
+model = "local_gpt"
+engine = "kataloop"
 tools = ["naps"]
 """
 
@@ -91,7 +98,7 @@ def last_event(server: str, agent: str, text: str) -> tuple[str, float]:
     return last, time.monotonic() - began
 
 
-@pytest.mark.parametrize("agent", ["langchain_naps", "pydantic_ai_naps"])
+@pytest.mark.parametrize("agent", ["langchain_naps", "pydantic_ai_naps", "kataloop_naps"])
 def test_a_quiet_engine_is_stopped_and_a_busy_one_is_not(
     napping: str, model_server: FakeLocalGPTServer, agent: str
 ) -> None:

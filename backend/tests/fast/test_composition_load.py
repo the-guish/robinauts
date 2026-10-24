@@ -18,6 +18,7 @@ EXAMPLES = Path(__file__).resolve().parents[3] / "examples"
         ("echo.toml", "echo", "echo"),
         ("langchain.toml", "assistant", "langchain"),
         ("pydantic-ai.toml", "assistant", "pydantic-ai"),
+        ("kataloop.toml", "assistant", "kataloop"),
     ],
 )
 def test_loads_the_example(example: str, agent: str, engine: str) -> None:

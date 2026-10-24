@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""A tool server's `exclude`: the tools both engines offer the model, from a real MCP server.
+"""A tool server's `exclude`: the tools the engines offer the model, from a real MCP server.
 
 The engines' own MCP clients list the tools; only the model is a stand-in, which keeps what
 it was asked (``chat_completions.Vendor``).
@@ -14,7 +14,9 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+import httpx2
 import pytest
+from kataloop_core import MemoryStore
 from test_engines_over_chat_completions import SETTINGS
 
 from robinauts.agent_engines.contract.domain import (
@@ -23,6 +25,8 @@ from robinauts.agent_engines.contract.domain import (
     ToolServerConfig,
 )
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings
+from robinauts.agent_engines.kataloop_engine import engine as kataloop_module
+from robinauts.agent_engines.kataloop_engine.engine import KataloopEngine
 from robinauts.agent_engines.langchain_engine import engine as langchain_module
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
 from robinauts.agent_engines.langchain_engine.memory import InProcessMemory as LangChainMemory
@@ -70,10 +74,23 @@ def pydantic_ai(vendor: Vendor, settings: EngineSettings, mp: pytest.MonkeyPatch
     return PydanticAIEngine(settings, PydanticAIMemory())
 
 
+def kataloop(vendor: Vendor, settings: EngineSettings, mp: pytest.MonkeyPatch) -> AgentEngine:
+    real = kataloop_module.client_for
+
+    def plugged(*args: Any) -> Any:
+        http = httpx2.AsyncClient(transport=httpx2.MockTransport(vendor.answer))
+        return real(*args, http_client=http)
+
+    mp.setattr(kataloop_module, "client_for", plugged)
+    return KataloopEngine(settings, MemoryStore())
+
+
 Build = Callable[[Vendor, EngineSettings, pytest.MonkeyPatch], AgentEngine]
 
 
-@pytest.mark.parametrize("build", [langchain, pydantic_ai], ids=["langchain", "pydantic-ai"])
+@pytest.mark.parametrize(
+    "build", [langchain, pydantic_ai, kataloop], ids=["langchain", "pydantic-ai", "kataloop"]
+)
 @pytest.mark.parametrize(
     ("exclude", "offered"), [((), ["kept", "dropped"]), (("dropped",), ["kept"])]
 )

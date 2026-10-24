@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""Both engines over OpenAI's Chat Completions: real client and framework, in-process.
+"""The engines over OpenAI's Chat Completions: real client and framework, in-process.
 
 Every test runs once per engine (the engine is in the test's id). Each engine's ``plug_*``
 function builds the engine with the test's vendor plugged into its client and ``add`` as its
-one tool; everything after that is the same for both.
+one tool; everything after that is the same for all three, but the field the output limit is
+sent in: OpenAI's SDK sends ``max_completion_tokens``, and uni-llm-client, kataloop's client,
+the older ``max_tokens`` every compatible server knows.
 """
 
 from __future__ import annotations
@@ -14,7 +16,9 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+import httpx2
 import pytest
+from kataloop_core import LocalToolbox, MemoryStore, ToolServer, ToolSpec
 from pydantic_ai.toolsets import FunctionToolset
 
 from robinauts.agent_engines.contract.domain import (
@@ -29,6 +33,8 @@ from robinauts.agent_engines.contract.domain import (
     ToolResult,
 )
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings
+from robinauts.agent_engines.kataloop_engine import engine as kataloop_module
+from robinauts.agent_engines.kataloop_engine.engine import KataloopEngine
 from robinauts.agent_engines.langchain_engine import engine as langchain_module
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
 from robinauts.agent_engines.langchain_engine.memory import InProcessMemory as LangChainMemory
@@ -89,11 +95,50 @@ def plug_pydantic_ai(vendor: Vendor, monkeypatch: pytest.MonkeyPatch) -> AgentEn
     return PydanticAIEngine(SETTINGS, PydanticAIMemory())
 
 
+def plug_kataloop(vendor: Vendor, monkeypatch: pytest.MonkeyPatch) -> AgentEngine:
+    """uni-llm-client's own HTTP client is the seam: it is handed one that the vendor answers."""
+    real_client_for = kataloop_module.client_for
+
+    def plugged_client_for(*args: Any) -> Any:
+        http = httpx2.AsyncClient(transport=httpx2.MockTransport(vendor.answer))
+        return real_client_for(*args, http_client=http)
+
+    def tools_for(*_: object) -> Any:
+        return (ToolServer("calculator", "local"),), LocalToolbox({"calculator": [(ADD, run_add)]})
+
+    monkeypatch.setattr(kataloop_module, "client_for", plugged_client_for)
+    monkeypatch.setattr(kataloop_module, "tools_for", tools_for)
+    return KataloopEngine(SETTINGS, MemoryStore())
+
+
+ADD = ToolSpec(
+    "add",
+    "Add two integers.",
+    {
+        "type": "object",
+        "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+        "required": ["a", "b"],
+    },
+)
+"""``add``, as kataloop's in-process toolbox offers it."""
+
+
+async def run_add(arguments: Any) -> str:
+    return str(add(**arguments))
+
+
 Plug = Callable[[Vendor, pytest.MonkeyPatch], AgentEngine]
 
 ENGINES = pytest.mark.parametrize(
-    "plug", [plug_langchain, plug_pydantic_ai], ids=["langchain", "pydantic-ai"]
+    ("plug", "ceiling"),
+    [
+        (plug_langchain, "max_completion_tokens"),
+        (plug_pydantic_ai, "max_completion_tokens"),
+        (plug_kataloop, "max_tokens"),
+    ],
+    ids=["langchain", "pydantic-ai", "kataloop"],
 )
+"""Each engine, and the field of the request its output limit is sent in."""
 
 
 async def turn_over(plug: Plug, vendor: Vendor, monkeypatch: pytest.MonkeyPatch) -> list[Event]:
@@ -110,7 +155,7 @@ async def turn_over(plug: Plug, vendor: Vendor, monkeypatch: pytest.MonkeyPatch)
 @ENGINES
 @asyncio_test
 async def test_an_answer_is_asked_for_as_configured_and_streamed_back(
-    plug: Plug, monkeypatch: pytest.MonkeyPatch
+    plug: Plug, ceiling: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     vendor = Vendor(streamed(*said("Two and three ", "make five."), *finished()))
     events = await turn_over(plug, vendor, monkeypatch)
@@ -122,11 +167,8 @@ async def test_an_answer_is_asked_for_as_configured_and_streamed_back(
     assert str(request.url) == ENDPOINT + PATH
     assert request.headers["Authorization"] == "Bearer key-of-gw"
     body = vendor.body_sent
-    assert (body["model"], body["stream"], body["max_completion_tokens"]) == (
-        "vendor-name",
-        True,
-        321,
-    )
+    assert (body["model"], body["stream"], body[ceiling]) == ("vendor-name", True, 321)
+    assert {"max_tokens", "max_completion_tokens"} & set(body) == {ceiling}
     assert [(message["role"], message["content"]) for message in body["messages"]] == [
         ("system", AGENT.system_prompt),
         ("user", PROMPT),
@@ -136,7 +178,7 @@ async def test_an_answer_is_asked_for_as_configured_and_streamed_back(
 @ENGINES
 @asyncio_test
 async def test_a_tool_round_is_run_and_its_result_sent_back(
-    plug: Plug, monkeypatch: pytest.MonkeyPatch
+    plug: Plug, ceiling: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     vendor = Vendor(
         bodies=[

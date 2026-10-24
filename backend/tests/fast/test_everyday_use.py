@@ -115,7 +115,7 @@ def echoed(*questions: str) -> list[str]:
 async def test_everyday_use(agent: str) -> None:
     tables = tomllib.loads(stack.config_for("http://model.invalid/v1"))
     config, secret_for = configure(tables, dict(stack.API_KEY))
-    engines = {name: mock_engine() for name in ("langchain", "pydantic-ai")}
+    engines = {name: mock_engine() for name in ("langchain", "pydantic-ai", "kataloop")}
     engine = engines[config.agents[agent].engine]
     composed = compose(
         config,
@@ -148,6 +148,7 @@ async def test_everyday_use(agent: str) -> None:
         assert [(a["id"], a["title"], a["model"]) for a in agents] == [
             ("langchain", "LangChain", "local_gpt"),
             ("pydantic_ai", "Pydantic AI", "local_gpt"),
+            ("kataloop", "kataloop", "local_gpt"),
         ]
         models = (await api.get("/api/models"))["items"]
         assert [(m["id"], m["title"]) for m in models] == [

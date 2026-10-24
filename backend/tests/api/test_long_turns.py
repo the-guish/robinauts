@@ -40,7 +40,7 @@ def fake_model() -> FakeModel:
     return LongTaskModel()
 
 
-@pytest.mark.parametrize("agent", ["langchain_tools", "pydantic_ai_tools"])
+@pytest.mark.parametrize("agent", ["langchain_tools", "pydantic_ai_tools", "kataloop_tools"])
 def test_a_turn_outlasts_a_vendor_error_and_fifty_tool_rounds(
     api: httpx.Client, local_gpt: FakeLocalGPTServer, agent: str
 ) -> None:
