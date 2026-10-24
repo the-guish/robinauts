@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx2
 import pytest
-from kataloop_core import MemoryStore
+from kataloop import MemoryStore
 from test_engines_over_chat_completions import SETTINGS
 
 from robinauts.agent_engines.contract.domain import (

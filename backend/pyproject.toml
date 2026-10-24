@@ -20,16 +20,21 @@ dependencies = [
     "asyncpg>=0.30",
     "fastapi>=0.141,<0.142",
     "httpx>=0.28",
-    # The loop, the memory and the context management of the kataloop engine
+    # The loop, the memory and the context management of the kataloop engine,
+    # and `McpToolbox`, the toolbox it reaches the tool servers through
     # (docs/specs/agent-engines.md, docs/adr/0006-kataloop-engine.md): our own
     # library, Apache-2.0, from git until it is released ([tool.uv.sources]).
-    # `kataloop-core` and not `kataloop`, the package that adds kataloop's MCP
-    # toolbox: that one needs `mcp` 2.3 or later, and `langchain-mcp-adapters`,
-    # the LangChain engine's MCP client, needs `mcp` below 2 (0.3.2, its latest
-    # release, says so; 0.3.1 does not, and fails to import on 2). One
-    # environment holds one `mcp`, so the kataloop engine reaches its tool
-    # servers through a toolbox of its own over the `mcp` 1 SDK the other two
-    # engines' clients already lock, until it can take kataloop's.
+    # The toolbox runs on either major of the MCP SDK, and the `mcp-1` extra
+    # holds it to `mcp` 1: `langchain-mcp-adapters`, the LangChain engine's MCP
+    # client, needs `mcp` below 2 (0.3.2, its latest release, says so; 0.3.1
+    # does not, and fails to import on 2), and one environment holds one `mcp`.
+    # This becomes `kataloop[mcp-2]` when `langchain-mcp-adapters` moves to
+    # `mcp` 2.
+    "kataloop[mcp-1]",
+    # The loop without MCP, which `kataloop` brings and re-exports, and which
+    # robinauts imports only through `kataloop`: named here so that its commit
+    # in [tool.uv.sources] applies, since uv does not follow a git dependency's
+    # own sources. Apache-2.0, ours.
     "kataloop-core",
     # `create_agent` and the middleware the LangGraph engine runs a turn on
     # (docs/specs/agents.md, "A turn"), and the framework's own MCP client.
@@ -51,10 +56,13 @@ dependencies = [
     "langchain-openai>=1.6.2,<1.6.7",
     "langgraph>=1.2,<2",
     "langsmith>=0.3.45,<1",
-    # The MCP SDK, which the kataloop engine's toolbox reaches the tool servers
-    # through (docs/adr/0006-kataloop-engine.md), and which the other two
-    # engines' MCP clients bring: imported, so a direct dependency, pinned below
-    # 2, whose API the toolbox is not written for.
+    # The MCP SDK, on the major `kataloop[mcp-1]` and the LangChain engine's
+    # `langchain-mcp-adapters` share (docs/adr/0006-kataloop-engine.md); the
+    # Pydantic AI engine's client runs on it too. Imported by the LangChain
+    # engine, so a direct dependency, and its bound is the one both of them
+    # need, stated here rather than left to their metadata: 0.3.1 of
+    # `langchain-mcp-adapters` states none and fails to import on 2. It moves
+    # to 2, with the extra, when `langchain-mcp-adapters` does.
     "mcp>=1.30,<2",
     "openai>=3.14.1,<3.20",
     # The `mcp` extra brings the framework's MCP client (fastmcp), which is how
@@ -62,9 +70,9 @@ dependencies = [
     "pydantic-ai-slim[anthropic,mcp,openai]>=2.47,<3",
     # The model client kataloop reaches the vendors through, which the kataloop
     # engine imports to build it with the provider's key and endpoint: a direct
-    # dependency for the reason `anthropic` is, and named here although
-    # `kataloop-core` brings it, because uv does not follow a git dependency's
-    # own sources. Apache-2.0, ours, from git until it is released.
+    # dependency for the reason `anthropic` is, and for the reason
+    # `kataloop-core` is: uv does not follow a git dependency's own sources.
+    # Apache-2.0, ours, from git until it is released.
     "uni-llm-client",
     # The ASGI server `robinauts start` runs (docs/specs/backend.md, "Web"),
     # imported by `robinauts.web.cli` and by nothing else -- the import-linter
@@ -117,15 +125,17 @@ environments = [
 ]
 
 # Our own packages that are not released yet, each at the commit the kataloop
-# engine was written against (docs/adr/0006-kataloop-engine.md). A release
-# turns each into a version bound above and its line here goes. Until then the
-# lock holds git sources, which CI's `uv sync --locked --no-build`, the
-# hash-pinned requirements of the wheel and the audit of the registry's
-# packages all refuse. `kataloop`, with its MCP toolbox, is the same repository
-# and commit, subdirectory packages/python/kataloop, once `mcp` 2 can be locked
-# here (above).
+# engine was written against (docs/adr/0006-kataloop-engine.md): `kataloop` and
+# `kataloop-core` at one commit of their repository, `uni-llm-client` at one of
+# its own. uv reads these for robinauts' own requirements alone and not for a
+# git dependency's, so all three are direct dependencies above although
+# `kataloop` brings the other two. A release turns each into a version bound
+# above and its line here goes. Until then the lock holds git sources, which
+# CI's `uv sync --locked --no-build`, the hash-pinned requirements of the wheel
+# and the audit of the registry's packages all refuse.
 [tool.uv.sources]
-kataloop-core = { git = "https://github.com/the-guish/kataloop", rev = "c181da74b55d753a1a5d233711218e4d79f1c695", subdirectory = "packages/python/kataloop-core" }
+kataloop = { git = "https://github.com/the-guish/kataloop", rev = "0770940b327d5e66a03606c513cd30c44208a2c6", subdirectory = "packages/python/kataloop" }
+kataloop-core = { git = "https://github.com/the-guish/kataloop", rev = "0770940b327d5e66a03606c513cd30c44208a2c6", subdirectory = "packages/python/kataloop-core" }
 uni-llm-client = { git = "https://github.com/the-guish/uni-llm-client", rev = "351c55f9a2da6e7826d54e0394d72a1d58dba72c", subdirectory = "packages/python" }
 
 [project.scripts]
@@ -425,12 +435,13 @@ ignore_imports = [
 ]
 unmatched_ignore_imports_alerting = "none"
 
+# The kataloop engine reaches the MCP SDK through kataloop's toolbox alone.
 [[tool.importlinter.contracts]]
-name = "the Anthropic SDK and the OpenAI SDK only under the LangChain and Pydantic AI engines"
+name = "the Anthropic SDK, the OpenAI SDK and the MCP SDK only under the LangChain and Pydantic AI engines"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts"]
-forbidden_modules = ["anthropic", "openai"]
+forbidden_modules = ["anthropic", "openai", "mcp"]
 ignore_imports = [
     "robinauts.agent_engines.langchain_engine -> *",
     "robinauts.agent_engines.langchain_engine.** -> *",
@@ -439,24 +450,10 @@ ignore_imports = [
 ]
 unmatched_ignore_imports_alerting = "none"
 
-# kataloop_engine's toolbox is over the MCP SDK until it can take kataloop's own
-# (docs/adr/0006-kataloop-engine.md).
-[[tool.importlinter.contracts]]
-name = "the MCP SDK only under the three framework engines"
-type = "forbidden"
-allow_indirect_imports = true
-source_modules = ["robinauts"]
-forbidden_modules = ["mcp"]
-ignore_imports = [
-    "robinauts.agent_engines.kataloop_engine -> *",
-    "robinauts.agent_engines.kataloop_engine.** -> *",
-    "robinauts.agent_engines.langchain_engine -> *",
-    "robinauts.agent_engines.langchain_engine.** -> *",
-    "robinauts.agent_engines.pydantic_ai_engine -> *",
-    "robinauts.agent_engines.pydantic_ai_engine.** -> *",
-]
-unmatched_ignore_imports_alerting = "none"
-
+# `kataloop` here includes the HTTP client the engine's tool servers are reached
+# with: the engine names it as kataloop's `McpHttpClient` and `McpHttpTimeout`,
+# httpx's classes on `mcp` 1 and httpx2's on 2, and imports neither httpx nor
+# the MCP SDK itself (the contracts on those, above and below).
 [[tool.importlinter.contracts]]
 name = "kataloop, uni-llm-client and httpx2 only under kataloop_engine"
 type = "forbidden"
@@ -486,7 +483,7 @@ ignore_imports = [
 unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
-name = "httpx only under web and the three framework engines"
+name = "httpx only under web and the LangChain and Pydantic AI engines"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts"]
@@ -494,8 +491,6 @@ forbidden_modules = ["httpx"]
 ignore_imports = [
     "robinauts.web -> *",
     "robinauts.web.** -> *",
-    "robinauts.agent_engines.kataloop_engine -> *",
-    "robinauts.agent_engines.kataloop_engine.** -> *",
     "robinauts.agent_engines.langchain_engine -> *",
     "robinauts.agent_engines.langchain_engine.** -> *",
     "robinauts.agent_engines.pydantic_ai_engine -> *",

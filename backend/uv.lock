@@ -1066,9 +1066,24 @@ wheels = [
 ]
 
 [[package]]
+name = "kataloop"
+version = "0.1.dev11+g0770940b3"
+source = { git = "https://github.com/the-guish/kataloop?subdirectory=packages%2Fpython%2Fkataloop&rev=0770940b327d5e66a03606c513cd30c44208a2c6#0770940b327d5e66a03606c513cd30c44208a2c6" }
+dependencies = [
+    { name = "httpx2" },
+    { name = "kataloop-core" },
+    { name = "mcp" },
+]
+
+[package.optional-dependencies]
+mcp-1 = [
+    { name = "mcp" },
+]
+
+[[package]]
 name = "kataloop-core"
-version = "0.1.dev9+gc181da74b"
-source = { git = "https://github.com/the-guish/kataloop?subdirectory=packages%2Fpython%2Fkataloop-core&rev=c181da74b55d753a1a5d233711218e4d79f1c695#c181da74b55d753a1a5d233711218e4d79f1c695" }
+version = "0.1.dev11+g0770940b3"
+source = { git = "https://github.com/the-guish/kataloop?subdirectory=packages%2Fpython%2Fkataloop-core&rev=0770940b327d5e66a03606c513cd30c44208a2c6#0770940b327d5e66a03606c513cd30c44208a2c6" }
 dependencies = [
     { name = "uni-llm-client" },
 ]
@@ -1958,6 +1973,7 @@ dependencies = [
     { name = "asyncpg" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "kataloop", extra = ["mcp-1"] },
     { name = "kataloop-core" },
     { name = "langchain" },
     { name = "langchain-anthropic" },
@@ -1991,7 +2007,8 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.30" },
     { name = "fastapi", specifier = ">=0.141,<0.142" },
     { name = "httpx", specifier = ">=0.28" },
-    { name = "kataloop-core", git = "https://github.com/the-guish/kataloop?subdirectory=packages%2Fpython%2Fkataloop-core&rev=c181da74b55d753a1a5d233711218e4d79f1c695" },
+    { name = "kataloop", extras = ["mcp-1"], git = "https://github.com/the-guish/kataloop?subdirectory=packages%2Fpython%2Fkataloop&rev=0770940b327d5e66a03606c513cd30c44208a2c6" },
+    { name = "kataloop-core", git = "https://github.com/the-guish/kataloop?subdirectory=packages%2Fpython%2Fkataloop-core&rev=0770940b327d5e66a03606c513cd30c44208a2c6" },
     { name = "langchain", specifier = ">=1.4,<2" },
     { name = "langchain-anthropic", specifier = ">=1.2,<2" },
     { name = "langchain-core", specifier = ">=1.2,<2" },

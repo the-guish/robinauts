@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 import httpx2
-from kataloop_core import ModelSpec
+from kataloop import ModelSpec
 from uni_llm_client import AsyncClient, ProviderConfig
 
 from robinauts.agent_engines.contract.domain import (

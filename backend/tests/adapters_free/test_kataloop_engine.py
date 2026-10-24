@@ -6,7 +6,8 @@
 The model is uni-llm-client's real client over ``httpx2.MockTransport``: a scripted vendor
 speaking Anthropic's Messages API, streamed, as the client expects it, plugged in through the
 engine's seam. The tools of the contract are kataloop's ``LocalToolbox``; the toolbox the engine
-reaches MCP servers with is tested against a real one.
+reaches MCP servers with, kataloop's ``McpToolbox`` over the engine's HTTP clients, is tested
+against a real one.
 """
 
 from __future__ import annotations
@@ -20,10 +21,20 @@ from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-import httpx
 import httpx2
 import pytest
-from kataloop_core import LocalToolbox, MemoryStore, ModelSpec, ToolOutput, ToolServer, ToolSpec
+from kataloop import (
+    LocalToolbox,
+    McpHttpClient,
+    McpHttpTimeout,
+    McpToolbox,
+    MemoryStore,
+    ModelSpec,
+    Toolbox,
+    ToolOutput,
+    ToolServer,
+    ToolSpec,
+)
 from mcp.server.fastmcp import Context
 from uni_llm_client import Message, ProviderError
 
@@ -48,7 +59,7 @@ from robinauts.agent_engines.kataloop_engine import engine as engine_module
 from robinauts.agent_engines.kataloop_engine import init_kataloop
 from robinauts.agent_engines.kataloop_engine.clients import client_for
 from robinauts.agent_engines.kataloop_engine.engine import KataloopEngine
-from robinauts.agent_engines.kataloop_engine.tools import McpToolbox, tool_server, tools_for
+from robinauts.agent_engines.kataloop_engine.tools import http_client, tool_server, tools_for
 from util.aio import asyncio_test
 from util.contracts.engine import (
     ANSWER,
@@ -377,6 +388,12 @@ def test_an_agent_has_the_servers_it_names_in_its_order() -> None:
 # --- The toolbox, against a real MCP server ---------------------------------------------------
 
 
+def engine_toolbox() -> Toolbox:
+    """The toolbox the engine reaches an agent's tool servers with."""
+    _, toolbox = tools_for(AgentDefinition("be brief"), tool_settings(NoSecrets()))
+    return toolbox
+
+
 def shout(text: str) -> str:
     """The text, in capitals."""
     return text.upper()
@@ -403,7 +420,7 @@ def credential(ctx: Context) -> str:
 @pytest.mark.io
 @asyncio_test
 async def test_the_toolbox_lists_and_calls_a_server_with_its_credential() -> None:
-    toolbox = McpToolbox()
+    toolbox = engine_toolbox()
     with mcp_server(shout, credential) as url:
         server = ToolServer("s", url, headers={"Authorization": "Bearer s3cret"}, timeout=10.0)
         listed = await toolbox.tools(server)
@@ -422,17 +439,19 @@ async def test_the_toolbox_lists_and_calls_a_server_with_its_credential() -> Non
 @asyncio_test
 async def test_a_call_is_a_session_of_its_own_and_lists_nothing() -> None:
     """The SDK lists the tools before a result to check its structured content, which the model
-    never sees; kataloop's toolbox does not, and neither does this one."""
+    never sees; kataloop's toolbox does not. kataloop's own tests record only the listings and
+    the calls a server receives: this one sees each call initialise a session of its own, over
+    the engine's HTTP client."""
     sent: list[str] = []
 
-    async def record(request: httpx.Request) -> None:
+    async def record(request: Any) -> None:
         if request.method == "POST":
             sent.append(json.loads(request.content)["method"])
 
-    def watched(headers: dict[str, str], timeout: httpx.Timeout) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            headers=headers, timeout=timeout, event_hooks={"request": [record]}
-        )
+    def watched(headers: dict[str, str], timeout: McpHttpTimeout) -> McpHttpClient:
+        client = http_client(headers, timeout)
+        client.event_hooks = {"request": [record]}
+        return client
 
     with mcp_server(shout) as url:
         toolbox = McpToolbox(http_client_factory=watched)
@@ -445,7 +464,9 @@ async def test_a_call_is_a_session_of_its_own_and_lists_nothing() -> None:
 @asyncio_test
 async def test_a_tool_that_fails_is_an_error_result_in_its_own_words() -> None:
     with mcp_server(fail) as url:
-        output = await McpToolbox().call(ToolServer("s", url, timeout=10.0), "fail", {"text": "x"})
+        output = await engine_toolbox().call(
+            ToolServer("s", url, timeout=10.0), "fail", {"text": "x"}
+        )
     assert output.is_error
     assert "the tool broke on x" in output.text
 
@@ -455,7 +476,7 @@ async def test_a_tool_that_fails_is_an_error_result_in_its_own_words() -> None:
 async def test_a_tool_past_its_server_s_timeout_is_a_timeout() -> None:
     with mcp_server(nap) as url:
         with pytest.raises(TimeoutError):
-            await McpToolbox().call(ToolServer("s", url, timeout=0.5), "nap", {"seconds": 2})
+            await engine_toolbox().call(ToolServer("s", url, timeout=0.5), "nap", {"seconds": 2})
 
 
 @pytest.mark.io
@@ -464,7 +485,7 @@ async def test_a_server_out_of_reach_is_its_transport_s_error() -> None:
     with mcp_server(shout) as url:
         pass
     with pytest.raises(Exception) as raised:
-        await McpToolbox().tools(ToolServer("s", url, timeout=5.0))
+        await engine_toolbox().tools(ToolServer("s", url, timeout=5.0))
     assert not isinstance(raised.value, BaseExceptionGroup)
 
 

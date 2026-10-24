@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from kataloop_core import MemoryStore
+from kataloop import MemoryStore
 
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings, StorageConfig
 from robinauts.agent_engines.kataloop_engine.engine import KataloopEngine

@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx2
 import pytest
-from kataloop_core import LocalToolbox, MemoryStore, ToolServer, ToolSpec
+from kataloop import LocalToolbox, MemoryStore, ToolServer, ToolSpec
 from pydantic_ai.toolsets import FunctionToolset
 
 from robinauts.agent_engines.contract.domain import (

@@ -20,7 +20,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
 
-import kataloop_core as kataloop
+import kataloop
 
 from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
