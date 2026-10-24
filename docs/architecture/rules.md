@@ -14,7 +14,7 @@ web -> controller.contract, controller.composition
 
 contract -> nothing from robinauts
 echo_engine -> contract
-kataloop_engine -> contract + kataloop deps + mcp
+kataloop_engine -> contract + kataloop deps
 langchain_engine -> contract + langchain deps + postgres
 pydantic_ai_engine -> contract + pydantic ai deps + postgres
 no engine imports another
@@ -33,8 +33,7 @@ composition -> contract, ports, core, adapters, application; imported by web alo
 langchain, langchain_core, langchain_*, langgraph, langchain_mcp_adapters, langsmith -> langchain_engine
 pydantic_ai, pydantic_graph, fastmcp, logfire, logfire_api, opentelemetry -> pydantic_ai_engine
 kataloop, kataloop_core, uni_llm_client, httpx2 -> kataloop_engine
-anthropic, openai -> langchain_engine, pydantic_ai_engine
-mcp -> langchain_engine, pydantic_ai_engine, kataloop_engine
+anthropic, openai, mcp -> langchain_engine, pydantic_ai_engine
 asyncpg, sqlite3, aiosqlite -> langchain_engine, pydantic_ai_engine, controller.adapters
-httpx -> web, langchain_engine, pydantic_ai_engine, kataloop_engine
+httpx -> web, langchain_engine, pydantic_ai_engine
 fastapi, starlette, uvicorn, ag_ui -> web

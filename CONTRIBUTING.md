@@ -36,10 +36,10 @@ The backend uses [uv](https://docs.astral.sh/uv/). From `backend/`:
 
     uv sync
 
-Until `kataloop-core` and `uni-llm-client`, the kataloop engine's packages,
-are released, the lock takes them from git and uv builds them from source,
-which the checks' `uv run --locked --no-build` refuses: run a check's command
-without `--no-build` after a plain `uv sync --locked`
+Until `kataloop`, `kataloop-core` and `uni-llm-client`, the kataloop engine's
+packages, are released, the lock takes them from git and uv builds them from
+source, which the checks' `uv run --locked --no-build` refuses: run a check's
+command without `--no-build` after a plain `uv sync --locked`
 ([DEPENDENCIES.md](DEPENDENCIES.md#packages-from-git)).
 
 ## Checks

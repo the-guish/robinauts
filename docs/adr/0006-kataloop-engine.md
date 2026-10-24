@@ -45,20 +45,25 @@ released yet.
   storage.** `kataloop[postgres]`, its store over PostgreSQL, is planned and
   not written. The engine holds the store for its lifetime; `setup` makes
   nothing ready and is safe from `robinauts db init`.
-- **The tools go through a toolbox of the engine's own, over the MCP SDK.**
+- **The tools go through kataloop's `McpToolbox`, on the `mcp` 1 SDK.**
   kataloop's `Toolbox` port is what the loop calls a tool through, and
-  `kataloop`'s `McpToolbox` is its MCP implementation, on `mcp` 2.3 or later.
-  `langchain-mcp-adapters`, the LangChain engine's MCP client, requires `mcp`
-  below 2 (0.3.2, its latest release; 0.3.1 states no bound and fails to
-  import on 2), and one environment holds one `mcp`. So the engine depends on
-  `kataloop-core`, the loop without MCP, and reaches its tool servers through
-  a toolbox of its own on the `mcp` 1 SDK the other two engines lock, held to
-  kataloop's specification of `McpToolbox`. It becomes kataloop's own once
-  `mcp` 2 can be locked here.
-- **The dependencies come from git**, pinned to a commit each:
-  `kataloop-core` and `uni-llm-client`, both direct, since uv does not follow
-  a git dependency's own sources. Both are Apache-2.0 and pass the licence
-  gate.
+  `kataloop`'s `McpToolbox` is its MCP implementation, on either major of the
+  SDK, with an extra for each: `kataloop[mcp-1]` and `kataloop[mcp-2]`. One
+  environment holds one `mcp`, and `langchain-mcp-adapters`, the LangChain
+  engine's MCP client, requires `mcp` below 2 (0.3.2, its latest release;
+  0.3.1 states no bound and fails to import on 2), so the engine depends on
+  `kataloop[mcp-1]`. The engine turns each tool server's credential into its
+  headers, and makes the HTTP client of each session from kataloop's
+  `McpHttpClient` and `McpHttpTimeout`, which are the classes of the SDK's
+  HTTP stack on either major: httpx's on 1, httpx2's on 2.
+- **`kataloop[mcp-2]` when `langchain-mcp-adapters` moves to `mcp` 2.** The
+  extra and the pin on `mcp` in `backend/pyproject.toml` change, and the
+  engine does not. fastmcp, the Pydantic AI engine's MCP client, moves with
+  them, to its 4.x, which is on `mcp` 2 and which `pydantic-ai` allows.
+- **The dependencies come from git**, pinned to a commit each: `kataloop` and
+  `kataloop-core` at one commit of their repository, and `uni-llm-client`.
+  All three are direct, since uv does not follow a git dependency's own
+  sources, and all three are Apache-2.0 and pass the licence gate.
 
 ## Consequences
 
@@ -98,14 +103,19 @@ Costs:
   them out without a word, since the export names them by URL and no
   advisory database knows them. Each release turns a line of
   `[tool.uv.sources]` into a version bound and gives those gates back.
-- **A toolbox of our own**, about a hundred lines over the SDK, until
-  kataloop's can be locked. Its tests run it against a real MCP server.
+- **The MCP SDK's major is the LangChain engine's.** kataloop's toolbox
+  runs on `mcp` 1 for as long as `langchain-mcp-adapters` needs it.
 
 ## Alternatives considered
 
-- **kataloop's `McpToolbox`, with `mcp` 2.** We could not: the lock resolves
+- **`kataloop[mcp-2]`, with `mcp` 2.** We could not: the lock resolves
   only by taking `langchain-mcp-adapters` back to 0.3.1, which does not
   import on `mcp` 2, and the LangChain engine would leave the build.
+- **A toolbox of the engine's own, over the `mcp` 1 SDK.** The engine had
+  one, held to kataloop's specification of `McpToolbox`, while kataloop's
+  ran on `mcp` 2 alone. It went when kataloop's came to run on `mcp` 1 too:
+  one toolbox, specified and tested in one place, which an MCP SDK of either
+  major serves alike.
 - **Wait for `kataloop[postgres]`.** We did not. The engine keeps the
   contract as it is, its tests run, and the store is one line of its
   factory to change.

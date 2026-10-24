@@ -93,9 +93,10 @@ contract.
   LangGraph for one, Pydantic AI for another, kataloop and uni-llm-client,
   the model client kataloop reaches the vendors through, for the third.
 - The model vendors' own SDKs.
-- An MCP client, normally the framework's. The kataloop engine's is a
-  toolbox of its own over the MCP SDK until kataloop's, which needs a newer
-  SDK than LangChain's client allows, can be installed beside the others.
+- An MCP client, normally the framework's. The kataloop engine's is
+  kataloop's own, which runs on either major of the MCP SDK: the engine
+  installs it as `kataloop[mcp-1]`, on the first, which LangChain's client
+  needs, and moves to `kataloop[mcp-2]` when that client moves to the second.
 - The shared contract: the engine interface, the events, the agent
   definition, the settings, the storage description and the errors. Nothing
   else from Robinauts.
