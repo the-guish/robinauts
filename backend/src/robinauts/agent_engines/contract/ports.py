@@ -115,6 +115,7 @@ EngineFactory = Callable[[EngineSettings, StorageConfig], AgentEngine]
 _SHIPPED: Mapping[str, tuple[str, str]] = {
     "langchain": ("robinauts.agent_engines.langchain_engine", "init_langchain"),
     "pydantic-ai": ("robinauts.agent_engines.pydantic_ai_engine", "init_pydantic_ai"),
+    "kataloop": ("robinauts.agent_engines.kataloop_engine", "init_kataloop"),
     "echo": ("robinauts.agent_engines.echo_engine", "init_echo"),
 }
 """Every engine the package ships: its name, and where its init function is."""

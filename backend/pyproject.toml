@@ -265,6 +265,7 @@ allow_indirect_imports = true
 source_modules = ["robinauts.agent_engines.contract"]
 forbidden_modules = [
     "robinauts.agent_engines.echo_engine",
+    "robinauts.agent_engines.kataloop_engine",
     "robinauts.agent_engines.langchain_engine",
     "robinauts.agent_engines.pydantic_ai_engine",
 ]
@@ -274,6 +275,7 @@ name = "no engine imports another"
 type = "independence"
 modules = [
     "robinauts.agent_engines.echo_engine",
+    "robinauts.agent_engines.kataloop_engine",
     "robinauts.agent_engines.langchain_engine",
     "robinauts.agent_engines.pydantic_ai_engine",
 ]
@@ -285,6 +287,7 @@ allow_indirect_imports = true
 source_modules = ["robinauts.controller"]
 forbidden_modules = [
     "robinauts.agent_engines.echo_engine",
+    "robinauts.agent_engines.kataloop_engine",
     "robinauts.agent_engines.langchain_engine",
     "robinauts.agent_engines.pydantic_ai_engine",
     "robinauts.web",
@@ -423,11 +426,11 @@ ignore_imports = [
 unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
-name = "the Anthropic SDK, the OpenAI SDK and the MCP SDK only under the two framework engines"
+name = "the Anthropic SDK and the OpenAI SDK only under the LangChain and Pydantic AI engines"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts"]
-forbidden_modules = ["anthropic", "openai", "mcp"]
+forbidden_modules = ["anthropic", "openai"]
 ignore_imports = [
     "robinauts.agent_engines.langchain_engine -> *",
     "robinauts.agent_engines.langchain_engine.** -> *",
@@ -436,8 +439,38 @@ ignore_imports = [
 ]
 unmatched_ignore_imports_alerting = "none"
 
+# kataloop_engine's toolbox is over the MCP SDK until it can take kataloop's own
+# (docs/adr/0006-kataloop-engine.md).
 [[tool.importlinter.contracts]]
-name = "database drivers only under the two framework engines and controller.adapters"
+name = "the MCP SDK only under the three framework engines"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts"]
+forbidden_modules = ["mcp"]
+ignore_imports = [
+    "robinauts.agent_engines.kataloop_engine -> *",
+    "robinauts.agent_engines.kataloop_engine.** -> *",
+    "robinauts.agent_engines.langchain_engine -> *",
+    "robinauts.agent_engines.langchain_engine.** -> *",
+    "robinauts.agent_engines.pydantic_ai_engine -> *",
+    "robinauts.agent_engines.pydantic_ai_engine.** -> *",
+]
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "kataloop, uni-llm-client and httpx2 only under kataloop_engine"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts"]
+forbidden_modules = ["kataloop", "kataloop_core", "uni_llm_client", "httpx2"]
+ignore_imports = [
+    "robinauts.agent_engines.kataloop_engine -> *",
+    "robinauts.agent_engines.kataloop_engine.** -> *",
+]
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "database drivers only under the LangChain and Pydantic AI engines and controller.adapters"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts"]
@@ -453,7 +486,7 @@ ignore_imports = [
 unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
-name = "httpx only under web and the two framework engines"
+name = "httpx only under web and the three framework engines"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts"]
@@ -461,6 +494,8 @@ forbidden_modules = ["httpx"]
 ignore_imports = [
     "robinauts.web -> *",
     "robinauts.web.** -> *",
+    "robinauts.agent_engines.kataloop_engine -> *",
+    "robinauts.agent_engines.kataloop_engine.** -> *",
     "robinauts.agent_engines.langchain_engine -> *",
     "robinauts.agent_engines.langchain_engine.** -> *",
     "robinauts.agent_engines.pydantic_ai_engine -> *",

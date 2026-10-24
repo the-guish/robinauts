@@ -20,7 +20,7 @@ from robinauts.controller.contract.domain import (
     WorkConfig,
 )
 
-ENGINES = ("langchain", "pydantic-ai", "echo")
+ENGINES = ("langchain", "pydantic-ai", "kataloop", "echo")
 
 # An HTTP field name is a token (RFC 9110, section 5.1): nothing else can go on the wire.
 HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
