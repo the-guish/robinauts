@@ -204,7 +204,7 @@ max_output_tokens = 8192
 [agents.assistant]
 title = "Assistant"
 model = "sonnet"
-engine = "langgraph"
+engine = "langchain"
 system_prompt = "Play fair."
 # Optional: how long one of its turns may run. Left out, max_turn_seconds.
 turn_timeout_seconds = 3600
@@ -231,23 +231,32 @@ Notes on what is and is not there:
 - **`[[admin]]` is refused.** Roles are deferred in this release: everyone
   who may sign in is a user, and a file with an `admin` table does not
   start ([specs/sign-in.md](specs/sign-in.md)).
-- **Engines**: `langgraph` and `pydantic-ai`, both wired. **Provider
-  kinds**: all four, under both engines. `anthropic` and `openai` are the
-  vendors themselves, at the endpoint the engines pin, and take no
-  `base_url`; `anthropic-compatible` is any endpoint that speaks Anthropic's
-  Messages API and `openai-compatible` any that speaks OpenAI's Chat
-  Completions, at a `base_url` you give. **What `base_url` means differs by
-  protocol**: it is the prefix the client appends its own path to, which is
-  `/v1/messages` for Anthropic's (so OpenRouter is
+- **Engines**: `langchain` (LangGraph underneath), `pydantic-ai` and
+  `kataloop`, all wired. **Provider kinds**: all four under `langchain` and
+  `pydantic-ai`; `kataloop` reaches every kind but `openai`, which its model
+  client, uni-llm-client, does not speak yet, and an agent of it on an
+  `openai` model is refused at start-up. **kataloop keeps its memory in the
+  server's process** until `kataloop[postgres]` exists: a restart forgets
+  what its conversations said, the next turn of each fails, and a turn the
+  restart interrupted cannot be resumed; with two servers on one database, a
+  conversation whose next turn the other server takes fails the same way.
+  Its users start a new conversation.
+  `anthropic` and `openai` are the vendors themselves, at the endpoint the
+  engines pin, and take no `base_url`; `anthropic-compatible` is any endpoint
+  that speaks Anthropic's Messages API and `openai-compatible` any that
+  speaks OpenAI's Chat Completions, at a `base_url` you give. **What
+  `base_url` means differs by protocol**: it is the prefix the client appends
+  its own path to, which is `/v1/messages` for Anthropic's (so OpenRouter is
   `https://openrouter.ai/api`) and `/chat/completions` alone for OpenAI's
   (so OpenRouter is `https://openrouter.ai/api/v1`, and a vLLM server on
   this machine `http://127.0.0.1:8000/v1`). The OpenAI kinds speak Chat
   Completions, never the Responses API, and the key is sent as
   `Authorization: Bearer`. `max_output_tokens` left out means 8192 over
-  Anthropic's protocol, which requires a ceiling, and no ceiling at all over
-  OpenAI's; one that is set is sent to `openai` as `max_completion_tokens`
-  and to `openai-compatible` as `max_tokens`, the field OpenRouter and older
-  servers know.
+  Anthropic's protocol, which requires a ceiling (16000 under `kataloop`),
+  and no ceiling at all over OpenAI's. One that is set is sent over OpenAI's
+  protocol as `max_completion_tokens` by `langchain` and `pydantic-ai`, the
+  field OpenAI's own SDK sends, and as `max_tokens` by `kataloop`, the older
+  field OpenRouter and every compatible server know.
 - **What the engines take out of the environment.** The vendors' clients
   would otherwise read settings from variables nobody wrote in this file, so
   the engines pass everything as arguments and, when they are built at
@@ -693,10 +702,12 @@ engine = "pydantic-ai"
 | `model_providers.<id>: the API key is read from the environment variable X, which is unset or empty` | as above, for a model provider | set it; every *declared* provider needs its key, used or not |
 | `model_providers.<id>.kind: this build cannot reach '…' providers; it was built with …` | a build whose engines do not offer that kind; this one offers all four, so it is a build of something else | use one of the kinds the message lists |
 | every turn on an `openai-compatible` provider fails, most often with a `404` | `base_url` is missing the API's version: OpenAI's client appends `/chat/completions` alone | end `base_url` where the endpoint's own documentation puts `/chat/completions` after it, usually at `/v1` |
-| every turn on an `openai-compatible` provider fails with a `400` naming `max_tokens` | the endpoint knows only the newer `max_completion_tokens`, and a compatible endpoint is sent the older field every server has known | leave `max_output_tokens` out for that model |
+| every turn on an `openai-compatible` provider fails with a `400` naming `max_completion_tokens` | the endpoint knows only the older `max_tokens`, and `langchain` and `pydantic-ai` send the newer field, as OpenAI's SDK does | leave `max_output_tokens` out for that model, or run its agents on `kataloop` |
+| every turn of a `kataloop` agent on an `openai-compatible` provider fails with a `400` naming `max_tokens` | the endpoint knows only the newer `max_completion_tokens`, and `kataloop` sends the older field every compatible server has known | leave `max_output_tokens` out for that model, or run its agents on another engine |
 | every turn on one OpenAI model fails, and the vendor's message says the model is not supported on this endpoint, or to use the Responses API | OpenAI serves some models (several `-pro` and agentic ones) only over the Responses API, and this build speaks Chat Completions for both OpenAI kinds | pick a model whose page on OpenAI's site lists `v1/chat/completions` |
 | a turn with tools on GPT-6 Sol, GPT-6 Luna or GPT-5.6 Sol is refused by OpenAI (for GPT-5.6 Sol, "Function tools with reasoning_effort are not supported … in /v1/chat/completions"), and the same model answers without tools | OpenAI documents function calling over Chat Completions on GPT-6 Sol and Luna only with reasoning off, OpenAI Support reported the GPT-5.6 Sol refusal (2026-09-07), and the other GPT-5.6 models reason by default and are untried; the engines do not turn reasoning off (not yet seen in a live turn here) | use another model for an agent with tools |
-| `agents.<id>.engine: one of langgraph, pydantic-ai, not '…'` | a misspelt engine | `langgraph` or `pydantic-ai`; both are wired in this build |
+| `agents.<id>: engine '…' is not one of ('langchain', 'pydantic-ai', 'kataloop', 'echo')` | a misspelt engine | `langchain`, `pydantic-ai` or `kataloop`, all wired in this build; `echo` answers with the question, for smoke tests |
+| `agent '…' runs on model '…', of kind 'openai', which engine 'kataloop' cannot reach` | a kataloop agent on OpenAI itself, which uni-llm-client does not speak yet | run that agent on `langchain` or `pydantic-ai` |
 | `admin: roles are not in this release …` | an `[[admin]]` table | remove it; roles are deferred |
 | `allow: no entry, so nobody could sign in` | providers configured, allow list empty | add at least one `[[allow]]` |
 | `allow N: group needs providers.<id>.groups_claim …` | a `group` entry with no claim named | add `groups_claim`, and the `groups` scope |

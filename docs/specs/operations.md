@@ -55,7 +55,7 @@ What an internal platform team deploys and controls.
     some servers want next to a bearer, are not configurable yet.
   - `none`: nothing.
 - **A tool server's `exclude`** lists tools of the server, by the server's
-  own names, that agents are not given: both engines leave them out of
+  own names, that agents are not given: every engine leaves them out of
   the tools the model is offered. One use is a tool whose input schema a
   model provider refuses, which fails every turn of every agent that uses
   the server; Composio's `COMPOSIO_MANAGE_SKILL` has `anyOf` at the top of

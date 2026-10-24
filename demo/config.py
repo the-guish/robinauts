@@ -85,7 +85,27 @@ so that an agent never names a server the platform would have no secret for."""
 GITHUB_URL = "https://api.githubcopilot.com/mcp/"
 """GitHub's remote MCP server, which takes the token as a bearer secret."""
 
-WHOLE_LINES = (BASE_URL, TOOLS, GITHUB_SERVER)
+KATALOOP_AGENT = "@KATALOOP_AGENT@"
+"""The template's line for the kataloop agent, a whole line too: its table when the provider's
+kind is one kataloop reaches, and nothing otherwise, since an agent on a kind its engine cannot
+reach is a start-up refusal."""
+
+KATALOOP_KINDS = frozenset({"anthropic", "anthropic-compatible", "openai-compatible"})
+"""The provider kinds the kataloop engine reaches: every kind but ``openai``, which waits for
+uni-llm-client's OpenAI kind (``KataloopEngine.kinds`` in the backend, written out here because
+this runs on the standard library alone)."""
+
+KATALOOP_ID = "assistant-kataloop"
+
+KATALOOP_TABLE = f"""[agents.{KATALOOP_ID}]
+title = "Assistant (kataloop)"
+model = "@MODEL_ID@"
+engine = "kataloop"
+system_prompt = "You are the Robinauts demo assistant. Answer briefly, and play fair."
+"""
+"""The kataloop agent, as the other two are written in the template."""
+
+WHOLE_LINES = (BASE_URL, TOOLS, GITHUB_SERVER, KATALOOP_AGENT)
 
 FORBIDDEN = '"\\'
 """What a value may not hold, because a TOML basic string would not survive it.
@@ -144,8 +164,9 @@ def filled(template: str, values: dict[str, str], base_url: str, github_env: str
 
     ``WHOLE_LINES`` are the exceptions: ``@BASE_URL@`` becomes the assignment
     when there is an endpoint to write, the two GitHub lines become the tools
-    line and the server's table when there is a token's variable to name, and
-    each line is dropped when there is not.
+    line and the server's table when there is a token's variable to name, the
+    kataloop line becomes that agent's table when kataloop reaches the
+    provider's kind, and each line is dropped when there is not.
     """
     unknown = sorted(set(UNFILLED.findall(template)) - {*PLACEHOLDERS, *WHOLE_LINES})
     if unknown:
@@ -167,6 +188,10 @@ def filled(template: str, values: dict[str, str], base_url: str, github_env: str
                 GITHUB_SERVER,
                 f'[tool_servers.github]\nurl = "{GITHUB_URL}"\nsecret_env = "{github_env}"',
             )
+        elif line.strip() == KATALOOP_AGENT:
+            if values["@PROVIDER_KIND@"] not in KATALOOP_KINDS:
+                continue
+            line = KATALOOP_TABLE + ('tools = ["github"]\n' if github_env else "")
         lines.append(line)
     text = "".join(lines)
     for placeholder in PLACEHOLDERS:
@@ -201,6 +226,10 @@ def written(text: str, values: dict[str, str], base_url: str, github_env: str) -
     agents = tables.get("agents")
     if not agents:
         raise SystemExit("the configuration declares no agents")
+    said["the kataloop agent"] = (
+        KATALOOP_ID in agents,
+        values["@PROVIDER_KIND@"] in KATALOOP_KINDS,
+    )
     tools = ["github"] if github_env else []
     for agent_id, agent in agents.items():
         said[f"{agent_id}'s model"] = (agent.get("model", ""), ids[0])

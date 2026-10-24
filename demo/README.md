@@ -88,21 +88,32 @@ Completions too, and a configuration of your own may reach it as an
 `openai-compatible` provider at `https://openrouter.ai/api/v1` instead; the
 demo does not, so the OpenRouter models below are the ones it has always had.
 **OpenAI is reached with the OpenAI client**, at `https://api.openai.com/v1`,
-which both engines pin ([../docs/deployment.md](../docs/deployment.md)).
+which the two engines that reach it pin
+([../docs/deployment.md](../docs/deployment.md)).
 
 ## What you get
 
-Two agents, one per engine:
+One agent per engine:
 
 - **Assistant (LangGraph)**
 - **Assistant (Pydantic AI)**
+- **Assistant (kataloop)**, through OpenRouter or Anthropic. kataloop is our
+  own agent loop, and reaches the vendors through uni-llm-client, which has no
+  OpenAI kind yet, so with an OpenAI key the demo leaves this agent out.
 
 An agent is chosen when a conversation is started and stays with it, so
-**seeing the swap means starting a chat with each**: ask both the same thing,
-and then look at the two conversations in the panel. The same configuration,
-the same model, the same stored format; two frameworks underneath. That is the
-seam the project exists to prove
+**seeing the swap means starting a chat with each**: ask them the same thing,
+and then look at the conversations in the panel. The same configuration,
+the same model, the same stored format; a different framework underneath each.
+That is the seam the project exists to prove
 ([../docs/specs/agent-engines.md](../docs/specs/agent-engines.md)).
+
+**kataloop remembers its conversations in the server's process**, until
+`kataloop[postgres]` is written: `demo/stop.sh` and `demo/start.sh` keep every
+conversation in the panel, but the kataloop agent has forgotten what its own
+said, and the next question in one of them fails. Start a new chat with it
+after a restart. The other two agents keep their memory in the demo's
+PostgreSQL, and carry on.
 
 And three models, in the picker beside the agent's. Which three depends on
 the key:
@@ -145,7 +156,7 @@ when the agents have no tools; with a token, every turn on it may fail (see
 
 Unlike the agent, **the model can be changed at any point** in a
 conversation: the next answer comes from the new one, and every answer records
-the model that wrote it. Either engine runs any of the three.
+the model that wrote it. Each engine runs any of the three.
 
 What a conversation and an answer record is the model's **id** in the
 configuration, which names the default model whichever key reaches it:
@@ -199,10 +210,10 @@ tool-call toggle above the answer -- the tool's name, its arguments and what
 came back, as text.
 
 **GitHub's server is on whenever a GitHub token is exported** in the shell
-that runs `start.sh`, as `ROBINAUTS_GITHUB_TOKEN`. Both agents then get `tools = ["github"]`, and a
+that runs `start.sh`, as `ROBINAUTS_GITHUB_TOKEN`. Every agent then gets `tools = ["github"]`, and a
 question about a repository has the model call, say,
 `get_latest_release`; the answer arrives with the call's toggle above
-it. `start.sh` says `Tools: GitHub's MCP server, for both agents.` when it is
+it. `start.sh` says `Tools: GitHub's MCP server, for every agent.` when it is
 on.
 
 The token is handled like the model key: taken **out of the script's

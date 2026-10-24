@@ -6,9 +6,21 @@ An agent engine runs an AI agent on an agent framework and remembers the
 conversations it has. Robinauts talks to engines through one contract and
 does not know which framework is behind it.
 
-There are two engines today, one on LangChain (with LangGraph underneath)
-and one on Pydantic AI. From the outside they do the same job in the same
-way. Adding a third means writing one more engine that keeps the contract.
+There are three engines today: one on LangChain (with LangGraph
+underneath), one on Pydantic AI, and one on kataloop, our own agent loop over
+uni-llm-client, our own model client. From the outside they do the same job
+in the same way. Adding another means writing one more engine that keeps the
+contract.
+
+kataloop keeps its memory in the process, whatever the storage it is given,
+until its PostgreSQL store, `kataloop[postgres]`, exists: a restart forgets
+what its conversations said, and their next turn fails. It reaches the
+`anthropic`, `anthropic-compatible` and `openai-compatible` kinds, not
+`openai`, until uni-llm-client has an OpenAI kind. Its context management
+cuts a tool result past a fifth of the window and summarises the older
+exchanges, but never compacts the turn it is answering, and it places no
+prompt cache until uni-llm-client places the breakpoints
+([ADR 0006](../adr/0006-kataloop-engine.md)).
 
 An engine is standalone. The Robinauts backend uses it, but so can a
 scheduled job, a command line script, or anything else that follows the
@@ -78,9 +90,12 @@ contract.
 ## What an engine may depend on
 
 - Its own framework and the libraries that come with it: LangChain and
-  LangGraph for one, Pydantic AI for the other.
+  LangGraph for one, Pydantic AI for another, kataloop and uni-llm-client,
+  the model client kataloop reaches the vendors through, for the third.
 - The model vendors' own SDKs.
-- An MCP client, normally the framework's.
+- An MCP client, normally the framework's. The kataloop engine's is a
+  toolbox of its own over the MCP SDK until kataloop's, which needs a newer
+  SDK than LangChain's client allows, can be installed beside the others.
 - The shared contract: the engine interface, the events, the agent
   definition, the settings, the storage description and the errors. Nothing
   else from Robinauts.

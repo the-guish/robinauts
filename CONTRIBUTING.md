@@ -36,6 +36,12 @@ The backend uses [uv](https://docs.astral.sh/uv/). From `backend/`:
 
     uv sync
 
+Until `kataloop-core` and `uni-llm-client`, the kataloop engine's packages,
+are released, the lock takes them from git and uv builds them from source,
+which the checks' `uv run --locked --no-build` refuses: run a check's command
+without `--no-build` after a plain `uv sync --locked`
+([DEPENDENCIES.md](DEPENDENCIES.md#packages-from-git)).
+
 ## Checks
 
 Every check is a script in [scripts/](scripts/), and CI runs those same
@@ -57,7 +63,7 @@ or one at a time:
     scripts/check-frontend.sh   the frontend: format, lint, types, tests,
                                 the build with its licence gate, npm audit
     scripts/check-e2e.sh        the interface in a browser (Playwright),
-                                over a server on both agent engines and
+                                over a server on the agent engines and
                                 PostgreSQL: the one ROBINAUTS_TEST_DATABASE_URL
                                 names, or a throwaway one in Docker
     scripts/check-wheel.sh      the wheel: built, looked inside, installed

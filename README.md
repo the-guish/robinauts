@@ -51,9 +51,11 @@ with no licence to renegotiate.
 - Tools over MCP: assistants can call remote tool servers such as GitHub,
   Atlassian or Microsoft Learn. Each call is shown in the chat.
 - UI for managing conversation history. Message editing and replaying.
-- Two AI agent frameworks built in, LangGraph and Pydantic AI, chosen per
-  assistant by configuration. A conversation stays with the framework it
-  started on.
+- Three agent engines built in, chosen per assistant by configuration:
+  LangGraph, Pydantic AI, and kataloop, our own small agent loop over our own
+  model client, uni-llm-client. A conversation stays with the engine it
+  started on. kataloop keeps its memory in the server's process for now, so
+  its conversations do not survive a restart.
 
 
 ![Robinauts chat, with the model picker and the history panel](docs/images/robinauts-chat.png)

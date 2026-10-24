@@ -13,7 +13,8 @@ robinauts/
   backend/
     src/robinauts/
       agent_engines/    the agent port and its engines: contract/,
-                        echo_engine/, langchain_engine/, pydantic_ai_engine/
+                        echo_engine/, kataloop_engine/, langchain_engine/,
+                        pydantic_ai_engine/
       controller/       the application: contract/, core/, ports/,
                         application/, adapters/{memory,postgres}/, composition/
       web/              the HTTP server, sign-in, the CLI, the worker's process

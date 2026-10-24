@@ -13,7 +13,7 @@
 # It needs one model provider key, and the only three variables it will look
 # at are OPENROUTER_API_KEY, ANTHROPIC_API_KEY and OPENAI_API_KEY, from the
 # environment or from demo/.env. A GitHub token exported as ROBINAUTS_GITHUB_TOKEN is optional,
-# and turns on GitHub's MCP server for both agents. COMPOSIO_API_KEY is
+# and turns on GitHub's MCP server for every agent. COMPOSIO_API_KEY is
 # optional too, for the commented-out [tool_servers.composio] table.
 # **No key or token is ever printed or written to a file**: the configuration
 # names the *variable*, and the secret travels in the environment of the
@@ -265,7 +265,7 @@ elif [ "$chosen" = anthropic ]; then
     provider_id=anthropic
     provider_kind=anthropic
     key_variable=$ANTHROPIC_VARIABLE
-    # `anthropic` has one endpoint and both engines pin it; a base_url there is
+    # `anthropic` has one endpoint and every engine pins it; a base_url there is
     # a start-up refusal, so there is none to write.
     base_url=
     id=$DEFAULT_ID
@@ -282,8 +282,8 @@ else
     provider_id=openai
     provider_kind=openai
     key_variable=$OPENAI_VARIABLE
-    # `openai` has one endpoint too, https://api.openai.com/v1, pinned by both
-    # engines, so there is no base_url to write either.
+    # `openai` has one endpoint too, https://api.openai.com/v1, pinned by the
+    # two engines that reach it, so there is no base_url to write either.
     base_url=
     id=$OPENAI_ID
     model=${ROBINAUTS_DEMO_MODEL:-$OPENAI_MODEL}
@@ -299,7 +299,7 @@ fi
 say "Provider: $provider_kind ($provider_id); models $model, $model_2, $model_3; key from $key_variable."
 if [ -n "$github_token" ]; then
     github_env=$GITHUB_VARIABLE
-    say "Tools: GitHub's MCP server, for both agents."
+    say "Tools: GitHub's MCP server, for every agent."
 else
     github_env=
     say "Tools: none (no GitHub token found)."
@@ -458,10 +458,15 @@ url="$BASE_URL/"
 say ""
 say "The demo is up: $url"
 say "  sign-in is off (the local development mode), loopback only, one user"
-say "  two agents in the picker, one per engine: start a chat with each"
+if [ "$provider_kind" = openai ]; then
+    # demo/config.py leaves the kataloop agent out: its engine does not reach OpenAI yet.
+    say "  two agents in the picker, one per engine but kataloop's: start a chat with each"
+else
+    say "  three agents in the picker, one per engine: start a chat with each"
+fi
 say "  three models beside it: $model, $model_2, $model_3"
 if [ -n "$github_token" ]; then
-    say "  tools: both agents may call GitHub's MCP server, as the token's owner"
+    say "  tools: every agent may call GitHub's MCP server, as the token's owner"
 fi
 say "  log:  $LOG_FILE"
 say "  stop: demo/stop.sh   ('demo/stop.sh --reset' also deletes $state)"

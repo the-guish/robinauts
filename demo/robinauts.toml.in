@@ -47,12 +47,12 @@ provider = "@PROVIDER_ID@"
 name = "@MODEL_3_NAME@"
 title = "@MODEL_3_TITLE@"
 
-# Two agents, one per engine, both on the first model by default: the agent
-# picker shows the swap the project exists to prove (docs/specs/agents.md). An
-# agent is chosen when a conversation is started and stays with it, so seeing
-# both means starting a chat with each. The model does not stay: it is the
+# One agent per engine, each on the first model by default: the agent picker
+# shows the swap the project exists to prove (docs/specs/agents.md). An agent
+# is chosen when a conversation is started and stays with it, so seeing them
+# all means starting a chat with each. The model does not stay: it is the
 # agent's default until the user picks another, on the empty chat or at any
-# point during a conversation, and either engine runs any of the three.
+# point during a conversation, and each engine runs any of the three.
 [agents.assistant-langgraph]
 title = "Assistant (LangGraph)"
 model = "@MODEL_ID@"
@@ -66,6 +66,14 @@ model = "@MODEL_ID@"
 engine = "pydantic-ai"
 system_prompt = "You are the Robinauts demo assistant. Answer briefly, and play fair."
 @TOOLS@
+
+# The third, on kataloop, our own engine, through Anthropic or OpenRouter: the
+# line below becomes its table, with the same `tools` line as the two above,
+# and goes altogether for OpenAI, which uni-llm-client, kataloop's client, does
+# not reach yet (demo/config.py). kataloop keeps its memory in the server's
+# process: a restart of the demo forgets what its conversations said, and their
+# next turn fails (demo/README.md).
+@KATALOOP_AGENT@
 
 # Tools. GitHub's server is on when demo/start.sh found a GitHub token, and its
 # table and each agent's `tools = ["github"]` line are then written in place of

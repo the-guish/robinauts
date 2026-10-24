@@ -198,8 +198,11 @@ it fails. And uv builds them from source, which `--no-build` refuses: CI's
 `uv sync --locked --no-build`, and this gate's own `uv run --locked
 --no-build`, cannot install them, so until the releases the gate runs here
 as `uv run --locked python scripts/licence_gate.py` after a plain `uv sync
---locked`. A release turns each into a version from PyPI, read like any
-other, and this section goes.
+--locked`. The audit does not see them at all: the export names them by
+their git URL, with no `==` version for `scripts/audit_requirements.py` to
+deal out, and no advisory database knows them, so `scripts/check-audit.sh`
+leaves them out without a word. A release turns each into a version from
+PyPI, read and audited like any other, and this section goes.
 
 `kataloop` itself, the package that adds kataloop's MCP toolbox, is not
 locked: it needs `mcp` 2.3 or later, and `langchain-mcp-adapters` needs `mcp`

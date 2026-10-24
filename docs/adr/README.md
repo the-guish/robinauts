@@ -16,3 +16,4 @@ history only. Skip it unless you need that history.
 | [0003](0003-single-visible-thread.md) | One visible thread: the tree stays in storage, users see the newest path |
 | [0004](0004-context-management-in-the-adapter.md) | Superseded by 0005. Context management belongs to the agent adapter |
 | [0005](0005-the-framework-owns-the-loop-and-the-memory.md) | The framework owns the loop, the context and the model's memory; the platform keeps the transcript. Supersedes 0002 and 0004 |
+| [0006](0006-kataloop-engine.md) | A third engine, kataloop: our own loop over uni-llm-client, its memory in the process until `kataloop[postgres]`, from git until the releases |
