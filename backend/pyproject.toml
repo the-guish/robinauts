@@ -134,9 +134,9 @@ environments = [
 # CI's `uv sync --locked --no-build`, the hash-pinned requirements of the wheel
 # and the audit of the registry's packages all refuse.
 [tool.uv.sources]
-kataloop = { git = "https://github.com/the-guish/kataloop", rev = "0770940b327d5e66a03606c513cd30c44208a2c6", subdirectory = "packages/python/kataloop" }
-kataloop-core = { git = "https://github.com/the-guish/kataloop", rev = "0770940b327d5e66a03606c513cd30c44208a2c6", subdirectory = "packages/python/kataloop-core" }
-uni-llm-client = { git = "https://github.com/the-guish/uni-llm-client", rev = "351c55f9a2da6e7826d54e0394d72a1d58dba72c", subdirectory = "packages/python" }
+kataloop = { git = "https://github.com/the-guish/kataloop", rev = "9f975324151fc4dae851f7b0d26c5c95bd738c5e", subdirectory = "packages/python/kataloop" }
+kataloop-core = { git = "https://github.com/the-guish/kataloop", rev = "9f975324151fc4dae851f7b0d26c5c95bd738c5e", subdirectory = "packages/python/kataloop-core" }
+uni-llm-client = { git = "https://github.com/the-guish/uni-llm-client", rev = "b14e11ee17254fbed23c17b8868693fbe71ffecf", subdirectory = "packages/python" }
 
 [project.scripts]
 robinauts = "robinauts.web.cli:run"
