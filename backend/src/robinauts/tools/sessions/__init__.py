@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The sessions tool: the model searches the person's earlier conversations with the same agent.
+"""The sessions tool: the model searches the person's earlier sessions with the same agent.
 
-Which conversations those are is not this tool's to decide: it reads through the turn's
+Which sessions those are is not this tool's to decide: it reads through the turn's
 ``ScopedData``, which the controller bound to the owner and the agent.
 """
 

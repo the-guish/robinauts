@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""``search_conversations``: the earlier conversations whose messages hold every word asked.
+"""``search_sessions``: the earlier sessions whose messages hold every word asked.
 
 Only what the person and the agent wrote is searched: not reasoning, and not tool calls or their
-results, which are large and are where text from outside the conversation comes in. The
-conversation the turn is in is left out, since the model has it already.
+results, which are large and are where text from outside the session comes in. The
+session the turn is in is left out, since the model has it already.
 
-The search reads the conversations, newest first, up to ``MAX_SESSIONS`` of them. That bounds
+The search reads the sessions, newest first, up to ``MAX_SESSIONS`` of them. That bounds
 what one call costs; an index is for when that is not enough.
 """
 
@@ -23,13 +23,14 @@ from robinauts.agent_engines.contract.domain import FunctionTool, FunctionToolEr
 from robinauts.controller.contract.domain import Message, Role, Session, TextPart
 from robinauts.tools.contract.ports import TurnScope
 
-NAME = "search_conversations"
+NAME = "search_sessions"
 
 DESCRIPTION = (
-    "Search the user's earlier conversations with you, this same assistant, for messages that "
-    "contain every word of the query, case aside. Only the user's own conversations with this "
-    "assistant are searched, and not the current one. Returns the most recently updated "
-    "conversations that match, each with its title and short excerpts of the matching messages."
+    "Search the user's earlier sessions (conversations) with you, this same assistant, for "
+    "messages that contain every word of the query, case aside. Only the user's own sessions "
+    "with this assistant are searched, and not the current one. Returns the most recently "
+    "updated sessions that match, each with its title and short excerpts of the matching "
+    "messages."
 )
 
 MAX_QUERY = 200
@@ -39,17 +40,17 @@ MAX_RESULTS = 10
 DEFAULT_RESULTS = 5
 
 MATCHES_PER_SESSION = 3
-"""How many matching messages of one conversation are quoted."""
+"""How many matching messages of one session are quoted."""
 
 MAX_SESSIONS = 100
-"""How many of the newest conversations one call reads at most."""
+"""How many of the newest sessions one call reads at most."""
 
 PAGE = 20
 
 EXCERPT = 240
 """Characters: how long an excerpt is, around the first word found."""
 
-PARAMETERS: Mapping[str, Any] = {
+INPUT_SCHEMA: Mapping[str, Any] = {
     "type": "object",
     "properties": {
         "query": {
@@ -59,9 +60,7 @@ PARAMETERS: Mapping[str, Any] = {
         },
         "limit": {
             "type": "integer",
-            "description": (
-                f"How many conversations to return at most, {DEFAULT_RESULTS} if left out."
-            ),
+            "description": (f"How many sessions to return at most, {DEFAULT_RESULTS} if left out."),
             "minimum": 1,
             "maximum": MAX_RESULTS,
         },
@@ -78,7 +77,7 @@ def search_tool(scope: TurnScope) -> FunctionTool:
         query, limit = _read(arguments)
         return json.dumps(await search(scope, query, limit), ensure_ascii=False)
 
-    return FunctionTool(NAME, DESCRIPTION, PARAMETERS, call)
+    return FunctionTool(NAME, DESCRIPTION, INPUT_SCHEMA, call)
 
 
 def _read(arguments: Mapping[str, Any]) -> tuple[str, int]:
@@ -126,7 +125,7 @@ async def search(scope: TurnScope, query: str, limit: int) -> dict[str, Any]:
                 found.append(_found(session, matches[:MATCHES_PER_SESSION]))
                 if len(found) == limit:
                     break
-    return {"query": query, "conversations_read": read, "conversations": found}
+    return {"query": query, "sessions_read": read, "sessions": found}
 
 
 def _match(message: Message, words: list[str]) -> _Match | None:
@@ -155,7 +154,7 @@ def _excerpt(text: str, words: list[str]) -> str:
 
 def _found(session: Session, matches: list[_Match]) -> dict[str, Any]:
     return {
-        "conversation_id": str(session.id),
+        "session_id": str(session.id),
         "title": session.title,
         "updated_at": session.updated_at.isoformat(),
         "matches": [

@@ -87,8 +87,8 @@ def test_load_gives_the_tool_its_id_and_one_function() -> None:
     provider = sessions.load()
     assert provider.id == "sessions"
     found = tool(Data())
-    assert found.name == "search_conversations"
-    assert found.parameters["required"] == ["query"]
+    assert found.name == "search_sessions"
+    assert found.input_schema["required"] == ["query"]
 
 
 @pytest.mark.parametrize(
@@ -119,8 +119,8 @@ async def test_a_message_matches_when_it_holds_every_word_case_aside() -> None:
     both = data.add("Trip", "We planned the ZEBRA trip in May")
     data.add("Other", "zebra alone")
     found = await call(data, {"query": "zebra may"})
-    assert [c["conversation_id"] for c in found["conversations"]] == [str(both)]
-    [match] = found["conversations"][0]["matches"]
+    assert [c["session_id"] for c in found["sessions"]] == [str(both)]
+    [match] = found["sessions"][0]["matches"]
     assert match == {
         "role": "user",
         "created_at": START.isoformat(),
@@ -138,47 +138,45 @@ async def test_only_what_the_person_and_the_agent_wrote_is_searched() -> None:
         [ToolResultPart("c", "zebra from a tool")],
     )
     data.add("Tool role", "zebra said by a tool", role=Role.TOOL)
-    assert (await call(data, {"query": "zebra"}))["conversations"] == []
+    assert (await call(data, {"query": "zebra"}))["sessions"] == []
 
 
 @asyncio_test
-async def test_the_conversation_of_the_turn_is_left_out() -> None:
+async def test_the_session_of_the_turn_is_left_out() -> None:
     data = Data()
     current = data.add("Now", "zebra")
     earlier = data.add("Before", "zebra")
     found = await call(data, {"query": "zebra"}, current=current)
-    assert [c["conversation_id"] for c in found["conversations"]] == [str(earlier)]
+    assert [c["session_id"] for c in found["sessions"]] == [str(earlier)]
 
 
 @asyncio_test
-async def test_the_newest_conversations_come_first_up_to_the_limit() -> None:
+async def test_the_newest_sessions_come_first_up_to_the_limit() -> None:
     data = Data()
     ids = [
         data.add(f"Talk {n}", "zebra", "more zebra", "zebra again", "zebra once more")
         for n in range(4)
     ]
     found = await call(data, {"query": "zebra", "limit": 2})
-    assert [c["conversation_id"] for c in found["conversations"]] == [str(ids[3]), str(ids[2])]
-    assert all(len(c["matches"]) == search.MATCHES_PER_SESSION for c in found["conversations"])
-    assert found["conversations"][0]["title"] == "Talk 3"
+    assert [c["session_id"] for c in found["sessions"]] == [str(ids[3]), str(ids[2])]
+    assert all(len(c["matches"]) == search.MATCHES_PER_SESSION for c in found["sessions"])
+    assert found["sessions"][0]["title"] == "Talk 3"
 
 
 @asyncio_test
-async def test_a_title_that_matches_finds_its_conversation() -> None:
+async def test_a_title_that_matches_finds_its_session() -> None:
     data = Data()
     titled = data.add("Zebra planning", "nothing here")
     found = await call(data, {"query": "zebra"})
-    assert [(c["conversation_id"], c["matches"]) for c in found["conversations"]] == [
-        (str(titled), [])
-    ]
+    assert [(c["session_id"], c["matches"]) for c in found["sessions"]] == [(str(titled), [])]
 
 
 @asyncio_test
 async def test_a_long_message_is_quoted_around_the_first_word_found() -> None:
     data = Data()
     data.add("Long", "a" * 1000 + " zebra " + "b" * 1000)
-    [conversation] = (await call(data, {"query": "zebra"}))["conversations"]
-    excerpt = conversation["matches"][0]["excerpt"]
+    [session] = (await call(data, {"query": "zebra"}))["sessions"]
+    excerpt = session["matches"][0]["excerpt"]
     assert excerpt.startswith("…")
     assert excerpt.endswith("…")
     assert "zebra" in excerpt
@@ -196,7 +194,7 @@ async def test_one_call_reads_at_most_the_newest_max_sessions(
     for n in range(9):
         data.add(f"Talk {n}", "nothing")
     found = await call(data, {"query": "zebra"})
-    assert found["conversations"] == []
-    assert found["conversations_read"] == 5
+    assert found["sessions"] == []
+    assert found["sessions_read"] == 5
     assert str(oldest) not in json.dumps(found)
     assert data.pages == 3

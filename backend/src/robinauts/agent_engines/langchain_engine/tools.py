@@ -77,5 +77,5 @@ def _function_tool(function: FunctionTool) -> BaseTool:
         coroutine=call,
         name=function.name,
         description=function.description,
-        args_schema=dict(function.parameters),
+        args_schema=dict(function.input_schema),
     )

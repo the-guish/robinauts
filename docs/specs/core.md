@@ -169,7 +169,7 @@ topic documents listed under [Documents](#documents).
   under `robinauts/tools`, given to the model like any other tool, and what it
   may read is limited to the turn's person and agent by the platform, not by
   the tool. The first is `sessions`, which searches the person's earlier
-  conversations with the same agent. [agent-engines.md](agent-engines.md),
+  sessions with the same agent. [agent-engines.md](agent-engines.md),
   [operations.md](operations.md),
   [the-path-of-one-message.md](../architecture/the-path-of-one-message.md).
 - **A turn.** The UI posts a message, which queues a **turn**. A worker

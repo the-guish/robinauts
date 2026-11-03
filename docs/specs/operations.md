@@ -65,14 +65,14 @@ What an internal platform team deploys and controls.
   tool servers, and an agent that does not name one does not have it. A tool
   server may not take a tool's id, and an agent naming neither a server nor
   a tool is refused at start-up. They reach nothing outside the process.
-  - `sessions` gives the model `search_conversations`: the person's earlier
-    conversations with the same agent whose messages hold every word asked,
-    newest first, with excerpts. It reads no other person's conversations
-    and no other agent's, nor hidden ones, nor the one the turn is in, and
-    only what the person and the agent wrote: not reasoning, tool calls or
-    their results. One call reads the newest hundred conversations at most.
-    What it finds goes to the model provider of the turn, which may not be
-    the one the earlier conversation was held with.
+  - `sessions` gives the model `search_sessions`: the person's earlier
+    sessions with the same agent whose messages hold every word asked,
+    newest first, with excerpts. It reads no other person's sessions and no
+    other agent's, nor hidden ones, nor the one the turn is in, and only what
+    the person and the agent wrote: not reasoning, tool calls or their
+    results. One call reads the newest hundred sessions at most. What it
+    finds goes to the model provider of the turn, which may not be the one
+    the earlier session was held with.
 
 ## Configuration
 

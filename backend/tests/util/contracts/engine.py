@@ -239,8 +239,8 @@ class EngineTurnContract:
         [result] = [event for event in events if isinstance(event, ToolResult)]
         assert result.call_id == CALL_ID
         assert result.name == "refuse"
-        assert result.is_error
-        assert REFUSAL in result.output
+        assert result.failed
+        assert REFUSAL in result.raw_output
         assert isinstance(events[-1], Done)
         assert events[-1].text == ANSWER
 

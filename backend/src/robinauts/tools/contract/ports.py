@@ -6,7 +6,7 @@
 A tool is given a ``TurnScope`` for each turn. The scope holds no user id and no store: what a
 tool may read of the platform's data, it reads through ``ScopedData``, which the controller
 binds to the turn's owner and agent before the tool sees it. A tool cannot name another user,
-nor another agent's conversations.
+nor another agent's sessions.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ class TurnScope:
     """The turn a tool's calls are made in."""
 
     session_id: uuid.UUID
-    """The conversation the turn is in."""
+    """The session the turn is in."""
     agent: str
     data: ScopedData
 

@@ -71,7 +71,7 @@ class SearchingEngine(EchoEngine):
             async for event in super().stream(session_id, agent, prompt, **options):
                 yield event
             return
-        [search] = [f for f in agent.functions if f.name == "search_conversations"]
+        [search] = [f for f in agent.functions if f.name == "search_sessions"]
         arguments = {"query": prompt.removeprefix(SEARCH)}
         yield ToolCall("call-1", search.name, arguments)
         output = await search.call(arguments)
@@ -99,7 +99,7 @@ async def talk(controller: Any, user: User, agent: str, text: str) -> TurnStarte
 
 
 @asyncio_test
-async def test_the_search_finds_the_owners_conversations_with_the_same_agent_alone() -> None:
+async def test_the_search_finds_the_owners_sessions_with_the_same_agent_alone() -> None:
     engine = SearchingEngine()
     lifecycle = await started_over(engine)
     controller: Any = lifecycle.composed.controller
@@ -113,8 +113,8 @@ async def test_the_search_finds_the_owners_conversations_with_the_same_agent_alo
 
     answer = (await controller.open_session(me, asked.session_id)).messages[-1]
     found = json.loads(answer.parts[-1].text)
-    assert [c["conversation_id"] for c in found["conversations"]] == [str(mine.session_id)]
-    assert [m["excerpt"] for m in found["conversations"][0]["matches"]] == [
+    assert [c["session_id"] for c in found["sessions"]] == [str(mine.session_id)]
+    assert [m["excerpt"] for m in found["sessions"][0]["matches"]] == [
         "the zebra plan",
         "The tool said: the zebra plan",
     ]
@@ -131,7 +131,7 @@ async def test_the_engine_is_handed_the_functions_and_the_tool_servers_alone() -
     await talk(controller, me, "other", "hello")
     keeper, other = engine.agents
     assert keeper.tools == ()
-    assert [f.name for f in keeper.functions] == ["search_conversations"]
+    assert [f.name for f in keeper.functions] == ["search_sessions"]
     assert other.functions == ()
     await lifecycle.stop()
 

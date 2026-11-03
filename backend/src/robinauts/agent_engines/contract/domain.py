@@ -109,14 +109,14 @@ class FunctionToolError(Exception):
 class FunctionTool:
     """A tool run in this process, which the engine gives the model like any other.
 
-    ``parameters`` is the JSON Schema of the arguments, an object. The frameworks do not check
+    ``input_schema`` is the JSON Schema of the arguments, an object. The frameworks do not check
     the arguments against it: ``call`` is handed them as the model sent them, and checks them
     itself. What it returns is the output the model sees.
     """
 
     name: str
     description: str
-    parameters: Mapping[str, Any]
+    input_schema: Mapping[str, Any]
     call: Callable[[Mapping[str, Any]], Awaitable[str]]
 
 
@@ -143,15 +143,17 @@ class ReasoningDelta:
 class ToolCall:
     call_id: str
     name: str
-    arguments: Mapping[str, Any] = field(default_factory=dict)
+    raw_input: Mapping[str, Any] = field(default_factory=dict)
+    """The arguments, as the model sent them."""
 
 
 @dataclass(frozen=True, slots=True)
 class ToolResult:
     call_id: str
     name: str
-    output: str
-    is_error: bool = False
+    raw_output: str
+    """The output, as the model sees it."""
+    failed: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -66,12 +66,12 @@ class EchoEngine(AgentEngine):
         resume: bool = False,
     ) -> AsyncGenerator[Event, None]:
         call_id = f"call-{uuid.uuid4().hex[:8]}"
-        yield ToolCall(call_id=call_id, name=TOOL, arguments={"text": prompt})
+        yield ToolCall(call_id=call_id, name=TOOL, raw_input={"text": prompt})
         if prompt.startswith(POISON):
-            yield ToolResult(call_id=call_id, name=TOOL, output=POISONED, is_error=True)
+            yield ToolResult(call_id=call_id, name=TOOL, raw_output=POISONED, failed=True)
             raise EngineError(f"Tool {TOOL!r} failed: {POISONED}")
         result = echo(prompt)
-        yield ToolResult(call_id=call_id, name=TOOL, output=result)
+        yield ToolResult(call_id=call_id, name=TOOL, raw_output=result)
         yield TextDelta(text=ANSWER)
         yield TextDelta(text=result)
         yield Done(text=ANSWER + result, checkpoint_id=str(uuid.uuid4()))

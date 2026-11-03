@@ -90,5 +90,5 @@ def _function_tool(function: FunctionTool) -> Tool[Any]:
         call,
         name=function.name,
         description=function.description,
-        json_schema=dict(function.parameters),
+        json_schema=dict(function.input_schema),
     )
