@@ -164,7 +164,13 @@ topic documents listed under [Documents](#documents).
 - **Tools.** Remote MCP servers the operator configures like model
   providers; the framework's own MCP client calls them inside its loop, and
   the platform writes each call and result into the transcript as it
-  happens. [agent-engines.md](agent-engines.md),
+  happens. Beside them, the platform's own tools, run in its process and
+  named in an agent's `tools` like a server: each is a package of its own
+  under `robinauts/tools`, given to the model like any other tool, and what it
+  may read is limited to the turn's person and agent by the platform, not by
+  the tool. The first is `sessions`, which searches the person's earlier
+  conversations with the same agent. [agent-engines.md](agent-engines.md),
+  [operations.md](operations.md),
   [the-path-of-one-message.md](../architecture/the-path-of-one-message.md).
 - **A turn.** The UI posts a message, which queues a **turn**. A worker
   hands the agent port the question and the checkpoint of the nearest

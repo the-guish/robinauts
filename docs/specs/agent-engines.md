@@ -24,14 +24,22 @@ contract.
   engine names each one with an id. The caller keeps the id and never looks
   inside.
 - **Agent definition**: the system prompt and the tool servers an agent may
-  use, as the operator configured them.
+  use, as the operator configured them; and the function tools of the turn,
+  run in the caller's process, which the caller binds to the turn before it
+  hands them over.
 
 ## Responsibilities
 
 - **Run a turn.** Given a session, the agent definition, the question and
   the model, run the whole agent loop: ask the model, call the tools it
   asks for, give the results back, and go on until the model answers.
-  Tools are reached over MCP through the framework's own client.
+  Tools are reached over MCP through the framework's own client. A function
+  tool is given to the model like any other tool, by the framework's own
+  means, and nothing about one tool is known to the engine: its name, its
+  description, the JSON Schema of its arguments, and a call that takes the
+  arguments as the model sent them and returns the output. A call that raises
+  the contract's function-tool error is a failed result in the error's own
+  words; anything else it raises is a failed result naming the error's kind.
 - **Stream what happens.** As the turn runs, report pieces of the answer,
   pieces of the model's reasoning when there is any, each tool call once its
   arguments are known, each tool result as it comes back, and finally the

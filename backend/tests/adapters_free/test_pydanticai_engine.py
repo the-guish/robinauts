@@ -54,8 +54,8 @@ from robinauts.agent_engines.pydantic_ai_engine.tools import (
 )
 from util.contracts.engine import (
     ANSWER,
-    ARGUMENTS,
     CALL_ID,
+    CALLS,
     EngineMemoryContract,
     EngineTurnContract,
     ModelFailure,
@@ -231,9 +231,10 @@ def scripted(script: Script) -> FunctionModel:
             await asyncio.sleep(3600)
         last = messages[-1]
         answered = isinstance(last, ModelRequest) and isinstance(last.parts[-1], ToolReturnPart)
-        if script is Script.TOOL_ROUND and not answered:
+        if script in CALLS and not answered:
+            name, arguments = CALLS[script]
             yield {
-                0: DeltaToolCall(name="add", json_args=json.dumps(ARGUMENTS), tool_call_id=CALL_ID)
+                0: DeltaToolCall(name=name, json_args=json.dumps(arguments), tool_call_id=CALL_ID)
             }
             return
         for piece in re.split(r"(\s)", ANSWER):

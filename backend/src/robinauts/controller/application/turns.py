@@ -30,7 +30,6 @@ from robinauts.agent_engines.contract.domain import (
 )
 from robinauts.agent_engines.contract.ports import AgentEngine
 from robinauts.controller.contract.domain import (
-    AgentConfig,
     ArgumentsPiece,
     CallCompleted,
     CallStarted,
@@ -165,7 +164,7 @@ async def run_turn(
     turn: Turn,
     question: Message,
     prompt: str,
-    agent_config: AgentConfig,
+    definition: AgentDefinition,
     checkpoint_id: str | None,
     claimed_at: datetime,
     max_turn_seconds: float,
@@ -181,7 +180,6 @@ async def run_turn(
     if remaining <= 0:
         return
     answer_id = uuid.uuid4()
-    definition = AgentDefinition(agent_config.system_prompt, agent_config.tools)
     parts: list[MessagePart] = []
     writer = _Writer(store, owner, turn)
     try:

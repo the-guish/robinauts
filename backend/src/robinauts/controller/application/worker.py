@@ -18,9 +18,11 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from robinauts.agent_engines.contract.domain import AgentDefinition
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineFactory, installed
 from robinauts.controller.application.engines import build_engines
 from robinauts.controller.application.intervals import run_at_intervals
+from robinauts.controller.application.tools import functions_for
 from robinauts.controller.application.turns import (
     CLOSE,
     STALLED,
@@ -47,6 +49,7 @@ from robinauts.controller.core.engine_settings import (
 )
 from robinauts.controller.core.failures import prompt_after_failures
 from robinauts.controller.ports.store import Store
+from robinauts.tools.contract.ports import ToolProvider
 
 _log = logging.getLogger(__name__)
 
@@ -74,17 +77,20 @@ class Worker:
         storage: StorageConfig,
         secret_for: SecretLookup,
         engines: Mapping[str, EngineFactory] | None = None,
+        tools: Mapping[str, ToolProvider] | None = None,
         wait_timeout: float = QUEUE_WAIT_TIMEOUT,
         close_timeout: float = CLOSE_TIMEOUT,
         now: Callable[[], datetime] | None = None,
     ) -> None:
-        """``engines`` are the factories by engine name; the installed ones when not given."""
+        """``engines`` are the factories by engine name; the installed ones when not given.
+        ``tools`` are this build's tools by id; none when not given."""
         self._store = store
         self._config = config
         self._work = config.work
         self._storage = storage
         self._secret_for = secret_for
         self._given_engines = engines
+        self._tools: Mapping[str, ToolProvider] = dict(tools or {})
         self._wait_timeout = wait_timeout
         self._close_timeout = close_timeout
         self._now = now or (lambda: datetime.now(UTC))
@@ -270,6 +276,11 @@ class Worker:
         # On a resume the engine goes on from what it saved, and needs the prompt only if it
         # saved nothing.
         prompt = prompt_after_failures(_text(question), earlier, retried)
+        definition = AgentDefinition(
+            agent_config.system_prompt,
+            tuple(name for name in agent_config.tools if name not in self._tools),
+            functions_for(agent_config, self._tools, self._store, owner, session),
+        )
         await run_turn(
             self._store,
             engine,
@@ -278,7 +289,7 @@ class Worker:
             turn,
             question,
             prompt,
-            agent_config,
+            definition,
             checkpoint_id,
             task.claimed_at or turn.started_at,
             agent_config.turn_timeout_seconds or self._work.max_turn_seconds,

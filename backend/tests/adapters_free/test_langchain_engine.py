@@ -51,8 +51,8 @@ from robinauts.agent_engines.langchain_engine.tools import connection_for, tools
 from util.aio import asyncio_test
 from util.contracts.engine import (
     ANSWER,
-    ARGUMENTS,
     CALL_ID,
+    CALLS,
     EngineMemoryContract,
     EngineTurnContract,
     ModelFailure,
@@ -226,8 +226,9 @@ class ScriptedChatModel(BaseChatModel):
             raise ModelFailure()
         if self.script is Script.HANG:
             await asyncio.sleep(3600)
-        if self.script is Script.TOOL_ROUND and not isinstance(messages[-1], ToolMessage):
-            call = tool_call_chunk(name="add", args=json.dumps(ARGUMENTS), id=CALL_ID, index=0)
+        if self.script in CALLS and not isinstance(messages[-1], ToolMessage):
+            name, arguments = CALLS[self.script]
+            call = tool_call_chunk(name=name, args=json.dumps(arguments), id=CALL_ID, index=0)
             yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_call_chunks=[call]))
             return
         for piece in re.split(r"(\s)", ANSWER):
