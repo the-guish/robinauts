@@ -61,18 +61,6 @@ What an internal platform team deploys and controls.
   the server; Composio's `COMPOSIO_MANAGE_SKILL` has `anyOf` at the top of
   its schema, which Anthropic's API refuses. A value that is not a list of
   names is refused at start-up.
-- **The platform's own tools** are named in an agent's `tools` beside its
-  tool servers, and an agent that does not name one does not have it. A tool
-  server may not take a tool's id, and an agent naming neither a server nor
-  a tool is refused at start-up. They reach nothing outside the process.
-  - `sessions` gives the model `search_sessions`: the person's earlier
-    sessions with the same agent whose messages hold every word asked,
-    newest first, with excerpts. It reads no other person's sessions and no
-    other agent's, nor hidden ones, nor the one the turn is in, and only what
-    the person and the agent wrote: not reasoning, tool calls or their
-    results. One call reads the newest hundred sessions at most. What it
-    finds goes to the model provider of the turn, which may not be the one
-    the earlier session was held with.
 
 ## Configuration
 
