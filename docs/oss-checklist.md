@@ -36,7 +36,8 @@ them from the start.
       `docs/legal/name-search.md`, `docs/legal/assets.md`; a `LICENSES/`
       directory (the name `reuse` expects). `ip-clearance` entries: the
       sign-in code, the frontend tooling and the design tokens derived from
-      neorc, and the vendored assistant-ui components.
+      neorc, the vendored assistant-ui components and their removal, and
+      the icon path data copied from lucide.
 - [x] `REUSE.toml` for files that cannot carry a header; `reuse lint`
       passing. **(neorc gap: no header check; no header on any TypeScript
       or CSS file)**
@@ -68,10 +69,11 @@ them from the start.
 - [x] CSS-reached packages in the bundle record. `bundled-packages.txt` is
       written from rollup's module graph, which misses a package reached only
       through a stylesheet. `CSS_PACKAGES` in `frontend/vite.config.ts` is a
-      hand-kept list of them, written into the record. A name nobody adds
-      to it is still missing ([DEPENDENCIES.md](../DEPENDENCIES.md)).
-- [ ] `gitleaks`. The ESLint import rule that confines assistant-ui
-      (ADR 0001) is done: `frontend/eslint.config.js`, with
+      hand-kept list of them, written into the record, and empty since no
+      stylesheet names a package (ADR 0006). A name nobody adds to it is
+      still missing ([DEPENDENCIES.md](../DEPENDENCIES.md)).
+- [ ] `gitleaks`. The ESLint import rule that keeps the chat behind its
+      seam (ADR 0006) is done: `frontend/eslint.config.js`, with
       `frontend/src/test/seam-rule.test.ts` proving it still fires.
 - [x] Workflows: `permissions: contents: read`, `persist-credentials:
       false`, actions pinned to commit SHAs **(neorc gap: pinned by tag)**.

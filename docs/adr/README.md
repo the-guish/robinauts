@@ -11,8 +11,9 @@ history only. Skip it unless you need that history.
 
 | # | Decision |
 |---|---|
-| [0001](0001-chat-ui-assistant-ui-with-tailwind.md) | Chat UI: assistant-ui styled components on Tailwind, behind an explicit seam |
+| [0001](0001-chat-ui-assistant-ui-with-tailwind.md) | Superseded by 0006. Chat UI: assistant-ui styled components on Tailwind, behind an explicit seam |
 | [0002](0002-conversation-persistence.md) | Superseded by 0005. The platform owns the conversation record; agent frameworks are stateless per turn |
 | [0003](0003-single-visible-thread.md) | One visible thread: the tree stays in storage, users see the newest path |
 | [0004](0004-context-management-in-the-adapter.md) | Superseded by 0005. Context management belongs to the agent adapter |
 | [0005](0005-the-framework-owns-the-loop-and-the-memory.md) | The framework owns the loop, the context and the model's memory; the platform keeps the transcript. Supersedes 0002 and 0004 |
+| [0006](0006-chat-ui-on-react-alone.md) | The chat window on React alone: our own components, Markdown renderer and icons, on plain CSS over the tokens, behind the same seam. Supersedes 0001 |

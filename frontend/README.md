@@ -4,8 +4,8 @@ A single-page application: Vite, React, TypeScript, Vitest, ESLint. It is
 served by the backend under `/ui/`, and it ships inside the `robinauts` wheel
 ([../docs/specs/frontend.md](../docs/specs/frontend.md)).
 
-What is here is the whole interface: the design tokens and the Tailwind
-theme over them, the collapsible panel with the profile block, the session
+What is here is the whole interface: the design tokens and the plain CSS
+over them, the collapsible panel with the profile block, the session
 and the sign-in page, the theme toggle and the banner of the local
 development mode, the hash routing, the history in the panel with renaming
 and deleting, the agent and model pickers, and **the chat** -- the message
@@ -13,15 +13,35 @@ box, the answer arriving a word at a time, re-attaching to a run that is
 already going, stopping one, editing a question, asking for an answer again,
 and retrying or resuming an answer that failed.
 
-The chat is behind `src/chat/index.ts` and nothing outside
-`src/chat/assistant-ui/` knows what draws it
-([../docs/adr/0001-chat-ui-assistant-ui-with-tailwind.md](../docs/adr/0001-chat-ui-assistant-ui-with-tailwind.md)).
-Behind that seam: the vendored assistant-ui components, a runtime that hands
-them our own state, and **our own AG-UI client** --
-`src/chat/agui/`, about eight hundred lines over `fetch` and a
-`ReadableStream`, because assistant-ui's bridge to AG-UI is still pinned to a
-pre-1.0 protocol client ([../docs/specs/wire.md](../docs/specs/wire.md),
-"Details likely to change").
+Everything is this project's own code on React alone: `react` and
+`react-dom` are the only runtime dependencies
+([../docs/adr/0006-chat-ui-on-react-alone.md](../docs/adr/0006-chat-ui-on-react-alone.md)).
+The chat is behind `src/chat/index.ts`, and nothing outside `src/chat/` knows
+what draws it.
+
+## Where things are
+
+```
+src/
+  tokens.css       the design tokens: the source of every colour, radius and font
+  styles.css       the base reset, the body and the focus outline
+  icons/           the icons, as inline SVG over lucide's path data
+  shell/, history/, session/, api/, conversation/,
+  App.tsx, ErrorBoundary.tsx, main.tsx, router.ts
+                   the shell: the panel, the history, the session, the routes
+  chat/
+    index.ts       the seam: the one file the rest of the application imports
+    Chat.tsx       the <Chat> of the seam, over the runtime and the thread
+    runtime.tsx    the state and the turn handlers, through a React context
+    state.ts       the reducer: it owns every message and every byte of a stream
+    agui/          our own AG-UI client, over fetch and a ReadableStream
+    thread/        the chat window's components, and thread.css
+    markdown/      the Markdown renderer, its parser and markdown.css
+```
+
+The AG-UI client is ours because the chat is ours, and it adds no dependency
+([../docs/specs/wire.md](../docs/specs/wire.md), "Details likely to change").
+Nothing here imports a library but React.
 
 ## The routes
 
@@ -112,7 +132,7 @@ or one at a time, from here:
 
     node scripts/check-licences.mjs   # the licence policy, and the exact pins
     npm run check-format    # prettier
-    npm run lint            # eslint, including the seam rule of ADR 0001
+    npm run lint            # eslint, including the seam rule
     npm run typecheck       # tsc, in strict mode
     npm test -- --run       # vitest
     npm run build           # the bundle, its licence gate and its size budget
@@ -151,32 +171,50 @@ Two of these are generated and thrown away; one is generated and committed.
   `scripts/check-licences.mjs` enforces over everything installed, and one
   dependency change per pull request — never a version published fewer than
   ten days ago, first pin included.
-- The chat seam: [../docs/adr/0001-chat-ui-assistant-ui-with-tailwind.md](../docs/adr/0001-chat-ui-assistant-ui-with-tailwind.md).
-  assistant-ui lives only under `src/chat/assistant-ui/`; the rest of the
-  application imports `src/chat/index.ts`. `eslint.config.js` refuses anything
-  else, and `src/test/seam-rule.test.ts` proves the rule still fires.
-- Vendored code: `src/chat/assistant-ui/vendor/` is somebody else's MIT
-  source, copied from two shadcn-style registries rather than installed, which
-  is how the styled chat components are distributed. Read
-  [its README](src/chat/assistant-ui/vendor/README.md) before touching
-  anything in there: edits are kept to the list it holds, each with its
-  reason, so that a re-sync stays a small merge, and
-  `src/test/vendor.test.ts` fails when the directory and that list disagree.
-  Our own code goes outside it, and what imports it is
-  `src/chat/assistant-ui/`: `Chat.tsx`, `Resume.tsx` and `ToolCall.tsx`.
-- Styling: `src/tokens.css` holds the design tokens as CSS custom properties
-  and is the source of truth for every colour and radius; `src/styles.css`
-  imports Tailwind and maps its theme onto them, so a component is written in
-  Tailwind utilities (`bg-panel`, `text-muted-foreground`, `rounded-ui`) and
-  the tokens survive a change of Tailwind. The vendored components are
-  shadcn/ui-shaped, so `styles.css` maps **their** palette onto the same
-  tokens as well (`background`, `foreground`, `muted`, `primary`, `border`,
-  …); where a name was already taken the shell gave it up rather than the
-  copy, so there is one vocabulary over the tokens and not two. Plain `.css`
-  only: no CSS Modules, no preprocessor, no `<style>` in `index.html`.
+- The chat seam: [../docs/adr/0006-chat-ui-on-react-alone.md](../docs/adr/0006-chat-ui-on-react-alone.md).
+  Nothing outside `src/chat/` imports anything under `src/chat/` but
+  `src/chat/index.ts`; what the rest of the application needs from the chat
+  goes there. `eslint.config.js` refuses anything else, and
+  `src/test/seam-rule.test.ts` proves the rule still fires. It is what keeps
+  the chat window replaceable in one directory.
+- Styling: plain CSS over the design tokens. `src/tokens.css` holds them as
+  CSS custom properties and is the source of truth for every colour, radius
+  and font: a rule writes `var(--panel)`, never a literal colour, and dark
+  mode is the tokens' job, so no stylesheet has a `prefers-color-scheme` rule
+  of its own. `src/styles.css` holds the base reset, the body and the global
+  `:focus-visible` outline, and no more. Each area has **one stylesheet**,
+  imported by the component that uses it (`import "./thread.css"`), and its
+  class names are plain and carry the area's prefix: `shell-`, `panel-`,
+  `history-`, `signin-`, `chat-`, `md-`, and `icon`. A prefix says which
+  stylesheet a class lives in, which is all a reader needs to find it. There
+  are no utility classes, no class-merging helper and no variant helper. A
+  `style` attribute is only for a value that is genuinely dynamic. Animations
+  are switched off under `prefers-reduced-motion: reduce`. No CSS Modules, no
+  preprocessor, no `<style>` in `index.html`: the build refuses all three.
+- Icons: `src/icons/`, one component per icon (`CheckIcon`, `XIcon`, …),
+  imported from `src/icons` by a relative path and sized by the class it is
+  given or its `size` prop. `index.tsx` is ours; `lucide.ts` is path data
+  copied from `lucide-react` under the licence beside it (`LICENSE.lucide`:
+  ISC, and MIT for the icons lucide derives from Feather), and is not
+  edited. To add an icon, read its data from
+  `dist/esm/icons/<name>.mjs` of `lucide-react` at a recorded version (from
+  `npm pack`, outside the tree), append
+  it to `lucide.ts` with the React `key`s dropped, export a component for it
+  from `index.tsx`, and append an entry to
+  [../docs/legal/ip-clearance.md](../docs/legal/ip-clearance.md) saying which
+  icon, from which version, on which day ([src/icons/README.md](src/icons/README.md)).
+  The package itself is never installed for it.
+- Markdown: `src/chat/markdown/` renders an answer straight to React elements,
+  with a parser of its own. Its safety contract is the reason it exists, and a
+  change to it keeps all of it: no HTML string is ever produced and nothing
+  goes through `dangerouslySetInnerHTML`, so raw HTML in an answer is text; a
+  link keeps its target only for `http:`, `https:` and `mailto:`, and opens in
+  a new tab with `rel="noopener noreferrer"`; an image is drawn as a link with
+  its alt text, never as `<img>`; text still arriving is normal input, and an
+  unclosed construct never throws. Parsing stays linear in the size of the
+  text, which a performance test holds it to: a crafted answer must not be
+  able to stall the page.
 - Nothing from a third-party origin: no CDN, no external font, no inline
-  script. An air-gapped install has to work. Icons come from `lucide-react`,
-  the one allowlisted icon package, imported by name so that the bundle
-  carries the icons used and no more.
+  script. An air-gapped install has to work.
 - Every file carries the SPDX header ([../CONTRIBUTING.md](../CONTRIBUTING.md));
   what cannot is listed in [../REUSE.toml](../REUSE.toml).

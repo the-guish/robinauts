@@ -1,8 +1,8 @@
 # The wire between the UI and the backend
 
-The wire is one of the seams: the backend is not shaped by the UI library
-([ADR 0001](../adr/0001-chat-ui-assistant-ui-with-tailwind.md)), and
-another UI — or no UI — can drive it. It is the one API that every
+The wire is one of the seams: the backend is not shaped by the interface
+([ADR 0006](../adr/0006-chat-ui-on-react-alone.md), which keeps this
+boundary from ADR 0001), and another UI — or no UI — can drive it. It is the one API that every
 delivery channel uses. It is served by
 the web shell over the controller ([architecture/web.md](../architecture/web.md),
 [architecture/controller.md](../architecture/controller.md)). What the wire
@@ -186,32 +186,20 @@ at least ten days before that day, `contributing/js-dependencies.md`):
 |---|---|---|---|
 | `ag-ui-protocol` (PyPI) | 1.0.0 | MIT | event types and encoder; depends on pydantic only. Imported only in `web` |
 | `@ag-ui/core`, `@ag-ui/client` (npm) | 1.0.0, published 2026-09-17 | MIT | |
-| `@assistant-ui/react-ag-ui` (npm) | 0.0.60, published 2026-09-18 | MIT | **not used.** Still pinned to `@ag-ui/client ^0.0.59`, as is 0.0.59 (2026-09-11), which is what the cooldown allows |
-| `@assistant-ui/react` (npm) | 0.15.19, published 2026-09-11 — **pinned**, step 20 | MIT | 0.15.21 (2026-09-18) is newer than the cooldown allows |
 
-- The protocol is at 1.0. The immature piece is assistant-ui's bridge, and
-  it sits inside `src/chat/assistant-ui/`, the place that is cheapest to
-  replace. If it proves too immature, a small AG-UI client of our own
-  takes its place behind the same seam; the wire does not change.
-- A month on, the bridge has not caught up: it would install a second,
-  pre-1.0 `@ag-ui/client` beside the 1.0 one. **Step 21 decided: the client
-  is ours** (`frontend/src/chat/agui/`, 2026-09-22), and the
-  bridge is not taken. It is about two hundred lines over `fetch` and a
-  `ReadableStream` -- the format, the event vocabulary this backend emits,
-  and re-attaching with `Last-Event-ID` -- and it added **no dependency at
-  all**, where the bridge would have added two, one of them a pre-1.0 copy
-  of a protocol that is at 1.0. Nothing about the wire turned on the answer,
-  which is what the seam was for; if the bridge catches up, taking it is a
-  change inside `src/chat/assistant-ui/` and nowhere else.
+The frontend uses neither npm package: it has a client of its own.
+
+- The protocol is at 1.0. **The client is ours** (`frontend/src/chat/agui/`,
+  since step 21, 2026-09-22), over `fetch` and a `ReadableStream`: the
+  format, the event vocabulary this backend emits, and re-attaching with
+  `Last-Event-ID`. It adds **no dependency at all**. Since
+  [ADR 0006](../adr/0006-chat-ui-on-react-alone.md) the whole chat window is
+  this project's own code, and the client is simply part of it; the wire
+  does not depend on that choice either way.
 - What the client does **not** do, because nothing needs it yet: AG-UI's
   `STATE_*` and `STEP_*` events, and the `RunAgentInput` a stock AG-UI
   server is handed -- the profile is ours and the history comes from the
   store. It decodes the four tool events, and an older client that does not
   ignores them, since unknown event types were always ignored.
-- The copy of the styled components is a release behind the registry for the
-  same reason — the registry serves files written against the newest
-  library, and the cooldown pins the one before it. What that cost is one
-  optional field, written down in
-  `frontend/src/chat/assistant-ui/vendor/README.md`.
 - Same-origin SSE passes the Content-Security-Policy
   (`connect-src 'self'`).

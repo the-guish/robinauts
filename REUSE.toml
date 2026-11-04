@@ -35,6 +35,7 @@ SPDX-License-Identifier = "Apache-2.0"
 path = [
     "frontend/README.md",
     "frontend/AGENTS.md",
+    "frontend/src/icons/README.md",
     "frontend/package.json",
     "frontend/package-lock.json",
     "frontend/tsconfig.json",
@@ -47,36 +48,23 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "The Robinauts Authors"
 SPDX-License-Identifier = "Apache-2.0"
 
-# The vendored chat components: somebody else's MIT source, copied in under
-# the rules of ADR 0001 and recorded in docs/legal/ip-clearance.md. They carry
-# no header because they carry no edit that is not listed in their README:
-# adding one to every file would be a change to re-apply at every re-sync, and
-# it would state this project's copyright over code that is not its own. Two
-# upstreams, so two blocks; `frontend/src/chat/assistant-ui/vendor/README.md`
-# is ours and says which file came from which.
-[[annotations]]
-path = ["frontend/src/chat/assistant-ui/vendor/components/ui/**"]
-precedence = "aggregate"
-SPDX-FileCopyrightText = "2023 shadcn"
-SPDX-License-Identifier = "MIT"
-
+# The icon data: lucide's, copied in under ADR 0006 and recorded in
+# docs/legal/ip-clearance.md. `lucide.ts` is data copied as it was shipped,
+# so it carries no header of this project's: that would state our copyright
+# over values that are not ours. Lucide's own licence is ISC, and its LICENSE
+# states that the icons it derives from Feather are MIT; several of the copied
+# icons are among them, so the file carries both. `LICENSE.lucide` is that
+# text, listed here so that it says the same of itself; reuse would otherwise
+# pass over it as a licence file. `index.tsx` beside them is ours and carries
+# the header, and the README is ours and is listed above.
 [[annotations]]
 path = [
-    "frontend/src/chat/assistant-ui/vendor/components/assistant-ui/**",
-    "frontend/src/chat/assistant-ui/vendor/hooks/**",
+    "frontend/src/icons/lucide.ts",
+    "frontend/src/icons/LICENSE.lucide",
 ]
 precedence = "aggregate"
-SPDX-FileCopyrightText = "2025 AgentbaseAI Inc."
-SPDX-License-Identifier = "MIT"
-
-# The two files in that directory that are this project's: the README, and
-# `lib/utils.ts`, which is written here rather than copied (its header says so
-# as well; `precedence = "aggregate"` leaves that header in charge).
-[[annotations]]
-path = [
-    "frontend/src/chat/assistant-ui/vendor/README.md",
-    "frontend/src/chat/assistant-ui/vendor/lib/utils.ts",
+SPDX-FileCopyrightText = [
+    "2026 Lucide Icons and Contributors",
+    "2013-present Cole Bemis",
 ]
-precedence = "aggregate"
-SPDX-FileCopyrightText = "The Robinauts Authors"
-SPDX-License-Identifier = "Apache-2.0"
+SPDX-License-Identifier = "ISC AND MIT"

@@ -37,7 +37,8 @@ The list of things to do is [oss-checklist.md](../oss-checklist.md).
   request is recorded in `docs/legal/ip-clearance.md`: where it came from,
   at which commit, under what licence, where it landed, what was changed.
   Known cases: the sign-in design and code, the frontend tooling and the
-  design tokens from neorc, and the vendored assistant-ui components.
+  design tokens from neorc, the vendored assistant-ui components (since
+  removed), and the icon path data copied from lucide.
 - Third-party assets and vendored code are listed in
   `docs/legal/third-party.md`. An upstream header is never stripped.
 - No squash-imports; `main` is never force-pushed.
@@ -85,7 +86,7 @@ On GitHub Actions, all blocking, all present from day zero:
   `npm audit signatures`.
 - `reuse lint`; a DCO check; the architecture contracts
   ([architecture/rules.md](../architecture/rules.md)); the lint rule that
-  confines assistant-ui. Secret scanning is planned.
+  keeps the chat behind its seam. Secret scanning is planned.
 - Dependabot for uv, npm and GitHub Actions, with a 10-day cooldown.
   Actions are pinned to commit SHAs.
 
@@ -110,7 +111,5 @@ On GitHub Actions, all blocking, all present from day zero:
   - `certifi` is MPL-2.0 and arrives with the HTTP client: a restricted
     case, unmodified and unbundled, like `pathspec`, `orjson` and npm's
     `lightningcss`.
-  - `assistant-cloud` arrives with `@assistant-ui/react`: its licence
-    passes, and it is never configured.
 - The two agent frameworks and their provider clients are the largest
   dependency surface, and the likeliest source of a future conflict.

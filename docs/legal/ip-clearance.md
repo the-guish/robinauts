@@ -284,5 +284,69 @@ Entries are never edited after the fact; a correction is a new entry.
 - Modifications: none to any code. Only the record of where it lives changes.
 - Attribution added to: none needed.
 
+### 2026-11-04, lucide's icon path data, copied
+
+- Source: the npm package `lucide-react` at version 1.61.0, as installed by
+  `npm ci` from the lockfile of the day, out of
+  https://github.com/lucide-icons/lucide. For each icon, the file
+  `dist/esm/icons/<name>.mjs` of the installed package was read, and the
+  icon's node was taken from it: the list of SVG elements and their
+  attributes that the file hands to lucide's icon factory.
+- What was copied: the path data of 23 icons, and nothing else of the
+  package: `arrow-down`, `arrow-up`, `brain`, `check`, `chevron-down`,
+  `circle-alert`, `circle-x`, `copy`, `ellipsis`, `loader`, `log-out`,
+  `menu`, `monitor`, `moon`, `panel-left`, `pencil`, `play`, `plus`,
+  `refresh-cw`, `square`, `sun`, `trash`, `x`. These are the icons the
+  interface drew from the package before it was removed
+  ([ADR 0006](../adr/0006-chat-ui-on-react-alone.md)).
+- Their licence: ISC, Copyright (c) 2026 Lucide Icons and Contributors. The
+  package's `LICENSE` also states that the icons it lists are derived from
+  the Feather project under MIT, Copyright (c) 2013-present Cole Bemis.
+  `arrow-down`, `arrow-up`, `check`, `chevron-down`, `loader`, `log-out`,
+  `monitor`, `moon`, `plus`, `square`, `trash` and `x` are in that list by
+  name, and `circle-alert`, `circle-x`, `ellipsis` and `panel-left` are in
+  it under the names lucide gave them before (`alert-circle`, `x-circle`,
+  `more-horizontal`, `sidebar`). The file is therefore annotated
+  `ISC AND MIT`. The text was copied whole from the same package.
+- Landed as: `frontend/src/icons/lucide.ts` (the data) and
+  `frontend/src/icons/LICENSE.lucide` (the package's `LICENSE`, unchanged).
+  `frontend/src/icons/index.tsx`, the components over the data, and
+  `frontend/src/icons/README.md` are this project's own code and carry its
+  header.
+- Modifications: the React `key` attribute of each element was dropped,
+  because the components here render the list with their own keys. Nothing
+  else was modified: every element name, attribute and value is as the
+  package ships it. The icons are keyed by lucide's own names. The file's
+  opening comment, which states where it came from, is ours.
+- Attribution added to: this entry, `docs/legal/third-party.md`, the licence
+  text beside the data, `LICENSES/ISC.txt` and the annotation for the two
+  files in `REUSE.toml`. The copy was made by The Robinauts Authors via
+  Claude Code, reviewed by the maintainers.
+
+### 2026-11-04, the vendored assistant-ui and shadcn/ui components, removed
+
+- Removes: what the entry "the assistant-ui styled chat components,
+  vendored" (2026-09-22) brought in. That entry stays as it was, as the
+  record of what was in the tree and when.
+- Source: this project. [ADR 0006](../adr/0006-chat-ui-on-react-alone.md)
+  replaces the chat window with this project's own code.
+- Their licences: MIT, Copyright (c) 2025 AgentbaseAI Inc. (assistant-ui);
+  MIT, Copyright (c) 2023 shadcn (shadcn/ui).
+- Removed: the whole of `frontend/src/chat/assistant-ui/vendor/`, which is
+  the sixteen copied files under `components/` and `hooks/`, the two licence
+  texts beside them (`vendor/LICENSE` and `vendor/LICENSE.shadcn-ui`), and
+  this project's own `vendor/README.md` and `vendor/lib/utils.ts`.
+  `frontend/src/test/vendor.test.ts`, which held the directory to its list,
+  went with it, as did the two ESLint relaxations scoped to the directory.
+- Modifications: none. Nothing of either project's code, markup, class names
+  or text remains in the tree. The chat window that replaces it was written
+  for this project, and the end-to-end suite holds it to the same roles and
+  accessible names as before, which are this project's interface and not
+  upstream's code.
+- Attribution removed from: `docs/legal/third-party.md`, which no longer
+  lists the components, and `REUSE.toml`, which no longer annotates the
+  directory. `LICENSES/MIT.txt` stays, because the icon data of the entry
+  above is in part MIT.
+
 <!-- Entries go above this line. -->
 <!-- REUSE-IgnoreEnd -->

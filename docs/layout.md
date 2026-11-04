@@ -9,7 +9,7 @@ robinauts/
   docs/             specs, decisions, architecture, legal records
   scripts/          one script per check; CI runs these
   demo/             one command to run the whole thing on one machine
-  frontend/         the UI (ADR 0001)
+  frontend/         the UI (ADR 0006)
   backend/
     src/robinauts/
       agent_engines/    the agent port and its engines: contract/,

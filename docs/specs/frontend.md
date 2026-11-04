@@ -4,8 +4,8 @@
 
 - The layout is neorc's: a collapsible left navigation panel, and the chat
   in the middle. There is no top bar.
-- **The panel is ours**, not the chat library's
-  ([ADR 0001](../adr/0001-chat-ui-assistant-ui-with-tailwind.md)). Top to
+- **The panel is ours**, and not part of the chat window
+  ([ADR 0006](../adr/0006-chat-ui-on-react-alone.md)). Top to
   bottom: the collapse button and the brand; "new chat"; the conversation
   history; projects, once they exist; and, pinned to the bottom, the
   profile block with sign-out. Collapsed, it becomes an icon rail. The state is remembered
@@ -35,16 +35,23 @@
 
 ## The chat window
 
-- Built on [assistant-ui](https://github.com/assistant-ui/assistant-ui),
-  on Tailwind CSS, with its styled components vendored into the
-  repository. The rules for vendoring are in ADR 0001.
-- **The seam.** assistant-ui exists only under `src/chat/assistant-ui/`.
-  The rest of the application imports `src/chat/index.ts`, an interface
-  this project owns. A lint rule enforces it. The panel, the history,
-  routing and the session read our API directly; assistant-ui's thread
-  list and its cloud are not used.
-- **The discard test.** Deleting `src/chat/assistant-ui/` and the
-  `@assistant-ui/*` packages breaks one thing: the implementation behind
+- Written in this repository, on React alone
+  ([ADR 0006](../adr/0006-chat-ui-on-react-alone.md)): the thread, the
+  composer, the messages and their action bars, and the disclosures for
+  tool calls and reasoning, under `src/chat/thread/`, over a runtime of our
+  own (`src/chat/runtime.tsx`) that holds the state and the turns. No chat
+  library is used.
+- **Markdown** is rendered by our own renderer, `src/chat/markdown/`,
+  straight to React elements. No HTML string is produced, so raw HTML in an
+  answer is drawn as text, and a link keeps its target only for `http:`,
+  `https:` and `mailto:`. Images are drawn as links: the
+  Content-Security-Policy allows no remote image.
+- **The seam.** The rest of the application imports `src/chat/index.ts`,
+  an interface this project owns, and nothing else under `src/chat/`. A lint
+  rule enforces it. The panel, the history, routing and the session read
+  our API directly.
+- **The discard test.** Replacing everything under `src/chat/` but
+  `index.ts` breaks one thing: the implementation behind
   `src/chat/index.ts`.
 - It talks to the backend over AG-UI ([wire.md](wire.md)).
 
@@ -55,7 +62,8 @@
 - The backend serves the built files, under a strict
   Content-Security-Policy. **No CDN, no external font, no third-party
   origin**: an air-gapped install works.
-- System fonts. One allowlisted icon package. No third-party logos.
+- System fonts. One icon set, lucide's, carried as data in the tree rather
+  than installed. No third-party logos.
 - The deliverable is **one Python wheel** that contains the built
   frontend: `pip install` plus a PostgreSQL is a complete deployment. The
   bundle is built only in CI; built assets are never committed, and a
@@ -95,18 +103,17 @@ neorc's rules (`neorc/contributing/js-dependencies.md`):
   `405` with `Allow: GET, HEAD`. Nothing under `/ui/` whose name begins with
   a dot is served or packaged: a directory a build writes into is one an
   editor or a stray `.env` writes into too.
-- Design tokens are CSS custom properties carried over from neorc; the
-  Tailwind theme refers to them, so they survive a change of either
-  Tailwind or the chat library.
-- Packages the styled components bring, as pinned on 2026-09-22 when they
-  were copied in: `clsx`, `tailwind-merge`, `class-variance-authority`,
-  `lucide-react`, `tw-animate-css`, Radix (the `radix-ui` package, which
-  `@assistant-ui/react` depends on anyway), and two the list did not expect —
-  `remark-gfm`, for the Markdown, and `tw-shimmer`, a second Tailwind plugin
-  the copied components are written against. The two Tailwind plugins are
-  reached only through `src/styles.css`, so they are named by hand in
-  `CSS_PACKAGES`. `assistant-cloud` arrives as a dependency of
-  `@assistant-ui/react`; it is never configured.
+- Design tokens are CSS custom properties carried over from neorc, in
+  `src/tokens.css`. Every colour, radius and font is one of them. The
+  styling is plain CSS over the tokens: a base reset, the body and the focus
+  outline in `src/styles.css`, and one stylesheet per area, with class names
+  prefixed by the area. No utility classes.
+- The runtime dependencies are `react` and `react-dom`, and nothing else
+  (2026-11-04). The icons are 23 inline SVG components in `src/icons/`, over
+  path data copied from `lucide-react` 1.61.0 (ISC, and MIT for the icons
+  lucide derives from Feather), recorded in
+  [legal/ip-clearance.md](../legal/ip-clearance.md). No package is reached
+  through a stylesheet.
 - The wheel carries `THIRD_PARTY_LICENSES.txt`, listed in its
   `license-files`.
 - **The bundle size budget is 400 KB**, everything the browser downloads,
@@ -115,7 +122,10 @@ neorc's rules (`neorc/contributing/js-dependencies.md`):
   Markdown in it, and the real one was left open until there was a bundle to
   measure: with the chat in it that is 278.6 KB (step 21, 2026-09-23), so the
   budget is that with room for the features named above and none for a
-  dependency an order of magnitude too big. It is `SIZE_BUDGET_BYTES` in
+  dependency an order of magnitude too big. With the chat on React alone it is
+  <<AFTER_KB>> (2026-11-04), from 303.8 KB of JavaScript and 12.3 KB of CSS
+  before; `react` and `react-dom` are about 76 KB of that. The budget was left
+  where it was. It is `SIZE_BUDGET_BYTES` in
   `frontend/vite.config.ts` and the build fails over it; raising it is a
   reviewed change with its reason written down
   ([contributing/js-dependencies.md](../contributing/js-dependencies.md)).

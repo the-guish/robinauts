@@ -90,8 +90,9 @@ topic documents listed under [Documents](#documents).
   a **discard test**: removing it must break one known place and nothing
   else.
 - The seams so far:
-  - the chat UI library (assistant-ui) —
-    [ADR 0001](../adr/0001-chat-ui-assistant-ui-with-tailwind.md),
+  - the chat window, now this project's own code, which the rest of the
+    interface reaches through one file —
+    [ADR 0006](../adr/0006-chat-ui-on-react-alone.md),
     [frontend.md](frontend.md);
   - the agent frameworks (LangGraph, Pydantic AI) —
     [agent-engines.md](agent-engines.md),

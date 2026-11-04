@@ -22,14 +22,18 @@ this file says how it is applied to npm.
 - **A package reached only through a stylesheet is in no module graph.**
   `@import "some-package"`, `url(some-package/logo.png)`, and the `@import`s
   inside a package's own stylesheet are all outside rollup's, so nothing
-  discovers them. **They are written down by hand**, in `CSS_PACKAGES` in
-  `frontend/vite.config.ts`: a stylesheet that gains one of those adds the
-  package's name there, and that line is what a reviewer looks at — say so
-  in the pull request as well. From the name, the build holds it to the allowed
-  list, adds it to `bundled-packages.txt` beside the module graph's packages,
-  and appends its `LICENSE` to `dist/THIRD_PARTY_LICENSES.txt`, so nothing
-  ships unrecorded or unattributed. What is still lost is a name nobody wrote
-  down; [../../DEPENDENCIES.md](../../DEPENDENCIES.md) says the whole of it.
+  discovers them. **No package is reached that way today**: the stylesheets
+  are plain CSS over the design tokens, and none of them names a package
+  ([../adr/0006-chat-ui-on-react-alone.md](../adr/0006-chat-ui-on-react-alone.md)).
+  The mechanism stays for the day one is. Such a package is written down by
+  hand, in `CSS_PACKAGES` in `frontend/vite.config.ts`, now empty: a
+  stylesheet that gains one of those adds the package's name there, and that
+  line is what a reviewer looks at — say so in the pull request as well. From
+  the name, the build holds it to the allowed list, adds it to
+  `bundled-packages.txt` beside the module graph's packages, and appends its
+  `LICENSE` to `dist/THIRD_PARTY_LICENSES.txt`, so nothing ships unrecorded
+  or unattributed. What is still lost is a name nobody wrote down;
+  [../../DEPENDENCIES.md](../../DEPENDENCIES.md) says the whole of it.
 - **Plain CSS, no CSS Modules, no inline `<style>`.** Three things the build
   refuses outright, because each can be judged from a file's name without
   resolving anything: a CSS Module (`composes ... from` and `@value ... from`
@@ -44,7 +48,7 @@ this file says how it is applied to npm.
 - Maintained: recent releases, issues answered, and **more than one
   maintainer — or a single maintainer with years of settled releases and wide
   adoption**. The second half is not a loophole; it is the truth about a
-  handful of packages everything depends on, `clsx` among them. What makes it
+  handful of packages everything depends on. What makes it
   a rule rather than a shrug is that the judgement is **written down** where
   the package is adopted: which of the two it is, and why.
 - Small: `npm view <pkg> dependencies` is short, and the size fits the budget.
@@ -152,8 +156,10 @@ assets are never committed, and a bundle built on a laptop is never released.
   exact pins. Its own refusals are tested in
   `frontend/src/test/licence-gate.test.ts`.
 - `frontend/.npmrc`: exact versions and no install scripts.
-- `frontend/eslint.config.js`: the rules that confine assistant-ui
-  ([../adr/0001-chat-ui-assistant-ui-with-tailwind.md](../adr/0001-chat-ui-assistant-ui-with-tailwind.md)) —
+- `frontend/eslint.config.js`: the seam in front of the chat
+  ([../adr/0006-chat-ui-on-react-alone.md](../adr/0006-chat-ui-on-react-alone.md)),
+  which lets nothing outside `frontend/src/chat/` import anything under it but
+  `src/chat/index.ts` —
   `import`, `export ... from`, `import()` with a string or a template, and a
   refusal of any specifier that cannot be read at compile time, of
   `import.meta.glob` and of `require` — which

@@ -10,14 +10,17 @@ governed by [DEPENDENCIES.md](../../DEPENDENCIES.md).
 
 | what | where | source | licence |
 |---|---|---|---|
-| assistant-ui's styled chat components: the thread with its composer, messages, scroll, branch picker and action bar, the Markdown text, the tooltip icon button, the follow-up suggestions, the file and image parts, the reasoning and tool components, and the copy-to-clipboard hook — eleven files | `frontend/src/chat/assistant-ui/vendor/components/assistant-ui/`, `.../hooks/` | [assistant-ui](https://github.com/assistant-ui/assistant-ui), commit `92d16d77a684cff61e6812c0803ea698a8db8b2f`, through the registry at `https://r.assistant-ui.com/` | MIT, Copyright (c) 2025 AgentbaseAI Inc. ([text](../../frontend/src/chat/assistant-ui/vendor/LICENSE)) |
-| the five shadcn/ui components those import: button, skeleton, tooltip, textarea, collapsible | `frontend/src/chat/assistant-ui/vendor/components/ui/` | [shadcn/ui](https://github.com/shadcn-ui/ui), commit `98a1fe67b439324ddc857f47fbdce056600a4329`, through the registry at `https://ui.shadcn.com/r/styles/new-york-v4/` | MIT, Copyright (c) 2023 shadcn ([text](../../frontend/src/chat/assistant-ui/vendor/LICENSE.shadcn-ui)) |
+| lucide's icon path data: the SVG elements of 23 icons, as data, with no code of lucide's | `frontend/src/icons/lucide.ts` | [lucide](https://github.com/lucide-icons/lucide), the npm package `lucide-react` 1.61.0 | ISC, Copyright (c) 2026 Lucide Icons and Contributors; the icons lucide derives from Feather are MIT, Copyright (c) 2013-present Cole Bemis ([text](../../frontend/src/icons/LICENSE.lucide)) |
 
-Both were copied on 2026-09-22 under
-[ADR 0001](../adr/0001-chat-ui-assistant-ui-with-tailwind.md). The
-seventeenth file in that directory, `vendor/lib/utils.ts`, is **not**
-third-party and is not listed above: it is written here, under this project's
-own licence, in place of the registry's `utils` item. What was copied, what
-was changed in it and how to re-sync are in
-[`frontend/src/chat/assistant-ui/vendor/README.md`](../../frontend/src/chat/assistant-ui/vendor/README.md),
-and the copy itself is an entry in [`ip-clearance.md`](ip-clearance.md).
+The data was copied on 2026-11-04 under
+[ADR 0006](../adr/0006-chat-ui-on-react-alone.md), and the copy is an entry in
+[`ip-clearance.md`](ip-clearance.md), which names the icons and which of them
+are Feather's. The components that draw it, `frontend/src/icons/index.tsx`,
+are **not** third-party: they are written here, under this project's own
+licence. How to add an icon is in
+[`frontend/src/icons/README.md`](../../frontend/src/icons/README.md).
+
+The assistant-ui and shadcn/ui components that were vendored under
+`frontend/src/chat/assistant-ui/vendor/` from 2026-09-22 were removed on
+2026-11-04, with their licence texts, and nothing of theirs remains in the
+tree ([`ip-clearance.md`](ip-clearance.md) has both entries).

@@ -1,6 +1,12 @@
 # ADR 0001 — Chat UI: assistant-ui styled components on Tailwind, behind an explicit seam
 
-- Status: accepted
+> **Superseded. Skip this ADR unless you need its history.**
+> [ADR 0006](0006-chat-ui-on-react-alone.md) replaces the library, the
+> vendored components and Tailwind. The seam, the design tokens and the wire
+> boundary survive, and ADR 0006 restates them. For the current design, read
+> ADR 0006.
+
+- Status: superseded by [ADR 0006](0006-chat-ui-on-react-alone.md)
 - Date: 2026-09-20
 
 ## Context

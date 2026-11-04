@@ -25,34 +25,38 @@ Do not:
   built by CI and by the wheel build, never committed.
 - edit `bundled-packages.txt` by hand. The build writes it; a change in it is
   what a reviewer looks at.
-- import `@assistant-ui/*` or anything under `src/chat/assistant-ui/` from
-  outside that directory, and do not weaken the rules in `eslint.config.js` or
+- import anything under `src/chat/` from outside that directory but
+  `src/chat/index.ts`, and do not weaken the rules in `eslint.config.js` or
   the tests in `src/test/seam-rule.test.ts` that prove they fire. That seam is
-  [ADR 0001](../docs/adr/0001-chat-ui-assistant-ui-with-tailwind.md); what the
-  rest of the application may use goes in `src/chat/index.ts`. The rule reads
+  [ADR 0006](../docs/adr/0006-chat-ui-on-react-alone.md); what the rest of the
+  application needs from the chat goes in `src/chat/index.ts`. The rule reads
   a path **segment**, so no spelling of a path is a way round it. Nor reach
   for a specifier no rule can read: `import()` or
   `new URL(..., import.meta.url)` with a variable or an interpolated
-  template, and `import.meta.glob`, are refused outside
-  `src/chat/assistant-ui/` precisely because nothing could clear them, and
-  `require` is refused everywhere.
-- edit anything under `src/chat/assistant-ui/vendor/` beyond the
-  modifications its `README.md` already lists. That directory is somebody
-  else's MIT source, copied from two registries rather than installed
-  ([ADR 0001](../docs/adr/0001-chat-ui-assistant-ui-with-tailwind.md)); every
-  edit in it is a change to re-apply at every re-sync, for ever. Fix it
-  outside, or list the edit there with its reason. `src/test/vendor.test.ts`
-  fails when the list and the directory disagree. **Do not "tidy" the two
-  ESLint relaxations** scoped to `src/chat/assistant-ui/vendor/**` in
-  `eslint.config.js`, or satisfy them by editing the copy: they are there so
-  that the copy stays a copy. Re-sync by the procedure in that README —
-  `curl` the registry JSON, never the `shadcn` or `assistant-ui` CLI, which
-  installs packages, runs install scripts and rewrites configuration — and
-  **record every copy and re-sync in
-  [../docs/legal/ip-clearance.md](../docs/legal/ip-clearance.md)**, where
-  entries are appended and never edited. A package that the copy newly needs
-  is still a dependency change of its own, vetted by the rules above, with
-  the judgement written into that README's vetting table.
+  template, and `import.meta.glob`, are refused precisely because nothing
+  could clear them, and `require` is refused everywhere.
+- add a runtime dependency to stand in for code this package writes for
+  itself: a chat component, a Markdown feature, an icon, a class-name helper.
+  `react` and `react-dom` are the whole runtime closure on purpose
+  ([ADR 0006](../docs/adr/0006-chat-ui-on-react-alone.md)), and a new one is
+  the dependency change of its own described above, with that ADR to argue
+  against.
+- weaken the Markdown renderer's safety contract in `src/chat/markdown/`. It
+  produces React elements and never an HTML string; nothing in it goes
+  through `dangerouslySetInnerHTML`; a link keeps its target only for
+  `http:`, `https:` and `mailto:`; an image is drawn as a link, never as
+  `<img>`. Its scanners are linear in the size of the text, and its
+  performance test holds them to it: an answer is text a model wrote, and a
+  quadratic scan is a way to stall the page.
+- edit `src/icons/lucide.ts` by hand, or install `lucide-react` to get an
+  icon. To add one, read its path data from `dist/esm/icons/<name>.mjs` of
+  the package at a recorded version (`npm pack lucide-react@<version>` in
+  a scratch directory outside the tree and look inside; nothing is installed), append it with the React `key`s dropped,
+  export a component for it from `src/icons/index.tsx`, and **append an entry
+  to [../docs/legal/ip-clearance.md](../docs/legal/ip-clearance.md)**, where
+  entries are appended and never edited. The data is lucide's, under the
+  licence in `src/icons/LICENSE.lucide` (ISC, and MIT for the icons lucide
+  derives from Feather); the copy is what is recorded.
 - write a path any way but plainly. `//`, `/./`, a `..` that is not the
   leading prefix and a trailing `/` are refused, as is any path through
   `node_modules/`: a package is imported by its name. One spelling per path
@@ -60,18 +64,24 @@ Do not:
 - add a CDN, a web font, a third-party origin or an inline script. An
   air-gapped install has to work, and the Content-Security-Policy forbids it.
 - use CSS Modules, a stylesheet language other than plain CSS, or a
-  `<style>` block in `index.html`. Each fails the build. Style with Tailwind
-  and plain CSS, and pick dependencies that ship plain CSS too.
+  `<style>` block in `index.html`. Each fails the build.
+- write a literal colour, radius or font, a `prefers-color-scheme` rule, a
+  utility class or a class-merging helper. Style with plain CSS over the
+  tokens of `src/tokens.css` (`var(--panel)`), one stylesheet per area,
+  imported by the component that uses it, with class names prefixed by the
+  area (`shell-`, `panel-`, `history-`, `signin-`, `chat-`, `md-`, `icon`).
+  Dark mode is the tokens' job. A `style` attribute is for a value that is
+  genuinely dynamic and nothing else. Keep animations off under
+  `prefers-reduced-motion: reduce`, and leave the global `:focus-visible`
+  outline in `src/styles.css` alone.
 
 Do:
 
-- add the package's name to `CSS_PACKAGES` in `vite.config.ts`, and say so in
-  the pull request, when a stylesheet gains an `@import` or a `url()` that
-  names a **package**. Rollup's module graph does not see it, so that list is
-  written by hand; from the name the build holds it to the allowed list,
-  records it in `bundled-packages.txt` and ships its `LICENSE`
-  ([../DEPENDENCIES.md](../DEPENDENCIES.md), "What the bundle's record does
-  not see").
+- treat a stylesheet `@import` or `url()` that names a **package** as a
+  dependency change. None does today. Rollup's module graph does not see one,
+  so the build has to be told about it by hand, as
+  [../docs/contributing/js-dependencies.md](../docs/contributing/js-dependencies.md)
+  says.
 - run `scripts/check-frontend.sh` from the root of the repository before
   declaring a change done; CI runs that same script.
 - when a package that is not on the allowed list appears or changes version,
