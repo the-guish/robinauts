@@ -78,16 +78,21 @@ address into a phone.
   token and for a browser session.
 - **A refused sign-in ends every credential of that identity.** When the
   allow list refuses someone the provider has just vouched for, their
-  browser sessions, devices and tokens are deleted in the same breath.
-  That is the moment the platform learns the person is out.
+  browser sessions, devices and tokens are deleted in the same breath,
+  keyed by provider and subject. Only the allow list's refusal does this.
+  A provider that is down, a state mismatch or an unreadable token wipes
+  nothing. That is the moment the platform learns the person is out.
 - **Minting needs a fresh sign-in.** `POST /auth/pairings` and
   `POST /auth/tokens` require a browser session younger than ten minutes.
   An older one is answered 403, `fresh_sign_in`, and the page offers to
   sign in again, coming back to `#/devices`. A stolen twelve-hour cookie
   can therefore install a thirty-day device only in the ten minutes after
   the person signed in, and a new sign-in is something the thief cannot
-  complete: it needs the person's session at the provider. Removing a
-  device needs no fresh sign-in. Taking access away is never gated.
+  complete: it needs the person's session at the provider. This guards
+  against a cookie that was copied, not against someone at an unlocked
+  browser: there the provider signs in again without a question, since
+  its own session is in the same browser. Removing a device needs no
+  fresh sign-in. Taking access away is never gated.
 - **The operator ends devices from the command line.**
   `robinauts devices end --user <email>`, `--device <id>` or `--all`, and
   `robinauts devices list`. They read the database the server reads, and
@@ -150,8 +155,8 @@ sequenceDiagram
 1. **The browser asks for a code.** `POST /auth/pairings`, with the session
    cookie. The server mints a pairing: an id, a 256-bit code, two minutes
    of life, owned by the signed-in user. It answers the id, the expiry and
-   the QR picture. It never answers the code. The picture is all the
-   browser needs, and its script has no business with the secret.
+   the QR picture. It answers the code only as the picture, which is all
+   the browser needs.
 2. **The browser shows the QR.** It polls `GET /auth/pairings/{id}` every
    two seconds. Under the picture it says: "Scan this with the Robinauts
    app on your phone. The app will show you a number to type here."
@@ -192,7 +197,10 @@ sequenceDiagram
    Both are cookie writes, and carry `Origin` like every cookie write.
 6. **On the right number** the server, in one statement, inserts a device
    session whose `secret_hash` is the pairing's claim hash, with
-   `device_days` of life, and marks the pairing `approved`. The browser's
+   `device_days` of life, clears `claim_hash` on the pairing, so the hash
+   moves rather than copies, and marks the pairing `approved`. The same
+   statement checks the expiry and counts a wrong try, so two approves at
+   once cannot both pass, and a wrong try is never lost. The browser's
    poll says so, and the device appears in the list. A wrong number is
    403, and the browser says so and asks again. The third wrong number
    deletes the pairing, as **No** does. The claim secret then resolves to
@@ -257,7 +265,7 @@ would read it off the shared screen and type it itself.
 | `POST /auth/pairings` | fresh cookie | mint; answers `{id, expires_at, qr_svg}`; 429 `busy` over the cap; 403 `fresh_sign_in` on a session older than ten minutes; 403 where `device_days` is 0 |
 | `GET /auth/pairings/{id}` | cookie, owner | `{state, expires_at, device}`; 404 for another's, or one gone |
 | `POST /auth/pairings/{id}/approve` | cookie, owner | body `{number}`; link the device and answer it; 403 `wrong_number`; 409 unless `claimed` |
-| `DELETE /auth/pairings/{id}` | cookie, owner | refuse, or cancel; 204 |
+| `DELETE /auth/pairings/{id}` | cookie, owner | refuse, or cancel; 204; on an approved one, 204, the row goes and the device stays |
 | `POST /auth/pairings/claim` | nobody | present a code; answers `{secret, number, expires_at}`; 404 |
 | `GET /auth/session` | bearer | also answers `device`, `token` or `pairing`; never a 401 |
 | `GET /auth/devices` | cookie or bearer | the person's devices, oldest first |
@@ -282,7 +290,9 @@ The QR picture is rendered by the backend as SVG, with `segno`
 answer. The browser shows it as `<img src="data:image/svg+xml;base64,…">`.
 The Content-Security-Policy's `img-src 'self' data:` allows that. It is
 never put in the page as markup. The frontend carries no QR library. The
-code never reaches the browser's script.
+code reaches the browser inside the picture, and a script in the page
+could decode it. Nothing needs to stop that: a script in a signed-in page
+can mint a pairing of its own anyway.
 
 ## Records
 
@@ -325,7 +335,9 @@ The credentials port has one operation per step: `add_pairing`,
 Each is one statement. Each is given `now`. `approve_pairing` is given the
 number, and answers one of approved, wrong number, or gone. Each has its
 row in the contract suite, which the memory and the PostgreSQL adapters
-both pass. The flow lives in `web/pairing.py`, beside `web/sign_in.py`,
+both pass, and so do the details above: the expiry and the wrong try in
+the approve, the hash that moves, the delete of an approved pairing, and
+the wipe that only an allow-list refusal triggers. The flow lives in `web/pairing.py`, beside `web/sign_in.py`,
 with the same `now` discipline.
 
 ## Configuration
@@ -386,9 +398,11 @@ The app is a repository of its own. This is what it does against the API.
   says it is leaving the first server. Release builds speak `https` only,
   and carry no exception.
 - **The number.** After the claim the app shows the number, large, with
-  one sentence: "Type this number in your browser." It keeps the screen on
-  and polls until the browser does, or the pairing expires. It does not
-  ask the person to type anything itself.
+  two sentences: "Type this number in your browser. Do not read it to
+  anyone." It keeps the screen on and polls until the browser does, or
+  the pairing expires. It does not ask the person to type anything
+  itself. Once in, its first screen names the account: the user's name
+  and email, as `GET /auth/session` answered them.
 - **Headers.** `Authorization: Bearer rbd_…` on every call.
   `Accept: application/json`. `Content-Type: application/json` on every
   write, with a body or without. That is the rule of
@@ -437,12 +451,13 @@ The app is a repository of its own. This is what it does against the API.
   There is nothing to type, so there is nothing to approve. The name the
   script chose is never what the person decides by, and is not shown at
   that step.
-- **A stranger's code shown to the person.** That is the attack of the
-  other direction: a victim scans an attacker's code and signs the attacker
-  in. It cannot happen here. Scanning gives the one who showed the code
-  nothing. The scanner receives, and only after a number from the
-  scanner's own screen is typed into the browser of the one who showed the
-  code.
+- **A stranger's code shown to the person.** The person scans a code from
+  the stranger's browser, and the person's phone is then linked to the
+  stranger's account: what the person types goes into the stranger's
+  conversations. It takes the person reading the number off their own
+  phone to the stranger, and the app's first screen names the account the
+  phone is now in, so a wrong one is seen at once. The sentence under the
+  number says: do not read it to anyone.
 - **Two claims racing.** One statement moves `waiting` to `claimed`. The
   second finds it moved.
 - **Secrets at rest.** Hashes only, in every table. The claim secret
@@ -462,10 +477,11 @@ The app is a repository of its own. This is what it does against the API.
   its removal, and the list is the whole of the person's control. The
   secret lives in the Keystore, out of backups, and never in a log, which
   is what makes stealing it hard in the first place.
-- **A stolen browser cookie.** It is a session for up to twelve hours. It
+- **A copied browser cookie.** It is a session for up to twelve hours. It
   can mint a device, or a token, only while the session is under ten
   minutes old. After that, minting asks for a sign-in the thief cannot
-  complete.
+  complete. An unlocked browser is not this case, and the gate does not
+  claim it.
 - **A lookalike code.** A "set up Robinauts" QR that names another host
   would make that host the account. The app shows the origin, in
   punycode, and asks before it sends anything. A company that configures
