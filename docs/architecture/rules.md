@@ -7,7 +7,8 @@ runs them.
 ## Top level
 
 agent_engines -> nothing from robinauts
-controller -> agent_engines.contract
+tools -> agent_engines.contract, controller.contract
+controller -> agent_engines.contract, tools.contract; a tool itself, by composition alone
 web -> controller.contract, controller.composition
 
 ## Inside agent_engines
@@ -18,14 +19,20 @@ langchain_engine -> contract + langchain deps + postgres
 pydantic_ai_engine -> contract + pydantic ai deps + postgres
 no engine imports another
 
+## Inside tools
+
+contract -> agent_engines.contract, controller.contract
+each tool (sessions) -> contract, agent_engines.contract, controller.contract
+no tool imports another; only controller.composition imports a tool
+
 ## Inside controller
 
 contract -> nothing from robinauts
 ports -> contract
 core -> contract, ports, agent_engines.contract; pure functions, no I/O
 adapters -> contract, ports
-application -> contract, ports, core, agent_engines.contract
-composition -> contract, ports, core, adapters, application; imported by web alone
+application -> contract, ports, core, agent_engines.contract, tools.contract
+composition -> contract, ports, core, adapters, application, tools; imported by web alone
 
 ## Third-party libraries, where each may be imported
 

@@ -45,6 +45,7 @@ from robinauts.agent_engines.contract.domain import (
     CheckpointNotFoundError,
     Done,
     Event,
+    FunctionToolError,
     ProviderKind,
     ReasoningDelta,
     SessionNotFoundError,
@@ -59,7 +60,7 @@ from robinauts.agent_engines.langchain_engine.clients import (
     force_tracing_off,
 )
 from robinauts.agent_engines.langchain_engine.memory import Memory
-from robinauts.agent_engines.langchain_engine.tools import tools_for
+from robinauts.agent_engines.langchain_engine.tools import function_tools, tools_for
 
 FASTEST_MODEL_CALL = 1.0
 """Seconds: a turn may make one model call per second of its timeout. Real rounds are slower;
@@ -122,7 +123,7 @@ class LangChainEngine(AgentEngine):
         chat = chat_model(model, self._settings)
         graph = create_agent(
             chat,
-            await tools_for(agent, self._settings),
+            [*await tools_for(agent, self._settings), *function_tools(agent.functions)],
             system_prompt=agent.system_prompt,
             checkpointer=self._memory.saver,
             middleware=middleware_for(chat, model, self._settings),
@@ -231,9 +232,9 @@ def done_of(state: StateSnapshot) -> Done:
 
 def tool_failed(error: Exception, _request: ToolCallRequest) -> str:
     """What the model is told of a tool call that raised, so that the turn goes on: the MCP
-    session's own words, such as a timeout's, or else the kind of error alone. An ``isError``
-    result of the server's is already its own answer."""
-    if isinstance(error, McpError):
+    session's own words, such as a timeout's, a function tool's own message, or else the kind of
+    error alone. An ``isError`` result of the server's is already its own answer."""
+    if isinstance(error, McpError | FunctionToolError):
         return str(error)
     return f"The tool call failed: {type(error).__name__}."
 

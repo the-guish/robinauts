@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from typing import Any
 
 from robinauts.controller.contract.domain import (
@@ -46,7 +46,9 @@ def _seconds(value: Any) -> float:
     return float(value)
 
 
-def parse_config(raw: Mapping[str, Any]) -> Config:
+def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
+    """``tools`` are the ids of the tools this build runs in process, which an agent's ``tools``
+    may name beside the tool servers."""
     problems: list[str] = []
 
     def build(table: str, cls: Any, **convert: Callable[[Any], Any]) -> dict[str, Any]:
@@ -99,6 +101,8 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
                 f'tool_servers.{server.id}: `header` is for auth "header" alone, '
                 f"not auth {server.auth.value!r}"
             )
+    for server_id in sorted(set(tool_servers) & set(tools)):
+        problems.append(f"tool_servers.{server_id}: the id of a tool of this build")
     for model in models.values():
         if model.provider not in providers:
             problems.append(f"models.{model.id}: provider {model.provider!r} is not configured")
@@ -106,10 +110,13 @@ def parse_config(raw: Mapping[str, Any]) -> Config:
         if agent.model not in models:
             problems.append(f"agents.{agent.id}: model {agent.model!r} is not configured")
         for tool in agent.tools:
-            if tool not in tool_servers:
-                problems.append(f"agents.{agent.id}: tool server {tool!r} is not configured")
+            if tool not in tool_servers and tool not in tools:
+                problems.append(
+                    f"agents.{agent.id}: tool {tool!r} is neither a configured tool server"
+                    " nor a tool of this build"
+                )
         if twice := sorted({tool for tool in agent.tools if agent.tools.count(tool) > 1}):
-            problems.append(f"agents.{agent.id}: tool server(s) named twice: {', '.join(twice)}")
+            problems.append(f"agents.{agent.id}: tool(s) named twice: {', '.join(twice)}")
         if agent.engine not in ENGINES:
             problems.append(f"agents.{agent.id}: engine {agent.engine!r} is not one of {ENGINES}")
     if problems:

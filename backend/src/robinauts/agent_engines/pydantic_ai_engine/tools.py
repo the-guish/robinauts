@@ -1,21 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The agent's tools, as toolsets of its MCP servers with the server's credential."""
+"""The agent's tools: toolsets of its MCP servers with the server's credential, and one toolset of
+its function tools."""
 
 from __future__ import annotations
 
 import base64
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic_ai import RunContext
+from pydantic_ai import RunContext, Tool
 from pydantic_ai.exceptions import ApprovalRequired, CallDeferred, ModelRetry, ToolFailed
 from pydantic_ai.mcp import MCPToolset
-from pydantic_ai.toolsets import AbstractToolset, ToolsetTool, WrapperToolset
+from pydantic_ai.toolsets import AbstractToolset, FunctionToolset, ToolsetTool, WrapperToolset
 
 from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
+    FunctionTool,
+    FunctionToolError,
     ToolServerAuth,
     ToolServerConfig,
 )
@@ -49,7 +53,8 @@ def toolset_for(server: ToolServerConfig, settings: EngineSettings) -> AbstractT
 class FailuresToModel(WrapperToolset[Any]):
     """Every failed tool call is a failed result the model sees, and the turn goes on: a call
     that raised, such as one that timed out, and one the server answered with an error. Neither
-    counts against the tool's retries, which would fail the turn the second time."""
+    counts against the tool's retries, which would fail the turn the second time. A function
+    tool's ``FunctionToolError`` is told in its own words, anything else by its kind alone."""
 
     async def call_tool(
         self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any], tool: ToolsetTool[Any]
@@ -60,6 +65,8 @@ class FailuresToModel(WrapperToolset[Any]):
             raise
         except ModelRetry as retry:
             raise ToolFailed(retry.message) from retry
+        except FunctionToolError as error:
+            raise ToolFailed(str(error)) from error
         except Exception as error:
             raise ToolFailed(f"The tool call failed: {type(error).__name__}.") from error
 
@@ -67,3 +74,21 @@ class FailuresToModel(WrapperToolset[Any]):
 def toolsets_for(agent: AgentDefinition, settings: EngineSettings) -> list[AbstractToolset[Any]]:
     servers = settings.models.tool_servers
     return [toolset_for(servers[server_id], settings) for server_id in agent.tools]
+
+
+def function_toolsets(functions: Iterable[FunctionTool]) -> list[AbstractToolset[Any]]:
+    tools = [_function_tool(function) for function in functions]
+    return [FailuresToModel(FunctionToolset(tools))] if tools else []
+
+
+def _function_tool(function: FunctionTool) -> Tool[Any]:
+    async def call(**arguments: Any) -> str:
+        return await function.call(arguments)
+
+    # A JSON Schema as it is: Pydantic AI hands the arguments over unchecked, as the tool expects.
+    return Tool.from_schema(
+        call,
+        name=function.name,
+        description=function.description,
+        json_schema=dict(function.input_schema),
+    )

@@ -36,8 +36,8 @@ async def turn(prompt: str, after: str | None = None) -> list[object]:
 async def test_a_turn_calls_the_tool_and_answers_the_fixed_string_plus_its_result() -> None:
     call, result, *said, done = await turn("hello", after="any checkpoint at all")
     assert isinstance(call, ToolCall)
-    assert (call.name, call.arguments) == (TOOL, {"text": "hello"})
-    assert result == ToolResult(call_id=call.call_id, name=TOOL, output="hello")
+    assert (call.name, call.raw_input) == (TOOL, {"text": "hello"})
+    assert result == ToolResult(call_id=call.call_id, name=TOOL, raw_output="hello")
     assert said == [TextDelta(text=ANSWER), TextDelta(text="hello")]
     assert isinstance(done, Done)
     assert done.text == ANSWER + "hello"
@@ -54,4 +54,4 @@ async def test_a_poisoned_prompt_gets_an_error_from_the_tool_and_ends_the_turn_b
             events.append(event)
     call, result = events
     assert isinstance(call, ToolCall)
-    assert result == ToolResult(call_id=call.call_id, name=TOOL, output=POISONED, is_error=True)
+    assert result == ToolResult(call_id=call.call_id, name=TOOL, raw_output=POISONED, failed=True)

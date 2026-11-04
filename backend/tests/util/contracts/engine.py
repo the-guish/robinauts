@@ -8,13 +8,15 @@ and ready, whose ``MODEL`` answers without reaching anything.
 
 Subclass ``EngineTurnContract`` and override ``new_engine(script)``, which returns an engine set
 up and ready whose ``MODEL`` behaves as the ``Script`` says and is handed ``add`` as its tool.
+The function tools are the contract's own, on ``TURN_AGENT``: the engine is handed them as
+they are, with nothing overridden.
 """
 
 from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Mapping
 from enum import Enum
 from typing import Any
 
@@ -25,6 +27,8 @@ from robinauts.agent_engines.contract.domain import (
     CheckpointNotFoundError,
     Done,
     Event,
+    FunctionTool,
+    FunctionToolError,
     SessionExistsError,
     SessionNotFoundError,
     TextDelta,
@@ -141,11 +145,42 @@ class ModelFailure(Exception):
     pass
 
 
+async def _look_up(arguments: Mapping[str, Any]) -> str:
+    return f"{arguments['key']} is in the drawer"
+
+
+async def _refuse(arguments: Mapping[str, Any]) -> str:
+    raise FunctionToolError(REFUSAL)
+
+
+LOOKUP = FunctionTool(
+    "look_up",
+    "Where a thing is.",
+    {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]},
+    _look_up,
+)
+REFUSE = FunctionTool("refuse", "Refuses.", {"type": "object", "properties": {}}, _refuse)
+REFUSAL = "Not today."
+
+TURN_AGENT = AgentDefinition(system_prompt=AGENT.system_prompt, functions=(LOOKUP, REFUSE))
+"""The agent of the contract's turns: ``AGENT``, with the contract's function tools."""
+
+
 class Script(Enum):
     ANSWER = "streams ANSWER in more than one piece"
     TOOL_ROUND = "calls add(**ARGUMENTS) as CALL_ID, then, given its result, streams ANSWER"
+    FUNCTION_ROUND = "calls look_up as CALL_ID, then, given its result, streams ANSWER"
+    REFUSED_ROUND = "calls refuse as CALL_ID, then, given its result, streams ANSWER"
     FAIL = "raises ModelFailure"
     HANG = "never answers"
+
+
+CALLS: dict[Script, tuple[str, dict[str, Any]]] = {
+    Script.TOOL_ROUND: ("add", ARGUMENTS),
+    Script.FUNCTION_ROUND: ("look_up", {"key": "the map"}),
+    Script.REFUSED_ROUND: ("refuse", {}),
+}
+"""What a script's model calls, as CALL_ID, before it answers: the tool's name and arguments."""
 
 
 class EngineTurnContract:
@@ -163,7 +198,7 @@ class EngineTurnContract:
         await engine.create(session)
         stream = engine.stream(
             session,
-            AGENT,
+            TURN_AGENT,
             "What are two and three?",
             model=self.MODEL,
             checkpoint_id=None,
@@ -186,6 +221,26 @@ class EngineTurnContract:
         call = events.index(ToolCall(CALL_ID, "add", ARGUMENTS))
         result = events.index(ToolResult(CALL_ID, "add", "5"))
         assert call < result < len(events) - 1
+        assert isinstance(events[-1], Done)
+        assert events[-1].text == ANSWER
+
+    @engine_test
+    async def test_a_function_tool_is_called_like_any_other_tool(self) -> None:
+        events = await self.turn(Script.FUNCTION_ROUND)
+        call = events.index(ToolCall(CALL_ID, "look_up", {"key": "the map"}))
+        result = events.index(ToolResult(CALL_ID, "look_up", "the map is in the drawer"))
+        assert call < result < len(events) - 1
+        assert isinstance(events[-1], Done)
+        assert events[-1].text == ANSWER
+
+    @engine_test
+    async def test_a_function_tool_refusing_is_a_failed_result_in_its_words(self) -> None:
+        events = await self.turn(Script.REFUSED_ROUND)
+        [result] = [event for event in events if isinstance(event, ToolResult)]
+        assert result.call_id == CALL_ID
+        assert result.name == "refuse"
+        assert result.failed
+        assert REFUSAL in result.raw_output
         assert isinstance(events[-1], Done)
         assert events[-1].text == ANSWER
 

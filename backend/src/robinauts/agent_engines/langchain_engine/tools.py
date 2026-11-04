@@ -1,20 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The agent's tools, listed from its MCP servers with the server's credential."""
+"""The agent's tools: listed from its MCP servers with the server's credential, and its function
+tools made LangChain tools."""
 
 from __future__ import annotations
 
 import asyncio
 import base64
+from collections.abc import Iterable
 from datetime import timedelta
+from typing import Any
 
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, StructuredTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.sessions import StreamableHttpConnection
 
 from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
+    FunctionTool,
     ToolServerAuth,
     ToolServerConfig,
 )
@@ -58,3 +62,20 @@ async def tools_for(agent: AgentDefinition, settings: EngineSettings) -> list[Ba
         for tool in tools
         if tool.name not in servers[server_id].exclude
     ]
+
+
+def function_tools(functions: Iterable[FunctionTool]) -> list[BaseTool]:
+    return [_function_tool(function) for function in functions]
+
+
+def _function_tool(function: FunctionTool) -> BaseTool:
+    async def call(**arguments: Any) -> str:
+        return await function.call(arguments)
+
+    # A JSON Schema as it is: LangChain hands the arguments over unchecked, as the tool expects.
+    return StructuredTool.from_function(
+        coroutine=call,
+        name=function.name,
+        description=function.description,
+        args_schema=dict(function.input_schema),
+    )

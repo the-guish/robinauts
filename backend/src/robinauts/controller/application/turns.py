@@ -30,7 +30,6 @@ from robinauts.agent_engines.contract.domain import (
 )
 from robinauts.agent_engines.contract.ports import AgentEngine
 from robinauts.controller.contract.domain import (
-    AgentConfig,
     ArgumentsPiece,
     CallCompleted,
     CallStarted,
@@ -165,7 +164,7 @@ async def run_turn(
     turn: Turn,
     question: Message,
     prompt: str,
-    agent_config: AgentConfig,
+    definition: AgentDefinition,
     checkpoint_id: str | None,
     claimed_at: datetime,
     max_turn_seconds: float,
@@ -181,7 +180,6 @@ async def run_turn(
     if remaining <= 0:
         return
     answer_id = uuid.uuid4()
-    definition = AgentDefinition(agent_config.system_prompt, agent_config.tools)
     parts: list[MessagePart] = []
     writer = _Writer(store, owner, turn)
     try:
@@ -209,15 +207,15 @@ async def run_turn(
                     await writer.append(ReasoningPiece(answer_id, event.text))
                 elif isinstance(event, ToolCall):
                     await writer.append(CallStarted(answer_id, event.call_id, event.name))
-                    arguments = json.dumps(dict(event.arguments))
+                    arguments = json.dumps(dict(event.raw_input))
                     await writer.append(ArgumentsPiece(answer_id, event.call_id, arguments))
                     await writer.append(CallCompleted(answer_id, event.call_id))
-                    parts.append(ToolCallPart(event.call_id, event.name, event.arguments))
+                    parts.append(ToolCallPart(event.call_id, event.name, event.raw_input))
                 elif isinstance(event, ToolResult):
                     await writer.append(
-                        ResultLanded(answer_id, event.call_id, event.output, event.is_error)
+                        ResultLanded(answer_id, event.call_id, event.raw_output, event.failed)
                     )
-                    parts.append(ToolResultPart(event.call_id, event.output, event.is_error))
+                    parts.append(ToolResultPart(event.call_id, event.raw_output, event.failed))
                 elif isinstance(event, Done):
                     # An engine that streamed no text at all still hands the answer over.
                     if event.text and not any(isinstance(p, TextPart) for p in parts):

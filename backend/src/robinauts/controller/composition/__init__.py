@@ -36,8 +36,17 @@ from robinauts.controller.contract.ports import Controller, Credentials
 from robinauts.controller.core.config import parse_config
 from robinauts.controller.core.engine_settings import SecretLookup, engine_settings
 from robinauts.controller.ports.store import Store
+from robinauts.tools import sessions
+from robinauts.tools.contract.ports import ToolProvider
 
 DATABASE_URL_VARIABLE = "ROBINAUTS_DATABASE_URL"
+
+
+def built_in_tools() -> dict[str, ToolProvider]:
+    """This build's tools by id, loaded from a fixed list: the one place that names a tool."""
+    loaded = [sessions.load()]
+    return {tool.id: tool for tool in loaded}
+
 
 CONTROLLER_TABLES = frozenset({"model_providers", "models", "tool_servers", "agents", "work"})
 """The file's tables that are the controller's, the ones `parse_config` reads."""
@@ -93,7 +102,14 @@ def compose(
     else:
         raise NotImplementedError(f"{storage.kind} storage")
     controller = RobinautsController(config, store=store)
-    worker = Worker(worker_store, config, storage=storage, secret_for=secret_for, engines=engines)
+    worker = Worker(
+        worker_store,
+        config,
+        storage=storage,
+        secret_for=secret_for,
+        engines=engines,
+        tools=built_in_tools(),
+    )
     return Composed(controller, credentials, worker)
 
 
@@ -110,7 +126,7 @@ def load(path: Path, environ: Mapping[str, str]) -> tuple[Config, SecretLookup]:
 
 
 def configure(tables: Mapping[str, Any], environ: Mapping[str, str]) -> tuple[Config, SecretLookup]:
-    return parse_config(tables), environ.get
+    return parse_config(tables, tools=built_in_tools().keys()), environ.get
 
 
 async def init_database(url: str, config: Config, secret_for: SecretLookup) -> str:

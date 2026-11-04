@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -99,10 +99,34 @@ class ModelsConfig:
     tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
 
 
+class FunctionToolError(Exception):
+    """What a function tool raises to fail a call with a message for the model: the engine hands
+    the message over as a failed result, and the turn goes on. Anything else a tool raises is
+    told to the model as its kind alone."""
+
+
+@dataclass(frozen=True, slots=True)
+class FunctionTool:
+    """A tool run in this process, which the engine gives the model like any other.
+
+    ``input_schema`` is the JSON Schema of the arguments, an object. The frameworks do not check
+    the arguments against it: ``call`` is handed them as the model sent them, and checks them
+    itself. What it returns is the output the model sees.
+    """
+
+    name: str
+    description: str
+    input_schema: Mapping[str, Any]
+    call: Callable[[Mapping[str, Any]], Awaitable[str]]
+
+
 @dataclass(frozen=True, slots=True)
 class AgentDefinition:
     system_prompt: str
     tools: tuple[str, ...] = ()
+    """The tool servers the agent may use, by id."""
+    functions: tuple[FunctionTool, ...] = ()
+    """The tools run in this process, bound to the turn by the caller."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,15 +143,17 @@ class ReasoningDelta:
 class ToolCall:
     call_id: str
     name: str
-    arguments: Mapping[str, Any] = field(default_factory=dict)
+    raw_input: Mapping[str, Any] = field(default_factory=dict)
+    """The arguments, as the model sent them."""
 
 
 @dataclass(frozen=True, slots=True)
 class ToolResult:
     call_id: str
     name: str
-    output: str
-    is_error: bool = False
+    raw_output: str
+    """The output, as the model sees it."""
+    failed: bool = False
 
 
 @dataclass(frozen=True, slots=True)

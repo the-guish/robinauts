@@ -127,7 +127,7 @@ def test_an_agent_naming_a_tool_server_twice_is_refused() -> None:
         "tool_servers": {"t": {"url": "https://t", "auth": "none"}},
         "agents": {"a": {**AGENT, "engine": "echo", "tools": ["t", "t"]}},
     }
-    with pytest.raises(ConfigError, match=re.escape("agents.a: tool server(s) named twice: t")):
+    with pytest.raises(ConfigError, match=re.escape("agents.a: tool(s) named twice: t")):
         parse_config(raw)
 
 
@@ -184,3 +184,28 @@ def test_an_agent_may_set_its_turn_timeout(given: object, parsed: float | str | 
             parse_config(raw)
     else:
         assert parse_config(raw).agents["a"].turn_timeout_seconds == parsed
+
+
+def test_an_agent_may_name_a_tool_of_this_build_beside_the_tool_servers() -> None:
+    raw = {
+        "model_providers": {"p": {"kind": "anthropic", "api_key_env": "K"}},
+        "models": {"fast": {"provider": "p", "name": "fast-1"}},
+        "tool_servers": {"t": {"url": "https://t", "auth": "none"}},
+        "agents": {"a": {**AGENT, "engine": "echo", "tools": ["t", "sessions"]}},
+    }
+    assert parse_config(raw, tools={"sessions"}).agents["a"].tools == ("t", "sessions")
+    with pytest.raises(
+        ConfigError,
+        match=re.escape(
+            "agents.a: tool 'sessions' is neither a configured tool server nor a tool of this build"
+        ),
+    ):
+        parse_config(raw)
+
+
+def test_a_tool_server_may_not_take_the_id_of_a_tool_of_this_build() -> None:
+    raw = {"tool_servers": {"sessions": {"url": "https://t", "auth": "none"}}}
+    with pytest.raises(
+        ConfigError, match=re.escape("tool_servers.sessions: the id of a tool of this build")
+    ):
+        parse_config(raw, tools={"sessions"})

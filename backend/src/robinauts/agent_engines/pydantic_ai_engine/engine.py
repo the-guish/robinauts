@@ -56,7 +56,7 @@ from robinauts.agent_engines.pydantic_ai_engine.clients import (
 )
 from robinauts.agent_engines.pydantic_ai_engine.context import within
 from robinauts.agent_engines.pydantic_ai_engine.memory import Memory
-from robinauts.agent_engines.pydantic_ai_engine.tools import toolsets_for
+from robinauts.agent_engines.pydantic_ai_engine.tools import function_toolsets, toolsets_for
 
 FASTEST_MODEL_CALL = 1.0
 """Seconds: a turn may make one model call per second of its timeout. Real rounds are slower;
@@ -123,7 +123,10 @@ class PydanticAIEngine(AgentEngine):
                 client,
                 instructions=agent.system_prompt,
                 model_settings=model_settings,
-                toolsets=toolsets_for(agent, self._settings),
+                toolsets=[
+                    *toolsets_for(agent, self._settings),
+                    *function_toolsets(agent.functions),
+                ],
                 capabilities=[ProcessHistory(within(window))],
             )
             # The deadline bounds the run, not the caller's handling of what is yielded.
