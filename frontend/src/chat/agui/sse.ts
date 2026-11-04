@@ -31,7 +31,7 @@
  * never something to re-attach after (`docs/specs/wire.md`).
  */
 
-import { ApiError } from "../../../api/client";
+import { ApiError } from "../../api/client";
 
 /**
  * How much of one line, and of one block, is read before giving up.

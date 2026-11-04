@@ -66,7 +66,7 @@ import {
   startNewConversation,
   startTurn,
   type Attached,
-} from "./agui/client";
+} from "../agui/client";
 import {
   askedIn,
   EMPTY,
@@ -83,7 +83,7 @@ import {
   type ChatAction,
   type ChatMessage,
   type ChatState,
-} from "./state";
+} from "../state";
 
 /** What is said when there is nobody to talk to. */
 export const NO_AGENT =

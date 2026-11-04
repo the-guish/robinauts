@@ -31,7 +31,7 @@ from util.mcp_server import mcp_server
 
 pytestmark = [pytest.mark.io, pytest.mark.database]
 
-# What the interface says of an answer that was stopped (frontend/src/chat/assistant-ui/state.ts).
+# What the interface says of an answer that was stopped (frontend/src/chat/state.ts).
 STOPPED = "This answer was stopped before it was finished."
 
 WORK = """

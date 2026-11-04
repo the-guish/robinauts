@@ -52,7 +52,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  *
  * Read by the chat as well: the run and the conversation a stream is of come
  * back in response **headers**, which are as much "from outside" as a hash is
- * (`src/chat/assistant-ui/agui/client.ts`), and both go straight into a
+ * (`src/chat/agui/client.ts`), and both go straight into a
  * request path. One shape, judged in one place.
  */
 export function isUuid(value: string): boolean {

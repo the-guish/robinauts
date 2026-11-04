@@ -17,7 +17,7 @@ from playwright.sync_api import Locator, Page, expect, sync_playwright
 
 from util.stack import ROOT
 
-# What the interface says of an answer that failed (frontend/src/chat/assistant-ui/state.ts).
+# What the interface says of an answer that failed (frontend/src/chat/state.ts).
 DID_NOT_FINISH = "This answer did not finish: something went wrong while it was being produced."
 # What Chromium's console says of what the Content-Security-Policy blocked.
 CSP = "Content Security Policy"

@@ -33,8 +33,8 @@
  * an `ApiError` from the call that opened the stream, through the API
  * client's own mapping.
  */
-import { ApiError, refused } from "../../../api/client";
-import { isUuid } from "../../../router";
+import { ApiError, refused } from "../../api/client";
+import { isUuid } from "../../router";
 import { blocks } from "./sse";
 import { decode, isTerminal, type AguiEvent } from "./events";
 

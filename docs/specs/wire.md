@@ -195,7 +195,7 @@ at least ten days before that day, `contributing/js-dependencies.md`):
   takes its place behind the same seam; the wire does not change.
 - A month on, the bridge has not caught up: it would install a second,
   pre-1.0 `@ag-ui/client` beside the 1.0 one. **Step 21 decided: the client
-  is ours** (`frontend/src/chat/assistant-ui/agui/`, 2026-09-22), and the
+  is ours** (`frontend/src/chat/agui/`, 2026-09-22), and the
   bridge is not taken. It is about two hundred lines over `fetch` and a
   `ReadableStream` -- the format, the event vocabulary this backend emits,
   and re-attaching with `Last-Event-ID` -- and it added **no dependency at

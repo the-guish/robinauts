@@ -14,7 +14,7 @@ import {
 } from "../../test/conversations";
 import { event, streamed, streamHeaders, writable } from "../../test/stream";
 import type { ChatProps } from "../index";
-import type { AguiEvent } from "./agui/events";
+import type { AguiEvent } from "../agui/events";
 import {
   AGENT_GONE,
   asRepository,
@@ -38,7 +38,7 @@ import {
   type ChatAction,
   type ChatMessage,
   type ChatState,
-} from "./state";
+} from "../state";
 
 const RUN = "11111111-2222-4333-8444-555555555555";
 const CONVERSATION = id(1);

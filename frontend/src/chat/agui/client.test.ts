@@ -2,9 +2,9 @@
 // Copyright The Robinauts Authors
 import { expect, test, vi } from "vitest";
 
-import { ApiError } from "../../../api/client";
-import { refusal } from "../../../test/api";
-import { event, streamed, streamHeaders, writable } from "../../../test/stream";
+import { ApiError } from "../../api/client";
+import { refusal } from "../../test/api";
+import { event, streamed, streamHeaders, writable } from "../../test/stream";
 import {
   attach,
   RETRIES,

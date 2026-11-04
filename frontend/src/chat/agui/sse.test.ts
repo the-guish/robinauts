@@ -2,8 +2,8 @@
 // Copyright The Robinauts Authors
 import { expect, test } from "vitest";
 
-import { ApiError } from "../../../api/client";
-import { streamed, writable } from "../../../test/stream";
+import { ApiError } from "../../api/client";
+import { streamed, writable } from "../../test/stream";
 import { blocks, MAX_BLOCK, type SseBlock } from "./sse";
 
 /** Every block of that body, with the chunks arriving as they are written. */

@@ -35,7 +35,7 @@
  * is text the model or a tool wrote, held here as data for the renderer to
  * draw as text.
  */
-import type { Message } from "../../conversation/conversation";
+import type { Message } from "../conversation/conversation";
 import type { AguiEvent } from "./agui/events";
 
 /**

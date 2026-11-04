@@ -18,7 +18,7 @@ The chat is behind `src/chat/index.ts` and nothing outside
 ([../docs/adr/0001-chat-ui-assistant-ui-with-tailwind.md](../docs/adr/0001-chat-ui-assistant-ui-with-tailwind.md)).
 Behind that seam: the vendored assistant-ui components, a runtime that hands
 them our own state, and **our own AG-UI client** --
-`src/chat/assistant-ui/agui/`, about eight hundred lines over `fetch` and a
+`src/chat/agui/`, about eight hundred lines over `fetch` and a
 `ReadableStream`, because assistant-ui's bridge to AG-UI is still pinned to a
 pre-1.0 protocol client ([../docs/specs/wire.md](../docs/specs/wire.md),
 "Details likely to change").
