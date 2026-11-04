@@ -73,9 +73,13 @@ address into a phone.
   record keeps what the last sign-in said: provider, subject, verified
   email, hosted domain and groups, refreshed at every sign-in. A device's
   resolve checks that against the allow list as it is now, on a
-  sixty-second cache per device. A person the operator takes out of the
-  allow list loses their phone within a minute. The same check runs for a
-  token and for a browser session.
+  sixty-second cache per device. A check that fails **deletes**: the
+  credential that asked, and every browser session, device and token of
+  that user with it, keyed by user id. A refusal that left the secret in
+  place would have it working again the moment the matcher is put back.
+  So a person the operator takes out of the allow list loses every
+  credential within a minute. The same check runs for a token and for a
+  browser session.
 - **A refused sign-in ends every credential of that identity.** When the
   allow list refuses someone the provider has just vouched for, their
   browser sessions, devices and tokens are deleted in the same breath,
@@ -83,16 +87,19 @@ address into a phone.
   A provider that is down, a state mismatch or an unreadable token wipes
   nothing. That is the moment the platform learns the person is out.
 - **Minting needs a fresh sign-in.** `POST /auth/pairings` and
-  `POST /auth/tokens` require a browser session younger than ten minutes.
-  An older one is answered 403, `fresh_sign_in`, and the page offers to
-  sign in again, coming back to `#/devices`. A stolen twelve-hour cookie
-  can therefore install a thirty-day device only in the ten minutes after
-  the person signed in, and a new sign-in is something the thief cannot
-  complete: it needs the person's session at the provider. This guards
-  against a cookie that was copied, not against someone at an unlocked
-  browser: there the provider signs in again without a question, since
-  its own session is in the same browser. Removing a device needs no
-  fresh sign-in. Taking access away is never gated.
+  `POST /auth/tokens` require a session whose sign-in re-authenticated
+  the person less than ten minutes ago. Any other session is answered
+  403, `fresh_sign_in`, and the page offers to sign in again, coming back
+  to `#/devices`. That sign-in is `/auth/login/{provider}?fresh=1&…`,
+  which sends the provider `prompt=login` and `max_age=0`, so it asks for
+  the person's credentials again whatever session it holds in that
+  browser. The session records the ID token's `auth_time`, and fresh
+  means that time is within ten minutes. A sign-in that rode the
+  provider's existing session is never fresh, so a script or malware
+  driving the signed-in browser gets no fresh session by navigating
+  through it, and a copied cookie gets none because the provider's
+  session is not on that machine. Removing a device needs no fresh
+  sign-in. Taking access away is never gated.
 - **The operator ends devices from the command line.**
   `robinauts devices end --user <email>`, `--device <id>` or `--all`, and
   `robinauts devices list`. They read the database the server reads, and
@@ -360,10 +367,10 @@ refuses it, like the other sign-in keys, and runs on the default.
   secret once. This page is the one place a credential is made or ended,
   because it runs on the browser's session. Nothing of the chat library is
   involved. The panel and the shell are ours.
-- **"Link a phone"** and **"New token"** want a session younger than ten
-  minutes. On an older one the button reads "Sign in again to link a
-  phone", and pressing it is the sign-in page's own navigation, with
-  `return_to` set to this page. "Link a phone" then opens a dialog. It
+- **"Link a phone"** and **"New token"** want a sign-in with
+  `prompt=login` within ten minutes. Without one the button reads "Sign
+  in again to link a phone", and pressing it is the sign-in page's own
+  navigation with `fresh=1`, and `return_to` set to this page. "Link a phone" then opens a dialog. It
   asks for a code and shows the QR, with the sentence of step 2. The state is written under it: *waiting*;
   *a phone scanned your code, type the number it shows* with a six-digit
   field, **Link** and **No**; *that is not the number, two tries left*;
@@ -477,18 +484,17 @@ The app is a repository of its own. This is what it does against the API.
   its removal, and the list is the whole of the person's control. The
   secret lives in the Keystore, out of backups, and never in a log, which
   is what makes stealing it hard in the first place.
-- **A copied browser cookie.** It is a session for up to twelve hours. It
-  can mint a device, or a token, only while the session is under ten
-  minutes old. After that, minting asks for a sign-in the thief cannot
-  complete. An unlocked browser is not this case, and the gate does not
-  claim it.
+- **A copied cookie, or a script in the signed-in browser.** Either is a
+  session for up to twelve hours. Neither mints a device or a token:
+  minting wants a sign-in with `prompt=login` within ten minutes, which
+  the thief cannot complete and the script cannot navigate through.
 - **A lookalike code.** A "set up Robinauts" QR that names another host
   would make that host the account. The app shows the origin, in
   punycode, and asks before it sends anything. A company that configures
   the app's server has every other origin refused outright. The secret,
   once held, goes to the origin it came from and nowhere else.
-- **A person who has left.** Taken out of the allow list, they lose the
-  phone within a minute. Refused at their next sign-in, they lose every
+- **A person who has left.** Taken out of the allow list, they lose every
+  credential within a minute. Refused at their next sign-in, they lose every
   credential at once. Known to an admin or an operator, they lose it on
   the admins' screen or at the command line. Known to nobody, they lose it
   when `device_days` pass.
@@ -503,6 +509,10 @@ The app is a repository of its own. This is what it does against the API.
   platform keeps no provider token, so it cannot ask the provider in
   between. The operator's controls are the allow list, which is read
   every minute, the admins' screen, the command line, and `device_days`.
+- **A provider that ignores `prompt=login`**, or answers no `auth_time`,
+  gives no fresh session, and nobody can mint a device or a token through
+  it. The sign-in page says so. That is a thing to know about the
+  company's provider before relying on pairing.
 - **A person with only their phone cannot pair.** Pairing needs a second
   screen. The browser hand-off is not here yet: the app opens the system
   browser on `/auth/login/{provider}`, the callback redirects to the app
