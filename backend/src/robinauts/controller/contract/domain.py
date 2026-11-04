@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -172,22 +172,31 @@ class StorageConfig:
 
 @dataclass(frozen=True, slots=True)
 class Identity:
-    """Who a shell says is asking: a provider and a subject, as the provider names them."""
+    """Who a shell says is asking: a provider and a subject, as the provider names them, and
+    what it said of them that the allow list reads: a verified email, Google's hosted domain,
+    the groups."""
 
     provider: str
     subject: str
     name: str | None = None
     email: str | None = None
+    hosted_domain: str | None = None
+    groups: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class User:
+    """A person; ``name``, ``email``, ``hosted_domain`` and ``groups`` are what their last
+    sign-in said, which the allow list is checked against again on every use."""
+
     id: uuid.UUID
     provider: str
     subject: str
     name: str | None = None
     email: str | None = None
     created_at: datetime | None = None
+    hosted_domain: str | None = None
+    groups: tuple[str, ...] = ()
 
 
 # --- credentials --------------------------------------------------------------
@@ -228,6 +237,74 @@ class ApiToken:
     secret_hash: str
     created_at: datetime
     expires_at: datetime
+
+
+LAST_USED_EVERY = timedelta(minutes=1)
+"""How often a device's ``last_used_at`` is written: by the resolve that finds it, when the
+one recorded is this old or older, so the list says "last used" without a write on every
+request."""
+
+PAIRING_WRONG_TRIES = 3
+"""The wrong numbers a pairing takes: the last of them deletes it."""
+
+
+class PairingState(StrEnum):
+    WAITING = "waiting"
+    CLAIMED = "claimed"
+    APPROVED = "approved"
+
+
+class Approval(StrEnum):
+    """What an approve with a number did (``Credentials.approve_pairing``)."""
+
+    APPROVED = "approved"
+    WRONG_NUMBER = "wrong_number"
+    NOT_CLAIMED = "not_claimed"
+    """Waiting for a phone still, or approved already: nothing to decide."""
+    GONE = "gone"
+    """Unknown, another's, expired, refused, or ended by this, the last wrong number."""
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceDescription:
+    """What a phone says of itself when it claims a pairing: data for the list, bounded by the
+    shell, and never what anybody decides by."""
+
+    name: str
+    platform: str
+    app_version: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceSession:
+    """A linked device. It holds the secret, and this the secret's SHA-256 hex: the claim hash
+    of the pairing that linked it."""
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    device: DeviceDescription
+    secret_hash: str
+    created_at: datetime
+    last_used_at: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class Pairing:
+    """A phone being linked (``docs/architecture/device-pairing.md``). Minted ``waiting`` under
+    the hash of the code its QR carries; a claim adds the claim secret's hash, the number and
+    the device's description; an approve moves the claim hash to the device session."""
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    code_hash: str
+    state: PairingState
+    created_at: datetime
+    expires_at: datetime
+    claim_hash: str | None = None
+    match_number: str | None = None
+    wrong_tries: int = 0
+    device: DeviceDescription | None = None
 
 
 # --- catalogue ----------------------------------------------------------------

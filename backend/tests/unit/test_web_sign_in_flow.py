@@ -119,5 +119,8 @@ async def test_a_session_naming_the_local_user_signs_nobody_in() -> None:
         config, credentials=composed.credentials, exchange=None, controller=composed.controller
     )
 
-    assert await composed.credentials.resolve_user_session(secret_hash(secret), now) == local
+    assert await composed.credentials.resolve_user_session(secret_hash(secret), now) == (
+        local,
+        session,
+    )
     assert await flow.resolve(secret, now) is None

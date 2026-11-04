@@ -6,8 +6,9 @@
 -- This is the controller's alone. The engines keep their memory in tables of
 -- their own, made by their own `setup`, and nothing here references them
 -- (docs/specs/agent-engines.md). Sign-in's tables, `user_sessions`,
--- `pending_logins` and `api_tokens`, are kept through the credentials port
--- and not the store's, and come last (docs/specs/sign-in.md).
+-- `pending_logins`, `api_tokens`, `device_sessions` and `pairings`, are kept
+-- through the credentials port and not the store's, and come last
+-- (docs/specs/sign-in.md, docs/architecture/device-pairing.md).
 --
 -- A table comes after every table it references, since the file is applied
 -- from the top.
@@ -78,7 +79,11 @@ CREATE TABLE IF NOT EXISTS schema_version (
 -- unique constraint makes one of them fail; the store reads that, by name, as
 -- "already there" and returns the row the other wrote.
 --
--- `name` and `email` are what the provider said, and may be null.
+-- `name`, `email`, `hosted_domain` and `groups` are what the provider said at
+-- the last sign-in, refreshed by every one, and may be null or empty. They are
+-- what the allow list is checked against again when a credential is used
+-- (docs/architecture/device-pairing.md, "While a device lives"). `email` is
+-- only an address the provider verified; `hosted_domain` is Google's `hd`.
 --
 -- Deleting a user deletes their sessions, by the cascade on
 -- `sessions.owner_id`. The cascade does not reach the engines, so whatever
@@ -91,6 +96,8 @@ CREATE TABLE IF NOT EXISTS users (
     name text,
     email text,
     created_at timestamptz NOT NULL,
+    hosted_domain text,
+    groups text[] NOT NULL DEFAULT '{}',
     CONSTRAINT users_provider_subject_key UNIQUE (provider, subject)
 );
 
@@ -470,6 +477,112 @@ CREATE INDEX IF NOT EXISTS api_tokens_user_id_idx
 -- What stage two's sweep deletes by: the tokens past their expiry.
 CREATE INDEX IF NOT EXISTS api_tokens_expires_at_idx
     ON api_tokens (expires_at);
+
+
+-- ---------------------------------------------------------------------------
+-- Device sessions.
+-- ---------------------------------------------------------------------------
+
+-- A linked phone (docs/architecture/device-pairing.md). Its secret is sent as
+-- a bearer; this table holds the secret's SHA-256 in hex, and a device is
+-- found by that hash, judged against the `now` the caller gives. The hash is
+-- the claim hash of the pairing that linked it, moved here by the approve, in
+-- the same statement that clears it there.
+--
+-- `name`, `platform` and `app_version` are what the device said of itself:
+-- data for the list, never what anybody decides by. `last_used_at` is written
+-- by the resolve, at most once a minute. A device is never renewed, so
+-- `expires_at` is written once.
+--
+-- `user_id` cascades: a user's devices end with the user.
+CREATE TABLE IF NOT EXISTS device_sessions (
+    id uuid
+        CONSTRAINT device_sessions_pkey PRIMARY KEY,
+    user_id uuid NOT NULL
+        CONSTRAINT device_sessions_user_id_fkey REFERENCES users (id) ON DELETE CASCADE,
+    name text NOT NULL,
+    platform text NOT NULL,
+    app_version text,
+    secret_hash text NOT NULL
+        CONSTRAINT device_sessions_secret_hash_key UNIQUE
+        CONSTRAINT device_sessions_secret_hash_is_a_hash
+            CHECK (secret_hash ~ '^[0-9a-f]{64}$'),
+    created_at timestamptz NOT NULL,
+    last_used_at timestamptz NOT NULL,
+    expires_at timestamptz NOT NULL
+);
+
+-- What the cascade from `users` deletes by, and what listing a user's devices
+-- reads.
+CREATE INDEX IF NOT EXISTS device_sessions_user_id_idx
+    ON device_sessions (user_id);
+
+-- What stage two's sweep deletes by: the devices past their expiry.
+CREATE INDEX IF NOT EXISTS device_sessions_expires_at_idx
+    ON device_sessions (expires_at);
+
+
+-- ---------------------------------------------------------------------------
+-- Pairings.
+-- ---------------------------------------------------------------------------
+
+-- A phone being linked, minutes long (docs/architecture/device-pairing.md,
+-- "The flow"). Minted `waiting` by the signed-in browser, under the SHA-256
+-- of the code its QR carries. The first phone to present the code moves it
+-- to `claimed`, in one `UPDATE` that requires `waiting`, so of two claims one
+-- wins: the claim records the device's description, the SHA-256 of the claim
+-- secret the phone got, and the number the phone shows. The browser's approve
+-- with that number moves `claim_hash` into `device_sessions` and the pairing
+-- to `approved`; it stays so, granting nothing, until it expires.
+--
+-- `match_number` is kept as it is: a hash of six digits hides nothing, and
+-- the row lives two minutes. `wrong_tries` counts the wrong numbers; the
+-- third deletes the row.
+--
+-- Minting one deletes the user's expired ones in the same statement, so the
+-- table holds minutes and needs no sweep.
+--
+-- `user_id` cascades: a user's pairings end with the user.
+CREATE TABLE IF NOT EXISTS pairings (
+    id uuid
+        CONSTRAINT pairings_pkey PRIMARY KEY,
+    user_id uuid NOT NULL
+        CONSTRAINT pairings_user_id_fkey REFERENCES users (id) ON DELETE CASCADE,
+    code_hash text NOT NULL
+        CONSTRAINT pairings_code_hash_key UNIQUE
+        CONSTRAINT pairings_code_hash_is_a_hash CHECK (code_hash ~ '^[0-9a-f]{64}$'),
+    claim_hash text
+        CONSTRAINT pairings_claim_hash_key UNIQUE
+        CONSTRAINT pairings_claim_hash_is_a_hash CHECK (claim_hash ~ '^[0-9a-f]{64}$'),
+    match_number text
+        CONSTRAINT pairings_match_number_is_six_digits CHECK (match_number ~ '^[0-9]{6}$'),
+    wrong_tries smallint NOT NULL
+        CONSTRAINT pairings_wrong_tries_not_negative CHECK (wrong_tries >= 0),
+    -- The states of robinauts.controller.contract.domain.PairingState.
+    state text NOT NULL
+        CONSTRAINT pairings_state_is_a_state CHECK (state IN ('waiting', 'claimed', 'approved')),
+    device_name text,
+    device_platform text,
+    device_app_version text,
+    created_at timestamptz NOT NULL,
+    expires_at timestamptz NOT NULL,
+    -- A waiting pairing has no claim yet; a claimed one has its secret's hash
+    -- and its number; an approved one has moved the hash to its device.
+    CONSTRAINT pairings_claim_follows_the_state CHECK (
+        (state = 'waiting' AND claim_hash IS NULL AND match_number IS NULL)
+        OR (state = 'claimed' AND claim_hash IS NOT NULL AND match_number IS NOT NULL)
+        OR (state = 'approved' AND claim_hash IS NULL)
+    )
+);
+
+-- What the cascade from `users` deletes by, what the cap counts and what
+-- minting deletes the expired ones by.
+CREATE INDEX IF NOT EXISTS pairings_user_id_idx
+    ON pairings (user_id);
+
+-- What stage two's sweep deletes by: the pairings past their expiry.
+CREATE INDEX IF NOT EXISTS pairings_expires_at_idx
+    ON pairings (expires_at);
 
 
 -- ---------------------------------------------------------------------------

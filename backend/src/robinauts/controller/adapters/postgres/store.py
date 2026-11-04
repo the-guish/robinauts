@@ -153,9 +153,20 @@ def _task(row: asyncpg.Record) -> Task:
     )
 
 
+USER_COLUMNS = "id, provider, subject, name, email, created_at, hosted_domain, groups"
+"""A user's columns, in the order ``_user`` reads them by name."""
+
+
 def _user(row: asyncpg.Record) -> User:
     return User(
-        row["id"], row["provider"], row["subject"], row["name"], row["email"], row["created_at"]
+        row["id"],
+        row["provider"],
+        row["subject"],
+        row["name"],
+        row["email"],
+        row["created_at"],
+        row["hosted_domain"],
+        tuple(row["groups"]),
     )
 
 
@@ -210,28 +221,23 @@ class PostgresStore(Store):
 
     # --- users --------------------------------------------------------------
 
-    async def add_user_if_absent(self, user: User) -> User:
-        async with self._pool.acquire() as connection:
-            row = await connection.fetchrow(
-                "INSERT INTO users (id, provider, subject, name, email, created_at)"
-                " VALUES ($1, $2, $3, $4, $5, $6)"
-                f" ON CONFLICT ON CONSTRAINT {USER_EXISTS} DO NOTHING"
-                " RETURNING id, provider, subject, name, email, created_at",
-                user.id,
-                user.provider,
-                user.subject,
-                user.name,
-                user.email,
-                user.created_at,
-            )
-            if row is None:
-                row = await connection.fetchrow(
-                    "SELECT id, provider, subject, name, email, created_at FROM users"
-                    " WHERE provider = $1 AND subject = $2",
-                    user.provider,
-                    user.subject,
-                )
-            return _user(row)
+    async def add_or_refresh_user(self, user: User) -> User:
+        row = await self._pool.fetchrow(
+            f"INSERT INTO users ({USER_COLUMNS}) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+            f" ON CONFLICT ON CONSTRAINT {USER_EXISTS} DO UPDATE SET"
+            " name = excluded.name, email = excluded.email,"
+            " hosted_domain = excluded.hosted_domain, groups = excluded.groups"
+            f" RETURNING {USER_COLUMNS}",
+            user.id,
+            user.provider,
+            user.subject,
+            user.name,
+            user.email,
+            user.created_at,
+            user.hosted_domain,
+            list(user.groups),
+        )
+        return _user(row)
 
     # --- sessions -----------------------------------------------------------
 

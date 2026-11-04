@@ -92,12 +92,27 @@ class MemoryStore(Store):
 
     # --- users --------------------------------------------------------------
 
-    async def add_user_if_absent(self, user: User) -> User:
-        return self._users.setdefault((user.provider, user.subject), user)
+    async def add_or_refresh_user(self, user: User) -> User:
+        key = (user.provider, user.subject)
+        there = self._users.get(key)
+        if there is not None:
+            user = dataclasses.replace(
+                there,
+                name=user.name,
+                email=user.email,
+                hosted_domain=user.hosted_domain,
+                groups=tuple(user.groups),
+            )
+        self._users[key] = user
+        return user
 
     def user_by_id(self, user_id: uuid.UUID) -> User | None:
         """Not the port's: what ``MemoryCredentials`` resolves a secret to."""
         return next((u for u in self._users.values() if u.id == user_id), None)
+
+    def all_users(self) -> list[User]:
+        """Not the port's: whom ``MemoryCredentials`` looks a person up among."""
+        return list(self._users.values())
 
     # --- sessions -----------------------------------------------------------
 

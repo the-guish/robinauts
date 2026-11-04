@@ -109,7 +109,7 @@ class StoreContract:
     async def start_first_turn(self, store: Store) -> tuple[User, Session, StoredMessage, Turn]:
         """A session with its first question and a running turn."""
         me = user()
-        await store.add_user_if_absent(me)
+        await store.add_or_refresh_user(me)
         one = session(me.id)
         await store.add_session(one)
         asked = question(one.id)
@@ -133,13 +133,32 @@ class StoreContract:
     # --- users --------------------------------------------------------------
 
     @store_test
-    async def test_a_user_is_added_once_and_found_after(self, store: Store) -> None:
-        first = User(uuid.uuid4(), "local", "me", name="Me", created_at=NOW)
-        again = User(uuid.uuid4(), "local", "me", name="Me again", created_at=NOW)
-        assert await store.add_user_if_absent(first) == first
-        assert await store.add_user_if_absent(again) == first
+    async def test_a_user_is_added_once_and_refreshed_after(self, store: Store) -> None:
+        first = User(uuid.uuid4(), "local", "me", name="Me", created_at=NOW, groups=("a",))
+        again = User(
+            uuid.uuid4(),
+            "local",
+            "me",
+            name="Me again",
+            email="me@example.com",
+            created_at=NOW + timedelta(days=1),
+            hosted_domain="example.com",
+            groups=("b", "c"),
+        )
+        assert await store.add_or_refresh_user(first) == first
+        # The id and the creation are the first sign-in's; what the provider says, the last's.
+        assert await store.add_or_refresh_user(again) == User(
+            first.id,
+            "local",
+            "me",
+            name="Me again",
+            email="me@example.com",
+            created_at=NOW,
+            hosted_domain="example.com",
+            groups=("b", "c"),
+        )
         other = User(uuid.uuid4(), "other", "me", created_at=NOW)
-        assert await store.add_user_if_absent(other) != first
+        assert await store.add_or_refresh_user(other) != first
 
     # --- sessions -----------------------------------------------------------
 
@@ -160,8 +179,8 @@ class StoreContract:
     async def test_sessions_page_newest_first_and_the_next_page_follows_the_cursor(
         self, store: Store
     ) -> None:
-        me = await store.add_user_if_absent(user())
-        you = await store.add_user_if_absent(user("you"))
+        me = await store.add_or_refresh_user(user())
+        you = await store.add_or_refresh_user(user("you"))
         first = session(me.id, NOW)
         second = session(me.id, NOW + MINUTE)
         third = session(me.id, NOW + 2 * MINUTE)
@@ -278,7 +297,7 @@ class StoreContract:
 
     @store_test
     async def test_an_append_or_a_finish_past_the_lease_is_refused(self, store: Store) -> None:
-        me = await store.add_user_if_absent(user())
+        me = await store.add_or_refresh_user(user())
         one = session(me.id)
         await store.add_session(one)
         asked = question(one.id)
@@ -298,7 +317,7 @@ class StoreContract:
     async def test_end_expired_turn_ends_only_a_turn_whose_lease_has_passed(
         self, store: Store
     ) -> None:
-        me = await store.add_user_if_absent(user())
+        me = await store.add_or_refresh_user(user())
         one = session(me.id)
         await store.add_session(one)
         asked = question(one.id)
@@ -321,7 +340,7 @@ class StoreContract:
     async def test_a_start_and_a_hide_succeed_after_an_expired_turn_is_ended(
         self, store: Store
     ) -> None:
-        me = await store.add_user_if_absent(user())
+        me = await store.add_or_refresh_user(user())
         one = session(me.id)
         await store.add_session(one)
         asked = question(one.id)

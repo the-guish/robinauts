@@ -100,8 +100,10 @@ class RobinautsController(Controller):
             name=identity.name,
             email=identity.email,
             created_at=self._now(),
+            hosted_domain=identity.hosted_domain,
+            groups=identity.groups,
         )
-        return await self._store.add_user_if_absent(user)
+        return await self._store.add_or_refresh_user(user)
 
     async def list_agents(self) -> tuple[AgentListing, ...]:
         return tuple(

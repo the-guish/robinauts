@@ -327,7 +327,8 @@ class SignIn:
         return SignedIn(user, secret, expires_at, login.return_to)
 
     async def resolve(self, secret: str, now: datetime) -> User | None:
-        user = await self._credentials.resolve_user_session(secret_hash(secret), now)
+        found = await self._credentials.resolve_user_session(secret_hash(secret), now)
+        user = None if found is None else found[0]
         # No sign-in makes the local development mode's user, so a session naming it came from
         # elsewhere: a database kept from a run of the mode hands nobody that account.
         return None if user is None or user.provider == LOCAL_PROVIDER else user

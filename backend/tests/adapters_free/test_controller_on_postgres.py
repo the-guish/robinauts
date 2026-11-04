@@ -83,7 +83,7 @@ async def test_start_refuses_a_database_with_no_schema_and_serves_after_db_init(
         cookie = hashlib.sha256(b"cookie").hexdigest()
         signed_in = UserSession(uuid.uuid4(), user.id, cookie, now, now + timedelta(hours=1))
         await composed.credentials.add_user_session(signed_in)
-        assert await composed.credentials.resolve_user_session(cookie, now) == user
+        assert await composed.credentials.resolve_user_session(cookie, now) == (user, signed_in)
         await lifecycle.stop()
 
 

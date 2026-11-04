@@ -66,8 +66,10 @@ class Store(ABC):
     # --- users --------------------------------------------------------------
 
     @abstractmethod
-    async def add_user_if_absent(self, user: User) -> User:
-        """The user stored for that identity: ``user`` if there was none, else the one there."""
+    async def add_or_refresh_user(self, user: User) -> User:
+        """The user stored for that identity: ``user`` if there was none, else the one there,
+        its ``name``, ``email``, ``hosted_domain`` and ``groups`` replaced by ``user``'s, which
+        is what a sign-in said last. Its id and ``created_at`` are kept."""
 
     # --- sessions -----------------------------------------------------------
 

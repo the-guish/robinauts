@@ -56,7 +56,7 @@ class TestPostgresStore(StoreContract):
 
 async def seeded(store: Store) -> tuple[User, Session, StoredMessage, Turn]:
     """A session of a user with a question and a running turn."""
-    me = await store.add_user_if_absent(User(uuid.uuid4(), "local", "me", created_at=NOW))
+    me = await store.add_or_refresh_user(User(uuid.uuid4(), "local", "me", created_at=NOW))
     one = Session(uuid.uuid4(), me.id, "a", "echo", NOW, NOW)
     await store.add_session(one)
     asked = StoredMessage(uuid.uuid4(), one.id, None, Role.USER, NOW, {"v": 1, "text": "hi"})

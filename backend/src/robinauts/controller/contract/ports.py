@@ -13,10 +13,15 @@ from datetime import datetime
 from robinauts.controller.contract.domain import (
     AgentListing,
     ApiToken,
+    Approval,
+    DeviceDescription,
+    DeviceSession,
     Identity,
     ModelListing,
     NumberedEvent,
     OpenedSession,
+    Pairing,
+    PairingState,
     PendingLogin,
     Session,
     SessionPage,
@@ -177,11 +182,12 @@ class Controller(ABC):
 
 
 class Credentials(ABC):
-    """Where sign-in keeps its records: user sessions, sign-ins in progress and API tokens
-    (``docs/specs/sign-in.md``). A secret never reaches it: a record holds the SHA-256 hex of
-    one, and a lookup is by that hash. Every id and every time comes from the caller, and no
-    clock is read here. Every operation is one statement, so two callers at once never both
-    take what is taken once."""
+    """Where sign-in keeps its records: user sessions, sign-ins in progress, API tokens,
+    device sessions and pairings (``docs/specs/sign-in.md``,
+    ``docs/architecture/device-pairing.md``). A secret never reaches it: a record holds the
+    SHA-256 hex of one, and a lookup is by that hash. Every id and every time comes from the
+    caller, and no clock is read here. Every operation is one statement, so two callers at once
+    never both take what is taken once."""
 
     @abstractmethod
     async def add_user_session(self, session: UserSession) -> None:
@@ -189,9 +195,12 @@ class Credentials(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def resolve_user_session(self, secret_hash: str, now: datetime) -> User | None:
-        """The user of the session with that hash, or ``None`` when there is none or its
-        ``expires_at`` is not after ``now``."""
+    async def resolve_user_session(
+        self, secret_hash: str, now: datetime
+    ) -> tuple[User, UserSession] | None:
+        """The user of the session with that hash and the session, whose ``created_at`` says
+        how fresh the sign-in is; ``None`` when there is none or its ``expires_at`` is not
+        after ``now``."""
         raise NotImplementedError
 
     @abstractmethod
@@ -230,4 +239,138 @@ class Credentials(ABC):
     @abstractmethod
     async def delete_api_token(self, user_id: uuid.UUID, token_id: uuid.UUID) -> bool:
         """Only the owner's: true when that user had that token."""
+        raise NotImplementedError
+
+    # --- pairings -----------------------------------------------------------
+
+    @abstractmethod
+    async def add_pairing(self, pairing: Pairing, now: datetime, *, at_most: int) -> bool:
+        """Store a waiting pairing, after deleting every pairing of its user whose
+        ``expires_at`` is not after ``now``; unless the user already has ``at_most`` that are
+        not expired, in which case nothing is stored and the answer is false. The cap bounds
+        the table: two mints at once may both pass it."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def claim_pairing(
+        self,
+        code_hash: str,
+        claim_hash: str,
+        number: str,
+        device: DeviceDescription,
+        now: datetime,
+        new_expires_at: datetime,
+    ) -> Pairing | None:
+        """The pairing with that code, moved from ``waiting`` to ``claimed`` with the claim
+        secret's hash, the number, the device's description and ``new_expires_at``; ``None``
+        when there is none, it is not waiting, or its ``expires_at`` is not after ``now``. Of
+        two claims at once, one gets it."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def pairing_of(self, user_id: uuid.UUID, pairing_id: uuid.UUID) -> Pairing | None:
+        """Only the owner's, expired or not: the caller judges the expiry."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def approve_pairing(
+        self,
+        user_id: uuid.UUID,
+        pairing_id: uuid.UUID,
+        number: str,
+        *,
+        device_id: uuid.UUID,
+        device_expires_at: datetime,
+        now: datetime,
+    ) -> tuple[Approval, DeviceSession | None]:
+        """Decide the owner's claimed pairing by the number its phone shows.
+
+        The right number, on a claimed pairing whose ``expires_at`` is after ``now``, inserts a
+        device session of that id, created and last used at ``now``, expiring at
+        ``device_expires_at``, with the pairing's device description and its claim hash as
+        the secret hash; clears the claim hash, so the hash moves rather than copies; marks
+        the pairing approved; and answers it. A wrong number counts a wrong try, and the
+        ``PAIRING_WRONG_TRIES``-th deletes the pairing, which then answers ``GONE``. A pairing
+        that is waiting or approved is ``NOT_CLAIMED``; one that is unknown, another's or
+        expired is ``GONE``. Of two approves at once, one decides first and the other sees
+        what it did."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def delete_pairing(self, user_id: uuid.UUID, pairing_id: uuid.UUID) -> bool:
+        """Only the owner's: true when that user had it. An approved one goes and its device
+        stays."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def resolve_claim(self, claim_hash: str, now: datetime) -> PairingState | None:
+        """The state of the pairing whose claim has that hash, for the phone's poll; ``None``
+        when there is none, as after the approve moved the hash, or its ``expires_at`` is not
+        after ``now``."""
+        raise NotImplementedError
+
+    # --- device sessions ----------------------------------------------------
+
+    @abstractmethod
+    async def add_device_session(self, device: DeviceSession) -> None:
+        """Its user is one the store has."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def resolve_device_session(
+        self, secret_hash: str, now: datetime
+    ) -> tuple[User, DeviceSession] | None:
+        """The user of the device with that hash and the device, or ``None`` when there is
+        none or its ``expires_at`` is not after ``now``. Its ``last_used_at`` becomes ``now``
+        when it is ``LAST_USED_EVERY`` old or older, in the same statement, and the device
+        answered carries what was written."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def device_sessions_of(self, user_id: uuid.UUID) -> list[DeviceSession]:
+        """The user's devices, oldest first, ties broken by id."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def delete_device_session(self, user_id: uuid.UUID, device_id: uuid.UUID) -> bool:
+        """Only the owner's: true when that user had that device."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def all_device_sessions(self) -> list[tuple[User, DeviceSession]]:
+        """Every device of the deployment with its user, oldest first, ties broken by id: what
+        the operator's command lists."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def users_with_email(self, email: str) -> list[User]:
+        """The users whose verified email is that one, compared case-insensitively, oldest
+        first: how the operator names a person."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def delete_device_sessions(
+        self,
+        *,
+        user_id: uuid.UUID | None = None,
+        device_id: uuid.UUID | None = None,
+        every: bool = False,
+    ) -> list[DeviceSession]:
+        """Delete one user's devices, one device whoever's it is, or every device, and answer
+        what was deleted, oldest first. Exactly one of the three is given, else
+        ``ValueError``. The operator's: the routes delete by owner."""
+        raise NotImplementedError
+
+    # --- every credential of a person ---------------------------------------
+
+    @abstractmethod
+    async def delete_credentials_of(self, user_id: uuid.UUID) -> int:
+        """Delete the user's sessions, devices, tokens and pairings at once, and answer how
+        many rows went: what a failed allow-list check on use does."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def delete_credentials_of_identity(self, provider: str, subject: str) -> int:
+        """As ``delete_credentials_of``, for the user of that identity, if there is one: what
+        an allow-list refusal at sign-in does."""
         raise NotImplementedError
