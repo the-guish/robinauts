@@ -10,13 +10,19 @@
  * prefix to build for, and nothing here depends on where the application is
  * mounted.
  *
- * No router library. Two routes, one event, and a store the size of this
+ * No router library. Four routes, one event, and a store the size of this
  * file; a library would be a dependency to vet, to keep pinned and to carry
  * in the bundle for something React already provides through
  * `useSyncExternalStore` (`docs/contributing/js-dependencies.md`).
  *
  *     #/            the empty chat, ready for a first message
  *     #/c/<id>      that conversation
+ *     #/devices     "Linked devices": the phones and the API tokens
+ *     #/link        what a phone's camera app opens a pairing code at
+ *
+ * `#/link?v=1&c=…` is the URL inside a pairing QR
+ * (`docs/architecture/device-pairing.md`). Its query is cut off like any
+ * other and is never read: the code is for the app, not for this page.
  *
  * **Anything else is the empty chat**, `#/sign-in?error=…` included -- the
  * hash the backend sends a failed sign-in back to, which
@@ -32,10 +38,18 @@ import type { ConversationId } from "./chat";
 /** Where the interface is. */
 export type Route =
   | { readonly kind: "new" }
-  | { readonly kind: "conversation"; readonly id: ConversationId };
+  | { readonly kind: "conversation"; readonly id: ConversationId }
+  | { readonly kind: "devices" }
+  | { readonly kind: "link" };
 
 /** The empty chat: the route of a page that has been told nothing else. */
 export const NEW_CHAT: Route = { kind: "new" };
+
+/** "Linked devices". */
+export const DEVICES: Route = { kind: "devices" };
+
+/** The page a pairing code opens in a browser. */
+export const LINK: Route = { kind: "link" };
 
 /**
  * The shape of every id the backend gives a conversation.
@@ -75,6 +89,8 @@ export function isConversationId(value: string): boolean {
 export function parseRoute(hash: string): Route {
   const path =
     (hash.startsWith("#") ? hash.slice(1) : hash).split("?")[0] ?? "";
+  if (path === "/devices") return DEVICES;
+  if (path === "/link") return LINK;
   const parts = path.split("/");
   const id = parts[2];
   if (
@@ -98,9 +114,16 @@ export function parseRoute(hash: string): Route {
  * that goes home is a smaller one than a hash somebody else composed.
  */
 export function formatRoute(route: Route): string {
-  return route.kind === "conversation" && isConversationId(route.id)
-    ? `#/c/${route.id}`
-    : "#/";
+  switch (route.kind) {
+    case "devices":
+      return "#/devices";
+    case "link":
+      return "#/link";
+    case "conversation":
+      return isConversationId(route.id) ? `#/c/${route.id}` : "#/";
+    default:
+      return "#/";
+  }
 }
 
 /** Go there. The hash is the whole of the navigation. */

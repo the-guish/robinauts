@@ -3,11 +3,12 @@
 
 /*
  * The pages that stand in place of the shell: the sign-in page
- * (`./SignInPage.tsx`), and the two that say why there is nothing yet --
- * the session still loading or not loaded (`../App.tsx`), and a render that
- * threw (`../ErrorBoundary.tsx`). All three are a narrow column in the middle
- * of the screen, so they share one stylesheet: `signin-` for the first,
- * `page-` for the other two.
+ * (`./SignInPage.tsx`), the two that say why there is nothing yet -- the
+ * session still loading or not loaded (`../App.tsx`), and a render that
+ * threw (`../ErrorBoundary.tsx`) -- and the page a pairing code opens in a
+ * browser (`./LinkPage.tsx`). All four are a narrow column in the middle of
+ * the screen, so they share one stylesheet: `signin-` for the first,
+ * `page-` for the other three.
  */
 
 .signin,
@@ -69,6 +70,11 @@
 
 .page {
   gap: 0.75rem;
+}
+
+/* A sentence of a page that explains, rather than a refusal. */
+.page-text {
+  color: var(--muted);
 }
 
 /* Loading, or the session could not be had: a line and a way to ask again. */

@@ -50,15 +50,19 @@ hash is the one part of a URL no server sees, so the static files need no
 fallback route and nothing depends on the `/ui/` the backend serves them
 under.
 
-| hash                    | what it is                                       |
-| ----------------------- | ------------------------------------------------ |
-| `#/`                    | the empty chat, with the agent and model pickers |
-| `#/c/<conversation id>` | that conversation, with its model picker         |
-| anything else           | the empty chat, with the hash left as it is      |
+| hash                    | what it is                                                    |
+| ----------------------- | ------------------------------------------------------------- |
+| `#/`                    | the empty chat, with the agent and model pickers              |
+| `#/c/<conversation id>` | that conversation, with its model picker                      |
+| `#/devices`             | "Linked devices": the phones and the API tokens, in the shell |
+| `#/link`                | the page a pairing code opens in a browser, signed in or not  |
+| anything else           | the empty chat, with the hash left as it is                   |
 
 `#/sign-in?error=<code>` is where the backend sends a failed sign-in; the
 sign-in page reads it for itself, and the router neither claims nor rewrites
-it.
+it. `#/link?v=1&c=<code>` is the URL inside a pairing QR
+([../docs/architecture/device-pairing.md](../docs/architecture/device-pairing.md));
+the query is cut off and never read, since the code is for the app.
 
 ## Running it
 
