@@ -44,6 +44,14 @@ dependencies = [
     # The `mcp` extra brings the framework's MCP client (fastmcp), which is how
     # that engine reaches the tool servers (docs/specs/agents.md, "Tools").
     "pydantic-ai-slim[anthropic,mcp,openai]>=2.47,<3",
+    # The QR code a browser shows to link a phone (docs/architecture/device-pairing.md):
+    # a module matrix, which `robinauts.web.pairing` draws as SVG itself, and which
+    # nothing outside `robinauts.web` imports (the import-linter contract below). MIT,
+    # pure Python, no dependencies; 1.8.0 was published on 2022-04-17. Not `segno`:
+    # its metadata names its licence only by the trove classifier
+    # `License :: OSI Approved :: BSD License`, which names no version of BSD, and the
+    # licence gate refuses that for a runtime dependency (DEPENDENCIES.md).
+    "qrcodegen>=1.8,<2",
     # The ASGI server `robinauts start` runs (docs/specs/backend.md, "Web"),
     # imported by `robinauts.web.cli` and by nothing else -- the import-linter
     # contract below has named it since before it was a dependency. BSD-3-Clause,
@@ -431,6 +439,18 @@ ignore_imports = [
     "robinauts.agent_engines.langchain_engine.** -> *",
     "robinauts.agent_engines.pydantic_ai_engine -> *",
     "robinauts.agent_engines.pydantic_ai_engine.** -> *",
+]
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "qrcodegen only under web"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts"]
+forbidden_modules = ["qrcodegen"]
+ignore_imports = [
+    "robinauts.web -> *",
+    "robinauts.web.** -> *",
 ]
 unmatched_ignore_imports_alerting = "none"
 

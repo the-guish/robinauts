@@ -2,7 +2,9 @@
 # Copyright The Robinauts Authors
 
 """``robinauts start`` serves the web shell; ``robinauts db init`` makes the database ready;
-``robinauts version`` prints the version.
+``robinauts version`` prints the version;
+``robinauts devices list`` and ``robinauts devices end`` are the operator's hold on linked
+devices (``docs/architecture/device-pairing.md``), over the database the server reads.
 
 The configuration is the TOML file ``ROBINAUTS_CONFIG`` names. It holds the controller's
 tables and sign-in's, read once and each half parsed by its own; a key that is neither is
@@ -26,6 +28,7 @@ import importlib.metadata
 import logging
 import os
 import sys
+import uuid
 from collections.abc import Mapping, Sequence
 from importlib import resources
 from pathlib import Path
@@ -44,7 +47,15 @@ from robinauts.controller.composition import (
     read_tables,
     storage_from,
 )
-from robinauts.controller.contract.domain import Config, ConfigError, StorageKind
+from robinauts.controller.contract.domain import (
+    Config,
+    ConfigError,
+    DeviceSession,
+    StorageConfig,
+    StorageKind,
+    User,
+)
+from robinauts.controller.contract.ports import Credentials
 from robinauts.web.app import create_app
 from robinauts.web.sign_in import SIGN_IN_KEYS, SignInConfig, is_loopback, parse_sign_in
 
@@ -162,6 +173,81 @@ def database_init() -> int:
     return 0
 
 
+def device_line(user: User, device: DeviceSession) -> str:
+    """One device, as the operator reads it: whose, what, and its three dates."""
+    who = user.email or f"{user.provider}:{user.subject}"
+    return "\t".join(
+        (
+            str(device.id),
+            who,
+            device.device.name,
+            device.device.platform,
+            f"linked {device.created_at.isoformat(timespec='seconds')}",
+            f"last used {device.last_used_at.isoformat(timespec='seconds')}",
+            f"expires {device.expires_at.isoformat(timespec='seconds')}",
+        )
+    )
+
+
+async def devices_command(credentials: Credentials, arguments: argparse.Namespace) -> int:
+    """``devices list`` or ``devices end``, over these credentials. ``end --user`` names a
+    person by email, and is refused when that email is several users'."""
+    if arguments.devices_command == "list":
+        for user, device in await credentials.all_device_sessions():
+            print(device_line(user, device))
+        return 0
+    owners = {u.id: u for u, _ in await credentials.all_device_sessions()}
+    if arguments.user is not None:
+        users = await credentials.users_with_email(arguments.user)
+        if not users:
+            print(f"no user has the email {arguments.user}", file=sys.stderr)
+            return 1
+        if len(users) > 1:
+            print(
+                f"{len(users)} users have the email {arguments.user}, one per provider:"
+                " end their devices one by one with --device",
+                file=sys.stderr,
+            )
+            return 1
+        ended = await credentials.delete_device_sessions(user_id=users[0].id)
+    elif arguments.device is not None:
+        ended = await credentials.delete_device_sessions(device_id=arguments.device)
+        if not ended:
+            print(f"no device has the id {arguments.device}", file=sys.stderr)
+            return 1
+    else:
+        ended = await credentials.delete_device_sessions(every=True)
+    for device in ended:
+        owner = owners.get(device.user_id) or User(device.user_id, "?", str(device.user_id))
+        print("ended\t" + device_line(owner, device))
+    print(f"{len(ended)} device(s) ended")
+    return 0
+
+
+def devices(arguments: argparse.Namespace) -> int:
+    """The devices commands, on the configured database: no browser and no admin needed."""
+    url = os.environ.get(DATABASE_URL_VARIABLE)
+    if not url:
+        print(f"{DATABASE_URL_VARIABLE} is not set", file=sys.stderr)
+        return 2
+    composed = compose(
+        Config(), storage=StorageConfig(StorageKind.POSTGRES, url=url), secret_for={}.get
+    )
+
+    async def go() -> int:
+        await composed.controller.open()
+        try:
+            return await devices_command(composed.credentials, arguments)
+        finally:
+            await composed.controller.close()
+
+    try:
+        return asyncio.run(go())
+    except ConfigError as refused:
+        print(refused, file=sys.stderr)
+        return 1
+
+
 def run(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="robinauts")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -177,11 +263,21 @@ def run(argv: Sequence[str] | None = None) -> None:
     database_commands = database.add_subparsers(dest="database_command", required=True)
     database_commands.add_parser("init", help="create this build's schema in an empty database")
     commands.add_parser("version")
+    linked = commands.add_parser("devices", help="the linked devices, for the operator")
+    linked_commands = linked.add_subparsers(dest="devices_command", required=True)
+    linked_commands.add_parser("list", help="every linked device, with its user")
+    end = linked_commands.add_parser("end", help="end linked devices: they get 401 at once")
+    which = end.add_mutually_exclusive_group(required=True)
+    which.add_argument("--user", metavar="EMAIL", help="every device of the user of that email")
+    which.add_argument("--device", metavar="ID", type=uuid.UUID, help="one device, by its id")
+    which.add_argument("--all", action="store_true", help="every device of the deployment")
     arguments = parser.parse_args(argv)
     if arguments.command == "start":
         status = start(arguments.host, arguments.port, dev_no_sign_in=arguments.dev_no_sign_in)
     elif arguments.command == "db":
         status = database_init()
+    elif arguments.command == "devices":
+        status = devices(arguments)
     else:
         print(importlib.metadata.version("robinauts"))
         status = 0

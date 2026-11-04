@@ -26,6 +26,7 @@ from urllib.parse import quote_plus, urlencode, urlsplit
 import httpx
 
 from robinauts.controller.composition import SecretLookup
+from robinauts.controller.contract.domain import User
 from robinauts.web.sign_in import (
     GOOGLE_ISSUER,
     ProviderConfig,
@@ -59,6 +60,18 @@ class Claims:
     """Only an address the provider verified; at Google, one in a Workspace or at Gmail."""
     hosted_domain: str | None
     groups: tuple[str, ...]
+
+
+def claims_from(user: User) -> Claims:
+    """What the user's last sign-in said, as the allow list reads it again when a credential of
+    theirs is used (``docs/architecture/device-pairing.md``, "While a device lives")."""
+    return Claims(
+        subject=user.subject,
+        name=user.name,
+        email=user.email,
+        hosted_domain=user.hosted_domain,
+        groups=tuple(user.groups),
+    )
 
 
 @dataclass(frozen=True, slots=True)

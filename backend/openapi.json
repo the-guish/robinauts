@@ -92,6 +92,102 @@
         "title": "ApiTokenSummary",
         "type": "object"
       },
+      "ApproveRequest": {
+        "properties": {
+          "number": {
+            "pattern": "^[0-9]{3} ?[0-9]{3}$",
+            "title": "Number",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number"
+        ],
+        "title": "ApproveRequest",
+        "type": "object"
+      },
+      "ClaimRequest": {
+        "properties": {
+          "code": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "device": {
+            "$ref": "#/components/schemas/ClaimedDevice"
+          }
+        },
+        "required": [
+          "code",
+          "device"
+        ],
+        "title": "ClaimRequest",
+        "type": "object"
+      },
+      "ClaimResponse": {
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "string"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "string"
+          }
+        },
+        "required": [
+          "secret",
+          "number",
+          "expires_at"
+        ],
+        "title": "ClaimResponse",
+        "type": "object"
+      },
+      "ClaimedDevice": {
+        "description": "What the phone says of itself, bounded: data for the list.",
+        "properties": {
+          "app_version": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Version"
+          },
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "platform": {
+            "enum": [
+              "android",
+              "ios",
+              "desktop",
+              "other"
+            ],
+            "title": "Platform",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "platform"
+        ],
+        "title": "ClaimedDevice",
+        "type": "object"
+      },
       "ConversationListResponse": {
         "properties": {
           "items": {
@@ -159,6 +255,94 @@
           "updated_at"
         ],
         "title": "ConversationSummary",
+        "type": "object"
+      },
+      "DeviceDescriptionView": {
+        "properties": {
+          "app_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Version"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "platform",
+          "app_version"
+        ],
+        "title": "DeviceDescriptionView",
+        "type": "object"
+      },
+      "DeviceListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DeviceSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "DeviceListResponse",
+        "type": "object"
+      },
+      "DeviceSummary": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "format": "date-time",
+            "title": "Last Used At",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "platform",
+          "created_at",
+          "last_used_at",
+          "expires_at"
+        ],
+        "title": "DeviceSummary",
         "type": "object"
       },
       "EndedBadlyView": {
@@ -291,6 +475,32 @@
           "provenance"
         ],
         "title": "MessageView",
+        "type": "object"
+      },
+      "MintedPairingResponse": {
+        "description": "The code is in the picture and nowhere else.",
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "qr_svg": {
+            "title": "Qr Svg",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "expires_at",
+          "qr_svg"
+        ],
+        "title": "MintedPairingResponse",
         "type": "object"
       },
       "ModelListResponse": {
@@ -431,6 +641,59 @@
         "title": "OpenedConversationResponse",
         "type": "object"
       },
+      "PairingStateView": {
+        "properties": {
+          "state": {
+            "enum": [
+              "waiting",
+              "claimed",
+              "approved"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "PairingStateView",
+        "type": "object"
+      },
+      "PairingView": {
+        "properties": {
+          "device": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeviceDescriptionView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "waiting",
+              "claimed",
+              "approved"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "expires_at",
+          "device"
+        ],
+        "title": "PairingView",
+        "type": "object"
+      },
       "ProvenanceView": {
         "properties": {
           "agent": {
@@ -549,6 +812,31 @@
         "title": "TextContent",
         "type": "object"
       },
+      "TokenBrief": {
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "expires_at"
+        ],
+        "title": "TokenBrief",
+        "type": "object"
+      },
       "ToolCallContent": {
         "properties": {
           "arguments": {
@@ -610,10 +898,30 @@
       },
       "UserSessionResponse": {
         "properties": {
+          "device": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeviceSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "local_development": {
             "default": false,
             "title": "Local Development",
             "type": "boolean"
+          },
+          "pairing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PairingStateView"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "providers": {
             "default": [],
@@ -637,6 +945,16 @@
           "sign_in": {
             "title": "Sign In",
             "type": "boolean"
+          },
+          "token": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenBrief"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "user": {
             "anyOf": [
@@ -1078,6 +1396,67 @@
         "summary": "List Models"
       }
     },
+    "/auth/devices": {
+      "get": {
+        "operationId": "list_devices_auth_devices_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "List Devices"
+      }
+    },
+    "/auth/devices/{device_id}": {
+      "delete": {
+        "operationId": "remove_device_auth_devices__device_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "Remove Device"
+      }
+    },
     "/auth/logout": {
       "post": {
         "operationId": "sign_out_auth_logout_post",
@@ -1097,6 +1476,193 @@
           }
         },
         "summary": "Sign Out"
+      }
+    },
+    "/auth/pairings": {
+      "post": {
+        "operationId": "mint_pairing_auth_pairings_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MintedPairingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "Mint Pairing"
+      }
+    },
+    "/auth/pairings/claim": {
+      "post": {
+        "operationId": "claim_pairing_auth_pairings_claim_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "Claim Pairing"
+      }
+    },
+    "/auth/pairings/{pairing_id}": {
+      "delete": {
+        "operationId": "refuse_pairing_auth_pairings__pairing_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pairing_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pairing Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "Refuse Pairing"
+      },
+      "get": {
+        "operationId": "pairing_state_auth_pairings__pairing_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pairing_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pairing Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "Pairing State"
+      }
+    },
+    "/auth/pairings/{pairing_id}/approve": {
+      "post": {
+        "operationId": "approve_pairing_auth_pairings__pairing_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pairing_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pairing Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "Approve Pairing"
       }
     },
     "/auth/session": {

@@ -35,3 +35,4 @@ anthropic, openai, mcp -> langchain_engine, pydantic_ai_engine
 asyncpg, sqlite3, aiosqlite -> langchain_engine, pydantic_ai_engine, controller.adapters
 httpx -> web, langchain_engine, pydantic_ai_engine
 fastapi, starlette, uvicorn, ag_ui -> web
+qrcodegen -> web

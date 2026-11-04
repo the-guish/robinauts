@@ -3,10 +3,15 @@
 
 """The web shell: the routes of ``docs/architecture/web.md`` over a controller, and the UI.
 
-Every route under ``/api/`` answers for whoever ``current_user`` names: the person an API
-token (``Authorization: Bearer``) or a session cookie stands for, signed in through an identity
-provider by the ``/auth/`` routes, or the one user of the local development mode
-(``docs/specs/sign-in.md``); with nobody, it is 401. A write that carries the session cookie
+Every route under ``/api/`` answers for whoever ``current_user`` names: the person a bearer
+(``Authorization: Bearer``, a linked device's secret or an API token, told apart by its prefix)
+or a session cookie stands for, signed in through an identity provider by the ``/auth/``
+routes, or the one user of the local development mode (``docs/specs/sign-in.md``); with nobody,
+it is 401. Whatever credential asks, its user is checked against the allow list again, at most
+once a minute, and one who fails it loses every credential
+(``docs/architecture/device-pairing.md``). A route that mints or removes a credential is
+``browsing``: the session cookie's alone, so a bearer is 403; minting also wants the session
+younger than ``FRESH_MINUTES``. A write that carries the session cookie
 must carry ``Origin`` equal to ``public_url``, else 403; a write with a bearer alone need not.
 In the local development mode every request must name ``localhost`` or an IP address as its
 ``Host``, and a write that carries ``Origin`` must name that ``Host``, else 403.
@@ -22,7 +27,9 @@ import logging
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
@@ -30,13 +37,15 @@ from urllib.parse import urlsplit
 from fastapi import Depends, FastAPI, Header, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from robinauts.controller.composition import Composed, SecretLookup
 from robinauts.controller.contract.domain import (
     ApiToken,
     ControllerError,
+    DeviceDescription,
+    DeviceSession,
     Identity,
     InvalidValueError,
     Message,
@@ -62,17 +71,30 @@ from robinauts.web.cookies import Cookies
 from robinauts.web.headers import SecurityHeaders
 from robinauts.web.lifecycle import Lifecycle
 from robinauts.web.logs import loggable
-from robinauts.web.oidc import Exchange
+from robinauts.web.oidc import Exchange, claims_from
+from robinauts.web.pairing import (
+    FRESH_MINUTES,
+    Pairing,
+    PairingError,
+    PairingErrorCode,
+    Pairings,
+    is_fresh,
+)
 from robinauts.web.sign_in import (
+    DEVICE_DAYS,
     LOCAL_PROVIDER,
     PENDING_LOGIN_LIFE,
     PROVIDER_ID_PATTERN,
+    RecentChecks,
+    SecretKind,
     SignIn,
     SignInConfig,
     SignInError,
     SignInErrorCode,
-    random_secret,
+    is_allowed,
+    kind_of,
     secret_hash,
+    secret_of_kind,
 )
 
 DEFAULT_PAGE = 30
@@ -95,7 +117,21 @@ NOT_SAME_ORIGIN = "a write that carries the session cookie must carry Origin equ
 NOT_LOCAL_HOST = "the local development mode answers a Host of localhost or an IP address only"
 NOT_LOCAL_ORIGIN = "a write in the local development mode must carry Origin equal to its Host"
 UNKNOWN_TOKEN = "the API token is unknown, revoked or expired"
+UNKNOWN_DEVICE = "the device is unknown, removed or expired: pair it again"
 NO_SUCH_TOKEN = "you have no API token of that id"
+NO_SUCH_DEVICE = "you have no device of that id"
+BEARER_MAY_NOT = "a bearer never mints or removes a credential: do it in the browser, signed in"
+NOT_FRESH = (
+    f"minting a credential wants a sign-in less than {FRESH_MINUTES} minutes old: sign in again"
+)
+
+PAIRING_REFUSALS: dict[PairingErrorCode, tuple[int, str]] = {
+    PairingErrorCode.NO_DEVICES: (403, "Forbidden"),
+    PairingErrorCode.BUSY: (429, "Busy"),
+    PairingErrorCode.NOT_FOUND: (404, "NotFound"),
+    PairingErrorCode.NOT_CLAIMED: (409, "Conflict"),
+    PairingErrorCode.WRONG_NUMBER: (403, "WrongNumber"),
+}
 
 LOCAL_IDENTITY = Identity(provider=LOCAL_PROVIDER, subject="developer", name="Local development")
 """The one user of the local development mode, under a provider no configuration can name
@@ -128,6 +164,28 @@ def local_host(values: list[str]) -> str | None:
     except ValueError:
         return None
     return host
+
+
+class Via(StrEnum):
+    """How the asker was named."""
+
+    COOKIE = "cookie"
+    DEVICE = "device"
+    TOKEN = "token"
+    LOCAL = "local"
+    """The local development mode's one user, who counts as the browser's."""
+
+
+@dataclass(frozen=True, slots=True)
+class Asker:
+    """Who is asking and by which credential: ``secret_hash`` is that credential's, the key of
+    the allow-list check on use; ``signed_in_at`` a session cookie's ``created_at``."""
+
+    user: User
+    via: Via
+    secret_hash: str = ""
+    signed_in_at: datetime | None = None
+    device: DeviceSession | None = None
 
 
 class Refused(Exception):
@@ -184,12 +242,93 @@ class UserSummary(BaseModel):
     provider: str
 
 
+class DeviceSummary(BaseModel):
+    id: uuid.UUID
+    name: str
+    platform: str
+    created_at: datetime
+    last_used_at: datetime
+    expires_at: datetime
+
+
+class DeviceListResponse(BaseModel):
+    items: list[DeviceSummary]
+
+
+class TokenBrief(BaseModel):
+    id: uuid.UUID
+    name: str
+    expires_at: datetime
+
+
+class PairingStateView(BaseModel):
+    state: Literal["waiting", "claimed", "approved"]
+
+
 class UserSessionResponse(BaseModel):
     sign_in: bool
     local_development: bool = False
     public_url: str | None = None
     providers: list[ProviderSummary] = []
     user: UserSummary | None = None
+    device: DeviceSummary | None = None
+    """The device a device bearer is."""
+    token: TokenBrief | None = None
+    """The token a token bearer is."""
+    pairing: PairingStateView | None = None
+    """The pairing the bearer of a claim waits on, before it is approved."""
+
+
+class MintedPairingResponse(BaseModel):
+    """The code is in the picture and nowhere else."""
+
+    id: uuid.UUID
+    expires_at: datetime
+    qr_svg: str
+
+
+class DeviceDescriptionView(BaseModel):
+    name: str
+    platform: str
+    app_version: str | None
+
+
+class PairingView(BaseModel):
+    state: Literal["waiting", "claimed", "approved"]
+    expires_at: datetime
+    device: DeviceDescriptionView | None
+
+
+class ApproveRequest(BaseModel):
+    number: str = Field(pattern=r"^[0-9]{3} ?[0-9]{3}$")
+    """Six digits, with or without the space in the middle."""
+
+
+def printable(text: str | None) -> str | None:
+    if text is not None and not text.isprintable():
+        raise ValueError("printable text only")
+    return text
+
+
+class ClaimedDevice(BaseModel):
+    """What the phone says of itself, bounded: data for the list."""
+
+    name: str = Field(min_length=1, max_length=64)
+    platform: Literal["android", "ios", "desktop", "other"]
+    app_version: str | None = Field(default=None, max_length=32)
+
+    _printable = field_validator("name", "app_version")(printable)
+
+
+class ClaimRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=128)
+    device: ClaimedDevice
+
+
+class ClaimResponse(BaseModel):
+    secret: str
+    number: str
+    expires_at: datetime
 
 
 class NewApiTokenRequest(BaseModel):
@@ -333,6 +472,30 @@ def user_summary(user: User) -> UserSummary:
     return UserSummary(id=user.id, name=user.name, email=user.email, provider=user.provider)
 
 
+def device_summary(device: DeviceSession) -> DeviceSummary:
+    return DeviceSummary(
+        id=device.id,
+        name=device.device.name,
+        platform=device.device.platform,
+        created_at=device.created_at,
+        last_used_at=device.last_used_at,
+        expires_at=device.expires_at,
+    )
+
+
+def pairing_view(pairing: Pairing) -> PairingView:
+    device = pairing.device
+    return PairingView(
+        state=pairing.state.value,
+        expires_at=pairing.expires_at,
+        device=None if device is None else DeviceDescriptionView(**_fields(device)),
+    )
+
+
+def _fields(device: DeviceDescription) -> dict[str, str | None]:
+    return {"name": device.name, "platform": device.platform, "app_version": device.app_version}
+
+
 def token_summary(token: ApiToken) -> ApiTokenSummary:
     return ApiTokenSummary(
         id=token.id, name=token.name, created_at=token.created_at, expires_at=token.expires_at
@@ -441,6 +604,10 @@ def create_app(
         exchange = Exchange(sign_in, secret_for)
         flow = SignIn(sign_in, credentials=credentials, exchange=exchange, controller=controller)
         cookies = Cookies(sign_in.public_url)
+    pairings = Pairings(
+        credentials, device_days=DEVICE_DAYS if sign_in is None else sign_in.device_days
+    )
+    recent = RecentChecks()
     local_user: User | None = None
 
     @asynccontextmanager
@@ -472,31 +639,87 @@ def create_app(
         ):
             raise Refused(403, "Forbidden", NOT_SAME_ORIGIN)
 
-    async def session_user(request: Request) -> User | None:
-        secret = request.cookies.get(cookies.session)
-        return await flow.resolve(secret, datetime.now(UTC)) if secret else None
-
-    async def token_user(secret: str) -> User | None:
-        user = await credentials.resolve_api_token(secret_hash(secret), datetime.now(UTC))
-        # The local development mode mints tokens for its user too: as with a session, a token
-        # naming that user signs nobody in.
-        return None if user is None or user.provider == LOCAL_PROVIDER else user
-
-    async def current_user(request: Request) -> User:
-        if flow is None:
-            return local_user
+    def bearer_of(request: Request) -> str | None:
         scheme, _, secret = request.headers.get("authorization", "").partition(" ")
-        if scheme.lower() == "bearer":
-            user = await token_user(secret)
-            if user is None:
-                raise Refused(401, "Unauthorized", UNKNOWN_TOKEN)
-            return user
-        user = await session_user(request)
-        if user is None:
-            raise Refused(401, "Unauthorized", NOT_SIGNED_IN)
+        return secret if scheme.lower() == "bearer" else None
+
+    async def still_allowed(asker: Asker, now: datetime) -> bool:
+        """The allow list as it is now, against what the user's last sign-in said; a failure
+        deletes every credential of theirs, so the matcher put back revives none."""
+        if recent.passed(asker.secret_hash, now):
+            return True
+        user = asker.user
+        if is_allowed(sign_in.allow, user.provider, claims_from(user)):
+            recent.record(asker.secret_hash, now)
+            return True
+        deleted = await credentials.delete_credentials_of(user.id)
+        log.warning(
+            "user %s is not on the allow list any more: %s credentials of theirs deleted",
+            user.id,
+            deleted,
+        )
+        return False
+
+    async def resolve(request: Request, now: datetime) -> Asker | None:
+        """Who the bearer or, without one, the session cookie stands for; ``None`` for
+        nobody, and for a user who failed the allow list just now."""
+        secret = bearer_of(request)
+        asker: Asker | None = None
+        if secret is not None:
+            hashed = secret_hash(secret)
+            if kind_of(secret) is SecretKind.DEVICE:
+                device = await credentials.resolve_device_session(hashed, now)
+                if device is not None:
+                    asker = Asker(device[0], Via.DEVICE, hashed, device=device[1])
+            else:
+                user = await credentials.resolve_api_token(hashed, now)
+                if user is not None:
+                    asker = Asker(user, Via.TOKEN, hashed)
+        else:
+            cookie = request.cookies.get(cookies.session)
+            found = await flow.resolve(cookie, now) if cookie else None
+            if found is not None:
+                user, session = found
+                asker = Asker(user, Via.COOKIE, session.secret_hash, session.created_at)
+        # The local development mode links devices and mints tokens for its user too: as with
+        # a session, a bearer naming that user signs nobody in.
+        if asker is None or asker.user.provider == LOCAL_PROVIDER:
+            return None
+        return asker if await still_allowed(asker, now) else None
+
+    async def current_asker(request: Request) -> Asker:
+        if flow is None:
+            return Asker(local_user, Via.LOCAL)
+        asker = await resolve(request, datetime.now(UTC))
+        if asker is None:
+            secret = bearer_of(request)
+            if secret is None:
+                raise Refused(401, "Unauthorized", NOT_SIGNED_IN)
+            device = kind_of(secret) is SecretKind.DEVICE
+            raise Refused(401, "Unauthorized", UNKNOWN_DEVICE if device else UNKNOWN_TOKEN)
+        return asker
+
+    asked = Depends(current_asker)
+
+    async def current_user(asker: Asker = asked) -> User:
+        return asker.user
+
+    async def browsing_user(asker: Asker = asked) -> User:
+        """The browser's session alone: a bearer never mints or removes a credential."""
+        if asker.via in (Via.DEVICE, Via.TOKEN):
+            raise Refused(403, "Forbidden", BEARER_MAY_NOT)
+        return asker.user
+
+    async def fresh_browsing_user(asker: Asker = asked) -> User:
+        """The browser's session, signed in less than ``FRESH_MINUTES`` ago."""
+        user = await browsing_user(asker)
+        if asker.via is Via.COOKIE and not is_fresh(asker.signed_in_at, datetime.now(UTC)):
+            raise Refused(403, "FreshSignInRequired", NOT_FRESH)
         return user
 
     asking = Depends(current_user)
+    browsing = Depends(browsing_user)
+    browsing_fresh = Depends(fresh_browsing_user)
 
     app = FastAPI(
         lifespan=lifespan,
@@ -513,6 +736,11 @@ def create_app(
     @app.exception_handler(Refused)
     async def not_let_in(request: Request, exc: Refused) -> JSONResponse:
         return exc.answer()
+
+    @app.exception_handler(PairingError)
+    async def not_paired(request: Request, exc: PairingError) -> JSONResponse:
+        status, error = PAIRING_REFUSALS[exc.code]
+        return JSONResponse({"error": error, "detail": exc.detail}, status_code=status)
 
     @app.exception_handler(NotImplementedError)
     async def not_implemented(request: Request, exc: NotImplementedError) -> JSONResponse:
@@ -559,23 +787,51 @@ def create_app(
             return UserSessionResponse(
                 sign_in=False, local_development=True, user=user_summary(local_user)
             )
-        user = await session_user(request)
-        return UserSessionResponse(
+        now = datetime.now(UTC)
+        answer = UserSessionResponse(
             sign_in=True,
             public_url=sign_in.public_url,
             providers=[ProviderSummary(id=p.id, title=p.title) for p in sign_in.providers.values()],
-            user=None if user is None else user_summary(user),
         )
+        asker = await resolve(request, now)
+        secret = bearer_of(request)
+        if asker is None:
+            # A phone waiting for the browser to approve its claim.
+            if secret is not None and kind_of(secret) is SecretKind.DEVICE:
+                state = await pairings.poll(secret, now)
+                if state is not None:
+                    answer.pairing = PairingStateView(state=state.value)
+            return answer
+        answer.user = user_summary(asker.user)
+        if asker.device is not None:
+            answer.device = device_summary(asker.device)
+        elif asker.via is Via.TOKEN:
+            tokens = await credentials.api_tokens_of(asker.user.id)
+            token = next((t for t in tokens if t.secret_hash == asker.secret_hash), None)
+            if token is not None:
+                answer.token = TokenBrief(id=token.id, name=token.name, expires_at=token.expires_at)
+        return answer
 
     @app.post("/auth/logout", status_code=204)
     async def sign_out(request: Request, response: Response) -> None:
         if flow is None:
             return
+        now = datetime.now(UTC)
+        bearer = bearer_of(request)
+        if bearer is not None:
+            # A device ends itself; a token does not, and is revoked in the browser.
+            if kind_of(bearer) is SecretKind.DEVICE:
+                found = await credentials.resolve_device_session(secret_hash(bearer), now)
+                if found is not None:
+                    user, device = found
+                    await credentials.delete_device_session(user.id, device.id)
+                    log.info("device %s of user %s signed out", device.id, user.id)
+            return
         secret = request.cookies.get(cookies.session)
         if secret:
-            user = await flow.resolve(secret, datetime.now(UTC))
-            if await flow.sign_out(secret) and user is not None:
-                log.info("user %s signed out", user.id)
+            found = await flow.resolve(secret, now)
+            if await flow.sign_out(secret) and found is not None:
+                log.info("user %s signed out", found[0].id)
         cookies.clear(response, cookies.session)
 
     if flow is not None:
@@ -632,8 +888,10 @@ def create_app(
     # --- API tokens: shown once, kept as their SHA-256 ---------------------------
 
     @app.post("/auth/tokens", status_code=201)
-    async def mint_api_token(body: NewApiTokenRequest, user: User = asking) -> NewApiTokenResponse:
-        secret = random_secret()
+    async def mint_api_token(
+        body: NewApiTokenRequest, user: User = browsing_fresh
+    ) -> NewApiTokenResponse:
+        secret = secret_of_kind(SecretKind.TOKEN)
         now = datetime.now(UTC)
         token = ApiToken(
             uuid.uuid4(), user.id, body.name, secret_hash(secret), now, now + TOKEN_LIFE
@@ -647,9 +905,62 @@ def create_app(
         return ApiTokenListResponse(items=[token_summary(t) for t in tokens])
 
     @app.delete("/auth/tokens/{token_id}", status_code=204)
-    async def revoke_api_token(token_id: uuid.UUID, user: User = asking) -> None:
+    async def revoke_api_token(token_id: uuid.UUID, user: User = browsing) -> None:
         if not await credentials.delete_api_token(user.id, token_id):
             raise Refused(404, "NotFound", NO_SUCH_TOKEN)
+
+    # --- pairing a device: docs/architecture/device-pairing.md -------------------
+
+    def origin_of(request: Request) -> str:
+        """The origin the QR names: ``public_url``, or the local development mode's host."""
+        if sign_in is not None:
+            return sign_in.public_url
+        return f"http://{local_host(request.headers.getlist('host'))}"
+
+    @app.post("/auth/pairings", status_code=201)
+    async def mint_pairing(request: Request, user: User = browsing_fresh) -> MintedPairingResponse:
+        minted = await pairings.mint(user, origin=origin_of(request), now=datetime.now(UTC))
+        return MintedPairingResponse(
+            id=minted.pairing.id, expires_at=minted.pairing.expires_at, qr_svg=minted.qr_svg
+        )
+
+    @app.post("/auth/pairings/claim")
+    async def claim_pairing(body: ClaimRequest) -> ClaimResponse:
+        device = DeviceDescription(body.device.name, body.device.platform, body.device.app_version)
+        claimed = await pairings.claim(body.code, device, datetime.now(UTC))
+        return ClaimResponse(
+            secret=claimed.secret, number=claimed.number, expires_at=claimed.expires_at
+        )
+
+    @app.get("/auth/pairings/{pairing_id}")
+    async def pairing_state(pairing_id: uuid.UUID, user: User = browsing) -> PairingView:
+        return pairing_view(await pairings.pairing_of(user, pairing_id, datetime.now(UTC)))
+
+    @app.post("/auth/pairings/{pairing_id}/approve")
+    async def approve_pairing(
+        pairing_id: uuid.UUID, body: ApproveRequest, user: User = browsing
+    ) -> DeviceSummary:
+        device = await pairings.approve(user, pairing_id, body.number, datetime.now(UTC))
+        log.info("device %s linked to user %s", device.id, user.id)
+        return device_summary(device)
+
+    @app.delete("/auth/pairings/{pairing_id}", status_code=204)
+    async def refuse_pairing(pairing_id: uuid.UUID, user: User = browsing) -> None:
+        await pairings.refuse(user, pairing_id)
+        log.info("pairing %s of user %s refused or cancelled", pairing_id, user.id)
+
+    # --- linked devices ------------------------------------------------------------
+
+    @app.get("/auth/devices")
+    async def list_devices(user: User = asking) -> DeviceListResponse:
+        devices = await credentials.device_sessions_of(user.id)
+        return DeviceListResponse(items=[device_summary(d) for d in devices])
+
+    @app.delete("/auth/devices/{device_id}", status_code=204)
+    async def remove_device(device_id: uuid.UUID, user: User = browsing) -> None:
+        if not await credentials.delete_device_session(user.id, device_id):
+            raise Refused(404, "NotFound", NO_SUCH_DEVICE)
+        log.info("device %s of user %s removed", device_id, user.id)
 
     # --- catalogue -------------------------------------------------------------
 

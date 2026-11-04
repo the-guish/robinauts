@@ -15,6 +15,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import ipaddress
+import math
 import re
 import secrets
 import uuid
@@ -37,13 +38,17 @@ from robinauts.controller.contract.ports import Controller, Credentials
 if TYPE_CHECKING:
     from robinauts.web.oidc import Claims, Exchange
 
-SIGN_IN_KEYS = frozenset({"public_url", "session_hours", "providers", "allow", "admin"})
+SIGN_IN_KEYS = frozenset(
+    {"public_url", "session_hours", "device_days", "providers", "allow", "admin"}
+)
 """The file's top-level keys that are sign-in's. ``admin`` is one of them so that it is
 refused for what it is."""
 
 GOOGLE_ISSUER = "https://accounts.google.com"
 DEFAULT_SCOPES = ("openid", "email", "profile")
 SESSION_HOURS = 12
+DEVICE_DAYS = 30
+"""How long a linked device lives (``docs/architecture/device-pairing.md``); 0 is no devices."""
 
 PROVIDER_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]*")
 """How a provider's id is spelt. The local development mode's ``!local`` is not spelt so, and
@@ -51,6 +56,11 @@ no configuration can name it."""
 LOCAL_PROVIDER = "!local"
 
 PENDING_LOGIN_LIFE = timedelta(minutes=10)
+ALLOW_CHECK_LIFE = timedelta(seconds=60)
+"""How long a credential's pass of the allow list on use is believed before it is checked
+again: so a person taken out of the list loses every credential within a minute."""
+RECENT_CHECKS_KEPT = 4096
+"""How many passes are kept before the stale ones are dropped."""
 
 
 class Matcher(StrEnum):
@@ -60,6 +70,15 @@ class Matcher(StrEnum):
     EMAIL_DOMAIN = "email_domain"
     HOSTED_DOMAIN = "hosted_domain"
     GROUP = "group"
+
+
+class SecretKind(StrEnum):
+    """What a bearer is, as its prefix says: the prefix picks the table it is looked up in,
+    and lets a secret scanner recognise ours. A secret with no prefix is an API token minted
+    before there were prefixes."""
+
+    DEVICE = "rbd_"
+    TOKEN = "rbt_"
 
 
 class SignInErrorCode(StrEnum):
@@ -109,6 +128,8 @@ class SignInConfig:
     public_url: str
     """The deployment's origin, ``scheme://host[:port]``."""
     session_hours: float = SESSION_HOURS
+    device_days: float = DEVICE_DAYS
+    """How long a linked device lives; 0 is a deployment with no devices."""
     providers: Mapping[str, ProviderConfig]
     allow: tuple[AllowEntry, ...]
 
@@ -122,6 +143,14 @@ def is_loopback(host: str) -> bool:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
+
+
+def is_days(value: object) -> bool:
+    """A number of days, 0 or more: not a ``bool``, which is an ``int``, nor a NaN or an
+    infinity."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return False
+    return math.isfinite(value) and value >= 0
 
 
 def parse_sign_in(raw: Mapping[str, Any]) -> SignInConfig | None:
@@ -139,6 +168,10 @@ def parse_sign_in(raw: Mapping[str, Any]) -> SignInConfig | None:
         problems.append(f"public_url: {url!r} is not https, which only a loopback host may skip")
     if origin.path.strip("/") or origin.query or origin.fragment:
         problems.append(f"public_url: {url!r} has a path, a query or a fragment; it is an origin")
+
+    device_days = raw.get("device_days", DEVICE_DAYS)
+    if not is_days(device_days):
+        problems.append(f"device_days: {device_days!r} is not a number of days, 0 or more")
 
     tables = raw.get("providers", {})
     known = {field.name for field in dataclasses.fields(ProviderConfig)} - {"id"}
@@ -191,6 +224,7 @@ def parse_sign_in(raw: Mapping[str, Any]) -> SignInConfig | None:
     return SignInConfig(
         public_url=f"{origin.scheme}://{origin.netloc}",
         session_hours=raw.get("session_hours", SESSION_HOURS),
+        device_days=device_days,
         providers=providers,
         allow=tuple(allow),
     )
@@ -206,7 +240,19 @@ def random_secret() -> str:
 
 
 def secret_hash(secret: str) -> str:
+    """The SHA-256 hex of the whole secret, its prefix included."""
     return hashlib.sha256(secret.encode()).hexdigest()
+
+
+def secret_of_kind(kind: SecretKind) -> str:
+    """A random secret, prefixed with its kind."""
+    return kind + random_secret()
+
+
+def kind_of(secret: str) -> SecretKind:
+    """A device's secret by its prefix; anything else is an API token, with ``rbt_`` or, minted
+    before there were prefixes, with none."""
+    return SecretKind.DEVICE if secret.startswith(SecretKind.DEVICE) else SecretKind.TOKEN
 
 
 def safe_return_to(target: str | None) -> str:
@@ -236,6 +282,30 @@ def allows(entry: AllowEntry, claims: Claims) -> bool:
 
 def is_allowed(allow: Iterable[AllowEntry], provider_id: str, claims: Claims) -> bool:
     return any(entry.provider == provider_id and allows(entry, claims) for entry in allow)
+
+
+class RecentChecks:
+    """The credentials whose user passed the allow list lately, by the credential's hash, in
+    this process's memory. Only a pass is kept: a failure deletes the credential."""
+
+    def __init__(self, life: timedelta = ALLOW_CHECK_LIFE, kept: int = RECENT_CHECKS_KEPT):
+        self._life = life
+        self._kept = kept
+        self._passed: dict[str, datetime] = {}
+
+    def passed(self, key: str, now: datetime) -> bool:
+        """Whether that credential passed less than ``life`` before ``now``."""
+        at = self._passed.get(key)
+        return at is not None and timedelta(0) <= now - at < self._life
+
+    def record(self, key: str, now: datetime) -> None:
+        self._passed[key] = now
+        if len(self._passed) > self._kept:
+            for stale in [k for k, at in self._passed.items() if not self.passed(k, now)]:
+                del self._passed[stale]
+
+    def __len__(self) -> int:
+        return len(self._passed)
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,12 +382,22 @@ class SignIn:
             provider_id, code=code, nonce=login.nonce, verifier=login.verifier, now=now
         )
         if not is_allowed(self._config.allow, provider_id, claims):
+            # The provider has just vouched for somebody the allow list no longer lets in: the
+            # moment to end every credential they still hold. Only this refusal does it.
+            await self._credentials.delete_credentials_of_identity(provider_id, claims.subject)
             raise SignInError(
                 SignInErrorCode.NOT_ALLOWED,
                 f"no allow entry of {provider_id!r} lets in {claims.email or claims.subject!r}",
             )
         user = await self._controller.ensure_user(
-            Identity(provider_id, claims.subject, name=claims.name, email=claims.email)
+            Identity(
+                provider_id,
+                claims.subject,
+                name=claims.name,
+                email=claims.email,
+                hosted_domain=claims.hosted_domain,
+                groups=claims.groups,
+            )
         )
         secret = random_secret()
         expires_at = now + timedelta(hours=self._config.session_hours)
@@ -326,12 +406,13 @@ class SignIn:
         )
         return SignedIn(user, secret, expires_at, login.return_to)
 
-    async def resolve(self, secret: str, now: datetime) -> User | None:
+    async def resolve(self, secret: str, now: datetime) -> tuple[User, UserSession] | None:
+        """The user a session cookie stands for, and the session, whose ``created_at`` is how
+        fresh the sign-in is."""
         found = await self._credentials.resolve_user_session(secret_hash(secret), now)
-        user = None if found is None else found[0]
         # No sign-in makes the local development mode's user, so a session naming it came from
         # elsewhere: a database kept from a run of the mode hands nobody that account.
-        return None if user is None or user.provider == LOCAL_PROVIDER else user
+        return None if found is None or found[0].provider == LOCAL_PROVIDER else found
 
     async def sign_out(self, secret: str) -> bool:
         return await self._credentials.delete_user_session(secret_hash(secret))
