@@ -7,7 +7,7 @@
  * `GET /api/conversations/{id}` answers **one moment** of a conversation
  * (`docs/specs/conversations.md`, "The visible thread"): the one thread it
  * shows, oldest first, and the run in flight or the way the last one ended.
- * The chat is what reads it (`src/chat/assistant-ui/runtime.tsx`); what is
+ * The chat is what reads it (`src/chat/runtime.tsx`); what is
  * here is the shapes, the title rule, and the two calls about a conversation
  * that are neither a turn nor the panel's.
  */

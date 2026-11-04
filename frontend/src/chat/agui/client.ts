@@ -4,16 +4,14 @@
 /**
  * The AG-UI client: ours, and about two hundred lines of it.
  *
- * **Why not `@assistant-ui/react-ag-ui`.** The protocol is at 1.0
- * (`@ag-ui/core`, `@ag-ui/client`), and assistant-ui's bridge to it is not:
- * 0.0.60, published 2026-09-18, is still pinned to `@ag-ui/client ^0.0.59`,
- * so taking it would install a second, pre-1.0 client beside the 1.0 one and
- * tie the chat to a package that has not caught up in a month. The wire spec
- * foresaw exactly this and named the alternative: "a small AG-UI client of
- * our own takes its place behind the same seam; the wire does not change"
- * (`docs/specs/wire.md`, "Details likely to change"). Checked again
- * 2026-09-22. So this step adds **no dependency at all**: `fetch`, a
- * `ReadableStream` and `./sse.ts`.
+ * **Why ours.** The protocol is at 1.0 (`@ag-ui/core`, `@ag-ui/client`), and
+ * when the chat was first built the only React bridge to it was pinned to a
+ * pre-1.0 client, so the wire spec's alternative was taken instead: "a small
+ * AG-UI client of our own takes its place behind the same seam; the wire does
+ * not change" (`docs/specs/wire.md`). It has stayed ours since, and it is one
+ * reason the chat window could later be written on React alone (ADR 0006):
+ * nothing on the wire side was a library's. It adds **no dependency at all**:
+ * `fetch`, a `ReadableStream` and `./sse.ts`.
  *
  * What it does, and nothing else:
  *

@@ -4,9 +4,9 @@
 /*
  * Design tokens: the colours and radii the whole interface is built from, as
  * CSS custom properties. They are carried over from neorc (recorded in
- * docs/legal/ip-clearance.md), and the Tailwind theme in styles.css refers to
- * them rather than the other way round, so they survive a change of Tailwind
- * or of the chat library (docs/specs/frontend.md, ADR 0001).
+ * docs/legal/ip-clearance.md), and every stylesheet refers to them rather than
+ * the other way round: a component names a token, never a colour, so the
+ * palette is one file (docs/specs/frontend.md, ADR 0006).
  *
  * **The dark values are written once**, as `--dark-*`, and the two ways of
  * turning dark on below map names to names. A palette repeated under a media

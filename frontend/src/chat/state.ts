@@ -226,9 +226,9 @@ const ENDED_SOMEHOW = "This answer did not finish.";
  * What a second turn asked for while one is on its way is told.
  *
  * **One run at a time** (`docs/specs/runs.md`). It says that the message was
- * not sent, because the box has already cleared it: assistant-ui empties the
- * composer when it hands a message over, and a turn that went nowhere with a
- * box that went empty would be a message somebody thinks they sent.
+ * not sent, because the box has already cleared it: the composer empties when
+ * it hands a message over, and a turn that went nowhere with a box that went
+ * empty would be a message somebody thinks they sent.
  */
 export const ONE_AT_A_TIME =
   "This conversation is already answering, and it takes one turn at a time. That message was not sent.";
@@ -404,10 +404,10 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
         : { ...EMPTY, conversationId: action.conversationId, loading: true };
     case "opened": {
       // **A message the store still says the same thing about is the message
-      // this state already holds.** Identity is what the chat converts for
-      // assistant-ui by (`./runtime.tsx`, `converted`), so rebuilding every
-      // object on the read that ends a turn would convert a whole
-      // conversation again -- and move every `createdAt` -- over one answer.
+      // this state already holds.** Identity is what the thread memoises its
+      // rendering by -- a message object that has not changed is not drawn
+      // again -- so rebuilding every object on the read that ends a turn would
+      // redraw a whole conversation over one answer.
       const before = new Map(state.messages.map((each) => [each.id, each]));
       const messages = folded(
         action.messages,

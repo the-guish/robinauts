@@ -3,7 +3,8 @@
 Inline SVG components, one per icon, over path data copied from
 [lucide](https://github.com/lucide-icons/lucide) rather than installed from
 it. `index.tsx` is this project's code; `lucide.ts` is lucide's data, under
-the ISC licence beside it (`LICENSE.lucide`), and the copy is recorded in
+the licence beside it (`LICENSE.lucide`: ISC, and MIT for the icons lucide
+derived from Feather, sixteen of ours among them), and the copy is recorded in
 [`docs/legal/ip-clearance.md`](../../../docs/legal/ip-clearance.md). The
 `REUSE.toml` at the root of the repository states the copyright of each.
 

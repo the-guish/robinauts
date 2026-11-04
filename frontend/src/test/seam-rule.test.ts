@@ -2,15 +2,14 @@
 // Copyright The Robinauts Authors
 
 /**
- * The lint rule that confines assistant-ui, tested for firing.
+ * The lint rule that keeps the chat behind its seam, tested for firing.
  *
  * `npm run lint` proves only that no file in the tree breaks the rule, which
  * is also what it would print if the rule matched nothing at all. This runs
  * ESLint over files that do not exist, with the real configuration, and asks
  * which of them it refuses. A change that quietly stopped the seam from
- * matching -- a renamed directory, a name dropped from the list, a pattern
- * syntax that changed under us -- fails here (ADR 0001,
- * docs/specs/open-source.md "Checks").
+ * matching -- a renamed directory, a pattern syntax that changed under us --
+ * fails here (ADR 0006, docs/specs/open-source.md "Checks").
  */
 import { readFileSync } from "node:fs";
 
@@ -87,72 +86,69 @@ async function refuses(
 }
 
 const SHELL = "src/shell/panel.tsx";
+const HISTORY = "src/history/list.tsx";
 const SEAM_FILE = "src/chat/index.ts";
-const INSIDE = "src/chat/assistant-ui/runtime.ts";
-const BESIDE = "src/chat/history/list.ts";
-const DEEPER = "src/chat/history/rows/row.ts";
+const INSIDE = "src/chat/thread/thread.tsx";
+const DEEPER = "src/chat/thread/parts/tool.tsx";
 
-test("the shell may not import the assistant-ui packages", async () => {
-  expect(
-    await refuses(SHELL, 'import "@assistant-ui/react";', {
-      rule: "no-restricted-imports",
-      says: "may be imported only under src/chat/assistant-ui/",
-    }),
-  ).toBe(true);
-  expect(
-    await refuses(SHELL, 'import type { T } from "@assistant-ui/react";'),
-  ).toBe(true);
-});
+/** The refusal this file is about, as the message says it. */
+const BEHIND = { rule: "no-restricted-imports", says: "behind the seam" };
 
-test("assistant-cloud is named too, subpaths and all", async () => {
-  // It arrives as a dependency of @assistant-ui/react and is never
-  // configured (ADR 0001). Drop it from the list in eslint.config.js and
-  // this is the test that goes red.
-  expect(await refuses(SHELL, 'import "assistant-cloud";')).toBe(true);
-  expect(await refuses(SHELL, 'import "assistant-cloud/auth";')).toBe(true);
+test("the shell may not reach behind the seam, extension or none", async () => {
+  for (const specifier of [
+    "../chat/Chat",
+    "../chat/Chat.js",
+    "../chat/runtime",
+    "../chat/state",
+    "../chat/agui/client",
+    "../chat/markdown/Markdown",
+    "../chat/thread/thread",
+    "/src/chat/runtime",
+    "../chat/index/anything",
+  ]) {
+    expect(
+      await refuses(SHELL, `import "${specifier}";`, BEHIND),
+      specifier,
+    ).toBe(true);
+  }
+  expect(await refuses(SHELL, 'import type { T } from "../chat/state";')).toBe(
+    true,
+  );
 });
 
 test("re-exporting is importing", async () => {
-  expect(await refuses(SHELL, 'export * from "@assistant-ui/react";')).toBe(
+  expect(await refuses(SHELL, 'export { Chat } from "../chat/Chat";')).toBe(
     true,
   );
-  expect(
-    await refuses(
-      SHELL,
-      'export { Thread } from "../chat/assistant-ui/runtime";',
-    ),
-  ).toBe(true);
+  expect(await refuses(SHELL, 'export * from "../chat/state";')).toBe(true);
 });
 
 test("import() is importing", async () => {
-  expect(await refuses(SHELL, 'void import("@assistant-ui/react");')).toBe(
+  expect(await refuses(SHELL, 'void import("../chat/Chat");')).toBe(true);
+  expect(await refuses(SHELL, 'void import("../chat/thread/thread");')).toBe(
     true,
   );
-  expect(
-    await refuses(SHELL, 'void import("../chat/assistant-ui/runtime");'),
-  ).toBe(true);
 });
 
 test("a template literal is a specifier too", async () => {
-  expect(await refuses(SHELL, "void import(`@assistant-ui/react`);")).toBe(
-    true,
-  );
-  expect(
-    await refuses(SHELL, "void import(`../chat/assistant-ui/runtime`);"),
-  ).toBe(true);
+  expect(await refuses(SHELL, "void import(`../chat/Chat`);")).toBe(true);
   expect(await refuses(SHELL, "void import(`../chat`);")).toBe(false);
 });
 
 test("case is not a way round it", async () => {
   // no-restricted-imports ignores case; the esquery selectors carry the same
   // `i` flag, so import() cannot be spelt past the rule either.
-  expect(await refuses(SHELL, 'import "@ASSISTANT-UI/react";')).toBe(true);
-  expect(await refuses(SHELL, 'void import("@ASSISTANT-UI/react");')).toBe(
-    true,
-  );
-  expect(await refuses(SHELL, "void import(`@Assistant-UI/react`);")).toBe(
-    true,
-  );
+  expect(await refuses(SHELL, 'import "../CHAT/state";')).toBe(true);
+  expect(await refuses(SHELL, 'void import("../Chat/State");')).toBe(true);
+  expect(await refuses(SHELL, "void import(`../CHAT/state`);")).toBe(true);
+});
+
+test("a directory that merely contains the word is not the seam", async () => {
+  // The segment has to be exactly `chat`: a neighbour called something else
+  // is nobody's business here.
+  expect(await refuses(SHELL, 'import "./chat-log";')).toBe(false);
+  expect(await refuses(SHELL, 'import "../chatter/rows";')).toBe(false);
+  expect(await refuses(SHELL, 'import "../chats/state";')).toBe(false);
 });
 
 test("a specifier that cannot be read cannot be cleared", async () => {
@@ -161,13 +157,11 @@ test("a specifier that cannot be read cannot be cleared", async () => {
   expect(
     await refuses(SHELL, "declare const w: string;\nvoid import(w);"),
   ).toBe(true);
-  expect(await refuses(SHELL, 'void import("@assistant" + "-ui/react");')).toBe(
-    true,
-  );
+  expect(await refuses(SHELL, 'void import("../chat" + "/state");')).toBe(true);
   expect(
     await refuses(
       SHELL,
-      "declare const b: string;\nvoid import(`${b}/react`);",
+      "declare const b: string;\nvoid import(`${b}/state`);",
     ),
   ).toBe(true);
   expect(
@@ -176,58 +170,47 @@ test("a specifier that cannot be read cannot be cleared", async () => {
   expect(await refuses(SHELL, 'void import.meta.globEager("./*.ts");')).toBe(
     true,
   );
+  // Inside the seam as well: it is this project's code, and nothing in it
+  // has a use for a specifier nobody can read.
+  expect(
+    await refuses(INSIDE, "declare const w: string;\nvoid import(w);"),
+  ).toBe(true);
 });
 
 test("require is not part of this package", async () => {
-  expect(
-    await refuses(SHELL, 'const x = require("@assistant-ui/react");'),
-  ).toBe(true);
-  expect(await refuses(SHELL, 'const x = require("react");')).toBe(true);
-  // Inside the implementation too: the seam is off there, this is not.
-  expect(
-    await refuses(INSIDE, 'const x = require("@assistant-ui/react");'),
-  ).toBe(true);
-});
-
-test("the shell may not reach behind the seam, extension or none", async () => {
-  expect(await refuses(SHELL, 'import "../chat/assistant-ui/runtime";')).toBe(
+  expect(await refuses(SHELL, 'const x = require("../chat/state");')).toBe(
     true,
   );
-  expect(
-    await refuses(SHELL, 'import "../chat/assistant-ui/runtime.js";'),
-  ).toBe(true);
-  expect(await refuses(SHELL, 'import "../chat/assistant-ui";')).toBe(true);
+  expect(await refuses(SHELL, 'const x = require("react");')).toBe(true);
+  // Inside the seam too: the seam is off there, this is not.
+  expect(await refuses(INSIDE, 'const x = require("react");')).toBe(true);
 });
 
 test("a path is not its spelling", async () => {
-  // Every one of these reaches src/chat/assistant-ui/. The rule reads a path
+  // Every one of these reaches src/chat/state.ts. The rule reads a path
   // segment, so none of them is a way round it -- and the plain-specifier
   // rule refuses the odd spellings besides.
   // The plainly-written ones must be refused *by the seam rule*; the rest
   // are refused for being a second spelling of a path, which is a rule of its
   // own and is proved below.
-  const behind = {
-    rule: "no-restricted-imports",
-    says: "behind the seam",
-  };
   for (const specifier of [
-    "../chat/assistant-ui/runtime",
-    "/src/chat/assistant-ui/runtime",
-    "../chat/assistant-ui/runtime.js",
-    "../chat/assistant-ui/runtime.mjs",
-    "../chat/ASSISTANT-UI/runtime",
+    "../chat/state",
+    "/src/chat/state",
+    "../chat/state.js",
+    "../chat/state.mjs",
+    "../CHAT/state",
   ]) {
     expect(
-      await refuses(SHELL, `import "${specifier}";`, behind),
+      await refuses(SHELL, `import "${specifier}";`, BEHIND),
       specifier,
     ).toBe(true);
   }
   for (const specifier of [
-    "../chat/history/../assistant-ui/runtime",
-    "..//assistant-ui/runtime",
-    "./../chat/assistant-ui/runtime",
-    "../chat/./assistant-ui/runtime",
-    "../chat/assistant-ui/",
+    "../history/../chat/state",
+    "..//chat/state",
+    "./../chat/state",
+    "../chat/./state",
+    "../chat/state/",
   ]) {
     expect(await refuses(SHELL, `import "${specifier}";`), specifier).toBe(
       true,
@@ -276,17 +259,16 @@ test("a package is imported by its name", async () => {
   expect(await refuses(SHELL, 'import "react";')).toBe(false);
 });
 
-test("a file beside the implementation may not reach sideways into it", async () => {
-  // src/chat/ will hold more than the seam and the implementation; one level
-  // up and two, the relative path is still the implementation.
-  expect(await refuses(BESIDE, 'import "../assistant-ui/runtime";')).toBe(true);
-  expect(await refuses(DEEPER, 'import "../../assistant-ui/runtime";')).toBe(
-    true,
-  );
-  expect(await refuses(BESIDE, "void import(`../assistant-ui/runtime`);")).toBe(
-    true,
-  );
-  expect(await refuses(BESIDE, 'import "../index";')).toBe(false);
+test("the seam applies from anywhere outside, however deep", async () => {
+  // src/history/ is not src/shell/, and a test harness is not either; the
+  // rule is about where the import lands, not where it is written.
+  expect(await refuses(HISTORY, 'import "../chat/state";', BEHIND)).toBe(true);
+  expect(
+    await refuses("src/test/harness.ts", 'import "../chat/runtime";', BEHIND),
+  ).toBe(true);
+  expect(
+    await refuses("scripts/tool.mjs", 'import "../src/chat/state";', BEHIND),
+  ).toBe(true);
 });
 
 test("a module reference in a URL is a module reference", async () => {
@@ -295,11 +277,9 @@ test("a module reference in a URL is a module reference", async () => {
   // a string, a template, and anything that cannot be read at all.
   const url = (specifier: string) =>
     `void new Worker(new URL(${specifier}, import.meta.url));`;
-  expect(await refuses(SHELL, url('"../chat/assistant-ui/w.ts"'))).toBe(true);
-  expect(await refuses(SHELL, url("`../chat/assistant-ui/w.ts`"))).toBe(true);
-  expect(
-    await refuses(SHELL, url('"../chat/history/../assistant-ui/w.ts"')),
-  ).toBe(true);
+  expect(await refuses(SHELL, url('"../chat/w.ts"'))).toBe(true);
+  expect(await refuses(SHELL, url("`../chat/w.ts`"))).toBe(true);
+  expect(await refuses(SHELL, url('"../history/../chat/w.ts"'))).toBe(true);
   expect(await refuses(SHELL, "declare const w: string;\n" + url("w"))).toBe(
     true,
   );
@@ -311,22 +291,23 @@ test("a module reference in a URL is a module reference", async () => {
   expect(
     await refuses(SHELL, "declare const h: string;\nvoid new URL(h);"),
   ).toBe(false);
-  // And inside the implementation, a worker may be built any way at all.
+  // Inside the seam a worker is still named plainly or not at all.
   expect(await refuses(INSIDE, "declare const w: string;\n" + url("w"))).toBe(
-    false,
+    true,
   );
+  expect(await refuses(INSIDE, url('"./w.ts"'))).toBe(false);
 });
 
 test("an ordinary URL is not a module reference", async () => {
-  // Only `new URL(x, import.meta.url)` names a module. These three are
-  // browser code that happens to share a constructor, and steps 18 to 21 are
-  // full of them; a rule that refused them would be a rule people turn off.
+  // Only `new URL(x, import.meta.url)` names a module. These are browser
+  // code that happens to share a constructor, and the API client is full of
+  // them; a rule that refused them would be a rule people turn off.
   for (const code of [
     'void new URL("/api/runs", location.origin);',
     'void new URL("https://example.test/x");',
     "declare const base: string;\nvoid new URL(`${base}/runs`);",
     "declare const href: string;\nvoid new URL(href);",
-    'void new URL("../chat/assistant-ui/w.ts", location.origin);',
+    'void new URL("../chat/w.ts", location.origin);',
   ]) {
     expect(await complains(SHELL, code), code).toEqual([]);
     expect(await complains("src/test/harness.ts", code), code).toEqual([]);
@@ -341,11 +322,7 @@ test("a specifier uses forward slashes", async () => {
     await refuses(SHELL, String.raw`import "..\\chat\\index";`, slashes),
   ).toBe(true);
   expect(
-    await refuses(
-      SHELL,
-      String.raw`void import("..\\chat\\assistant-ui\\x");`,
-      slashes,
-    ),
+    await refuses(SHELL, String.raw`void import("..\\chat\\state");`, slashes),
   ).toBe(true);
 });
 
@@ -365,6 +342,9 @@ test("Node's globals are not in a browser", async () => {
   expect(await complains(SHELL, "void __dirname;")).toContain(
     "no-restricted-globals",
   );
+  expect(await complains(INSIDE, "void process.env;")).toContain(
+    "no-restricted-globals",
+  );
   // The checks that drive tools do run in Node, and say so by living here.
   expect(
     await complains("src/test/harness.ts", "void process.env;"),
@@ -376,44 +356,35 @@ test("the seam itself is what the shell imports", async () => {
   expect(await refuses(SHELL, 'import { Chat } from "../chat/index";')).toBe(
     false,
   );
+  expect(
+    await refuses(SHELL, 'import type { ChatProps } from "../chat/index";'),
+  ).toBe(false);
 });
 
-test("the seam's interface may reach its own implementation", async () => {
-  expect(await refuses(SEAM_FILE, 'import "./assistant-ui/runtime";')).toBe(
+test("inside the seam, the chat's files import one another", async () => {
+  // The interface reaches its implementation, and the implementation reaches
+  // its own parts, by the plain relative paths; the seam is for everybody
+  // else.
+  expect(await refuses(SEAM_FILE, 'import "./Chat";')).toBe(false);
+  expect(await refuses(SEAM_FILE, 'export { Chat } from "./Chat";')).toBe(
     false,
   );
-  expect(
-    await refuses(SEAM_FILE, 'void import("./assistant-ui/runtime");'),
-  ).toBe(false);
-  // By that one name, and by no other path that arrives at the same place.
-  expect(
-    await refuses(SEAM_FILE, 'import "../chat/assistant-ui/runtime";'),
-  ).toBe(true);
-  expect(
-    await refuses(SEAM_FILE, 'import "./history/../assistant-ui/runtime";'),
-  ).toBe(true);
-});
-
-test("the seam's interface may not name the packages", async () => {
-  // Its types mention nothing from assistant-ui: that is what makes the
-  // implementation behind it replaceable (ADR 0001, "The discard test").
-  expect(await refuses(SEAM_FILE, 'import "@assistant-ui/react";')).toBe(true);
-  expect(await refuses(SEAM_FILE, 'void import("@assistant-ui/react");')).toBe(
-    true,
-  );
-});
-
-test("the implementation may import assistant-ui, which is the point", async () => {
-  expect(
-    await refuses(
-      INSIDE,
-      'import "@assistant-ui/react";\nimport "./vendor/thread";\nvoid import("assistant-cloud");',
-    ),
-  ).toBe(false);
-  // And it is the one place a specifier may be worked out at run time.
-  expect(
-    await refuses(INSIDE, "declare const w: string;\nvoid import(w);"),
-  ).toBe(false);
+  for (const specifier of [
+    "../runtime",
+    "../state",
+    "../agui/client",
+    "../markdown/Markdown",
+    "./composer",
+    "../../icons",
+  ]) {
+    expect(await refuses(INSIDE, `import "${specifier}";`), specifier).toBe(
+      false,
+    );
+  }
+  expect(await refuses(DEEPER, 'import "../../state";')).toBe(false);
+  // By the plain spelling, and by no other: the hygiene rules hold inside.
+  expect(await refuses(INSIDE, 'import "../thread/../state";')).toBe(true);
+  expect(await refuses(INSIDE, 'import "..//state";')).toBe(true);
 });
 
 test("nothing renames a path behind the seam's back", async () => {
@@ -441,13 +412,7 @@ test("nothing renames a path behind the seam's back", async () => {
       string,
       unknown
     >;
-    const paths = (options.paths ?? {}) as Record<string, string[]>;
-    for (const [alias, targets] of Object.entries(paths)) {
-      for (const target of targets) {
-        expect(target, `${name} maps ${alias}`).not.toMatch(
-          /chat\/assistant-ui/,
-        );
-      }
-    }
+    expect(options.paths, `${name} declares paths`).toBeUndefined();
+    expect(options.baseUrl, `${name} declares baseUrl`).toBeUndefined();
   }
 });

@@ -365,7 +365,7 @@ const SCENES = {
    * The stream simply stops -- no event in it says the run is over -- which
    * is what a proxy closing a connection looks like. The run is still in
    * flight, so the chat reads the conversation and watches it again
-   * (`docs/specs/wire.md`; `src/chat/assistant-ui/runtime.tsx`).
+   * (`docs/specs/wire.md`; `src/chat/runtime.tsx`).
    */
   drop: {
     session: SIGNED_IN,

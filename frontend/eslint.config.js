@@ -5,21 +5,24 @@ import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
-// The seam of ADR 0001, as lint rules.
+// The seam of ADR 0006 (and of ADR 0001 before it), as lint rules.
 //
-// assistant-ui exists in exactly one place, `src/chat/assistant-ui/`. What the
-// rest of the application may import is `src/chat/index.ts`, an interface this
-// project owns, and the rest of the application is everything else: the shell,
-// the routes, the API client, the tests.
+// The chat is behind `src/chat/index.ts`, an interface this project owns. What
+// the rest of the application may import is that file; what is behind it --
+// `src/chat/Chat.tsx`, the runtime, the thread, the Markdown renderer, the
+// state and the wire client -- is the chat's own, and the rest of the
+// application is everything else: the shell, the routes, the API client, the
+// tests. The implementation used to be a library behind this same seam
+// (ADR 0001); the seam outlived the library, which is what it was for.
 //
 // Three things had to be true for a pattern to be worth anything here, and
 // each of them cost a review to learn:
 //
 //  1. **The implementation is matched by segment, not by prefix.** A path is
-//     not its spelling: `../chat/history/../assistant-ui/runtime` and
-//     `..//assistant-ui/runtime` reach the same directory as
-//     `../assistant-ui/runtime`. What is refused is a specifier with a path
-//     segment that *is* `assistant-ui`, wherever in the path it sits.
+//     not its spelling: `../history/../chat/state` and `..//chat/state` reach
+//     the same place as `../chat/state`. What is refused is a specifier with
+//     a path segment that *is* `chat`, followed by anything but the seam's
+//     own `index`, wherever in the path it sits.
 //  2. **Specifiers are written plainly.** `//`, `/./`, a `..` that is not
 //     part of the leading prefix, a trailing `/` -- every one of them is a
 //     second spelling of a path, and a rule that reads spellings can only
@@ -27,8 +30,8 @@ import tseslint from "typescript-eslint";
 //     each path for the rules above to read.
 //  3. **A specifier that cannot be read cannot be cleared.** A variable, a
 //     concatenation, an interpolated template, `import.meta.glob`,
-//     `import.meta.resolve`: all refused outside the implementation, because
-//     nothing could clear them.
+//     `import.meta.resolve`: all refused, everywhere, because nothing could
+//     clear them.
 //
 // Each restriction is one regular expression, used by `no-restricted-imports`
 // for `import`, `export ... from` and `import type`, and by
@@ -38,19 +41,6 @@ import tseslint from "typescript-eslint";
 //
 // This is a blocking check (docs/specs/open-source.md, "Checks"). Every rule
 // fires in `src/test/seam-rule.test.ts`.
-
-/**
- * The packages themselves. Only `src/chat/assistant-ui/` may import them.
- * `assistant-cloud` is named because `@assistant-ui/react` depends on it and
- * it is never configured: conversations live in our database only. Its
- * subpaths are named too -- `assistant-cloud/x` is the same package.
- */
-const ASSISTANT_UI_PACKAGES = {
-  source: "^(@assistant-ui/|assistant-cloud(/|$))",
-  message:
-    "assistant-ui may be imported only under src/chat/assistant-ui/ " +
-    "(ADR 0001). The rest of the application imports src/chat/index.ts.",
-};
 
 /**
  * `new URL(..., import.meta.url)`, and only that.
@@ -63,26 +53,20 @@ const ASSISTANT_UI_PACKAGES = {
 const MODULE_URL =
   'NewExpression[callee.name="URL"]:has(> MemberExpression[object.type="MetaProperty"])';
 
-/** A path segment that is exactly `assistant-ui`, wherever it sits. */
-const IMPLEMENTATION_SEGMENT = String.raw`(?:^|/)assistant-ui(?:/|\.(?:[cm]?[jt]sx?|json)$|$)`;
+/**
+ * A path segment that is exactly `chat`, followed by anything but the seam's
+ * own `index`, wherever in the path it sits: `../chat/state`,
+ * `../chat/thread/Thread`, `../chat/Chat.js`, `/src/chat/runtime`. `../chat`
+ * and `../chat/index` are the seam itself and pass.
+ */
+const CHAT_INTERNALS_SEGMENT = String.raw`(?:^|/)chat/(?!index(?:\.[cm]?[jt]sx?)?$)[^/]`;
 
 /** The implementation behind the seam, by any path that reaches it. */
 const CHAT_IMPLEMENTATION = {
-  source: IMPLEMENTATION_SEGMENT,
+  source: CHAT_INTERNALS_SEGMENT,
   message:
-    "src/chat/assistant-ui/ is behind the seam (ADR 0001). Import " +
+    "what is under src/chat/ is behind the seam (ADR 0006). Import " +
     "src/chat/index.ts, and add to it what you are missing.",
-};
-
-/**
- * The same, for the seam's own interface, which may reach the implementation
- * -- but only by the one spelling that says plainly what it is doing.
- */
-const CHAT_IMPLEMENTATION_FROM_SEAM = {
-  source: String.raw`^(?!\./assistant-ui(?:/|$)).*` + IMPLEMENTATION_SEGMENT,
-  message:
-    "src/chat/index.ts reaches its implementation as ./assistant-ui/... and " +
-    "no other way (ADR 0001).",
 };
 
 /**
@@ -157,7 +141,7 @@ const NO_REQUIRE = [
     selector: 'CallExpression[callee.name="require"]',
     message:
       "this package is ESM throughout; use import. A require() is also a " +
-      "module no seam rule can see (ADR 0001).",
+      "module no seam rule can see (ADR 0006).",
   },
 ];
 
@@ -179,34 +163,34 @@ const UNJUDGEABLE = [
       'ImportExpression[source.type!="Literal"][source.type!="TemplateLiteral"]',
     message:
       "import() with a specifier that is not a plain string cannot be checked " +
-      "against the seam of ADR 0001, so it is not allowed here. Write the " +
-      "specifier out, or put the code under src/chat/assistant-ui/.",
+      "against the seam of ADR 0006, so it is not allowed. Write the " +
+      "specifier out.",
   },
   {
     selector: "ImportExpression > TemplateLiteral[expressions.length>0]",
     message:
       "import() with an interpolated specifier cannot be checked against the " +
-      "seam of ADR 0001, so it is not allowed here. Write the specifier out.",
+      "seam of ADR 0006, so it is not allowed. Write the specifier out.",
   },
   {
     selector: `${MODULE_URL}:not(:has(> Literal)):not(:has(> TemplateLiteral))`,
     message:
       "new URL(..., import.meta.url) names a module the bundler will build. " +
       "One that is not a plain string cannot be checked against the seam of " +
-      "ADR 0001, so it is not allowed here.",
+      "ADR 0006, so it is not allowed.",
   },
   {
     selector: `${MODULE_URL} > TemplateLiteral[expressions.length>0]`,
     message:
       "new URL(..., import.meta.url) with an interpolated specifier cannot be " +
-      "checked against the seam of ADR 0001, so it is not allowed here.",
+      "checked against the seam of ADR 0006, so it is not allowed.",
   },
   {
     selector:
       'MemberExpression[object.type="MetaProperty"][property.name=/^(glob|resolve)/]',
     message:
       "import.meta.glob takes a pattern and import.meta.resolve takes whatever " +
-      "it is handed; neither could be checked against the seam of ADR 0001, " +
+      "it is handed; neither could be checked against the seam of ADR 0006, " +
       "and nothing here has a use for them.",
   },
 ];
@@ -272,7 +256,7 @@ export default tseslint.config(
       ecmaVersion: 2022,
       globals: globals.browser,
     },
-    rules: confine([ASSISTANT_UI_PACKAGES, CHAT_IMPLEMENTATION]),
+    rules: confine([CHAT_IMPLEMENTATION]),
   },
   {
     // The build configuration and the checks run in Node, not in a browser.
@@ -296,36 +280,11 @@ export default tseslint.config(
     },
   },
   {
-    // The seam's interface: it may reach the implementation, by its one name.
-    files: ["src/chat/index.ts"],
-    rules: confine([ASSISTANT_UI_PACKAGES, CHAT_IMPLEMENTATION_FROM_SEAM]),
-  },
-  {
-    // The one place assistant-ui exists. The seam does not apply to it -- it
-    // is the inside of the seam -- but the hygiene rules still do.
-    files: ["src/chat/assistant-ui/**"],
-    rules: confine([], { unjudgeable: false }),
-  },
-  {
-    // The vendored copy (ADR 0001, src/chat/assistant-ui/vendor/README.md).
-    // Two rules are turned off for it, and only for it, because they are
-    // about how upstream wrote its code rather than about anything this
-    // project decides. Editing the copy to satisfy them would put a change on
-    // every re-sync for ever, which is the cost the vendoring rules exist to
-    // keep down. Everything else -- the hygiene rules, `no-restricted-globals`,
-    // the refusal of `require` -- still applies here.
-    //
-    // `no-empty`: four `catch {}` that discard a failure on purpose, so only
-    // the empty catch is allowed, not an empty block anywhere.
-    //
-    // `react-hooks/refs`: `markdown-text.tsx` memoises its component table by
-    // comparing it with a ref during render. React's rule is right in general
-    // and this is a deliberate exception upstream makes; it is their call to
-    // make in their file.
-    files: ["src/chat/assistant-ui/vendor/**"],
-    rules: {
-      "no-empty": ["error", { allowEmptyCatch: true }],
-      "react-hooks/refs": "off",
-    },
+    // The inside of the seam. Its files import one another freely -- the
+    // seam does not apply to them -- but the hygiene rules still do, and so
+    // does the refusal of a specifier nobody can read: this is this project's
+    // code, and it has no use for one.
+    files: ["src/chat/**"],
+    rules: confine([]),
   },
 );
