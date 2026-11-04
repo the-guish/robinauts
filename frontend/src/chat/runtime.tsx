@@ -323,13 +323,17 @@ export function useChat(props: ChatProps): Chatting {
   // is refused instead (`turnsOf`, `busy`).
   const running = state.runId !== null;
   // There is nothing to send a first message to when the deployment has no
-  // agent, and nothing yet to send one under while the conversation is being
-  // read: where it would go is the end of a thread that has not arrived
-  // (`askedIn`). The box still takes what is typed into it either way, and
-  // keeps it, rather than emptying itself for a send that does not happen.
+  // agent, and nothing yet to send one under while a conversation is being
+  // read for the first time: where it would go is the end of a thread that
+  // has not arrived (`askedIn`). The box still takes what is typed into it
+  // either way, and keeps it, rather than emptying itself for a send that
+  // does not happen. The read that follows a turn is a read too, but the
+  // thread is already here then, so a send under it goes where it should.
   const sendDisabled =
     (state.conversationId === null && props.agentId === null) ||
-    (state.conversationId !== null && state.loading);
+    (state.conversationId !== null &&
+      state.loading &&
+      state.messages.length === 0);
   // What a control reads when it is used. Written as the render is put on the
   // screen, before anything on it can be clicked: a passive effect may still
   // be pending when a click lands, and Edit would then open on nothing.
