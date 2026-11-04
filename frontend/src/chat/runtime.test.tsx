@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright The Robinauts Authors
-import { act, renderHook, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  waitFor,
+} from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 
-import { json, refusal, type Call } from "../../test/api";
+import { json, refusal, type Call } from "../test/api";
 import {
   calling,
   conversation,
@@ -11,18 +17,19 @@ import {
   message,
   opened,
   results,
-} from "../../test/conversations";
-import { event, streamed, streamHeaders, writable } from "../../test/stream";
-import type { ChatProps } from "../index";
-import type { AguiEvent } from "../agui/events";
+} from "../test/conversations";
+import { event, streamed, streamHeaders, writable } from "../test/stream";
+import { ToolGroup } from "./thread/ToolCall";
+import type { ChatProps } from "./index";
+import type { AguiEvent } from "./agui/events";
 import {
   AGENT_GONE,
-  asRepository,
-  asThreadMessage,
   LOST_TOUCH,
   MODEL_GONE,
   MODEL_GONE_NEW_CHAT,
+  parentOf,
   STILL_ANSWERING,
+  textOf,
   useChat,
 } from "./runtime";
 import {
@@ -38,7 +45,7 @@ import {
   type ChatAction,
   type ChatMessage,
   type ChatState,
-} from "../state";
+} from "./state";
 
 const RUN = "11111111-2222-4333-8444-555555555555";
 const CONVERSATION = id(1);
@@ -693,32 +700,67 @@ test("opening a conversation folds each tool message into the answer before it",
   expect(changed.messages[1]).not.toBe(state.messages[1]);
 });
 
-test("a call is handed to assistant-ui as its tool-call part, as data", () => {
+test("a call is drawn from the part the reducer holds, as data", async () => {
+  // Nothing converts it on the way: the thread draws the reducer's part, its
+  // name, its arguments as the model wrote them and its result as the tool
+  // answered, each in a text node.
   const state = after(asked, started, ...toolRound());
-  const handed = asThreadMessage(state.messages[1]!);
-  expect(handed.content).toEqual([
-    { type: "text", text: "Let me look." },
-    {
-      type: "tool-call",
-      toolCallId: "toolu_01",
-      toolName: "github__search",
-      argsText: '{"q": "x"}',
-      args: { q: "x" },
-      result: "found 3",
-      isError: false,
-    },
-  ]);
-  // A call still streaming has no arguments as data yet, and no result.
+  const answer = state.messages[1]!;
+  const drawn = render(
+    <ToolGroup
+      calls={answer.parts.filter((part) => part.kind === "tool-call")}
+      message={answer}
+    />,
+  );
+  fireEvent.click(drawn.getByRole("button", { name: "1 tool call" }));
+  const trigger = drawn.getByRole("button", { name: /github__search/ });
+  expect(trigger).toHaveTextContent("Used tool: github__search");
+  // Complete: it has its result.
+  expect(trigger.closest("[data-status]")).toHaveAttribute(
+    "data-status",
+    "complete",
+  );
+  fireEvent.click(trigger);
+  expect(
+    drawn.container.querySelector('[data-slot="tool-fallback-args"]'),
+  ).toHaveTextContent('{"q": "x"}');
+  expect(
+    drawn.container.querySelector('[data-slot="tool-fallback-result"]'),
+  ).toHaveTextContent("Result:found 3");
+  drawn.unmount();
+
+  // A call still streaming has no arguments as data yet, and no result: it is
+  // drawn as running, with the arguments as far as they have come.
   const streaming = after(asked, started, ...toolRound().slice(0, 4));
-  expect(asThreadMessage(streaming.messages[1]!).content).toEqual([
-    { type: "text", text: "Let me look." },
+  const running = streaming.messages[1]!;
+  expect(running.parts).toEqual([
+    { kind: "text", text: "Let me look." },
     {
-      type: "tool-call",
-      toolCallId: "toolu_01",
-      toolName: "github__search",
+      kind: "tool-call",
+      id: "toolu_01",
+      name: "github__search",
       argsText: '{"q": ',
     },
   ]);
+  const partial = render(
+    <ToolGroup
+      calls={running.parts.filter((part) => part.kind === "tool-call")}
+      message={running}
+    />,
+  );
+  fireEvent.click(partial.getByRole("button", { name: "1 tool call" }));
+  const call = partial.getByRole("button", { name: /github__search/ });
+  expect(call.closest("[data-status]")).toHaveAttribute(
+    "data-status",
+    "running",
+  );
+  fireEvent.click(call);
+  expect(
+    partial.container.querySelector('[data-slot="tool-fallback-args"]'),
+  ).toHaveTextContent('{"q":');
+  expect(
+    partial.container.querySelector('[data-slot="tool-fallback-result"]'),
+  ).toBeNull();
 });
 
 test("content for a message whose start went missing still arrives", () => {
@@ -947,23 +989,41 @@ test("a refused turn puts the thread back exactly as it was", () => {
   expect(parts(refused, ANSWER)).toEqual([["text", "half"]]);
 });
 
-test("the thread is handed over as a chain, each message under the one before", () => {
+test("the thread is a chain, each message under the one before", () => {
+  // What an edit or a regeneration is cut after on the screen: the message
+  // before it, and nothing for the first. There is no other branch to be
+  // under (ADR 0003).
   const messages: ChatMessage[] = ["m1", "m2", "m3"].map((id) => ({
     id,
     role: "user",
     parts: [{ kind: "text", text: id }],
     state: "stored",
   }));
-  const chain = asRepository(messages);
-  expect(chain.messages.map((each) => each.parentId)).toEqual([
+  expect(messages.map((each) => parentOf(messages, each.id))).toEqual([
     null,
     "m1",
     "m2",
   ]);
-  expect(chain.headId).toBe("m3");
-  // Nothing at all is no head, rather than a head of `null`.
-  expect(asRepository([]).headId).toBeUndefined();
-  expect(asRepository([]).messages).toEqual([]);
+  // A message that is not there is under nothing, and so is anything in a
+  // thread with nothing in it.
+  expect(parentOf(messages, "never")).toBeNull();
+  expect(parentOf([], "m1")).toBeNull();
+});
+
+test("what Copy copies is the answer's words, a blank line between", () => {
+  const answer: ChatMessage = {
+    id: "m2",
+    role: "assistant",
+    parts: [
+      { kind: "reasoning", id: "r", text: "thinking" },
+      { kind: "text", text: "One." },
+      { kind: "tool-call", id: "c", name: "echo", argsText: "{}" },
+      { kind: "text", text: "Two." },
+    ],
+    state: "stored",
+  };
+  // Not the thinking, not the calls: what the answer said.
+  expect(textOf(answer)).toBe("One.\n\nTwo.");
 });
 
 test("a stream that could not be picked up again is said, not hidden", () => {
@@ -1097,7 +1157,7 @@ test("a first message begins a conversation and says which one", async () => {
   await settle();
 
   await act(async () => {
-    await result.current.runtime.thread.append("why?");
+    await result.current.send("why?");
   });
   expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toEqual({
     agent_id: "helper",
@@ -1186,12 +1246,7 @@ test("an edit names the question it replaces", async () => {
   // The question being replaced is `m3`, whose parent is the answer `m2`.
   // The server keeps `m3`, off the visible thread.
   await act(async () => {
-    result.current.runtime.thread.append({
-      role: "user",
-      content: [{ type: "text", text: "and at night?" }],
-      parentId: "m2",
-      sourceId: "m3",
-    });
+    result.current.edit("m3", "and at night?");
     await settle();
   });
   expect(posts[0]?.body).toEqual({
@@ -1202,12 +1257,7 @@ test("an edit names the question it replaces", async () => {
 
   // The root's own edit, which hangs under nothing, names the root.
   await act(async () => {
-    result.current.runtime.thread.append({
-      role: "user",
-      content: [{ type: "text", text: "why really?" }],
-      parentId: null,
-      sourceId: "m1",
-    });
+    result.current.edit("m1", "why really?");
     await settle();
   });
   expect(posts[1]?.body).toEqual({
@@ -1248,7 +1298,7 @@ test("a reply after a tool round hangs under the tool message, not the answer", 
   });
 
   await act(async () => {
-    result.current.runtime.thread.append("and at night?");
+    result.current.send("and at night?");
     await settle();
   });
   expect(posts[0]?.body).toEqual({
@@ -1289,7 +1339,7 @@ test("after an interrupted turn, asking again replaces the question", async () =
     expect(result.current.state.messages).toHaveLength(1);
   });
   await act(async () => {
-    result.current.runtime.thread.append("why, really?");
+    result.current.send("why, really?");
     await settle();
   });
   expect(posts[0]?.body).toEqual({
@@ -1338,7 +1388,7 @@ test("regenerating names the answer to produce again, and sends no message", asy
   });
 
   await act(async () => {
-    result.current.runtime.thread.startRun({ parentId: "m1", sourceId: "m2" });
+    result.current.regenerate("m2");
     await settle();
   });
   expect(posts[0]?.body).toEqual({ regenerate: "m2", model_id: "sonnet" });
@@ -1377,7 +1427,7 @@ test("regenerating the answer after a tool round takes the whole turn off the sc
   });
 
   await act(async () => {
-    result.current.runtime.thread.startRun({ parentId: "m2", sourceId: "m3" });
+    result.current.regenerate("m3");
     await settle();
   });
   expect(posts[0]?.body).toEqual({ regenerate: "m3", model_id: "sonnet" });
@@ -1416,7 +1466,7 @@ test("cancelling posts to the run and waits for the stream to say so", async () 
     expect(result.current.state.messages).toHaveLength(2);
   });
   await act(async () => {
-    result.current.runtime.thread.append("and then?");
+    result.current.send("and then?");
     await settle();
   });
   write(event("TEXT_MESSAGE_START", { messageId: "m4", role: "assistant" }, 2));
@@ -1425,7 +1475,7 @@ test("cancelling posts to the run and waits for the stream to say so", async () 
   expect(result.current.state.runId).toBe(RUN);
 
   await act(async () => {
-    result.current.runtime.thread.cancelRun();
+    result.current.cancel();
     await settle();
   });
   expect(cancels[0]?.url).toBe(
@@ -1466,7 +1516,7 @@ test("a turn a conversation that is answering refuses is said plainly", async ()
     expect(result.current.state.messages).toHaveLength(2);
   });
   await act(async () => {
-    result.current.runtime.thread.append("again");
+    result.current.send("again");
     await settle();
   });
   // Not the backend's own detail, which names a run for an operator's log.
@@ -1541,7 +1591,7 @@ test("a stream that is lost reads the store and watches the run again", async ()
   const { result } = chatting();
   await settle();
   await act(async () => {
-    await result.current.runtime.thread.append("why?");
+    await result.current.send("why?");
   });
   await waitFor(() => {
     expect(result.current.state.messages.map((each) => each.id)).toEqual([
@@ -1574,7 +1624,7 @@ test("a second loss is said rather than retried for ever", async () => {
   const { result } = chatting();
   await settle();
   await act(async () => {
-    await result.current.runtime.thread.append("why?");
+    await result.current.send("why?");
   });
   await waitFor(() => {
     expect(result.current.state.ended).not.toBeNull();
@@ -1611,7 +1661,7 @@ test("leaving a conversation stops a turn whose request is still in the air", as
     () => new Promise<Response>((done) => (arrived = done)),
   );
   await act(async () => {
-    void result.current.runtime.thread.append("and then?");
+    void result.current.send("and then?");
     await settle();
   });
 
@@ -1670,7 +1720,7 @@ test("a first turn that lands after the person moved on does not take them back"
     () => new Promise<Response>((done) => (arrived = done)),
   );
   await act(async () => {
-    void result.current.runtime.thread.append("why?");
+    void result.current.send("why?");
     await settle();
   });
 
@@ -1704,7 +1754,7 @@ test("a first turn that lands after the person moved on does not take them back"
 
   // And the next message goes to the conversation on the screen.
   await act(async () => {
-    await result.current.runtime.thread.append("and then?");
+    await result.current.send("and then?");
   });
   expect(posts.map((each) => each.url)).toEqual([
     `/api/conversations/${other}/turns`,
@@ -1762,7 +1812,7 @@ test("a read that finds a run in flight watches it, whichever read it is", async
     expect(result.current.state.messages).toHaveLength(2);
   });
   await act(async () => {
-    await result.current.runtime.thread.append("and then?");
+    await result.current.send("and then?");
   });
   await waitFor(() => {
     expect(result.current.state.runId).toBeNull();
@@ -1782,10 +1832,10 @@ test("a read that finds a run in flight watches it, whichever read it is", async
 });
 
 test("stopping before the first token leaves the box empty", async () => {
-  // assistant-ui's own stop would take the trailing question out of its
-  // repository and put its text into the box -- but only for a host that
-  // offers `setMessages`, which this one does not (`runtime.tsx`). The
-  // backend stored that question when the turn began, so it stays.
+  // A stop is a stop of the run, and nothing else: the trailing question is
+  // not taken back out of the thread and put into the box, as a chat that
+  // owned its messages might. The backend stored that question when the turn
+  // began, so it stays.
   const { response, write, close } = writable({
     headers: streamHeaders(RUN, CONVERSATION),
   });
@@ -1803,16 +1853,16 @@ test("stopping before the first token leaves the box empty", async () => {
     expect(result.current.state.messages).toHaveLength(2);
   });
   await act(async () => {
-    void result.current.runtime.thread.append("and then?");
+    void result.current.send("and then?");
     await settle();
   });
   // The run exists and has said nothing yet.
   expect(result.current.state.runId).toBe(RUN);
   await act(async () => {
-    result.current.runtime.thread.cancelRun();
+    result.current.cancel();
     await settle();
   });
-  expect(result.current.runtime.thread.composer.getState().text).toBe("");
+  expect(result.current.composer.text).toBe("");
   // The question is still in the thread, not back in the box.
   expect(
     result.current.state.messages.some(
@@ -1860,7 +1910,7 @@ test("a refused message leaves the unanswered question it replaced on the thread
     expect(result.current.state.messages).toHaveLength(1);
   });
   await act(async () => {
-    await result.current.runtime.thread.append("why, really?");
+    await result.current.send("why, really?");
   });
   // The question that went unanswered is a message the conversation really
   // has: it is still there, and still the end of the thread.
@@ -1891,7 +1941,7 @@ test("the model goes with every turn", async () => {
   const { result, rerender, started, ended } = chatting({ modelId: "opus" });
   await settle();
   await act(async () => {
-    await result.current.runtime.thread.append("why?");
+    await result.current.send("why?");
   });
   expect(
     (JSON.parse(String(fetch.mock.calls[0]?.[1]?.body)) as { model_id: string })
@@ -1910,13 +1960,13 @@ test("the model goes with every turn", async () => {
     expect(result.current.state.messages).toHaveLength(2);
   });
   await act(async () => {
-    await result.current.runtime.thread.append("and then?");
+    await result.current.send("and then?");
   });
   await waitFor(() => {
     expect(result.current.state.runId).toBeNull();
   });
   await act(async () => {
-    result.current.runtime.thread.startRun({ parentId: "m1", sourceId: "m2" });
+    result.current.regenerate("m2");
     await settle();
   });
   // A continued turn and a regeneration name the model too: it goes with
@@ -1948,15 +1998,13 @@ test("a turn refused because the model has gone says so", async () => {
     expect(gone.result.current.state.messages).toHaveLength(2);
   });
   await act(async () => {
-    await gone.result.current.runtime.thread.append("and then?");
+    await gone.result.current.send("and then?");
     await settle();
   });
   expect(gone.result.current.state.ended).toBe(MODEL_GONE);
   // What is asked of them is to pick another model and send again, so what
   // they wrote is back in the box to send.
-  expect(gone.result.current.runtime.thread.composer.getState().text).toBe(
-    "and then?",
-  );
+  expect(gone.result.current.composer.text).toBe("and then?");
   expect(gone.result.current.state.messages.map((each) => each.id)).toEqual([
     "m1",
     "m2",
@@ -1972,13 +2020,13 @@ test("a turn refused because the model has gone says so", async () => {
     expect(there.result.current.state.messages).toHaveLength(2);
   });
   await act(async () => {
-    await there.result.current.runtime.thread.append("and then?");
+    await there.result.current.send("and then?");
     await settle();
   });
   expect(there.result.current.state.ended).toBe(
     "there is nothing here of that id",
   );
-  expect(there.result.current.runtime.thread.composer.getState().text).toBe("");
+  expect(there.result.current.composer.text).toBe("");
 });
 
 test("an edit refused because the model has gone goes back into its edit box", async () => {
@@ -1996,21 +2044,14 @@ test("an edit refused because the model has gone goes back into its edit box", a
     expect(result.current.state.messages).toHaveLength(2);
   });
   await act(async () => {
-    result.current.runtime.thread.append({
-      role: "user",
-      content: [{ type: "text", text: "why, really?" }],
-      parentId: null,
-      sourceId: "m1",
-    });
+    result.current.edit("m1", "why, really?");
     await settle();
   });
   expect(result.current.state.ended).toBe(MODEL_GONE);
   // Still an edit of the message it was of, so that sending it again once
   // another model is picked replaces that message rather than adding one.
-  const edit = result.current.runtime.thread.getMessageById("m1").composer;
-  expect(edit.getState().isEditing).toBe(true);
-  expect(edit.getState().text).toBe("why, really?");
-  expect(result.current.runtime.thread.composer.getState().text).toBe("");
+  expect(result.current.editing).toEqual({ id: "m1", text: "why, really?" });
+  expect(result.current.composer.text).toBe("");
   expect(result.current.state.messages.map((each) => each.id)).toEqual([
     "m1",
     "m2",
@@ -2032,7 +2073,7 @@ test("a regeneration refused because the model has gone says so", async () => {
     expect(result.current.state.messages).toHaveLength(2);
   });
   await act(async () => {
-    result.current.runtime.thread.startRun({ parentId: "m1", sourceId: "m2" });
+    result.current.regenerate("m2");
     await settle();
   });
   expect(result.current.state.ended).toBe(MODEL_GONE);
@@ -2060,19 +2101,12 @@ test("an edit refused because the conversation is answering goes back into its e
     expect(result.current.state.messages).toHaveLength(2);
   });
   await act(async () => {
-    result.current.runtime.thread.append({
-      role: "user",
-      content: [{ type: "text", text: "why, really?" }],
-      parentId: null,
-      sourceId: "m1",
-    });
+    result.current.edit("m1", "why, really?");
     await settle();
   });
   expect(result.current.state.ended).toBe(STILL_ANSWERING);
-  const edit = result.current.runtime.thread.getMessageById("m1").composer;
-  expect(edit.getState().isEditing).toBe(true);
-  expect(edit.getState().text).toBe("why, really?");
-  expect(result.current.runtime.thread.composer.getState().text).toBe("");
+  expect(result.current.editing).toEqual({ id: "m1", text: "why, really?" });
+  expect(result.current.composer.text).toBe("");
 });
 
 /** A conversation of `TREE` with a run going in it, as a chat sees it. */
@@ -2094,7 +2128,7 @@ async function answering() {
     expect(chat.result.current.state.messages).toHaveLength(2);
   });
   await act(async () => {
-    void chat.result.current.runtime.thread.append("and then?");
+    void chat.result.current.send("and then?");
     await settle();
   });
   expect(chat.result.current.state.runId).toBe(RUN);
@@ -2104,19 +2138,12 @@ async function answering() {
 test("an edit not sent while a run is going goes back into its edit box", async () => {
   const { result } = await answering();
   await act(async () => {
-    void result.current.runtime.thread.append({
-      role: "user",
-      content: [{ type: "text", text: "why, really?" }],
-      parentId: null,
-      sourceId: "m1",
-    });
+    void result.current.edit("m1", "why, really?");
     await settle();
   });
   expect(result.current.state.notice).toBe(ONE_AT_A_TIME);
-  const edit = result.current.runtime.thread.getMessageById("m1").composer;
-  expect(edit.getState().isEditing).toBe(true);
-  expect(edit.getState().text).toBe("why, really?");
-  expect(result.current.runtime.thread.composer.getState().text).toBe("");
+  expect(result.current.editing).toEqual({ id: "m1", text: "why, really?" });
+  expect(result.current.composer.text).toBe("");
 });
 
 test("an edit whose message has left the thread is kept in the main box", async () => {
@@ -2124,18 +2151,11 @@ test("an edit whose message has left the thread is kept in the main box", async 
   // would be replaced by the error boundary. The text is kept all the same.
   const { result } = await answering();
   await act(async () => {
-    void result.current.runtime.thread.append({
-      role: "user",
-      content: [{ type: "text", text: "why, really?" }],
-      parentId: null,
-      sourceId: "gone",
-    });
+    void result.current.edit("gone", "why, really?");
     await settle();
   });
   expect(result.current.state.notice).toBe(ONE_AT_A_TIME);
-  expect(result.current.runtime.thread.composer.getState().text).toBe(
-    "why, really?",
-  );
+  expect(result.current.composer.text).toBe("why, really?");
 });
 
 test("a first message refused for its model says so, and hands the model back", async () => {
@@ -2148,12 +2168,12 @@ test("a first message refused for its model says so, and hands the model back", 
   const { result } = chatting({ modelId: "retired", onModelRefused });
   await settle();
   await act(async () => {
-    await result.current.runtime.thread.append("why?");
+    await result.current.send("why?");
     await settle();
   });
   expect(result.current.state.ended).toBe(MODEL_GONE_NEW_CHAT);
   expect(result.current.state.messages).toHaveLength(0);
-  expect(result.current.runtime.thread.composer.getState().text).toBe("why?");
+  expect(result.current.composer.text).toBe("why?");
   expect(onModelRefused).toHaveBeenCalledWith("retired");
 });
 
@@ -2168,11 +2188,11 @@ test("a first message refused as not there is about its agent, and keeps the tex
   const { result } = chatting({ modelId: "sonnet", onModelRefused });
   await settle();
   await act(async () => {
-    await result.current.runtime.thread.append("why?");
+    await result.current.send("why?");
     await settle();
   });
   expect(result.current.state.ended).toBe(AGENT_GONE);
-  expect(result.current.runtime.thread.composer.getState().text).toBe("why?");
+  expect(result.current.composer.text).toBe("why?");
   expect(onModelRefused).not.toHaveBeenCalled();
 });
 
@@ -2196,14 +2216,14 @@ test("a stop that does not reach the server leaves the answer alone", async () =
     expect(result.current.state.messages).toHaveLength(2);
   });
   await act(async () => {
-    void result.current.runtime.thread.append("and then?");
+    void result.current.send("and then?");
     await settle();
   });
   write(event("TEXT_MESSAGE_START", { messageId: "m4", role: "assistant" }, 2));
   await settle();
 
   await act(async () => {
-    result.current.runtime.thread.cancelRun();
+    result.current.cancel();
     await settle();
   });
   // **Nothing was cancelled**, so the run is still the run and the stream is
@@ -2239,7 +2259,7 @@ test("a turn the backend refuses takes its question back off the screen", async 
     expect(result.current.state.messages).toHaveLength(2);
   });
   await act(async () => {
-    await result.current.runtime.thread.append("and then?");
+    await result.current.send("and then?");
   });
   expect(result.current.state.ended).toContain("still answering");
   // Not left on the screen as though it were in the conversation: the
@@ -2281,11 +2301,11 @@ test("a second turn while one is in flight is said, not swallowed", async () => 
     () => new Promise<Response>((done) => (arrived = done)),
   );
   await act(async () => {
-    void result.current.runtime.thread.append("and then?");
+    void result.current.send("and then?");
     await settle();
   });
   await act(async () => {
-    void result.current.runtime.thread.append("impatient");
+    void result.current.send("impatient");
     await settle();
   });
   expect(result.current.state.notice).toBe(ONE_AT_A_TIME);
@@ -2312,7 +2332,7 @@ test("a second turn while one is in flight is said, not swallowed", async () => 
 
   // Their next turn is what clears it.
   await act(async () => {
-    await result.current.runtime.thread.append("now then?");
+    await result.current.send("now then?");
   });
   expect(result.current.state.notice).toBeNull();
 });
@@ -2337,7 +2357,7 @@ test("a second turn while one is in flight is not sent at all", async () => {
     expect(result.current.state.messages).toHaveLength(2);
   });
   await act(async () => {
-    void result.current.runtime.thread.append("and then?");
+    void result.current.send("and then?");
     await settle();
   });
   write(event("TEXT_MESSAGE_START", { messageId: "m4", role: "assistant" }, 2));
@@ -2347,17 +2367,14 @@ test("a second turn while one is in flight is not sent at all", async () => {
   // One run at a time (`docs/specs/runs.md`), and the run that is going is
   // left exactly as it is.
   await act(async () => {
-    void result.current.runtime.thread.append("impatient");
+    void result.current.send("impatient");
     await settle();
   });
   expect(result.current.state.notice).toBe(ONE_AT_A_TIME);
   // A regeneration carries no message, so it is told so without being told
   // that a message was not sent.
   await act(async () => {
-    void result.current.runtime.thread.startRun({
-      parentId: "m1",
-      sourceId: "m2",
-    });
+    void result.current.regenerate("m2");
     await settle();
   });
   expect(result.current.state.notice).toBe(ONE_AT_A_TIME_ANSWER);
@@ -2381,10 +2398,9 @@ test("a second turn while one is in flight is not sent at all", async () => {
 });
 
 test("nothing is running until the run exists", async () => {
-  // The library's own stop takes a trailing question out of the thread and
-  // puts its text back into the box. Between the send and the response's
-  // headers there is no run to stop, so the thread must not offer one --
-  // `isRunning` is a run this chat knows the id of and nothing else.
+  // Between the send and the response's headers there is no run to stop,
+  // so the thread must not offer one -- `running` is a run this chat knows
+  // the id of and nothing else.
   const { response, write, close } = writable({
     headers: streamHeaders(RUN, CONVERSATION),
   });
@@ -2412,15 +2428,15 @@ test("nothing is running until the run exists", async () => {
     () => new Promise<Response>((done) => (arrived = done)),
   );
   await act(async () => {
-    void result.current.runtime.thread.append("and then?");
+    void result.current.send("and then?");
     await settle();
   });
   expect(result.current.state.sending).toBe(true);
   expect(result.current.state.runId).toBeNull();
-  expect(result.current.runtime.thread.getState().isRunning).toBe(false);
+  expect(result.current.running).toBe(false);
   // And there is nothing to stop: no request goes out for one.
   await act(async () => {
-    result.current.runtime.thread.cancelRun();
+    result.current.cancel();
     await settle();
   });
   expect(cancels).toHaveLength(0);
@@ -2430,7 +2446,7 @@ test("nothing is running until the run exists", async () => {
     await settle();
   });
   expect(result.current.state.runId).toBe(RUN);
-  expect(result.current.runtime.thread.getState().isRunning).toBe(true);
+  expect(result.current.running).toBe(true);
   write(event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 2));
   close();
   await waitFor(() => {
@@ -2457,42 +2473,10 @@ test("an edit under a question the server has never seen is not sent", async () 
     expect(result.current.state.messages).toHaveLength(2);
   });
   await act(async () => {
-    void result.current.runtime.thread.append({
-      role: "user",
-      content: [{ type: "text", text: "under nothing" }],
-      parentId: "unsent:whatever",
-      sourceId: "unsent:whatever",
-    });
+    void result.current.edit("unsent:whatever", "under nothing");
     await settle();
   });
   expect(posts).toHaveLength(0);
-});
-
-test("the tree is converted once per message, however many deltas arrive", () => {
-  // A delta rebuilds the repository, and a conversation is as long as it is.
-  const messages = Array.from({ length: 4 }, (_, index) => ({
-    id: `m${index}`,
-    role: "user" as const,
-    parts: [{ kind: "text" as const, text: "hello" }],
-    state: "stored" as const,
-  }));
-  const first = asRepository(messages);
-  const again = asRepository(messages);
-  expect(again.messages.map((each) => each.message)).toEqual(
-    first.messages.map((each) => each.message),
-  );
-  for (const [at, item] of again.messages.entries()) {
-    // The same object, not an equal one: nothing was built a second time,
-    // and `createdAt` did not move.
-    expect(item.message).toBe(first.messages[at]?.message);
-  }
-  // A message the reducer touched is a new object, and only that one is
-  // converted again.
-  const touched = [...messages];
-  touched[2] = { ...messages[2]!, parts: [{ kind: "text", text: "changed" }] };
-  const third = asRepository(touched);
-  expect(third.messages[1]?.message).toBe(first.messages[1]?.message);
-  expect(third.messages[2]?.message).not.toBe(first.messages[2]?.message);
 });
 
 test("a conversation that is not here is one answer for two reasons", async () => {
@@ -2507,7 +2491,7 @@ test("a conversation that is not here is one answer for two reasons", async () =
 });
 
 test("a read that says the same thing hands back the same messages", () => {
-  // Identity is what the chat converts for assistant-ui by, so a read that
+  // Identity is what the thread draws a message again by, so a read that
   // ends a turn must not rebuild a whole conversation over one answer.
   const stored = [
     message("m1", "user", "why?"),
@@ -2531,10 +2515,8 @@ test("a read that says the same thing hands back the same messages", () => {
   expect(again.messages[0]).toBe(first.messages[0]);
   expect(again.messages[1]).toBe(first.messages[1]);
   expect(again.messages[2]?.id).toBe("m3");
-  // Which is what keeps the conversions, and `createdAt` with them.
-  expect(asRepository(again.messages).messages[0]?.message).toBe(
-    asRepository(first.messages).messages[0]?.message,
-  );
+  // Which is what keeps an unchanged message from being drawn again: the
+  // thread draws each message by its identity (`./thread/Thread.test.tsx`).
   // A message the store now says something else about is rebuilt.
   const edited = reduce(first, {
     kind: "opened",

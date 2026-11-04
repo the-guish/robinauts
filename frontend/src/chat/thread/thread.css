@@ -1,0 +1,888 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright The Robinauts Authors */
+
+/*
+ * The chat window: the thread, its messages, the box, and the sentences
+ * `Chat.tsx` says beside them.
+ *
+ * Plain CSS over the tokens of `src/tokens.css` and nothing else: every
+ * colour, radius and font is a token, or a mix of tokens, so dark mode is the
+ * tokens' business and nothing here mentions it. Written against the base
+ * reset of `src/styles.css` alone -- a border is `0 solid var(--line)` until
+ * a rule here gives it a width, and a button or a textarea has no padding,
+ * margin or background of its own.
+ *
+ * **Motion** is the four things that moved before: a message easing in, the
+ * pulsing dot of an answer that has not said anything yet, the spinner of a
+ * call that is running, and a disclosure opening and closing. All of it stops
+ * for somebody who has asked for less motion (at the end of this file).
+ */
+
+/* ------------------------------------------------------------- the window */
+
+.chat {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 0%;
+  flex-direction: column;
+}
+
+/* Its own box, so that the thread's viewport is what scrolls rather than the
+   page: a flex child's minimum size is its content unless it is told. */
+.chat-body {
+  min-height: 0;
+  flex: 1 1 0%;
+}
+
+/* A sentence about the last run, or a notice about what was just done. */
+.chat-said {
+  margin: 0 auto;
+  width: 100%;
+  max-width: 48rem;
+  padding: 0 1.5rem 1rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.chat-said-notice {
+  color: var(--bad);
+}
+
+/* A conversation that is not here, in place of a thread. */
+.chat-failure {
+  margin: 0 auto;
+  width: 100%;
+  max-width: 48rem;
+  padding: 2rem 1rem;
+}
+
+.chat-failure-text {
+  color: var(--bad);
+}
+
+/* ------------------------------------------------------------- the thread */
+
+.chat-thread {
+  /* The width of the column, and the box's shape, which a question's bubble
+     shares. */
+  --chat-width: 44rem;
+  --chat-radius: calc(var(--radius) * 2);
+  --chat-box: color-mix(in oklab, var(--tint) 30%, transparent);
+  --chat-box-edge: color-mix(in oklab, var(--ink) 10%, transparent);
+  --chat-box-edge-focus: color-mix(in oklab, var(--ink) 25%, transparent);
+  --chat-ease: cubic-bezier(0.32, 0.72, 0, 1);
+
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  background-color: var(--ground);
+}
+
+.chat-viewport {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 0%;
+  flex-direction: column;
+  overflow-x: auto;
+  overflow-y: scroll;
+}
+
+/* The ring of a region that is focused from the keyboard, drawn inside it:
+   outside, it would be cut off by the edges of the page. */
+.chat-viewport:focus-visible {
+  outline-offset: -2px;
+}
+
+.chat-column {
+  margin: 0 auto;
+  display: flex;
+  width: 100%;
+  max-width: var(--chat-width);
+  flex: 1 1 0%;
+  flex-direction: column;
+  padding: 1rem 1rem 0;
+}
+
+/* The empty chat: the welcome and the box together, in the middle. */
+.chat-column[data-empty] {
+  justify-content: center;
+}
+
+.chat-messages {
+  margin-bottom: 3.5rem;
+  display: flex;
+  flex-direction: column;
+  row-gap: 1.5rem;
+}
+
+.chat-messages:empty {
+  display: none;
+}
+
+/* The box's footing: docked to the bottom of the viewport once there is a
+   thread above it, with the ground behind it so that nothing shows through. */
+.chat-footer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  background-color: var(--ground);
+}
+
+.chat-footer[data-docked] {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  border-radius: var(--chat-radius) var(--chat-radius) 0 0;
+}
+
+@media (min-width: 48rem) {
+  .chat-footer {
+    padding-bottom: 1.5rem;
+  }
+}
+
+/* On the empty chat the welcome and the box sit a little above the middle,
+   with room below the box, as they always have. */
+.chat-column[data-empty] .chat-footer {
+  padding-bottom: 2rem;
+}
+
+@media (min-width: 48rem) {
+  .chat-column[data-empty] .chat-footer {
+    padding-bottom: 2.5rem;
+  }
+}
+
+/* Back to the bottom, shown only when the viewport is not there. */
+.chat-icon-button.chat-to-bottom {
+  position: absolute;
+  top: -3rem;
+  z-index: 10;
+  align-self: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-width: 1px;
+  border-color: var(--line);
+  border-radius: var(--radius-pill);
+  background-color: var(--ground);
+  color: var(--ink);
+  box-shadow: 0 1px 2px color-mix(in oklab, var(--ink) 8%, transparent);
+}
+
+.chat-icon-button.chat-to-bottom:hover {
+  background-color: var(--hover);
+}
+
+.chat-icon-button.chat-to-bottom:disabled {
+  visibility: hidden;
+}
+
+/* A conversation being read: the outline of a thread, pulsing. */
+.chat-outline {
+  display: flex;
+  flex-direction: column;
+  row-gap: 1.5rem;
+  animation: chat-appear 200ms ease-out 150ms both;
+}
+
+.chat-outline-block {
+  border-radius: calc(var(--radius) - 2px);
+  background-color: var(--hover);
+  animation: chat-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.chat-outline-question {
+  margin-left: auto;
+  height: 2.25rem;
+  border-radius: calc(var(--radius) * 1.5);
+}
+
+.chat-outline-question:nth-child(2) {
+  width: 40%;
+}
+
+.chat-outline-question:nth-child(4) {
+  width: 33.333%;
+}
+
+.chat-outline-lines {
+  display: flex;
+  flex-direction: column;
+  row-gap: 0.5rem;
+}
+
+.chat-outline-line {
+  height: 1rem;
+}
+
+.chat-outline-lines:nth-child(3) > :nth-child(1) {
+  width: 91.667%;
+}
+
+.chat-outline-lines:nth-child(3) > :nth-child(2) {
+  width: 80%;
+}
+
+.chat-outline-lines:nth-child(3) > :nth-child(3) {
+  width: 60%;
+}
+
+.chat-outline-lines:nth-child(5) > :nth-child(1) {
+  width: 83.333%;
+}
+
+.chat-outline-lines:nth-child(5) > :nth-child(2) {
+  width: 66.667%;
+}
+
+/* Read, and not seen. */
+.chat-visually-hidden {
+  position: absolute;
+  margin: -1px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  padding: 0;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+/* ---------------------------------------------------------------- the box */
+
+.chat-composer {
+  position: relative;
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+}
+
+.chat-composer-shell,
+.chat-edit-box {
+  border-width: 1px;
+  border-color: var(--chat-box-edge);
+  border-radius: var(--chat-radius);
+  background-color: var(--chat-box);
+  cursor: text;
+  transition: border-color 150ms ease;
+}
+
+.chat-composer-shell:focus-within,
+.chat-edit-box:focus-within {
+  border-color: var(--chat-box-edge-focus);
+}
+
+.chat-composer-shell {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 8px;
+}
+
+.chat-composer-input,
+.chat-edit-input {
+  display: block;
+  width: 100%;
+  /* It grows by itself (`textarea.ts`), so a handle would only fight it. */
+  resize: none;
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1.5rem;
+  caret-color: var(--accent);
+}
+
+/* The box's own edge says it has the keyboard (`:focus-within` above), so
+   the ring would say it twice. */
+.chat-composer-input:focus-visible,
+.chat-edit-input:focus-visible {
+  outline: none;
+}
+
+.chat-composer-input::placeholder,
+.chat-edit-input::placeholder {
+  color: color-mix(in oklab, var(--muted) 60%, transparent);
+}
+
+.chat-composer-input {
+  min-height: 2.5rem;
+  max-height: 12rem;
+  padding: 0.25rem 0.625rem;
+}
+
+.chat-composer-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+/* Send, and Stop in its place while a run is going. */
+.chat-send {
+  display: inline-flex;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background-color: var(--accent);
+  color: var(--on-accent);
+  transition:
+    background-color 150ms ease,
+    opacity 150ms ease;
+}
+
+.chat-send:hover {
+  background-color: color-mix(in oklab, var(--accent) 90%, transparent);
+}
+
+.chat-send:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.chat-send-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.chat-stop-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  fill: currentColor;
+}
+
+/* --------------------------------------------------------------- controls */
+
+.chat-icon-button {
+  display: inline-flex;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem;
+  border-radius: calc(var(--radius) - 2px);
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    transform 150ms ease;
+}
+
+.chat-icon-button:hover {
+  background-color: var(--hover);
+  color: var(--ink);
+}
+
+.chat-icon-button:active {
+  transform: scale(0.9);
+}
+
+.chat-icon-button:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.chat-icon-button > .icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.chat-button {
+  display: inline-flex;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.75rem;
+  border-radius: calc(var(--radius) - 2px);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  white-space: nowrap;
+  transition:
+    background-color 150ms ease,
+    opacity 150ms ease;
+}
+
+.chat-button-quiet:hover {
+  background-color: var(--hover);
+}
+
+.chat-button-primary {
+  background-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.chat-button-primary:hover {
+  background-color: color-mix(in oklab, var(--accent) 90%, transparent);
+}
+
+.chat-button-primary:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/*
+ * The actions of a message that is not the last are there for whoever points
+ * at it or reaches it from the keyboard, and quiet otherwise. Still in the
+ * page, and still a tab stop: hidden in a way the keyboard cannot reach would
+ * be no actions at all for somebody without a pointer.
+ */
+.chat-message[data-last="false"] .chat-actions {
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.chat-message[data-last="false"]:hover .chat-actions,
+.chat-message[data-last="false"]:focus-within .chat-actions {
+  opacity: 1;
+}
+
+/* ----------------------------------------------------------- the messages */
+
+.chat-question,
+.chat-answer {
+  animation: chat-arrive 150ms ease-out both;
+}
+
+/* A question: a bubble on the right, and Edit just left of it. */
+.chat-question {
+  display: grid;
+  grid-template-columns: minmax(72px, 1fr) auto;
+  grid-auto-rows: auto;
+  align-content: start;
+  row-gap: 0.5rem;
+  padding: 0 0.5rem;
+}
+
+.chat-question-content {
+  position: relative;
+  grid-column-start: 2;
+  min-width: 0;
+}
+
+.chat-bubble {
+  border-radius: var(--chat-radius);
+  background-color: var(--tint);
+  color: var(--ink);
+  padding: 0.5rem 1rem;
+  overflow-wrap: break-word;
+}
+
+.chat-question-text {
+  white-space: pre-line;
+}
+
+.chat-question-actions {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding-inline-end: 0.5rem;
+  transform: translate(-100%, -50%);
+}
+
+/* A question being edited: its box, on the right where the bubble was. */
+.chat-edit {
+  display: flex;
+  flex-direction: column;
+  padding: 0 0.5rem;
+}
+
+.chat-edit-box {
+  margin-inline-start: auto;
+  display: flex;
+  width: 100%;
+  max-width: 85%;
+  flex-direction: column;
+}
+
+.chat-edit-input {
+  min-height: 3.5rem;
+  padding: 0.75rem 1rem 0.25rem;
+}
+
+.chat-edit-footer {
+  margin: 0 0.625rem 0.625rem;
+  display: flex;
+  align-items: center;
+  align-self: flex-end;
+  gap: 0.375rem;
+}
+
+/* An answer. */
+.chat-answer {
+  position: relative;
+}
+
+.chat-answer-content {
+  padding: 0 0.5rem;
+  color: var(--ink);
+  line-height: 1.625;
+  overflow-wrap: break-word;
+}
+
+.chat-answer-footer {
+  margin-inline-start: 0.5rem;
+  display: flex;
+  min-height: 1.875rem;
+  align-items: center;
+  padding-top: 0.375rem;
+}
+
+.chat-answer-actions {
+  margin-inline-start: -0.25rem;
+  display: flex;
+  gap: 0.25rem;
+  color: var(--muted);
+}
+
+/* An answer that has said nothing yet. */
+.chat-working {
+  font-family: var(--sans);
+  animation: chat-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* A failed answer says so where the answer would be, in the palette's quiet
+   colours rather than as an alarm (`docs/specs/ui.md`). */
+.chat-error {
+  margin-top: 0.5rem;
+  border-width: 1px;
+  border-color: var(--line);
+  border-radius: calc(var(--radius) - 2px);
+  background-color: var(--panel);
+  color: var(--muted);
+  padding: 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.chat-error-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+/* --------------------------------------------------------- the disclosures */
+
+/* What opens one: thinking, a group of calls, a call. */
+.chat-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  transform-origin: left;
+  transition:
+    color 150ms ease,
+    scale 150ms ease;
+}
+
+.chat-trigger:hover {
+  color: var(--ink);
+}
+
+.chat-trigger:active {
+  scale: 0.98;
+}
+
+.chat-trigger-icon {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+.chat-trigger-label {
+  display: inline-block;
+  line-height: 1;
+  text-align: start;
+}
+
+.chat-chevron {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  transform: rotate(-90deg);
+  transition: transform 200ms var(--chat-ease);
+}
+
+.chat-trigger[aria-expanded="true"] > .chat-chevron {
+  transform: rotate(0deg);
+}
+
+/*
+ * The panel opens on its grid row, from nothing to its height: a transition
+ * when it closes, and `@starting-style` for the frame it arrives in.
+ * `overflow: clip` with a margin keeps the content inside while it moves and
+ * still leaves room for a focus ring on what is inside it.
+ */
+.chat-disclosure {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows 200ms var(--chat-ease),
+    opacity 200ms var(--chat-ease);
+}
+
+.chat-disclosure[data-state="closed"] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+
+@starting-style {
+  .chat-disclosure[data-state="open"] {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+.chat-disclosure-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+@supports (overflow-clip-margin: 4px) {
+  .chat-disclosure-inner {
+    overflow: clip;
+    overflow-clip-margin: 4px;
+  }
+}
+
+/* Thinking: a box of its own, its newest lines followed while it arrives. */
+.chat-reasoning {
+  margin-bottom: 1rem;
+  width: 100%;
+  border-width: 1px;
+  border-color: currentColor;
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+}
+
+.chat-reasoning-trigger {
+  max-width: 75%;
+}
+
+.chat-reasoning-trigger > .chat-chevron {
+  margin-top: 0.125rem;
+}
+
+.chat-reasoning-content {
+  position: relative;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.chat-fade {
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  left: 0;
+  z-index: 10;
+  height: 2rem;
+}
+
+.chat-fade-top {
+  top: 0;
+  background-image: linear-gradient(to bottom, var(--ground), transparent);
+}
+
+.chat-fade-bottom {
+  bottom: 0;
+  background-image: linear-gradient(to top, var(--ground), transparent);
+}
+
+.chat-reasoning-text {
+  position: relative;
+  z-index: 0;
+  max-height: 16rem;
+  overflow-y: auto;
+  padding: 0.5rem 0 0.5rem 1.5rem;
+  line-height: 1.625;
+  text-wrap: pretty;
+}
+
+.chat-reasoning-stretches > * + * {
+  margin-top: 1rem;
+}
+
+/* Calls: a group named by its count, and each call inside it. */
+.chat-tool-group,
+.chat-tool {
+  width: 100%;
+}
+
+.chat-tool-group-label {
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.chat-group-icon,
+.chat-group-chevron {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.chat-tool-group-content {
+  margin-top: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.chat-tool-group-content > * {
+  animation: chat-arrive-down 200ms var(--chat-ease) both;
+}
+
+.chat-tool-group-content > :nth-child(2) {
+  animation-delay: 40ms;
+}
+
+.chat-tool-group-content > :nth-child(3) {
+  animation-delay: 80ms;
+}
+
+.chat-tool-group-content > :nth-child(4) {
+  animation-delay: 120ms;
+}
+
+.chat-tool-group-content > :nth-child(n + 5) {
+  animation-delay: 160ms;
+}
+
+.chat-tool-trigger {
+  width: fit-content;
+}
+
+.chat-tool[data-status="cancelled"] .chat-tool-label {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.chat-tool-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.25rem 0 0.5rem 1.5rem;
+  font-size: 0.875rem;
+}
+
+.chat-tool-data {
+  border-radius: calc(var(--radius) - 2px);
+  background-color: color-mix(in oklab, var(--tint) 50%, transparent);
+  color: color-mix(in oklab, var(--ink) 90%, transparent);
+  padding: 0.625rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-tool-result-header {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+}
+
+.chat-tool-result-header + .chat-tool-data {
+  margin-top: 0.25rem;
+}
+
+.chat-tool-failed {
+  color: var(--bad);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+}
+
+.chat-tool-error-header {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.chat-tool-error-reason {
+  color: var(--muted);
+  white-space: pre-line;
+}
+
+/* ----------------------------------------------------------------- motion */
+
+.chat-spin {
+  animation: chat-spin 0.6s linear infinite;
+}
+
+@keyframes chat-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(0.25rem);
+  }
+}
+
+@keyframes chat-arrive-down {
+  from {
+    opacity: 0;
+    transform: translateY(-0.25rem);
+  }
+}
+
+@keyframes chat-appear {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes chat-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes chat-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-question,
+  .chat-answer,
+  .chat-outline,
+  .chat-outline-block,
+  .chat-working,
+  .chat-spin,
+  .chat-tool-group-content > * {
+    animation: none;
+  }
+
+  .chat-disclosure,
+  .chat-chevron,
+  .chat-trigger,
+  .chat-icon-button,
+  .chat-send,
+  .chat-button,
+  .chat-composer-shell,
+  .chat-edit-box,
+  .chat-message[data-last="false"] .chat-actions {
+    transition: none;
+  }
+
+  .chat-icon-button:active,
+  .chat-trigger:active {
+    transform: none;
+    scale: none;
+  }
+}

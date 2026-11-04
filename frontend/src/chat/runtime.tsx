@@ -2,54 +2,47 @@
 // Copyright The Robinauts Authors
 
 /**
- * Our state, given to assistant-ui to render.
+ * The chat's runtime: our state, the four turns, and what the boxes say.
  *
- * `useExternalStoreRuntime` is the runtime for a host that owns its own
- * messages: the library renders and calls back, and every message and every
- * byte of a stream is ours (`./state.ts`). None of assistant-ui's own
- * persistence is used -- no `assistant-cloud`, no thread list -- because the
- * conversation lives in our database and nowhere else (ADR 0001).
+ * Every message and every byte of a stream is ours (`./state.ts`), and so is
+ * everything that is done about them: a send, an edit, a regeneration, a stop
+ * and a resume are each one of the wire's turns (`docs/specs/wire.md`), made
+ * here and nowhere else. What the components under `./thread/` draw is
+ * `ChatMessage` and `ChatPart` as the reducer holds them, with no layer of
+ * conversion between; what they do is call the functions below, which they
+ * reach through `ChatContext`.
  *
- * **What the adapter really offers, having read it** (`@assistant-ui/react`
- * 0.15.19, `ExternalStoreAdapter`):
+ * - `send` is a new message: under the end of the thread, or in place of a
+ *   question nobody answered (`askedIn`).
+ * - `edit` is a new message under the parent of the question it replaces;
+ *   the thread on the screen is cut after that parent and goes on from it.
+ * - `regenerate` cuts the answer's turn off and produces it again; on an
+ *   answer that failed, the same button is Retry (`docs/specs/ui.md`).
+ * - `cancel` asks the server to stop the run; the stream says when it has.
+ * - `resume` goes on with a failed answer's turn from the rounds saved.
  *
- * - `messageRepository` is how the thread is handed over: an
- *   `ExportedMessageRepository` is **every message with its parent, and a
- *   head**, and in that mode the runtime keeps exactly what it is given and
- *   drops what it is no longer given. Ours is a chain -- each message's
- *   parent is the one before it -- so a message an edit cut off the thread
- *   is gone from the runtime on the next render. The other way in, plain
- *   `messages`, relinks a flat list and keeps what it has already seen, so a
- *   message cut off would linger beside its replacement as a branch. Nothing
- *   here is a branch (ADR 0003, `docs/specs/conversations.md`).
- * - `setMessages` is **not** offered. It is what turns on branch switching
- *   and deleting, neither of which exists; and it is what makes the library's
- *   own `cancelRun` take a trailing question out of the thread and put its
- *   text back into the box, which is wrong for a host whose backend stored
- *   that question when the turn began (`@assistant-ui/core`,
- *   `external-store-thread-runtime-core`, `cancelRun`). Without it a stop
- *   leaves the thread as it is.
- * - `onNew`, `onEdit`, `onReload` and `onCancel` are the four the vendored
- *   Thread's composer and action bar reach: send, edit, regenerate, stop.
- *   Each is one of the wire's turns (`docs/specs/wire.md`). An edit cuts the
- *   thread after the edited message's parent and goes on from there; a
- *   regeneration cuts the answer off and produces it again.
- * - `isRunning` is ours to say, and while it is true with no assistant
- *   message at the end of the thread the runtime draws a placeholder of its
- *   own -- which is the "working" dot between a question and its first word.
+ * **The boxes are ours too.** What is typed into the main box, and into the
+ * box of a question being edited, is held here rather than in the components
+ * that draw them, because a turn the server refuses puts what was written
+ * back -- into the box it came from (`turnsOf`, `wanted`) -- and only the
+ * thing that made the turn knows it was refused.
+ *
+ * **Running is a run this chat knows the id of**, and nothing else. Between a
+ * send and its response's headers there is nothing to stop, so the box goes
+ * on offering to send, and a second send is refused here and said
+ * (`ONE_AT_A_TIME`) rather than stopping anything.
  */
 import {
-  fromThreadMessageLike,
-  useExternalStoreRuntime,
-  type AppendMessage,
-  type AssistantRuntime,
-  type ExportedMessageRepository,
-  type ExternalStoreAdapter,
-  type MessageStatus,
-  type ThreadMessage,
-  type ThreadMessageLike,
-} from "@assistant-ui/react";
-import { useEffect, useMemo, useReducer, useState } from "react";
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 
 import {
   ApiError,
@@ -58,15 +51,15 @@ import {
   MODEL_NOT_OFFERED,
   request,
   UNKNOWN_MODEL,
-} from "../../api/client";
-import { cancelRun } from "../../conversation/conversation";
-import type { ChatProps } from "../index";
+} from "../api/client";
+import { cancelRun } from "../conversation/conversation";
+import type { ChatProps } from "./index";
 import {
   attach,
   startNewConversation,
   startTurn,
   type Attached,
-} from "../agui/client";
+} from "./agui/client";
 import {
   askedIn,
   EMPTY,
@@ -83,7 +76,7 @@ import {
   type ChatAction,
   type ChatMessage,
   type ChatState,
-} from "../state";
+} from "./state";
 
 /** What is said when there is nobody to talk to. */
 export const NO_AGENT =
@@ -164,12 +157,96 @@ function forItsModel(failure: unknown): boolean {
   );
 }
 
-/** What the component below gets back. */
+/** A box of the chat's: what it says, and how to change that. */
+export interface ChatBox {
+  text: string;
+  setText: (text: string) => void;
+}
+
+/** The question being edited, and what its box says. */
+export interface Editing {
+  id: string;
+  text: string;
+}
+
+/**
+ * What the chat offers the components that draw it.
+ *
+ * `state` is the reducer's, read as it is. The rest is either worked out from
+ * it once, here, so that no component works it out a second way (`running`,
+ * `sendDisabled`), or is something a control does.
+ */
 export interface Chatting {
   state: ChatState;
-  runtime: AssistantRuntime;
-  /** Resume a failed answer: what the Resume button beside it does. */
-  onResume: (answerId: string) => Promise<void>;
+  /** A run this chat knows the id of is in flight: what stop is offered for. */
+  running: boolean;
+  /** There is nobody to send a first message to; the box still takes text. */
+  sendDisabled: boolean;
+  /** The main box. */
+  composer: ChatBox;
+  /** Send what the main box says, and empty it; nothing when it may not. */
+  submit: () => void;
+  /** The question being edited, while its box is open. */
+  editing: Editing | null;
+  /** Open that question's box, with what it says in it. */
+  beginEdit: (messageId: string) => void;
+  /** Change what the open edit box says. */
+  setEditText: (text: string) => void;
+  /** Close the edit box without sending. */
+  cancelEdit: () => void;
+  /** Send what the open edit box says, and close it. */
+  submitEdit: () => void;
+  /** A new message, as typed. */
+  send: (text: string) => Promise<void>;
+  /** That question replaced by this text. */
+  edit: (messageId: string, text: string) => Promise<void>;
+  /** That answer produced again, or retried when it failed. */
+  regenerate: (answerId: string) => Promise<void>;
+  /** A failed answer gone on with from the rounds its engine saved. */
+  resume: (answerId: string) => Promise<void>;
+  /** Stop the run in flight. */
+  cancel: () => Promise<void>;
+}
+
+/** The chat, for the components under `./thread/`. */
+export const ChatContext = createContext<Chatting | null>(null);
+
+/** The chat this component is drawn in; drawn outside one is a bug. */
+export function useChatContext(): Chatting {
+  const chat = useContext(ChatContext);
+  if (chat === null) throw new Error("This is drawn outside a <Chat>.");
+  return chat;
+}
+
+/**
+ * The message before that one on the screen, which is where an edit of it or
+ * a regeneration of it cuts the thread; `null` for the first message, and for
+ * one that is not there.
+ */
+export function parentOf(
+  messages: readonly ChatMessage[],
+  messageId: string,
+): string | null {
+  const at = messages.findIndex((message) => message.id === messageId);
+  return at > 0 ? (messages[at - 1]?.id ?? null) : null;
+}
+
+/** That edit box, if the question it is open on is on the screen. */
+function openOn(
+  editing: Editing | null,
+  messages: readonly ChatMessage[],
+): Editing | null {
+  return editing !== null &&
+    messages.some((message) => message.id === editing.id)
+    ? editing
+    : null;
+}
+
+/** What a message says in words, as Copy copies it: a blank line between. */
+export function textOf(message: ChatMessage): string {
+  return message.parts
+    .flatMap((part) => (part.kind === "text" ? [part.text] : []))
+    .join("\n\n");
 }
 
 export function useChat(props: ChatProps): Chatting {
@@ -182,8 +259,13 @@ export function useChat(props: ChatProps): Chatting {
   // whatever is current then rather than what was current when it was made.
   // They also call one another: a turn ends in a reading, and a reading of a
   // conversation with a run going attaches to it.
+  //
+  // A layout effect, so that it is written before anything just drawn can be
+  // clicked: a click that landed before a passive effect had run would begin
+  // its turn on the state before -- a regeneration of an answer the screen
+  // shows as failed, say, where the screen is offering a retry.
   const [turns] = useState(() => turnsOf(dispatch, props));
-  useEffect(() => {
+  useLayoutEffect(() => {
     turns.now(props, state);
   });
 
@@ -215,82 +297,144 @@ export function useChat(props: ChatProps): Chatting {
     };
   }, [turns]);
 
-  // The runtime re-imports what it is given when the object is not the one it
-  // was given last, so this is what decides how often it does.
-  const repository = useMemo(
-    () => asRepository(state.messages),
-    [state.messages],
+  // **The two boxes.** Each is state, for the components to draw, and a ref
+  // beside it, for the functions below to read: a send reads what the box
+  // says at the moment it is pressed, and those functions are made once, so
+  // that a keystroke does not hand every message on the screen a new one.
+  const [text, setTextState] = useState("");
+  const textRef = useRef(text);
+  const setText = useCallback((next: string) => {
+    textRef.current = next;
+    setTextState(next);
+  }, []);
+  const [editingState, setEditingState] = useState<Editing | null>(null);
+  const editingRef = useRef(editingState);
+  const setEditing = useCallback((next: Editing | null) => {
+    editingRef.current = next;
+    setEditingState(next);
+  }, []);
+
+  // **Running is a run, and not a turn that has been asked for.** Between the
+  // send and the response's headers there is nothing to stop, and a stop
+  // offered there would be a stop of nothing; while `sending`, a second send
+  // is refused instead (`turnsOf`, `busy`).
+  const running = state.runId !== null;
+  // There is nothing to send a first message to when the deployment has no
+  // agent; the box still takes what is typed into it.
+  const sendDisabled = state.conversationId === null && props.agentId === null;
+  // What a control reads when it is used. Written as the render is put on the
+  // screen, before anything on it can be clicked: a passive effect may still
+  // be pending when a click lands, and Edit would then open on nothing.
+  const held = useRef({ running, sendDisabled, messages: state.messages });
+  useLayoutEffect(() => {
+    held.current = { running, sendDisabled, messages: state.messages };
+  });
+
+  const submit = useCallback(() => {
+    const written = textRef.current;
+    const { running: answering, sendDisabled: nobody } = held.current;
+    if (written.trim() === "" || answering || nobody) return;
+    // The box empties itself as it hands the message over, which is what a
+    // send looks like; a turn refused for being a second one puts it back.
+    setText("");
+    void turns.onNew(written);
+  }, [setText, turns]);
+
+  const beginEdit = useCallback(
+    (messageId: string) => {
+      const message = held.current.messages.find(
+        (each) => each.id === messageId,
+      );
+      if (message === undefined) return;
+      setEditing({ id: messageId, text: textOf(message) });
+    },
+    [setEditing],
   );
-
-  const adapter: ExternalStoreAdapter = useMemo(
-    () => ({
-      messageRepository: repository,
-      // **A run, and not a turn that has been asked for.** Between the send
-      // and the response's headers there is nothing to stop: the library's
-      // own `cancelRun` would take the question back out of the thread and
-      // put its text into the box, and the server would answer it anyway.
-      // While `sending`, `onNew` refuses instead (see `turnsOf`).
-      isRunning: state.runId !== null,
-      isLoading: state.loading,
-      // There is nothing to send a first message to when the deployment has
-      // no agent; the box still takes what is typed into it.
-      isSendDisabled: state.conversationId === null && props.agentId === null,
-      onNew: turns.onNew,
-      onEdit: turns.onEdit,
-      onReload: turns.onReload,
-      onCancel: turns.onCancel,
-    }),
-    [
-      repository,
-      state.runId,
-      state.loading,
-      state.conversationId,
-      props.agentId,
-      turns,
-    ],
+  const setEditText = useCallback(
+    (next: string) => {
+      const open = editingRef.current;
+      if (open !== null) setEditing({ ...open, text: next });
+    },
+    [setEditing],
   );
+  const cancelEdit = useCallback(() => {
+    setEditing(null);
+  }, [setEditing]);
+  const submitEdit = useCallback(() => {
+    const open = editingRef.current;
+    if (open === null || open.text.trim() === "") return;
+    // Closed as it is sent, as the main box is emptied: an edit refused for
+    // a reason the person can act on opens again with its text (`follow`).
+    setEditing(null);
+    void turns.onEdit(open.id, open.text);
+  }, [setEditing, turns]);
 
-  const runtime = useExternalStoreRuntime(adapter);
-
-  // **The box.** The one thing the library leaves it saying the wrong thing
-  // about a message that never became a turn; what it is and why is in
-  // `turnsOf`, beside `wanted`. This runs after every render, which is after
-  // the library's own work in the same event, and it never overwrites
-  // anything the person has typed since.
+  // **A box put back.** What a refused turn wants a box to say is held in
+  // `turnsOf` (`wanted`) and written here, after the render that follows the
+  // refusal -- which is the render that put the message an edit was of back
+  // on the screen. It never overwrites anything the person has typed since.
   useEffect(() => {
     const wanted = turns.saying();
     if (wanted === null) return;
     const editing = wanted.editing;
     // Only while that message is still in the thread: a read landing in
-    // between may have taken it off, and asking the runtime for a message it
-    // does not hold throws -- which would put the error boundary in place of
-    // the chat. The text then goes to the main box, which is still somewhere.
-    const held = runtime.thread
-      .getState()
-      .messages.some((message) => message.id === editing);
-    if (editing !== null && held) {
+    // between may have taken it off, and the text then goes to the main box,
+    // which is still somewhere.
+    const there = state.messages.some((message) => message.id === editing);
+    if (editing !== null && there) {
       // An edit goes back into its own box, open on the message it was
-      // editing -- which the refusal has just put back on the screen -- so
-      // that sending it again is still an edit and not a new message at
-      // the end of the thread. If that box has been opened again since, the
-      // text goes into it only while it is empty, and otherwise on to the
-      // main box below: `saying` has handed it over, and it is not dropped.
-      const edit = runtime.thread.getMessageById(editing).composer;
-      if (!edit.getState().isEditing) {
-        edit.beginEdit();
-        edit.setText(wanted.text);
-        return;
-      }
-      if (edit.getState().text === "") {
-        edit.setText(wanted.text);
+      // editing, so that sending it again is still an edit and not a new
+      // message at the end of the thread. If a box has been opened since,
+      // the text goes into it only while it is that message's and empty, and
+      // otherwise on to the main box below: it is handed over, not dropped.
+      const open = openOn(editingRef.current, state.messages);
+      if (open === null || (open.id === editing && open.text === "")) {
+        setEditing({ id: editing, text: wanted.text });
         return;
       }
     }
-    const box = runtime.thread.composer;
-    if (box.getState().text === "") box.setText(wanted.text);
+    if (textRef.current === "") setText(wanted.text);
   });
 
-  return { state, runtime, onResume: turns.onResume };
+  // A question that has left the thread has no box to be open on: an edit,
+  // a regeneration or another conversation took it off the screen. Only a
+  // refused turn brings a message back, and then what was being written in
+  // its box comes back with it rather than being lost.
+  const editing = openOn(editingState, state.messages);
+
+  return useMemo(
+    () => ({
+      state,
+      running,
+      sendDisabled,
+      composer: { text, setText },
+      submit,
+      editing,
+      beginEdit,
+      setEditText,
+      cancelEdit,
+      submitEdit,
+      send: turns.onNew,
+      edit: turns.onEdit,
+      regenerate: turns.onReload,
+      resume: turns.onResume,
+      cancel: turns.onCancel,
+    }),
+    [
+      state,
+      running,
+      sendDisabled,
+      text,
+      setText,
+      submit,
+      editing,
+      beginEdit,
+      setEditText,
+      cancelEdit,
+      submitEdit,
+      turns,
+    ],
+  );
 }
 
 /**
@@ -317,7 +461,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
   /** A conversation this chat created itself, which the shell then routes to. */
   let ours: string | null = null;
   /**
-   * What the box must be made to say, once, after the next render.
+   * What a box must be made to say, once, after the next render.
    *
    * The box empties itself when it hands a message over, so a turn refused
    * here for being a second one leaves nothing behind at all. The text goes
@@ -327,7 +471,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
   type Wanted = { text: string; editing: string | null };
   let wanted: Wanted | null = null;
 
-  /** What the box must be made to say, once. */
+  /** What a box must be made to say, once. */
   function saying(): Wanted | null {
     const held = wanted;
     wanted = null;
@@ -349,9 +493,9 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
    * told about, so a turn that *is* refused can be taken back off it without
    * having to work out which of several it was.
    *
-   * The Thread does not offer either -- the box shows stop while a run is
-   * going, and the action bar hides itself -- so this is reachable only by
-   * driving the runtime, or by being very quick between a send and its
+   * The thread does not offer either -- the box shows stop while a run is
+   * going, and the action bars are not drawn -- so this is reachable only by
+   * calling these directly, or by being very quick between a send and its
    * answer's headers.
    */
   function busy(): boolean {
@@ -361,10 +505,10 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
   /**
    * Say that the turn was not sent, because the box has already cleared it.
    *
-   * assistant-ui empties the composer when it hands a message over, so a turn
-   * dropped in silence is a message somebody believes they sent
-   * (`ONE_AT_A_TIME`). `told` changes nothing else: the turn that *is* on its
-   * way keeps its question, its run and its stream.
+   * The box empties itself when it hands a message over, so a turn dropped
+   * in silence is a message somebody believes they sent (`ONE_AT_A_TIME`).
+   * `told` changes nothing else: the turn that *is* on its way keeps its
+   * question, its run and its stream.
    */
   function told(text: string, editing: string | null = null): void {
     dispatch({ kind: "told", detail: ONE_AT_A_TIME });
@@ -569,7 +713,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
       // since a link that has come back is not the link that went.
       //
       // Once. A second loss is one to tell about rather than to keep
-      // retrying, and the reading below leaves `isRunning` false, so the box
+      // retrying, and the reading below leaves `running` false, so the box
       // and the answer's "try again" are usable.
       if (!afterLoss) {
         await read(attached.conversationId, control.signal, true);
@@ -590,8 +734,9 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     await read(attached.conversationId, control.signal);
   }
 
-  async function onNew(message: AppendMessage): Promise<void> {
-    const text = wrote(message);
+  /** A new message: what the main box sends. */
+  async function onNew(written: string): Promise<void> {
+    const text = written.trim();
     if (text === "") return;
     if (busy()) return told(text);
     // Not the end of the thread where that is a question nobody answered:
@@ -652,28 +797,29 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     );
   }
 
-  async function onEdit(message: AppendMessage): Promise<void> {
-    const text = wrote(message);
+  /** That question replaced: what an edit box sends. */
+  async function onEdit(edited: string, written: string): Promise<void> {
+    const text = written.trim();
     const conversationId = state.conversationId;
-    const edited = message.sourceId;
-    if (text === "" || conversationId === null || edited === null) return;
+    if (text === "" || conversationId === null) return;
     // **An edit is a new message under the parent of the one it replaces**
     // (`docs/specs/conversations.md`): the store keeps the old one, and the
     // thread on the screen is cut after that parent and goes on from the new
     // one. The backend is told which question is edited and works out the
-    // parent itself; the runtime's parent, the message before the edited one
-    // or nothing for the first, is only where the screen is cut.
+    // parent itself; the message before the edited one on the screen, or
+    // nothing for the first, is only where the screen is cut.
+    const parentId = parentOf(state.messages, edited);
     // A question the server has never been told about: one this chat put on
     // the screen a moment ago, or under one, and the conversation has not
-    // been read since. The backend would answer 404 for it. The Thread hides
+    // been read since. The backend would answer 404 for it. The thread hides
     // the edit button while a run is going, so this is reachable only by
-    // driving the runtime directly.
-    if (isUnsent(edited) || isUnsent(message.parentId)) return;
+    // calling this directly.
+    if (isUnsent(edited) || isUnsent(parentId)) return;
     if (busy()) return told(text, edited);
     // The store's parent, which is the tool message under that answer when
-    // its calls were answered (`state.ts`): the runtime does not hold one.
-    const parentId = storedParent(state, message.parentId);
-    dispatch({ kind: "asked", id: unsent(), after: parentId, text });
+    // its calls were answered (`state.ts`): the screen does not hold one.
+    const storedId = storedParent(state, parentId);
+    dispatch({ kind: "asked", id: unsent(), after: storedId, text });
     // Refused for its model, or because the conversation is answering, the
     // edited text comes back in the edit box of the message it was of
     // (`follow`).
@@ -688,13 +834,10 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     );
   }
 
-  async function onReload(
-    parentId: string | null,
-    config: { sourceId: string | null },
-  ): Promise<void> {
+  /** That answer produced again: what Refresh does. */
+  async function onReload(regenerate: string): Promise<void> {
     const conversationId = state.conversationId;
-    const regenerate = config.sourceId;
-    if (conversationId === null || regenerate === null) return;
+    if (conversationId === null) return;
     // Nothing was typed for a regeneration, so there is nothing to put back
     // and nothing that was not sent.
     if (busy()) {
@@ -702,7 +845,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
       return;
     }
     // **The same button is Retry on an answer that failed** (`docs/specs/ui.md`):
-    // the Thread offers one reload, and what it means is decided here. A
+    // the thread offers one Refresh, and what it means is decided here. A
     // regeneration drops the answer from what the model sees; a retry keeps
     // the failure for it to see.
     const retry = state.messages.some(
@@ -711,12 +854,13 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     // Neither carries a new message, and both take the answer off the
     // screen: a regeneration answers the question that turn already had, and
     // **replaces the turn** (`docs/specs/conversations.md`). The cut is after
-    // its question -- which is not always `parentId`, the message before the
-    // regenerated one: a turn with tools in it has an answer that called
-    // before the answer after the results (`turnStart`).
+    // its question -- which is not always the message before the regenerated
+    // one: a turn with tools in it has an answer that called before the
+    // answer after the results (`turnStart`).
     dispatch({
       kind: "again",
-      after: turnStart(state, regenerate) ?? parentId,
+      after:
+        turnStart(state, regenerate) ?? parentOf(state.messages, regenerate),
     });
     const modelId = props.modelId;
     await follow((signal) =>
@@ -747,9 +891,10 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     );
   }
 
+  /** Stop the run in flight: what the stop button does. */
   async function onCancel(): Promise<void> {
     const { conversationId, runId } = state;
-    // Nothing to stop. The Thread offers stopping only while `isRunning`,
+    // Nothing to stop. The box offers stopping only while a run is going,
     // which is a run this chat knows the id of, so this is a guard and not a
     // state: there is no request that would say "stop whatever is going".
     if (conversationId === null || runId === null) return;
@@ -787,149 +932,4 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
 /** An id for a message the server has not been told about yet. */
 function unsent(): string {
   return `${UNSENT}${crypto.randomUUID()}`;
-}
-
-/** What was typed, as one string. */
-function wrote(message: AppendMessage): string {
-  return message.content
-    .map((part) => (part.type === "text" ? part.text : ""))
-    .join("")
-    .trim();
-}
-
-/**
- * Every message of ours, converted once.
- *
- * **A delta rebuilds the repository**, and a conversation is as long as it
- * is: without this, a hundred deltas into a turn of a hundred-message
- * conversation is ten thousand conversions of messages that have not changed
- * since they were read. The reducer builds a new object only for a message it
- * touches, so object identity is exactly "this message has changed", and a
- * `WeakMap` keyed on it is a cache nothing has to invalidate -- an entry goes
- * when the message it is of does.
- *
- * Giving assistant-ui converted messages rather than `ThreadMessageLike`s is
- * also what makes `createdAt` stop moving: `fromThreadMessageLike` stamps
- * `new Date()` on anything without one, so the same message converted twice
- * was two different messages.
- */
-const converted = new WeakMap<ChatMessage, ThreadMessage>();
-
-/**
- * The thread as the runtime takes it: a chain, each message under the one
- * before it, with the last as the head.
- *
- * A chain and not a flat list, because of how the two ways in differ
- * (the header above): given a repository, the runtime holds exactly these
- * messages and no others, so a message an edit cut off is gone from it on
- * the next render rather than kept beside its replacement.
- */
-export function asRepository(
-  messages: readonly ChatMessage[],
-): ExportedMessageRepository {
-  const items = messages.map((message, at) => ({
-    message: stored(message),
-    parentId: at === 0 ? null : (messages[at - 1]?.id ?? null),
-  }));
-  const headId = items.at(-1)?.message.id ?? null;
-  return {
-    messages: items,
-    // Left out rather than given as `null`, which would mean "no thread at
-    // all"; left out, the runtime reads the last message as the head.
-    ...(headId === null ? {} : { headId }),
-  };
-}
-
-/** That message as assistant-ui holds one, converted at most once. */
-function stored(message: ChatMessage): ThreadMessage {
-  const held = converted.get(message);
-  if (held !== undefined) return held;
-  const made = fromThreadMessageLike(
-    asThreadMessage(message),
-    message.id,
-    // The fallback status, for a message that carries none. Ours all do --
-    // an assistant message is given one below and a user message may not have
-    // one at all -- so this is never what is used.
-    { type: "complete", reason: "unknown" },
-  );
-  converted.set(message, made);
-  return made;
-}
-
-/** One part of a message as assistant-ui takes one. */
-type PartLike = Exclude<ThreadMessageLike["content"], string>[number];
-
-/** A call as assistant-ui takes one, built up field by field. */
-type ToolCallLike = {
-  type: "tool-call";
-  toolCallId: string;
-  toolName: string;
-  argsText: string;
-  args?: NonNullable<Extract<PartLike, { type: "tool-call" }>["args"]>;
-  result?: string;
-  isError?: boolean;
-};
-
-/**
- * One message of ours, as assistant-ui takes one.
- *
- * A call is the library's `tool-call` part: the id and the name as the
- * platform stored them, the arguments as text and -- once whole -- as data,
- * the result as the string the tool answered, and whether it failed. The
- * vendored Thread draws it with its `ToolFallback`, which puts every one of
- * those in a text node (`docs/specs/wire.md`: rendered as data).
- */
-export function asThreadMessage(message: ChatMessage): ThreadMessageLike {
-  const content = message.parts.map((part): PartLike => {
-    if (part.kind === "reasoning")
-      return { type: "reasoning", text: part.text };
-    if (part.kind === "tool-call") {
-      const call: ToolCallLike = {
-        type: "tool-call",
-        toolCallId: part.id,
-        toolName: part.name,
-        argsText: part.argsText,
-      };
-      // What the store or the model wrote, which is JSON by construction.
-      if (part.args !== undefined)
-        call.args = part.args as NonNullable<ToolCallLike["args"]>;
-      if (part.result !== undefined) call.result = part.result;
-      if (part.isError !== undefined) call.isError = part.isError;
-      return call;
-    }
-    return { type: "text", text: part.text };
-  });
-  if (message.role === "user") {
-    return {
-      id: message.id,
-      role: "user",
-      content: content.filter((part) => part.type === "text"),
-    };
-  }
-  return {
-    id: message.id,
-    role: "assistant",
-    content,
-    status: asStatus(message),
-  };
-}
-
-/** How a message of ours stands, in assistant-ui's words. */
-function asStatus(message: ChatMessage): MessageStatus {
-  switch (message.state) {
-    case "running":
-      return { type: "running" };
-    case "cancelled":
-      return { type: "incomplete", reason: "cancelled" };
-    case "failed":
-      // What the Thread shows under the message, and the one place a sentence
-      // about a run that went wrong is drawn by the library rather than by us.
-      return {
-        type: "incomplete",
-        reason: "error",
-        error: message.detail ?? "",
-      };
-    case "stored":
-      return { type: "complete", reason: "stop" };
-  }
 }

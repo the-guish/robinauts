@@ -63,7 +63,7 @@ def edit(page: Page, old: str, new: str) -> None:
     message = page.locator('[data-role="user"]').filter(has_text=old)
     message.hover()  # its actions show on hover
     message.get_by_role("button", name="Edit").click()
-    page.locator(".aui-edit-composer-input").fill(new)
+    page.get_by_role("textbox", name="Edit message").fill(new)
     page.get_by_role("button", name="Update").click()
 
 
