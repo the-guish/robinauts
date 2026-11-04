@@ -40,7 +40,8 @@ address into a phone.
   looked up in, and lets a secret scanner recognise ours. A secret with no
   prefix is an older API token, and works until it expires.
 - In the local development mode a device is linked to the mode's one user,
-  as a token is minted for it. Like a session or a token that names that
+  as a token is minted for it, and the code names the origin the request
+  came to, `http://{Host}`. Like a session or a token that names that
   user, it signs nobody in where sign-in is on.
 
 ## What a bearer may do
@@ -58,12 +59,14 @@ address into a phone.
   its removal. A stolen 30-day device secret would mint a 90-day API
   token, and removing the phone from the list would achieve nothing. With
   the rule, removing the phone ends everything the phone had. The same
-  rule stops a token minting a token. Only a person at a browser, signed
-  in through the identity provider within the last twelve hours, creates
-  or removes a credential.
+  rule stops a token minting a token. Only a person at a browser, with a
+  session from the identity provider, creates or removes a credential.
 - The shell knows how the asker was named: by the session cookie, by a
   device secret, or by a token. The routes above take the stricter
-  dependency, `browsing`, where the others take `asking`. In the local
+  dependency, `browsing`, where the others take `asking`; the two that
+  mint take `browsing_fresh`, which also wants the session fresh. So do
+  `GET` and `DELETE /auth/pairings/{id}`: they are the browser's half of
+  the flow. In the local
   development mode every request is the mode's one user, and counts as
   the browser's.
 
@@ -73,7 +76,7 @@ address into a phone.
   record keeps what the last sign-in said: provider, subject, verified
   email, hosted domain and groups, refreshed at every sign-in. A device's
   resolve checks that against the allow list as it is now, on a
-  sixty-second cache per device. A check that fails **deletes**: the
+  sixty-second cache per credential, kept in each server process. A check that fails **deletes**: the
   credential that asked, and every browser session, device and token of
   that user with it, keyed by user id. A refusal that left the secret in
   place would have it working again the moment the matcher is put back.
@@ -87,19 +90,17 @@ address into a phone.
   A provider that is down, a state mismatch or an unreadable token wipes
   nothing. That is the moment the platform learns the person is out.
 - **Minting needs a fresh sign-in.** `POST /auth/pairings` and
-  `POST /auth/tokens` require a session whose sign-in re-authenticated
-  the person less than ten minutes ago. Any other session is answered
-  403, `fresh_sign_in`, and the page offers to sign in again, coming back
-  to `#/devices`. That sign-in is `/auth/login/{provider}?fresh=1&…`,
-  which sends the provider `prompt=login` and `max_age=0`, so it asks for
-  the person's credentials again whatever session it holds in that
-  browser. The session records the ID token's `auth_time`, and fresh
-  means that time is within ten minutes. A sign-in that rode the
-  provider's existing session is never fresh, so a script or malware
-  driving the signed-in browser gets no fresh session by navigating
-  through it, and a copied cookie gets none because the provider's
-  session is not on that machine. Removing a device needs no fresh
-  sign-in. Taking access away is never gated.
+  `POST /auth/tokens` require a browser session younger than ten minutes:
+  fresh is the session's own age, whatever the provider did. Any other
+  session is answered 403, `FreshSignInRequired`, and the page offers to
+  sign in again, coming back to `#/devices`. That sign-in is the sign-in
+  page's own navigation, `/auth/login/{provider}` with `return_to`. A
+  copied cookie cannot pass: signing in again needs the provider's
+  session, which is not on the thief's machine. A script or malware
+  driving the signed-in browser is not stopped by this gate: it can sign
+  in again through the provider's own session in that browser, and get a
+  fresh session. Removing a device needs no fresh sign-in. Taking access
+  away is never gated.
 - **The operator ends devices from the command line.**
   `robinauts devices end --user <email>`, `--device <id>` or `--all`, and
   `robinauts devices list`. They read the database the server reads, and
@@ -209,16 +210,18 @@ sequenceDiagram
    statement checks the expiry and counts a wrong try, so two approves at
    once cannot both pass, and a wrong try is never lost. The browser's
    poll says so, and the device appears in the list. A wrong number is
-   403, and the browser says so and asks again. The third wrong number
-   deletes the pairing, as **No** does. The claim secret then resolves to
-   nothing, ever.
+   403, `WrongNumber`, and the browser says so and asks again. The third
+   wrong number deletes the pairing, as **No** does, and is answered 404,
+   as a pairing that is gone is. The claim secret then resolves to
+   nothing, ever. A number that is not six digits is 422, and is not
+   counted.
 7. **The phone waits.** It polls `GET /auth/session` with
    `Authorization: Bearer <secret>` every two seconds, until the pairing's
    expiry. That route is never a 401. While the pairing is `claimed`, it
    answers `user: null` and `pairing: {"state": "claimed"}`. Once approved,
    it answers the user and the device. The phone keeps the secret and is
    in. A pairing that is gone, refused or expired, answers `user: null` and
-   no `pairing`. The phone says so and offers to scan again.
+   `pairing: null`. The phone says so and offers to scan again.
 
 The code is spent by the first phone that presents it. A second phone with
 a photograph of it gets the 404 of step 4. A first phone that is not the
@@ -242,10 +245,11 @@ would read it off the shared screen and type it itself.
   for the next. Telegram rotates every thirty seconds and WhatsApp every
   twenty. Those numbers suit a service with a billion phones. Two minutes
   is enough to find one's phone, and short enough not to matter.
-- **Three pairings per user at once.** A fourth is 429, `busy`. Asking for
-  one deletes the user's expired ones in the same statement, as beginning
-  a sign-in deletes expired pending logins. The table holds minutes and
-  needs no sweep.
+- **Three pairings per user at once.** A fourth is 429, `Busy`. An
+  approved one counts until it expires. Asking for one deletes the user's
+  expired ones in the same statement, as beginning a sign-in deletes
+  expired pending logins. The table holds minutes and needs no sweep. The
+  cap bounds the table: two mints at the same instant may both pass it.
 - **The number** is six digits, from a random source, shown with a space
   in the middle and typed with or without it. Nobody guesses it from
   outside: only the signed-in browser can send it, and three wrong numbers
@@ -255,8 +259,9 @@ would read it off the shared screen and type it itself.
 - An approved pairing stays, as `approved`, until it expires. Both sides'
   polls can read the outcome. It grants nothing after the approval. From
   then on the device session is what resolves.
-- `device.name` is at most 64 characters of printable text. `platform` is
-  one of `android`, `ios`, `desktop`, `other`. `app_version` is at most 32
+- `device.name` is 1 to 64 characters of printable text. `platform` is
+  one of `android`, `ios`, `desktop`, `other`. `app_version` is optional,
+  at most 32 characters of printable text. `code` is at most 128
   characters. Anything else is 422.
 - The claim is the one write a stranger can make. The code is 256 bits, so
   nobody guesses one. A claim creates nothing that resolves. At worst a
@@ -269,15 +274,15 @@ would read it off the shared screen and type it itself.
 
 | route | who | purpose |
 |---|---|---|
-| `POST /auth/pairings` | fresh cookie | mint; answers `{id, expires_at, qr_svg}`; 429 `busy` over the cap; 403 `fresh_sign_in` on a session older than ten minutes; 403 where `device_days` is 0 |
-| `GET /auth/pairings/{id}` | cookie, owner | `{state, expires_at, device}`; 404 for another's, or one gone |
-| `POST /auth/pairings/{id}/approve` | cookie, owner | body `{number}`; link the device and answer it; 403 `wrong_number`; 409 unless `claimed` |
+| `POST /auth/pairings` | fresh cookie | mint; 201 `{id, expires_at, qr_svg}`; 429 `Busy` over the cap; 403 `FreshSignInRequired` on a session older than ten minutes; 403 `Forbidden` where `device_days` is 0 |
+| `GET /auth/pairings/{id}` | cookie, owner | `{state, expires_at, device}`, `device` being `{name, platform, app_version}` once claimed; 404 for another's, or one gone or expired |
+| `POST /auth/pairings/{id}/approve` | cookie, owner | body `{number}`; link the device and answer it; 403 `WrongNumber`; 404 for the third wrong one, and one gone; 409 `Conflict` unless `claimed`; 403 where `device_days` is 0 |
 | `DELETE /auth/pairings/{id}` | cookie, owner | refuse, or cancel; 204; on an approved one, 204, the row goes and the device stays |
 | `POST /auth/pairings/claim` | nobody | present a code; answers `{secret, number, expires_at}`; 404 |
 | `GET /auth/session` | bearer | also answers `device`, `token` or `pairing`; never a 401 |
 | `GET /auth/devices` | cookie or bearer | the person's devices, oldest first |
 | `DELETE /auth/devices/{device_id}` | cookie | remove one of theirs; 404 for another's; 403 for a bearer |
-| `POST /auth/logout` | device bearer | end this device, as it ends a browser's session |
+| `POST /auth/logout` | device bearer | end this device, as it ends a browser's session; 204, and with a token's bearer 204 and nothing ended |
 
 The API token routes follow the same rule. `POST /auth/tokens` and
 `DELETE /auth/tokens/{token_id}` are the browser's, and answer a bearer
@@ -290,11 +295,13 @@ device session it answers the user and
 an API token it answers the user and `token: {id, name, expires_at}`. For
 the bearer of a claimed pairing it answers `user: null` and
 `pairing: {state: "claimed"}`. For a bearer nobody knows it answers
-`user: null`, as for no cookie. The web ignores the new fields.
+`user: null`, as for no cookie. A field that does not apply is `null`. The
+web ignores the new fields.
 
-The QR picture is rendered by the backend as SVG, with `segno`
-(BSD-3-Clause, pure Python, no dependencies). It travels in the mint
-answer. The browser shows it as `<img src="data:image/svg+xml;base64,…">`.
+The QR picture is rendered by the backend as SVG. `qrcodegen` (MIT, pure
+Python, no dependencies) computes the modules, and the SVG is ours: one
+path of the dark modules, a quiet zone of four, no script and no external
+reference. It travels in the mint answer, as SVG text. The browser shows it as `<img src="data:image/svg+xml;base64,…">`.
 The Content-Security-Policy's `img-src 'self' data:` allows that. It is
 never put in the page as markup. The frontend carries no QR library. The
 code reaches the browser inside the picture, and a script in the page
@@ -338,9 +345,17 @@ two columns `users` gains for the allow-list check above, refreshed by
 The credentials port has one operation per step: `add_pairing`,
 `claim_pairing`, `pairing_of(user_id, pairing_id)`, `approve_pairing`,
 `delete_pairing`, `resolve_claim`, `add_device_session`,
-`resolve_device_session`, `device_sessions_of`, `delete_device_session`.
-Each is one statement. Each is given `now`. `approve_pairing` is given the
-number, and answers one of approved, wrong number, or gone. Each has its
+`resolve_device_session`, `device_sessions_of`, `delete_device_session`;
+for the operator, `all_device_sessions`, `users_with_email` and
+`delete_device_sessions`; and for the allow list, `delete_credentials_of`
+and `delete_credentials_of_identity`, which delete a user's sessions,
+devices, tokens and pairings at once. Each is one statement. Each that
+judges an expiry is given `now`; `pairing_of` is not, and the shell judges
+the expiry it answers. `approve_pairing` is given the number, and answers
+one of approved, wrong number, not claimed (waiting still, or approved
+already), or gone; the third wrong number deletes the pairing and answers
+gone. A cookie's resolve answers the session beside the user, since its
+`created_at` is what fresh means. Each has its
 row in the contract suite, which the memory and the PostgreSQL adapters
 both pass, and so do the details above: the expiry and the wrong try in
 the approve, the hash that moves, the delete of an approved pairing, and
@@ -351,8 +366,10 @@ with the same `now` discipline.
 
     device_days = 30
 
-One key of sign-in's, beside `session_hours`. `0` means no devices: the
-pairing routes answer 403, and "Linked devices" shows tokens alone. That is
+One key of sign-in's, beside `session_hours`. `0` means no devices: minting
+and approving a pairing answer 403, so no pairing exists for the other
+routes to find, and "Linked devices" shows tokens alone. Anything but a
+number 0 or more is refused at start-up. That is
 for a deployment whose policy allows no phones. Absent, it is 30. A file
 that names it is a sign-in configuration. The local development mode
 refuses it, like the other sign-in keys, and runs on the default.
@@ -367,10 +384,10 @@ refuses it, like the other sign-in keys, and runs on the default.
   secret once. This page is the one place a credential is made or ended,
   because it runs on the browser's session. Nothing of the chat library is
   involved. The panel and the shell are ours.
-- **"Link a phone"** and **"New token"** want a sign-in with
-  `prompt=login` within ten minutes. Without one the button reads "Sign
-  in again to link a phone", and pressing it is the sign-in page's own
-  navigation with `fresh=1`, and `return_to` set to this page. "Link a phone" then opens a dialog. It
+- **"Link a phone"** and **"New token"** want a session younger than ten
+  minutes. Without one the button reads "Sign in again to link a phone",
+  and pressing it is the sign-in page's own navigation, with `return_to`
+  set to this page. "Link a phone" then opens a dialog. It
   asks for a code and shows the QR, with the sentence of step 2. The state is written under it: *waiting*;
   *a phone scanned your code, type the number it shows* with a six-digit
   field, **Link** and **No**; *that is not the number, two tries left*;
@@ -484,10 +501,10 @@ The app is a repository of its own. This is what it does against the API.
   its removal, and the list is the whole of the person's control. The
   secret lives in the Keystore, out of backups, and never in a log, which
   is what makes stealing it hard in the first place.
-- **A copied cookie, or a script in the signed-in browser.** Either is a
-  session for up to twelve hours. Neither mints a device or a token:
-  minting wants a sign-in with `prompt=login` within ten minutes, which
-  the thief cannot complete and the script cannot navigate through.
+- **A copied cookie.** It is a session for up to twelve hours. It mints
+  no device and no token once it is ten minutes old: minting wants a
+  fresh sign-in, which needs the provider's session, and that is not on
+  the thief's machine.
 - **A lookalike code.** A "set up Robinauts" QR that names another host
   would make that host the account. The app shows the origin, in
   punycode, and asks before it sends anything. A company that configures
@@ -509,10 +526,11 @@ The app is a repository of its own. This is what it does against the API.
   platform keeps no provider token, so it cannot ask the provider in
   between. The operator's controls are the allow list, which is read
   every minute, the admins' screen, the command line, and `device_days`.
-- **A provider that ignores `prompt=login`**, or answers no `auth_time`,
-  gives no fresh session, and nobody can mint a device or a token through
-  it. The sign-in page says so. That is a thing to know about the
-  company's provider before relying on pairing.
+- **The fresh-sign-in gate is stolen-cookie strength, not keyboard
+  strength.** Malware on the machine, or a script in the page, can sign in
+  again through the provider's session and mint. The compensating control
+  is the "Linked devices" list. A "a phone was linked" notice is not here
+  yet.
 - **A person with only their phone cannot pair.** Pairing needs a second
   screen. The browser hand-off is not here yet: the app opens the system
   browser on `/auth/login/{provider}`, the callback redirects to the app

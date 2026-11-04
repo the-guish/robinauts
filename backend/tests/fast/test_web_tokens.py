@@ -140,3 +140,54 @@ async def test_a_token_is_shown_once_reaches_the_api_and_is_refused_once_revoked
             refused = await http.get("/api/conversations", headers=bearer(secret))
             assert refused.status_code == 401
             assert refused.json()["error"] == "Unauthorized"
+
+
+@asyncio_test
+async def test_a_new_token_names_its_kind_and_an_older_unprefixed_one_still_works() -> None:
+    async with signed_in() as (http, composed, ada, browser):
+        minted = (await http.post("/auth/tokens", json={"name": "ci"}, headers=browser)).json()
+        assert minted["secret"].startswith("rbt_")
+        older = await token_of(composed, ada, datetime.now(UTC) + TOKEN_LIFE)
+        assert not older.startswith(("rbt_", "rbd_"))
+        for secret, name in ((minted["secret"], "ci"), (older, "added")):
+            assert (await http.get("/api/conversations", headers=bearer(secret))).status_code == 200
+            session = (await http.get("/auth/session", headers=bearer(secret))).json()
+            assert session["user"]["id"] == str(ada.id)
+            assert session["token"]["name"] == name
+            assert session["device"] is None
+        # An unknown bearer is nobody, and never a 401 there.
+        nobody = await http.get("/auth/session", headers=bearer("rbt_" + random_secret()))
+        assert nobody.status_code == 200
+        assert nobody.json()["user"] is None
+
+
+@asyncio_test
+async def test_a_token_neither_mints_nor_revokes_a_token() -> None:
+    async with signed_in() as (http, composed, ada, browser):
+        secret = await token_of(composed, ada, datetime.now(UTC) + TOKEN_LIFE)
+        (listed,) = (await http.get("/auth/tokens", headers=bearer(secret))).json()["items"]
+        minted = await http.post("/auth/tokens", json={"name": "more"}, headers=bearer(secret))
+        assert minted.status_code == 403
+        assert minted.json()["error"] == "Forbidden"
+        revoked = await http.delete(f"/auth/tokens/{listed['id']}", headers=bearer(secret))
+        assert revoked.status_code == 403
+        assert (await http.get("/api/conversations", headers=bearer(secret))).status_code == 200
+
+
+@asyncio_test
+async def test_minting_a_token_wants_a_session_younger_than_ten_minutes() -> None:
+    async with signed_in() as (http, composed, ada, browser):
+        secret = random_secret()
+        at = datetime.now(UTC) - timedelta(minutes=10, seconds=1)
+        await composed.credentials.add_user_session(
+            UserSession(uuid.uuid4(), ada.id, secret_hash(secret), at, at + timedelta(hours=12))
+        )
+        stale = {"cookie": f"{Cookies(PUBLIC_URL).session}={secret}", "origin": PUBLIC_URL}
+        refused = await http.post("/auth/tokens", json={"name": "late"}, headers=stale)
+        assert refused.status_code == 403
+        assert refused.json()["error"] == "FreshSignInRequired"
+        # Revoking is never gated by age.
+        token = await token_of(composed, ada, datetime.now(UTC) + TOKEN_LIFE)
+        (listed,) = (await http.get("/auth/tokens", headers=stale)).json()["items"]
+        assert (await http.delete(f"/auth/tokens/{listed['id']}", headers=stale)).status_code == 204
+        assert (await http.get("/api/conversations", headers=bearer(token))).status_code == 401

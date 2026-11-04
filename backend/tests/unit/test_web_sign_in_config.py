@@ -96,3 +96,26 @@ def test_names_every_problem_at_once() -> None:
     assert "public_url: 'http://robinauts.example.com' is not https" in message
     assert "allow 1: everyone is refused for Google" in message
     assert "admin: roles are not in this release" in message
+
+
+@pytest.mark.parametrize(
+    ("given", "days"),
+    [({}, 30), ({"device_days": 0}, 0), ({"device_days": 7}, 7), ({"device_days": 0.5}, 0.5)],
+)
+def test_device_days_is_thirty_unless_named_and_zero_is_no_devices(
+    given: dict[str, object], days: float
+) -> None:
+    config = parse_sign_in({**tomllib.loads(EXAMPLE), **given})
+    assert config is not None
+    assert config.device_days == days
+
+
+@pytest.mark.parametrize("days", [-1, True, "30", float("nan"), float("inf"), [30]])
+def test_device_days_that_is_not_a_number_of_days_is_refused(days: object) -> None:
+    with pytest.raises(ConfigError, match="device_days: .* is not a number of days, 0 or more"):
+        parse_sign_in({**tomllib.loads(EXAMPLE), "device_days": days})
+
+
+def test_device_days_alone_is_a_sign_in_configuration() -> None:
+    with pytest.raises(ConfigError, match="public_url"):
+        parse_sign_in({"device_days": 30})

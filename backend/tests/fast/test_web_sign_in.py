@@ -3,7 +3,8 @@
 
 """Signing in through the stand-in provider, over the web app on the memory credentials: the
 login cookie, the callback, the session cookie, who is asking, the ``Origin`` check and
-signing out; and the local development mode beside it. Marked ``io``: the stand-in listens on
+signing out; a refusal of the allow list ending every credential of that identity; and the
+local development mode beside it. Marked ``io``: the stand-in listens on
 a port the operating system picks."""
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from robinauts.controller.contract.domain import ProviderConfig as ModelProvider
 from robinauts.web.app import create_app
 from robinauts.web.sign_in import AllowEntry, Matcher, ProviderConfig, SignInConfig
 from util.aio import asyncio_test
-from util.standin import StandInProvider, redirect_from
+from util.standin import Misbehaviour, StandInProvider, redirect_from
 
 pytestmark = pytest.mark.io
 
@@ -217,3 +218,31 @@ async def test_a_callback_whose_state_is_not_the_login_cookies_is_a_state_mismat
 
         assert landed.headers["location"] == "/ui/#/sign-in?error=state_mismatch"
         assert (await http.get("/api/conversations")).status_code == 401
+
+
+@asyncio_test
+async def test_a_refusal_of_the_allow_list_ends_every_credential_and_a_provider_error_none(
+    stand_in: StandInProvider,
+) -> None:
+    async with browser(stand_in) as http:
+        await signed_in(http)
+        session = (await http.get("/auth/session")).json()
+        assert session["user"] is not None
+        token = await http.post("/auth/tokens", json={"name": "ci"}, headers={"origin": PUBLIC_URL})
+        assert token.status_code == 201
+        key = {"authorization": f"Bearer {token.json()['secret']}"}
+        cookie = {"cookie": f"robinauts_session={http.cookies['robinauts_session']}"}
+
+        # A provider that fails, at the token endpoint, wipes nothing.
+        stand_in.token_misbehaves(Misbehaviour.server_error())
+        failed = await signed_in(http)
+        assert failed.headers["location"] == "/ui/#/sign-in?error=provider_unavailable"
+        assert (await http.get("/api/conversations", headers=cookie)).status_code == 200
+        assert (await http.get("/api/conversations", headers=key)).status_code == 200
+
+        # The provider vouches for her, and the allow list no longer lets her in.
+        stand_in.person["groups"] = ["somebody-else"]
+        refused = await signed_in(http)
+        assert refused.headers["location"] == "/ui/#/sign-in?error=not_allowed"
+        assert (await http.get("/api/conversations", headers=cookie)).status_code == 401
+        assert (await http.get("/api/conversations", headers=key)).status_code == 401

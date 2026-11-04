@@ -52,8 +52,9 @@ With providers configured and no allow entry, start-up fails.
 ## Users
 
 - The first successful sign-in creates a user, keyed by
-  `(provider, subject)`. Later sign-ins refresh its name and verified
-  email.
+  `(provider, subject)`. Later sign-ins refresh its name, verified email,
+  hosted domain and groups: what the allow list is checked against again
+  when a credential of theirs is used.
 - A user owns their conversations and projects
   ([privacy.md](privacy.md)).
 
@@ -114,8 +115,8 @@ roles come, they work as follows.
 - It reads the **configuration file** (`ROBINAUTS_CONFIG`), as every start
   does, and **only its model tables are read**: the chat is developed in
   this mode ([frontend.md](frontend.md)) and a chat needs an agent. A file that also holds sign-in tables — `public_url`,
-  `session_hours`, `providers`, `allow`, `admin` — is what "cannot be
-  combined" refuses,
+  `session_hours`, `device_days`, `providers`, `allow`, `admin` — is what
+  "cannot be combined" refuses,
   because the mode exists where there is nothing to sign in to. A file with
   no agents gives an empty agent list.
 - It serves the loopback interface only, and refuses to start on any other
@@ -145,14 +146,20 @@ roles come, they work as follows.
 ## API tokens
 
 - A signed-in person mints a token for themselves, with a name, at
-  `POST /auth/tokens`. The answer shows its secret, and it is the only
-  time the secret is shown: the database holds its SHA-256, as it does a
-  session's.
+  `POST /auth/tokens`, from the browser: minting takes the session cookie,
+  never a bearer, and a session younger than ten minutes; an older one is
+  answered 403 `FreshSignInRequired`, and the person signs in again. The
+  answer shows its secret, and it is the only time the secret is shown: the
+  database holds its SHA-256, as it does a session's. A new secret starts
+  with `rbt_`; one with no prefix is a token minted before the prefix, and
+  works until it expires.
 - A token lives ninety days and is not renewed. `GET /auth/tokens` lists
-  the person's tokens, oldest first, without their secrets;
-  `DELETE /auth/tokens/{token_id}` revokes one of them.
+  the person's tokens, oldest first, without their secrets, to a bearer
+  too; `DELETE /auth/tokens/{token_id}` revokes one of them, from the
+  browser's session alone. A bearer that mints or revokes is 403.
 - It is sent as `Authorization: Bearer <secret>` and reaches every route
-  under `/api/`, and these three, as the person who minted it. It is what
+  under `/api/`, `GET /auth/tokens`, `GET /auth/devices` and
+  `GET /auth/session`, as the person who minted it. It is what
   channels other than the browser sign in with.
 - A bearer is not a cookie: a write that carries one, and no session
   cookie, is not subject to the `Origin` check.
@@ -160,6 +167,9 @@ roles come, they work as follows.
   a session naming that user, it signs nobody in where sign-in is on.
 - Not there yet: tokens minted by an operator for somebody else, and scopes.
   A token reaches all that its owner can.
+
+Linking a phone, its device sessions, and the allow-list check on every
+use are in [device-pairing.md](../architecture/device-pairing.md).
 
 ## Details likely to change
 
@@ -171,6 +181,7 @@ are errors; all problems are reported at once:
 ```toml
 public_url = "https://robinauts.example.com"
 session_hours = 12
+device_days = 30
 
 [providers.google]
 title = "Google"
@@ -207,6 +218,9 @@ Routes:
 | `GET /auth/tokens` | the API tokens of the person asking, without their secrets |
 | `DELETE /auth/tokens/{token_id}` | revoke one of them |
 
+The routes of linked devices are in
+[device-pairing.md](../architecture/device-pairing.md), "Routes".
+
 - A pending sign-in is stored under the SHA-256 of `state`, single use, for
   10 minutes; their number is capped.
 - A failure redirects to the sign-in page with a fixed error code; the
@@ -217,10 +231,13 @@ Routes:
 
 ## Known limits
 
-- The allow list, the admin list and group membership are evaluated at
-  sign-in only. A person removed at the identity provider keeps access
-  until the session ends, or an operator clears sessions. A shorter
-  `session_hours` is the available control.
+- Group membership and the other claims are what the last sign-in said.
+  The allow list is checked against them again on every use, at most once
+  a minute, so a person the operator takes out of the allow list loses
+  every credential within a minute; but a person removed at the identity
+  provider keeps access until their next sign-in is refused, the session
+  ends, or an operator clears it. A shorter `session_hours` is the
+  available control.
 - No sign-out at the identity provider.
 - No rate limit on sign-in beyond the cap on pending sign-ins. The cap
   bounds the table; it does not protect sign-in. Beginning a sign-in needs

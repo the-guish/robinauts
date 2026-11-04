@@ -8,12 +8,14 @@ to conversations it opened itself: the listing holds every other test's too. ``f
 is what the model server answers each test with, and a test module overrides it; ``local_gpt``
 is the model server, holding only that test's requests. The ``<engine>_tools`` agents call
 ``shout`` on a real MCP server. The interface is a one-line page, so ``/ui/`` is served
-whether or not this checkout has built the frontend.
+whether or not this checkout has built the frontend. ``database_url`` is the schema that
+server reads, for a test that has to plant a record the API cannot make for it.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import httpx
 import pytest
@@ -41,20 +43,29 @@ def tools_url() -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
-def server(
+def server_config(
     model_server: FakeLocalGPTServer, tools_url: str, tmp_path_factory: pytest.TempPathFactory
-) -> Iterator[str]:
+) -> Path:
     here = tmp_path_factory.mktemp("api")
     config = here / "robinauts.toml"
     config.write_text(stack.config_for(model_server.base_url, tools_url))
     ui = here / "ui"
     ui.mkdir()
     (ui / "index.html").write_text("<!doctype html><title>Robinauts</title>")
-    env = {**stack.API_KEY, "ROBINAUTS_UI_DIR": str(ui)}
-    with (
-        stack.database(config) as url,
-        stack.server(config, url, env=env) as running,
-    ):
+    return config
+
+
+@pytest.fixture(scope="session")
+def database_url(server_config: Path) -> Iterator[str]:
+    """The schema the shared server reads, for a test that plants a record of its own."""
+    with stack.database(server_config) as url:
+        yield url
+
+
+@pytest.fixture(scope="session")
+def server(server_config: Path, database_url: str) -> Iterator[str]:
+    env = {**stack.API_KEY, "ROBINAUTS_UI_DIR": str(server_config.parent / "ui")}
+    with stack.server(server_config, database_url, env=env) as running:
         yield running
 
 

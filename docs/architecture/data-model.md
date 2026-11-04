@@ -17,7 +17,7 @@ agent to another engine, and what its sessions then do, is stage two.
 
 | record | key | holds | document |
 |---|---|---|---|
-| user | `id` | `provider` and `subject` (unique together), `name`, `email`, `created_at` | no |
+| user | `id` | `provider` and `subject` (unique together), `name`, `email`, `created_at`, `hosted_domain`, `groups` | no |
 | session | `id` | `owner_id`, `agent`, `engine`, `title`, `created_at`, `updated_at`, `deleted_at` | no |
 | message | `id` | `session_id`, `parent_id`, `role`, `created_at` | **yes** |
 | turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `retries_message_id`, `task_id` | no |
@@ -26,12 +26,17 @@ agent to another engine, and what its sessions then do, is stage two.
 | user session | `id` | `user_id`, `secret_hash` (unique), `created_at`, `expires_at` | no |
 | pending login | `state_hash` | `provider`, `nonce`, `verifier`, `return_to`, `created_at`, `expires_at` | no |
 | API token | `id` | `user_id`, `name`, `secret_hash` (unique), `created_at`, `expires_at` | no |
+| device session | `id` | `user_id`, `name`, `platform`, `app_version`, `secret_hash` (unique), `created_at`, `last_used_at`, `expires_at` | no |
+| pairing | `id` | `user_id`, `code_hash` (unique), `claim_hash` (unique), `match_number`, `wrong_tries`, `state`, `device_name`, `device_platform`, `device_app_version`, `created_at`, `expires_at` | no |
 
 Also in the PostgreSQL schema: `schema_version`, one row with the version and the
-hash of the file. The last three records are sign-in's, kept through the
-`Credentials` port and not the store, in `user_sessions`, `pending_logins` and
-`api_tokens`. Each holds the SHA-256 of a secret, never the secret, and is found by
-it (`docs/specs/sign-in.md`).
+hash of the file. The last five records are sign-in's, kept through the
+`Credentials` port and not the store, in `user_sessions`, `pending_logins`,
+`api_tokens`, `device_sessions` and `pairings`. Each holds the SHA-256 of a secret,
+never the secret, and is found by it (`docs/specs/sign-in.md`,
+`docs/architecture/device-pairing.md`). A user's `name`, `email`, `hosted_domain`
+and `groups` are what their last sign-in said, refreshed by each one, and are what
+the allow list is checked against again when a credential of theirs is used.
 
 A record whose fields are all ordered, filtered or decided by is columns. A record
 with content of many shapes is a document: the store keeps it whole and never reads
