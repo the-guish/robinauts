@@ -317,6 +317,14 @@ refuses it, like the other sign-in keys, and runs on the default.
   *linked*; *the code expired* with **Show a new code**. Polling runs while
   the dialog is open. It stops when the dialog closes or the tab is hidden.
   Closing the dialog while a code waits deletes the pairing.
+- **"Devices", for admins**, is one of the admin screens. It lists every
+  linked device and every API token of the instance, by person: name,
+  platform, linked on, last used, expires. An admin ends one device, every
+  device of one person, or every device of the instance, with one action
+  each. An ended device gets 401 on its next request, and the phone
+  returns to its pairing screen. The admin sees names and dates, never a
+  secret and never a conversation (`docs/specs/privacy.md`). Each action
+  is logged.
 - **`#/link`** explains and does nothing: "This code is for the Robinauts
   app on a phone. Open the app and scan it there." It reads no parameter.
 - The QR has alternative text. Every state is said in words. No colour
@@ -429,7 +437,5 @@ The app is a repository of its own. This is what it does against the API.
   approves.
 - **No typed code.** Where no camera can see the screen, there is no way
   to pair. A short code needs a rate limit, and is not here.
-- **No operator's view.** Every device of every user, and "remove all of a
-  person's", come with the admin screens (`docs/specs/privacy.md`).
 - **No audit entries yet.** Device linked, device removed and pairing
   refused are log lines, as sign-ins are, until the audit log exists.
