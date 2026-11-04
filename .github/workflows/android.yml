@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+#
+# Builds the Android client. A workflow of its own rather than a job in
+# ci.yml, because a `paths` filter applies to the whole workflow: this way the
+# backend and frontend jobs in ci.yml still run on every pull request, and this
+# one runs only when the client, or the API contract it is built against,
+# changes. The reuse and sign-off jobs in ci.yml cover the client's files too.
+#
+# Like every check, the one job runs one script -- scripts/check-android.sh.
+# The steps before it only put a JDK and the Android SDK on the runner.
+
+name: Android client
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - clients/android/**
+      - backend/openapi.json
+      - scripts/check-android.sh
+      - .github/workflows/android.yml
+  pull_request:
+    paths:
+      - clients/android/**
+      - backend/openapi.json
+      - scripts/check-android.sh
+      - .github/workflows/android.yml
+
+# Nothing here writes to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: the client, assembled
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      # ubuntu-latest ships the Android command-line tools and sets
+      # ANDROID_SDK_ROOT. Accept the licences and make sure the platform and
+      # build-tools this build compiles against (SDK 35) are installed.
+      - name: provision the Android SDK
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" "build-tools;35.0.0" > /dev/null
+      - run: scripts/check-android.sh
