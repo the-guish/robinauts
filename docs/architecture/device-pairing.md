@@ -29,9 +29,9 @@ address into a phone.
   it was linked, when it was last used, and when it expires.
 - It lives `device_days`, 30 by default. It is not renewed. A phone that
   reaches the end pairs again.
-- It ends when its owner removes it under "Linked devices", when the phone
-  signs out, when it expires, when the operator clears it, or with the
-  user.
+- It ends when its owner removes it under "Linked devices", from a
+  browser, when the phone signs out, when it expires, when the operator
+  clears it, or with the user.
 - It is not an API token. A token is for a script. A person names it, it
   lasts ninety days, and it is never shown as a device. The two are
   separate tables with one shape. "Linked devices" shows both.
@@ -42,6 +42,30 @@ address into a phone.
 - In the local development mode a device is linked to the mode's one user,
   as a token is minted for it. Like a session or a token that names that
   user, it signs nobody in where sign-in is on.
+
+## What a bearer may do
+
+- A bearer reads and writes what its owner owns: every route under
+  `/api/`, and the lists of devices and tokens. A device ends itself with
+  `POST /auth/logout`. A token does not end itself. Its owner revokes it
+  in the browser.
+- **A bearer never mints a credential, and never removes one.**
+  `POST /auth/pairings`, `POST /auth/pairings/{id}/approve`,
+  `POST /auth/tokens`, `DELETE /auth/devices/{device_id}` and
+  `DELETE /auth/tokens/{token_id}` need the browser's session cookie. A
+  bearer that asks is 403.
+- The reason is persistence. A credential that mints credentials outlives
+  its removal. A stolen 30-day device secret would mint a 90-day API
+  token, and removing the phone from the list would achieve nothing. With
+  the rule, removing the phone ends everything the phone had. The same
+  rule stops a token minting a token. Only a person at a browser, signed
+  in through the identity provider within the last twelve hours, creates
+  or removes a credential.
+- The shell knows how the asker was named: by the session cookie, by a
+  device secret, or by a token. The routes above take the stricter
+  dependency, `browsing`, where the others take `asking`. In the local
+  development mode every request is the mode's one user, and counts as
+  the browser's.
 
 ## The flow
 
@@ -202,8 +226,12 @@ would read it off the shared screen and type it itself.
 | `POST /auth/pairings/claim` | nobody | present a code; answers `{secret, number, expires_at}`; 404 |
 | `GET /auth/session` | bearer | also answers `device`, `token` or `pairing`; never a 401 |
 | `GET /auth/devices` | cookie or bearer | the person's devices, oldest first |
-| `DELETE /auth/devices/{device_id}` | cookie or bearer | remove one of theirs; 404 for another's |
+| `DELETE /auth/devices/{device_id}` | cookie | remove one of theirs; 404 for another's; 403 for a bearer |
 | `POST /auth/logout` | device bearer | end this device, as it ends a browser's session |
+
+The API token routes follow the same rule. `POST /auth/tokens` and
+`DELETE /auth/tokens/{token_id}` are the browser's, and answer a bearer
+403. `GET /auth/tokens` answers a bearer too.
 
 `GET /auth/session` answers for a bearer as it does for a cookie. For a
 device session it answers the user and
@@ -278,8 +306,10 @@ refuses it, like the other sign-in keys, and runs on the default.
   block at the bottom of the panel links to it, beside sign-out. It lists
   the person's devices: name, platform, linked on, last used, expires. Each
   has **Remove**. Below them it lists their API tokens, each with
-  **Revoke**. Nothing of the chat library is involved. The panel and the
-  shell are ours.
+  **Revoke**, and a **New token** that asks for a name and shows the
+  secret once. This page is the one place a credential is made or ended,
+  because it runs on the browser's session. Nothing of the chat library is
+  involved. The panel and the shell are ours.
 - **"Link a phone"** opens a dialog. It asks for a code and shows the QR,
   with the sentence of step 2. The state is written under it: *waiting*;
   *a phone scanned your code, type the number it shows* with a six-digit
@@ -314,6 +344,10 @@ The app is a repository of its own. This is what it does against the API.
 - **Start-up.** `GET /auth/session`. With a user, the app carries on. With
   none, the device was removed or expired. The app forgets the secret and
   shows the pairing screen. Any `401` later means the same.
+- **No credential management.** The app can show the person's devices and
+  tokens, and can sign itself out. It cannot mint a token, start a
+  pairing, or remove another device. It sends the person to the browser
+  for that, and says so.
 - **The secret** lives in storage the operating system keeps for the app
   alone, under a key the Android Keystore holds. It is excluded from
   backups. A backup restored on another phone would otherwise clone the
@@ -369,6 +403,12 @@ The app is a repository of its own. This is what it does against the API.
   bearer it does not hold.
 - **The device's name.** Text the phone chose, bounded, shown as data in
   the list, and never part of the decision.
+- **A stolen device secret.** It is the device, until the device is
+  removed: it reads and writes what the person owns. It mints nothing,
+  not a token and not a pairing, and removes nothing. So it cannot outlive
+  its removal, and the list is the whole of the person's control. The
+  secret lives in the Keystore, out of backups, and never in a log, which
+  is what makes stealing it hard in the first place.
 
 ## Known limits
 
