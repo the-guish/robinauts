@@ -9,10 +9,12 @@
  * says stays true -- there is no sign-in and everybody is the one local
  * user -- and a banner that can be put away is a banner nobody sees.
  */
+import "./shell.css";
+
 export function LocalModeBanner({ local }: Readonly<{ local: boolean }>) {
   if (!local) return null;
   return (
-    <p role="note" className="m-0 bg-warn-bg px-4 py-1.5 text-sm text-warn-ink">
+    <p role="note" className="banner-local">
       Local development mode: sign-in is off and everything runs as one local
       user. For developing on your own machine, never for a deployment.
     </p>

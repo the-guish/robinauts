@@ -16,6 +16,7 @@
  * `docs/legal/ip-clearance.md`.
  */
 import type { Session } from "./session";
+import "./session.css";
 
 /**
  * What each code a failed sign-in comes back with means, for a reader.
@@ -116,20 +117,20 @@ export function SignInPage({ session }: Readonly<{ session: Session }>) {
   const providers = session.providers ?? [];
   const message = failure(errorInHash(location.hash));
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4">
-      <div className="flex flex-col gap-4 rounded-card border border-line bg-paper p-8">
-        <h1 className="text-xl font-semibold">Sign in to Robinauts</h1>
+    <main className="signin">
+      <div className="signin-card">
+        <h1 className="signin-title">Sign in to Robinauts</h1>
         {message !== null && (
-          <p role="alert" className="text-bad">
+          <p role="alert" className="signin-failed">
             {message}
           </p>
         )}
         {session.sign_in && providers.length > 0 ? (
-          <ul className="flex list-none flex-col gap-2 p-0">
+          <ul className="signin-providers">
             {providers.map((provider) => (
               <li key={provider.id}>
                 <a
-                  className="block rounded-ui border border-primary bg-primary px-4 py-2 text-center font-semibold text-primary-foreground no-underline hover:opacity-90"
+                  className="signin-provider"
                   href={loginHref(provider.id, location.hash)}
                 >
                   Sign in with {provider.title}
@@ -138,7 +139,7 @@ export function SignInPage({ session }: Readonly<{ session: Session }>) {
             ))}
           </ul>
         ) : (
-          <p className="text-muted-foreground">
+          <p className="signin-none">
             This deployment has no sign-in configured. Whoever runs it starts it
             with a configuration file naming an identity provider; until then
             there is no way in.

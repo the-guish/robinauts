@@ -181,8 +181,8 @@ test("the closed drawer is out of a keyboard's way; the open one is a dialog", a
  *
  * jsdom has no layout engine and reports no boxes for anything, so without
  * this the trap cannot tell what is on the screen -- and the panel holds a
- * control that belongs to the other layout: "Collapse the panel" is
- * `max-md:hidden`, which at drawer width is `display: none`. A stop the
+ * control that belongs to the other layout: "Collapse the panel" is hidden
+ * by `./panel.css` below the breakpoint, `display: none`. A stop the
  * browser will not focus is a stop the trap must skip, or Tab deadlocks on
  * it. `vi.restoreAllMocks` in src/test/setup.ts puts this back.
  */

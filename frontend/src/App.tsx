@@ -15,6 +15,7 @@ import type { ReactNode } from "react";
 
 import { ErrorBoundary } from "./ErrorBoundary";
 import { loadSession, useSession } from "./session/session";
+import "./session/session.css";
 import { SignInPage } from "./session/SignInPage";
 import { Shell } from "./shell/Shell";
 
@@ -47,14 +48,14 @@ function Pages() {
     // again.
     return (
       <Centred>
-        <p role="alert" className="text-bad">
+        <p role="alert" className="page-failed">
           The session could not be loaded
           {error === null ? "" : `: ${error.detail}`}
         </p>
         <button
           type="button"
           onClick={() => void loadSession()}
-          className="rounded-ui border border-edge bg-paper px-3 py-1.5 hover:bg-hover"
+          className="page-button"
         >
           Try again
         </button>
@@ -68,9 +69,5 @@ function Pages() {
 }
 
 function Centred({ children }: Readonly<{ children: ReactNode }>) {
-  return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-3 px-4 text-muted-foreground">
-      {children}
-    </main>
-  );
+  return <main className="page page-centred">{children}</main>;
 }

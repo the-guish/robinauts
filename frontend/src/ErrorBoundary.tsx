@@ -15,6 +15,8 @@
  */
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
+import "./session/session.css";
+
 interface Caught {
   failure: Error | null;
 }
@@ -41,9 +43,9 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, Caught> {
     const { failure } = this.state;
     if (failure === null) return this.props.children;
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-3 px-4">
-        <h1 className="text-xl font-semibold">Something went wrong</h1>
-        <p role="alert" className="text-bad">
+      <main className="page">
+        <h1 className="page-title">Something went wrong</h1>
+        <p role="alert" className="page-failed">
           {failure.message}
         </p>
         <p>
@@ -52,7 +54,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, Caught> {
             onClick={() => {
               location.reload();
             }}
-            className="rounded-ui border border-edge bg-paper px-3 py-1.5 hover:bg-hover"
+            className="page-button"
           >
             Reload
           </button>

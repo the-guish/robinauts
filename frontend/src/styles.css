@@ -2,207 +2,133 @@
 /* Copyright The Robinauts Authors */
 
 /*
- * The stylesheet the page loads: Tailwind, our design tokens, and the little
- * that is written as plain CSS.
+ * The stylesheet the page loads first: our design tokens, the base every
+ * other stylesheet is written against, and the two rules that hold for the
+ * whole page.
  *
- * `@import "tailwindcss"` **names a package**, and rollup's module graph does
- * not see it, because no module is ever imported from `tailwindcss`. So it
- * is written down by hand, in `CSS_PACKAGES` in ../vite.config.ts, which is
- * what puts it in `bundled-packages.txt` and its MIT notice in
- * `dist/THIRD_PARTY_LICENSES.txt` (../../DEPENDENCIES.md, "What the bundle's
- * record does not see"). **A stylesheet here that gains an `@import` or a
- * `url()` naming another package adds that name there too.**
- *
- * Tailwind's own sources are named rather than discovered. `source(none)`
- * turns the automatic scan off: left on, it walks up to the repository root
- * and reads the backend as well, so what the build produces would depend on
- * what else happens to be in the tree.
+ * **Plain CSS, and no package.** Each area of the interface has a stylesheet
+ * of its own, imported by the component that uses it (`./shell/shell.css`,
+ * `./history/history.css` and the rest), with classes named for the area;
+ * this file is what they all assume. A stylesheet that `@import`s a package
+ * would ship that package's code with no module graph to see it, which is
+ * why `./test/dependency-free.test.ts` refuses one here.
  */
-@import "tailwindcss" source(none);
-/*
- * Two more packages, and two more names in `CSS_PACKAGES`. Both are Tailwind
- * plugins written as CSS, and both are asked for by the vendored assistant-ui
- * components rather than by anything of ours
- * (./chat/assistant-ui/vendor/README.md): `tw-animate-css` defines the
- * `animate-in`, `fade-in-*`, `zoom-in-*` and `slide-in-from-*` utilities the
- * copied components are written in, and `tw-shimmer` the `shimmer` one. Both
- * imports sit where the registries' own install instructions put them: at the
- * top of the stylesheet Tailwind is imported in.
- */
-@import "tw-animate-css";
-@import "tw-shimmer";
 @import "./tokens.css";
 
-@source "../index.html";
 /*
- * The vendored copy is in this glob and is meant to be: the chat renders it
- * (`./chat/assistant-ui/Chat.tsx`), so its utilities ship with it. Until it
- * was rendered there was an `@source not` here keeping 40 kB of utilities
- * for markup no page drew; step 21 took it out.
- */
-@source "./**/*.{ts,tsx}";
-
-/*
- * Dark, as this project decides it rather than as Tailwind's default does.
+ * The base: what a browser draws differently from one engine to the next,
+ * levelled, and nothing more. Every stylesheet in the interface is written
+ * against exactly this; anything a component needs beyond it -- a margin, a
+ * border, a cursor -- it says itself.
  *
- * Tailwind's own `dark:` is `prefers-color-scheme` alone, and the interface
- * has a toggle that overrules the machine (`./tokens.css`). The vendored
- * components carry a dozen `dark:` utilities, and with the default variant
- * every one of them would disagree with the tokens beside it the moment
- * somebody chose light on a dark machine. The two rules below are the two in
- * `tokens.css`, said again as a variant.
+ * The borders are zero and solid in the line colour, so that a component
+ * draws one by giving it a width alone; lists lose their bullets, because
+ * every list here is a list of controls; and form controls take the text of
+ * whatever they sit in, which a browser does not do by itself.
  */
-@custom-variant dark {
-  @media (prefers-color-scheme: dark) {
-    &:where(
-      :root:not([data-theme="light"]),
-      :root:not([data-theme="light"]) *
-    ) {
-      @slot;
-    }
-  }
-  &:where(:root[data-theme="dark"], :root[data-theme="dark"] *) {
-    @slot;
-  }
+*,
+::before,
+::after {
+  box-sizing: border-box;
+  border: 0 solid var(--line);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  tab-size: 4;
+}
+
+body {
+  margin: 0;
+  background-color: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p,
+figure,
+blockquote,
+dl,
+dd,
+pre,
+ul,
+ol {
+  margin: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+ul,
+ol {
+  padding: 0;
+  list-style: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+
+button,
+[role="button"] {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+a {
+  color: inherit;
+  text-decoration: inherit;
+}
+
+img,
+svg,
+video {
+  display: block;
+  max-width: 100%;
+}
+
+textarea {
+  resize: none;
+}
+
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--mono);
+  font-size: 1em;
 }
 
 /*
- * The rest of what the registry items declare for the stylesheet, copied from
- * their `css` blocks (see ./chat/assistant-ui/vendor/README.md): the two
- * variants and the two keyframes that the copied collapsible components --
- * the reasoning panel and the tool group -- are written against. `shadcn add`
- * merges these into the project's stylesheet; here they are written out, so
- * that what they are and where they came from is readable.
+ * A keyboard's way through the interface has to be visible, and the base
+ * above draws no outline of its own: this is the one ring, everywhere.
  */
-@custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
-@custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));
-
-@keyframes collapsible-down {
-  from {
-    height: 0;
-  }
-  to {
-    height: var(
-      --radix-collapsible-content-height,
-      var(--collapsible-panel-height, auto)
-    );
-  }
-}
-
-@keyframes collapsible-up {
-  from {
-    height: var(
-      --radix-collapsible-content-height,
-      var(--collapsible-panel-height, auto)
-    );
-  }
-  to {
-    height: 0;
-  }
-}
-
-/*
- * The Tailwind theme, over our tokens (docs/specs/frontend.md, ADR 0001).
- *
- * `inline` is what makes `bg-panel` compile to `background-color:
- * var(--panel)` rather than to a variable of Tailwind's own that holds
- * `var(--panel)`. One indirection, and the tokens stay the thing every
- * colour in the interface is written in: if Tailwind goes, this block goes
- * with it and `tokens.css` does not move.
- *
- * Tailwind's default palette is left in place. It is not what components are
- * written in -- every colour below is a token -- and clearing it would take
- * `transparent` and `current` with it.
- */
-@theme inline {
-  --color-ground: var(--ground);
-  --color-paper: var(--paper);
-  --color-panel: var(--panel);
-  --color-tint: var(--tint);
-  --color-hover: var(--hover);
-  --color-ink: var(--ink);
-  --color-line: var(--line);
-  --color-edge: var(--edge);
-  --color-link: var(--link);
-  --color-bad: var(--bad);
-  --color-warn-bg: var(--warn-bg);
-  --color-warn-ink: var(--warn-ink);
-  --color-scrim: var(--scrim);
-
-  --radius-ui: var(--radius);
-  --radius-card: var(--radius-card);
-  --radius-pill: var(--radius-pill);
-
-  --font-sans: var(--sans);
-  --font-mono: var(--mono);
-
-  /*
-   * The vendored components' palette, over the same tokens (ADR 0001).
-   *
-   * They are shadcn/ui-shaped, so they are written in `bg-background`,
-   * `text-muted-foreground`, `border-border` and a dozen more -- names this
-   * project does not use and did not choose. Rather than edit the copy,
-   * which would be a change to re-apply at every re-sync, the names are
-   * **mapped here** onto the tokens the rest of the interface is built from.
-   * That is what makes the chat and the shell one look, and it is the whole
-   * of the styling this step needed.
-   *
-   * **Two of these names were already taken**, and the shell gave them up
-   * rather than the copy: `muted` was this project's grey *ink* and is
-   * shadcn's subtle *surface* (the grey ink is `muted-foreground`), and
-   * `accent` was the primary button and is shadcn's hover surface (the
-   * primary button is `primary`). One vocabulary over our tokens is a
-   * smaller thing to keep straight than two, and the tokens themselves --
-   * which is what outlives Tailwind -- did not move.
-   *
-   * Everything flips with the tokens, so there is one palette and not two.
-   */
-  --color-background: var(--ground);
-  --color-foreground: var(--ink);
-  --color-popover: var(--paper);
-  --color-popover-foreground: var(--ink);
-  --color-primary: var(--accent);
-  --color-primary-foreground: var(--on-accent);
-  --color-secondary: var(--panel);
-  --color-secondary-foreground: var(--ink);
-  --color-muted: var(--tint);
-  --color-muted-foreground: var(--muted);
-  --color-accent: var(--hover);
-  --color-accent-foreground: var(--ink);
-  --color-destructive: var(--bad);
-  --color-border: var(--line);
-  --color-input: var(--edge);
-  --color-ring: var(--link);
-}
-
-@layer base {
-  body {
-    background-color: var(--ground);
-    color: var(--ink);
-    font-family: var(--sans);
-    font-size: 15px;
-    line-height: 1.45;
-  }
-
-  /*
-   * A keyboard's way through the interface has to be visible, and Tailwind's
-   * preflight removes the browser's own outline from anything it styles.
-   */
-  :focus-visible {
-    outline: 2px solid var(--link);
-    outline-offset: 2px;
-  }
-}
-
-/*
- * A failed answer says so where the answer would be, in the palette's quiet
- * colours rather than as an alarm (`docs/specs/ui.md`). The vendored error box
- * is red; it is restyled here, by the class it carries, so that the copy stays
- * as it came (`src/chat/assistant-ui/vendor/README.md`). Unlayered, so it wins
- * over the utilities on the element.
- */
-.aui-message-error-root {
-  border-color: var(--line);
-  background-color: var(--panel);
-  color: var(--muted);
+:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
 }

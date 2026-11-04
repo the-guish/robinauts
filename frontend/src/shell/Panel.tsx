@@ -16,16 +16,17 @@
  * The shape is neorc's, written again for this project; recorded in
  * `docs/legal/ip-clearance.md`.
  */
-import { LogOut, PanelLeft, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState, type RefObject } from "react";
 
 import { ApiError } from "../api/client";
 import type { ConversationId } from "../chat";
 import type { History } from "../history/history";
 import { HistoryList } from "../history/HistoryList";
+import { LogOutIcon, PanelLeftIcon, PlusIcon, XIcon } from "../icons";
 import type { User } from "../session/session";
 import { useWide } from "./breakpoint";
 import { ThemeToggle } from "./ThemeToggle";
+import "./panel.css";
 
 /**
  * What can be tabbed to, in the order a browser would tab through it.
@@ -50,8 +51,9 @@ const FOCUSABLE = [
  * The stops a Tab would actually land on, in order.
  *
  * **What is drawn, not what is written.** This panel holds controls that
- * belong to the other layout -- "Collapse the panel" is `max-md:hidden`, so
- * at drawer width it is `display: none` -- and a selector cannot see that.
+ * belong to the other layout -- "Collapse the panel" is hidden by
+ * `./panel.css` below the breakpoint, so at drawer width it is
+ * `display: none` -- and a selector cannot see that.
  * An element that is not rendered cannot take the focus, so `.focus()` on it
  * does nothing; having already called `preventDefault()`, the trap would
  * then leave the focus where it was and Tab would be dead.
@@ -151,18 +153,13 @@ export function Panel({
       inert={offScreen}
       // Open, it covers the page and is the only thing to be in.
       {...(open ? { role: "dialog" as const, "aria-modal": true } : {})}
+      // The two attributes are what `./panel.css` draws the rail and the
+      // drawer by: what is hidden in the rail, and where the drawer is.
       data-collapsed={collapsed}
       data-drawer={drawer ? "open" : "closed"}
-      className={
-        "z-20 flex h-screen shrink-0 flex-col gap-1 overflow-x-hidden overflow-y-auto border-r border-line bg-panel p-3 " +
-        "max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:w-70 max-md:transition-transform md:sticky md:top-0 " +
-        (drawer ? "max-md:translate-x-0 " : "max-md:-translate-x-full ") +
-        (collapsed ? "md:w-14 md:items-center md:px-2" : "md:w-70")
-      }
+      className="panel"
     >
-      <div
-        className={`flex items-center gap-2 ${collapsed ? "md:flex-col" : ""}`}
-      >
+      <div className="panel-head">
         <button
           type="button"
           title={collapsed ? "Expand the panel" : "Collapse the panel"}
@@ -171,9 +168,9 @@ export function Panel({
           onClick={() => {
             onCollapse(!collapsed);
           }}
-          className="rounded-ui p-1.5 text-muted-foreground hover:bg-hover hover:text-ink max-md:hidden"
+          className="panel-tool panel-collapse"
         >
-          <PanelLeft size={16} aria-hidden="true" />
+          <PanelLeftIcon className="panel-icon" />
         </button>
         <button
           type="button"
@@ -181,35 +178,28 @@ export function Panel({
           title="Close the panel"
           aria-label="Close the panel"
           onClick={onCloseDrawer}
-          className="rounded-ui p-1.5 text-muted-foreground hover:bg-hover hover:text-ink md:hidden"
+          className="panel-tool panel-close"
         >
-          <X size={16} aria-hidden="true" />
+          <XIcon className="panel-icon" />
         </button>
         {/* The brand is text. No logo image: this project ships no mark. */}
-        <span className={`text-lg font-bold ${collapsed ? "md:hidden" : ""}`}>
-          Robinauts
-        </span>
+        <span className="panel-brand panel-wide">Robinauts</span>
       </div>
 
       <button
         type="button"
         title="New chat"
         onClick={onNewChat}
-        className="my-2 flex items-center justify-center gap-2 rounded-ui border border-primary bg-primary px-3 py-2 font-semibold text-primary-foreground hover:opacity-90"
+        className="panel-new"
       >
-        <Plus size={16} aria-hidden="true" />
-        <span className={collapsed ? "md:hidden" : ""}>New chat</span>
+        <PlusIcon className="panel-icon" />
+        <span className="panel-wide">New chat</span>
       </button>
 
       {/* The one part of the panel that scrolls: a long history must not
           push the profile block off the bottom of the screen. */}
-      <nav
-        aria-label="History"
-        className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto ${collapsed ? "md:hidden" : ""}`}
-      >
-        <h2 className="mt-2 mb-1 px-2 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-          History
-        </h2>
+      <nav aria-label="History" className="panel-history panel-wide">
+        <h2 className="panel-heading">History</h2>
         <HistoryList
           history={history}
           current={current}
@@ -221,13 +211,12 @@ export function Panel({
           because `docs/specs/frontend.md` leaves no top bar to put it in.
           In the rail the toggle goes with the labels: three buttons do not
           fit in it, and the theme is not what a rail is for. */}
-      <div className="mt-auto flex flex-col gap-2">
-        <div className={collapsed ? "md:hidden" : ""}>
+      <div className="panel-foot">
+        <div className="panel-wide">
           <ThemeToggle />
         </div>
         <ProfileBlock
           user={user}
-          collapsed={collapsed}
           signOut={signOut}
           signInConfigured={signInConfigured}
           onSignedOut={onCloseDrawer}
@@ -297,13 +286,11 @@ function useLockedScroll(open: boolean): void {
 /** Who is signed in, and the way out. Pinned to the bottom of the panel. */
 function ProfileBlock({
   user,
-  collapsed,
   signOut,
   signInConfigured,
   onSignedOut,
 }: Readonly<{
   user: User | null;
-  collapsed: boolean;
   signOut: () => Promise<void>;
   signInConfigured: boolean;
   onSignedOut: () => void;
@@ -336,34 +323,19 @@ function ProfileBlock({
   };
   return (
     // A region rather than a labelled div: a name on a <div> names nothing.
-    <section
-      aria-label="Profile"
-      className={`flex flex-wrap gap-2 border-t border-line pt-3 ${
-        collapsed ? "md:flex-col md:items-center" : "items-center"
-      }`}
-    >
+    <section aria-label="Profile" className="panel-profile">
       {/* The initial is a picture of the name, and in the rail it is the
           only thing left of the profile, so it says whose it is rather than
           being hidden from a reader who cannot see it. */}
-      <span
-        role="img"
-        aria-label={name}
-        title={name}
-        className="grid size-8 shrink-0 place-items-center rounded-pill bg-primary text-sm font-semibold text-primary-foreground"
-      >
+      <span role="img" aria-label={name} title={name} className="panel-avatar">
         {name.slice(0, 1).toUpperCase()}
       </span>
-      <span
-        className={`flex min-w-0 flex-1 flex-col text-sm leading-tight ${collapsed ? "md:hidden" : ""}`}
-      >
-        <span className="truncate" title={name}>
+      <span className="panel-who panel-wide">
+        <span className="panel-name" title={name}>
           {name}
         </span>
         {user.email !== undefined && user.email !== null && (
-          <span
-            className="truncate text-xs text-muted-foreground"
-            title={user.email}
-          >
+          <span className="panel-email" title={user.email}>
             {user.email}
           </span>
         )}
@@ -381,20 +353,16 @@ function ProfileBlock({
           disabled={leaving}
           title="Sign out"
           aria-label="Sign out"
-          className="flex shrink-0 items-center gap-1 rounded-ui p-1 text-xs text-muted-foreground hover:bg-hover hover:text-ink disabled:opacity-60"
+          className="panel-signout"
         >
-          <LogOut size={14} aria-hidden="true" />
-          <span className={collapsed ? "md:hidden" : ""}>Sign out</span>
+          <LogOutIcon className="panel-icon-small" />
+          <span className="panel-wide">Sign out</span>
         </button>
       ) : (
-        <span
-          className={`shrink-0 text-xs text-muted-foreground ${collapsed ? "md:hidden" : ""}`}
-        >
-          Sign-in is off
-        </span>
+        <span className="panel-nosignin panel-wide">Sign-in is off</span>
       )}
       {refused !== null && (
-        <span role="alert" className="basis-full text-xs text-bad">
+        <span role="alert" className="panel-refused">
           Not signed out: {refused}
         </span>
       )}

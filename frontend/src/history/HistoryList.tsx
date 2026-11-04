@@ -19,7 +19,6 @@
  * and puts the focus back on the button that opened it, and the focus
  * follows into the rename box and onto "No".
  */
-import { Check, MoreHorizontal, Pencil, Trash2, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -32,8 +31,16 @@ import { ApiError, detailOf } from "../api/client";
 import type { ConversationId } from "../chat";
 import type { Conversation } from "../conversation/conversation";
 import { shownTitle } from "../conversation/conversation";
+import {
+  CheckIcon,
+  EllipsisIcon,
+  PencilIcon,
+  TrashIcon,
+  XIcon,
+} from "../icons";
 import { formatRoute, navigate, NEW_CHAT } from "../router";
 import type { History } from "./history";
+import "./history.css";
 
 /**
  * What a conversation that is still answering is told when it is deleted.
@@ -94,7 +101,7 @@ export function HistoryList({
         ref={list}
         tabIndex={-1}
         aria-label="Conversations"
-        className="m-0 flex list-none flex-col p-0 outline-none"
+        className="history-list"
       >
         {items.map((conversation) => (
           <HistoryItem
@@ -108,19 +115,15 @@ export function HistoryList({
         ))}
       </ul>
       {status === "loading" && (
-        <p className="px-2 text-sm text-muted-foreground">
-          Loading the conversations…
-        </p>
+        <p className="history-note">Loading the conversations…</p>
       )}
       {status === "ready" && items.length === 0 && (
-        <p className="px-2 text-sm text-muted-foreground">
-          No conversations yet.
-        </p>
+        <p className="history-note">No conversations yet.</p>
       )}
       {/* Already a sentence: which ask failed is known where it failed, not
           here (`history.ts`). */}
       {error !== null && (
-        <p role="alert" className="px-2 text-sm text-bad">
+        <p role="alert" className="history-failed">
           {error}
         </p>
       )}
@@ -130,7 +133,7 @@ export function HistoryList({
         <button
           type="button"
           onClick={history.refresh}
-          className="mt-1 self-start rounded-ui border border-edge bg-paper px-2 py-1 text-sm hover:bg-hover"
+          className="history-retry"
         >
           Try again
         </button>
@@ -142,7 +145,7 @@ export function HistoryList({
           // A page cannot be added to a list that is being replaced: the
           // cursor belongs to the listing the refresh is throwing away.
           disabled={loadingMore || refreshing}
-          className="mt-1 self-start rounded-ui px-2 py-1 text-sm text-muted-foreground hover:bg-hover hover:text-ink disabled:opacity-60"
+          className="history-more"
         >
           {loadingMore ? "Loading…" : "Load more"}
         </button>
@@ -306,18 +309,14 @@ function HistoryItem({
   };
 
   return (
-    <li
-      onKeyDown={onKeyDown}
-      className="flex flex-col rounded-ui hover:bg-hover"
-      data-current={isCurrent}
-    >
+    <li onKeyDown={onKeyDown} className="history-item" data-current={isCurrent}>
       {mode === "rename" ? (
         <form
           onSubmit={(event) => {
             event.preventDefault();
             void save();
           }}
-          className="flex items-center gap-1 p-1"
+          className="history-rename"
         >
           {/* `readOnly`, never `disabled`: this box holds the focus while
               the rename is in the air, and a disabled control loses it to
@@ -341,37 +340,35 @@ function HistoryItem({
               event.preventDefault();
               void save();
             }}
-            className="min-w-0 flex-1 rounded-ui border border-edge bg-paper px-2 py-1 text-sm text-ink"
+            className="history-title-box"
           />
           <button
             type="submit"
             title="Save the title"
             aria-label="Save the title"
             aria-disabled={busy}
-            className="rounded-ui p-1 text-muted-foreground hover:bg-tint hover:text-ink aria-disabled:opacity-60"
+            className="history-tool"
           >
-            <Check size={16} aria-hidden="true" />
+            <CheckIcon className="history-icon" />
           </button>
           <button
             type="button"
             title="Cancel the rename"
             aria-label="Cancel the rename"
             onClick={close}
-            className="rounded-ui p-1 text-muted-foreground hover:bg-tint hover:text-ink"
+            className="history-tool"
           >
-            <X size={16} aria-hidden="true" />
+            <XIcon className="history-icon" />
           </button>
         </form>
       ) : (
-        <div className="flex items-center gap-1">
+        <div className="history-row">
           <a
             href={formatRoute({ kind: "conversation", id: conversation.id })}
             aria-current={isCurrent ? "page" : undefined}
             title={name}
             onClick={onOpened}
-            className={`min-w-0 flex-1 truncate rounded-ui px-2 py-1.5 text-sm no-underline ${
-              isCurrent ? "bg-tint font-semibold text-ink" : "text-ink"
-            }`}
+            className="history-link"
           >
             {name}
           </a>
@@ -385,9 +382,9 @@ function HistoryItem({
               setRefused(null);
               setMode(mode === "idle" ? "menu" : "idle");
             }}
-            className="mr-1 shrink-0 rounded-ui p-1 text-muted-foreground hover:bg-tint hover:text-ink"
+            className="history-tool history-actions"
           >
-            <MoreHorizontal size={16} aria-hidden="true" />
+            <EllipsisIcon className="history-icon" />
           </button>
         </div>
       )}
@@ -399,7 +396,7 @@ function HistoryItem({
         <div
           role="group"
           aria-label={`Actions for ${label}`}
-          className="flex gap-1 px-1 pb-1"
+          className="history-menu"
         >
           <button
             type="button"
@@ -407,9 +404,9 @@ function HistoryItem({
               setDraft(conversation.title);
               setMode("rename");
             }}
-            className="flex items-center gap-1 rounded-ui px-2 py-1 text-sm text-muted-foreground hover:bg-tint hover:text-ink"
+            className="history-menu-item"
           >
-            <Pencil size={14} aria-hidden="true" />
+            <PencilIcon className="history-icon-small" />
             Rename
           </button>
           <button
@@ -417,16 +414,16 @@ function HistoryItem({
             onClick={() => {
               setMode("confirm");
             }}
-            className="flex items-center gap-1 rounded-ui px-2 py-1 text-sm text-muted-foreground hover:bg-tint hover:text-ink"
+            className="history-menu-item"
           >
-            <Trash2 size={14} aria-hidden="true" />
+            <TrashIcon className="history-icon-small" />
             Delete
           </button>
         </div>
       )}
 
       {mode === "confirm" && (
-        <div className="flex flex-wrap items-center gap-2 px-2 pb-1 text-sm">
+        <div className="history-confirm">
           <span>Delete this conversation?</span>
           {/* The title goes after the visible words, not instead of them:
               a control has to stay reachable by what it says. */}
@@ -435,7 +432,7 @@ function HistoryItem({
             onClick={() => void remove()}
             aria-label={`Yes, delete: ${label}`}
             aria-disabled={busy}
-            className="rounded-ui border border-edge bg-paper px-2 py-0.5 text-bad hover:bg-hover aria-disabled:opacity-60"
+            className="history-answer history-yes"
           >
             Yes, delete
           </button>
@@ -444,7 +441,7 @@ function HistoryItem({
             type="button"
             onClick={close}
             aria-label={`No, keep it: ${label}`}
-            className="rounded-ui border border-edge bg-paper px-2 py-0.5 hover:bg-hover"
+            className="history-answer"
           >
             No, keep it
           </button>
@@ -452,7 +449,7 @@ function HistoryItem({
       )}
 
       {refused !== null && (
-        <p role="alert" className="px-2 pb-1 text-xs text-bad">
+        <p role="alert" className="history-refused">
           {refused}
         </p>
       )}
