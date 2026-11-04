@@ -14,7 +14,6 @@ import {
 import { join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 
-import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import license from "rollup-plugin-license";
 import type { Dependency } from "rollup-plugin-license";
@@ -73,26 +72,27 @@ const BUNDLED_PACKAGES = resolve(here, "bundled-packages.txt");
 
 /**
  * Packages whose CSS ships although no module was ever imported from them.
- *
  * **This list is maintained by hand**, and it is the by-hand rule of
  * ../DEPENDENCIES.md ("What the bundle's record does not see") made into a
  * file the build reads. A stylesheet that gains an `@import "pkg"`, a
  * `url(pkg/…)` or a reference to a package stylesheet that imports another
  * package is a change that adds a name here, and that name is what a
  * reviewer looks at -- exactly as a new line in `bundled-packages.txt` is.
- *
  * Nothing discovers these: a scanner that agrees with Vite's own resolver
  * about what a specifier means was written for step 17 and dropped after ten
  * rounds of review. What the build can still do, once a name is written
  * down, is everything that follows from it: read the package's own metadata,
  * hold its licence to the allowed list like any bundled package, put it in
- * the record, and ship its notice with the code it belongs to. Left out,
- * `tailwindcss`'s preflight and utilities would ship with no MIT notice
- * anywhere in `dist/`.
+ * the record, and ship its notice with the code it belongs to.
  *
- * `src/styles.css` says the same thing from the other side.
+ * **Empty since ADR 0006.** Every stylesheet is this project's own, written
+ * over `src/tokens.css`, and none names a package: Tailwind and the two
+ * plugins the vendored chat components were written against went with them.
+ * The mechanism stays, because the day a stylesheet does name a package,
+ * this is where the name goes, and `src/test/build-rules.test.ts` proves it
+ * still works on a tree that has one.
  */
-const CSS_PACKAGES = ["tailwindcss", "tw-animate-css", "tw-shimmer"];
+const CSS_PACKAGES: readonly string[] = [];
 
 /** Where the packages above are read from, which is what npm installed. */
 const NODE_MODULES = resolve(here, "node_modules");
@@ -498,15 +498,8 @@ export default defineConfig({
   // `rollupOptions.output.assetFileNames` written here is a change to that
   // rule as well.
   base: "./",
-  // Tailwind compiles src/styles.css; the stylesheet rules still judge every
-  // file that reaches the build, Tailwind's own included.
-  plugins: [
-    tailwindcss(),
-    react(),
-    refuseStylesheets(),
-    carryCssNotices(),
-    sizeBudget(),
-  ],
+  // The stylesheet rules judge every file that reaches the build.
+  plugins: [react(), refuseStylesheets(), carryCssNotices(), sizeBudget()],
   test: {
     environment: "jsdom",
     setupFiles: ["src/test/setup.ts"],

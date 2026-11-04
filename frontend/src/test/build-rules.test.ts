@@ -319,19 +319,11 @@ describe("the packages a stylesheet reaches", () => {
     // The by-hand list and the installed tree have to agree, and this is
     // where a name that was written down without the package being there
     // stops the build.
-    const named = cssPackagesIn(resolve(here, "node_modules"));
-    // Tailwind, and the two plugins the vendored chat components are written
-    // against (src/chat/assistant-ui/vendor/README.md). All three are
-    // `@import`ed by src/styles.css and reached by no module.
-    expect(named.map((one) => one.name)).toEqual([
-      "tailwindcss",
-      "tw-animate-css",
-      "tw-shimmer",
-    ]);
-    for (const one of named) {
-      expect(one.license).toBe("MIT");
-      expect(one.text).toContain("MIT License");
-    }
+    // Since ADR 0006 no stylesheet names a package, so the list is empty and
+    // the real tree yields nothing. That is itself the thing to prove: an
+    // entry here would be a package shipping through a stylesheet, and the
+    // first question to ask of it is which stylesheet.
+    expect(cssPackagesIn(resolve(here, "node_modules"))).toEqual([]);
   });
 });
 
