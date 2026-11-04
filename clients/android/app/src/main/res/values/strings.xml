@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    SPDX-License-Identifier: Apache-2.0
+    Copyright The Robinauts Authors
+-->
+<resources>
+    <string name="app_name">Robinauts</string>
+</resources>

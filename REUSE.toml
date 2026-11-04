@@ -80,3 +80,17 @@ path = [
 precedence = "aggregate"
 SPDX-FileCopyrightText = "The Robinauts Authors"
 SPDX-License-Identifier = "Apache-2.0"
+
+# The Gradle wrapper carried with the Android client (clients/android), so the
+# client builds against a pinned Gradle without a separate install. The jar is
+# a binary, and the properties file is written by Gradle's own `wrapper` task;
+# neither is ours to put a header on. The two wrapper scripts beside them carry
+# Gradle's own SPDX header already, so they are not listed here.
+[[annotations]]
+path = [
+    "clients/android/gradle/wrapper/gradle-wrapper.jar",
+    "clients/android/gradle/wrapper/gradle-wrapper.properties",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Gradle, Inc."
+SPDX-License-Identifier = "Apache-2.0"
