@@ -169,6 +169,17 @@
   color: var(--muted);
 }
 
+/* "Linked devices" and "Sign out", on a line of their own under the name. */
+.panel-account {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem;
+}
+
+.panel-devices,
 .panel-signout {
   display: flex;
   flex-shrink: 0;
@@ -179,6 +190,12 @@
   font-size: 0.75rem;
   line-height: calc(1 / 0.75);
   color: var(--muted);
+}
+
+.panel-devices[aria-current="page"] {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
 }
 
 .panel-signout:disabled {
@@ -201,6 +218,7 @@
 
 @media (hover: hover) {
   .panel-tool:hover,
+  .panel-devices:hover,
   .panel-signout:hover {
     background-color: var(--hover);
     color: var(--ink);
@@ -258,6 +276,11 @@
 
   .panel[data-collapsed="true"] .panel-profile {
     align-items: center;
+  }
+
+  .panel[data-collapsed="true"] .panel-account {
+    flex-basis: auto;
+    flex-direction: column;
   }
 
   .panel[data-collapsed="true"] .panel-wide {

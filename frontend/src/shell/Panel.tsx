@@ -23,7 +23,14 @@ import { ApiError } from "../api/client";
 import type { ConversationId } from "../chat";
 import type { History } from "../history/history";
 import { HistoryList } from "../history/HistoryList";
-import { LogOutIcon, PanelLeftIcon, PlusIcon, XIcon } from "../icons";
+import {
+  LogOutIcon,
+  MonitorIcon,
+  PanelLeftIcon,
+  PlusIcon,
+  XIcon,
+} from "../icons";
+import { DEVICES, formatRoute } from "../router";
 import type { User } from "../session/session";
 import { useWide } from "./breakpoint";
 import { ThemeToggle } from "./ThemeToggle";
@@ -108,6 +115,8 @@ export interface PanelProps {
   history: History;
   /** The conversation the page is on, so the list can mark it. */
   current: ConversationId | null;
+  /** Whether the page is "Linked devices", so its link can say so. */
+  onDevices?: boolean;
   /** Collapsed to a rail of icons. Only on a screen wide enough for one. */
   collapsed: boolean;
   onCollapse: (collapsed: boolean) => void;
@@ -126,6 +135,7 @@ export function Panel({
   user,
   history,
   current,
+  onDevices = false,
   collapsed,
   onCollapse,
   drawer,
@@ -220,7 +230,8 @@ export function Panel({
           user={user}
           signOut={signOut}
           signInConfigured={signInConfigured}
-          onSignedOut={onCloseDrawer}
+          onDevices={onDevices}
+          onLeft={onCloseDrawer}
         />
       </div>
     </aside>
@@ -284,17 +295,23 @@ function useLockedScroll(open: boolean): void {
   }, [open]);
 }
 
-/** Who is signed in, and the way out. Pinned to the bottom of the panel. */
+/**
+ * Who is signed in, their linked devices, and the way out. Pinned to the
+ * bottom of the panel.
+ */
 function ProfileBlock({
   user,
   signOut,
   signInConfigured,
-  onSignedOut,
+  onDevices,
+  onLeft,
 }: Readonly<{
   user: User | null;
   signOut: () => Promise<void>;
   signInConfigured: boolean;
-  onSignedOut: () => void;
+  onDevices: boolean;
+  /** The drawer has somewhere else to be: a page, or the sign-in page. */
+  onLeft: () => void;
 }>) {
   const [leaving, setLeaving] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
@@ -307,7 +324,7 @@ function ProfileBlock({
       await signOut();
       // The drawer belongs to a page that is about to be replaced by the
       // sign-in page; left open it would cover it.
-      onSignedOut();
+      onLeft();
     } catch (failure) {
       // The session is still open, and the reader has to be told: a button
       // that quietly did nothing is worse than a refusal.
@@ -341,27 +358,42 @@ function ProfileBlock({
           </span>
         )}
       </span>
-      {/* Outside the block above, so that the rail keeps it: collapsed, it
-          is the icon alone, with its name on the button rather than beside
-          it. In the local development mode there is no session to end --
+      {/* Outside the block above, so that the rail keeps them: collapsed,
+          each is the icon alone, with its name on the control rather than
+          beside it. "Linked devices" is a link, since it goes to a page;
+          opened from the drawer it closes the drawer, as a conversation
+          does. In the local development mode there is no session to end --
           the route answers 204 and the same local user comes back -- and a
           button that changes nothing is worse than saying why there is
           none. */}
-      {signInConfigured ? (
-        <button
-          type="button"
-          onClick={() => void leave()}
-          disabled={leaving}
-          title="Sign out"
-          aria-label="Sign out"
-          className="panel-signout"
+      <div className="panel-account">
+        <a
+          href={formatRoute(DEVICES)}
+          title="Linked devices"
+          aria-label="Linked devices"
+          aria-current={onDevices ? "page" : undefined}
+          onClick={onLeft}
+          className="panel-devices"
         >
-          <LogOutIcon className="panel-icon-small" />
-          <span className="panel-wide">Sign out</span>
-        </button>
-      ) : (
-        <span className="panel-nosignin panel-wide">Sign-in is off</span>
-      )}
+          <MonitorIcon className="panel-icon-small" />
+          <span className="panel-wide">Linked devices</span>
+        </a>
+        {signInConfigured ? (
+          <button
+            type="button"
+            onClick={() => void leave()}
+            disabled={leaving}
+            title="Sign out"
+            aria-label="Sign out"
+            className="panel-signout"
+          >
+            <LogOutIcon className="panel-icon-small" />
+            <span className="panel-wide">Sign out</span>
+          </button>
+        ) : (
+          <span className="panel-nosignin panel-wide">Sign-in is off</span>
+        )}
+      </div>
       {refused !== null && (
         <span role="alert" className="panel-refused">
           Not signed out: {refused}

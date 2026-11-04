@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Chat } from "../chat";
+import { DevicesPage } from "../devices/DevicesPage";
 import { conversationIn, useHistory } from "../history/history";
 import { MenuIcon } from "../icons";
 import { navigate, NEW_CHAT, useRoute } from "../router";
@@ -162,7 +163,8 @@ export function Shell({
 }>) {
   const [collapsed, setCollapsed] = usePanelCollapsed();
   const [drawer, setDrawer] = useState(false);
-  // Where the interface is: `#/` or `#/c/<id>` (`src/router.ts`).
+  // Where the interface is: `#/`, `#/c/<id>` or `#/devices`
+  // (`src/router.ts`).
   const route = useRoute();
   const history = useHistory();
   // "New chat" pressed while the empty chat is already up changes no hash
@@ -319,6 +321,7 @@ export function Shell({
         user={session.user ?? null}
         history={history}
         current={current}
+        onDevices={route.kind === "devices"}
         collapsed={collapsed}
         onCollapse={setCollapsed}
         drawer={drawer}
@@ -371,52 +374,60 @@ export function Shell({
             `chat` count is what "New chat" remounts it by, so that nothing
             typed into one carries over into the next. */}
         <main className="shell-main">
-          <h1 className="shell-title">
-            {route.kind === "conversation"
-              ? title === null
-                ? "…"
-                : shownTitle(title)
-              : "New chat"}
-          </h1>
-          {/* Who the conversation is with, under its title. The agent
+          {/* "Linked devices" is a page of the shell: the panel stays, and
+              the page stands where the chat would be. */}
+          {route.kind === "devices" ? (
+            <DevicesPage session={session} />
+          ) : (
+            <>
+              <h1 className="shell-title">
+                {route.kind === "conversation"
+                  ? title === null
+                    ? "…"
+                    : shownTitle(title)
+                  : "New chat"}
+              </h1>
+              {/* Who the conversation is with, under its title. The agent
               picker is gone once a conversation exists (`./AgentPicker.tsx`),
               and with it the only thing on the screen that said so; this is
               the fact it left behind, told as a line rather than a control
               that could not be changed. The model is still a choice, so
               beside it is the model picker (`./ModelPicker.tsx`). */}
-          {withAgent !== null && (
-            <div className="shell-about">
-              <p data-agent="" className="shell-agent">
-                with {withAgent}
-              </p>
-              {current !== null && conversationModel !== null && (
-                <ConversationModel
-                  key={current}
-                  models={models}
-                  conversationId={current}
-                  model={conversationModel}
-                  onMoved={modelMoved}
-                  onNotOffered={modelsStale}
-                />
+              {withAgent !== null && (
+                <div className="shell-about">
+                  <p data-agent="" className="shell-agent">
+                    with {withAgent}
+                  </p>
+                  {current !== null && conversationModel !== null && (
+                    <ConversationModel
+                      key={current}
+                      models={models}
+                      conversationId={current}
+                      model={conversationModel}
+                      onMoved={modelMoved}
+                      onNotOffered={modelsStale}
+                    />
+                  )}
+                </div>
               )}
-            </div>
+              <Chat
+                key={chat}
+                conversationId={current}
+                agentId={agentId}
+                // The model goes with every turn: an open conversation's is the
+                // one its line's picker shows.
+                modelId={current === null ? modelId : conversationModel}
+                // A first message refused for its model: this browser forgets
+                // it, whether or not the list has come, and asks for the list
+                // again, so the next one goes to a model still offered.
+                onModelRefused={forgetModel}
+                onConversationStarted={startedConversation}
+                onConversationOpened={conversationOpened}
+                onTurnEnded={history.refresh}
+                welcome={welcome}
+              />
+            </>
           )}
-          <Chat
-            key={chat}
-            conversationId={current}
-            agentId={agentId}
-            // The model goes with every turn: an open conversation's is the
-            // one its line's picker shows.
-            modelId={current === null ? modelId : conversationModel}
-            // A first message refused for its model: this browser forgets
-            // it, whether or not the list has come, and asks for the list
-            // again, so the next one goes to a model still offered.
-            onModelRefused={forgetModel}
-            onConversationStarted={startedConversation}
-            onConversationOpened={conversationOpened}
-            onTurnEnded={history.refresh}
-            welcome={welcome}
-          />
         </main>
       </div>
     </div>

@@ -111,12 +111,17 @@ type Json<T> = T extends { content: { "application/json": infer B } }
   ? B
   : never;
 
-/** What a call gives back: the 200 body, or nothing for a 204. */
+/**
+ * What a call gives back: the 200 body, the 201 body of a route that
+ * creates something, or nothing for a 204.
+ */
 type Result<O> = O extends { responses: { 200: infer R } }
   ? Json<R>
-  : O extends { responses: { 204: unknown } }
-    ? void
-    : never;
+  : O extends { responses: { 201: infer R } }
+    ? Json<R>
+    : O extends { responses: { 204: unknown } }
+      ? void
+      : never;
 
 type PathPart<O> = O extends { parameters: { path: infer T } }
   ? { path: T }
