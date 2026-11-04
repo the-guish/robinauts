@@ -210,7 +210,6 @@ hard, the decision is taken with them in mind.
 |---|---|
 | [core.md](core.md) | goals, principles, the system in one page |
 | [sign-in.md](sign-in.md) | sign-in, users, roles |
-| [devices.md](devices.md) | linked devices and pairing a phone with a signed-in browser (proposal, [ADR 0006](../adr/0006-mobile-sign-in-by-device-pairing.md)) |
 | [privacy.md](privacy.md) | visibility, projects, sharing, admins, retention, leavers, audit |
 | [agent-engines.md](agent-engines.md) | the agent engines: their contract, the turn, the memory |
 | [wire.md](wire.md) | the UI-to-backend protocol |
