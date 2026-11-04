@@ -66,7 +66,6 @@ export const ArrowUpIcon = icon("arrow-up");
 export const BrainIcon = icon("brain");
 export const CheckIcon = icon("check");
 export const ChevronDownIcon = icon("chevron-down");
-export const CircleAlertIcon = icon("circle-alert");
 export const CircleXIcon = icon("circle-x");
 export const CopyIcon = icon("copy");
 export const EllipsisIcon = icon("ellipsis");

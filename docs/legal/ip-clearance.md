@@ -292,21 +292,24 @@ Entries are never edited after the fact; a correction is a new entry.
   `dist/esm/icons/<name>.mjs` of the installed package was read, and the
   icon's node was taken from it: the list of SVG elements and their
   attributes that the file hands to lucide's icon factory.
-- What was copied: the path data of 23 icons, and nothing else of the
+- What was copied: the path data of 22 icons, and nothing else of the
   package: `arrow-down`, `arrow-up`, `brain`, `check`, `chevron-down`,
-  `circle-alert`, `circle-x`, `copy`, `ellipsis`, `loader`, `log-out`,
-  `menu`, `monitor`, `moon`, `panel-left`, `pencil`, `play`, `plus`,
-  `refresh-cw`, `square`, `sun`, `trash`, `x`. These are the icons the
-  interface drew from the package before it was removed
-  ([ADR 0006](../adr/0006-chat-ui-on-react-alone.md)).
+  `circle-x`, `copy`, `ellipsis`, `loader`, `log-out`, `menu`, `monitor`,
+  `moon`, `panel-left`, `pencil`, `play`, `plus`, `refresh-cw`, `square`,
+  `sun`, `trash`, `x`. These are the icons the interface drew from the
+  package before it was removed
+  ([ADR 0006](../adr/0006-chat-ui-on-react-alone.md)). The copy is these 22
+  icons: `circle-alert`, copied at first, was drawn nowhere and was taken
+  out of the file again, regenerated from the same source, before this
+  branch landed.
 - Their licence: ISC, Copyright (c) 2026 Lucide Icons and Contributors. The
   package's `LICENSE` also states that the icons it lists are derived from
   the Feather project under MIT, Copyright (c) 2013-present Cole Bemis.
   `arrow-down`, `arrow-up`, `check`, `chevron-down`, `loader`, `log-out`,
   `monitor`, `moon`, `plus`, `square`, `trash` and `x` are in that list by
-  name, and `circle-alert`, `circle-x`, `ellipsis` and `panel-left` are in
-  it under the names lucide gave them before (`alert-circle`, `x-circle`,
-  `more-horizontal`, `sidebar`). The file is therefore annotated
+  name, and `circle-x`, `ellipsis` and `panel-left` are in it under the
+  names lucide gave them before (`x-circle`, `more-horizontal`,
+  `sidebar`). The file is therefore annotated
   `ISC AND MIT`. The text was copied whole from the same package.
 - Landed as: `frontend/src/icons/lucide.ts` (the data) and
   `frontend/src/icons/LICENSE.lucide` (the package's `LICENSE`, unchanged).

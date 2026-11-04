@@ -33,6 +33,7 @@ import {
   PlayIcon,
   RefreshCwIcon,
 } from "../../icons";
+import { IconButton } from "../IconButton";
 import { Markdown } from "../markdown/Markdown";
 import { textOf } from "../runtime";
 import type {
@@ -41,7 +42,7 @@ import type {
   ChatTextPart,
   ChatToolCall,
 } from "../state";
-import { IconButton } from "./IconButton";
+import { useCopied } from "../useCopied";
 import { Reasoning } from "./Reasoning";
 import { ToolGroup } from "./ToolCall";
 
@@ -50,9 +51,6 @@ export interface AnswerActions {
   regenerate: (answerId: string) => Promise<void>;
   resume: (answerId: string) => Promise<void>;
 }
-
-/** How long Copy shows that it copied. */
-export const COPIED_MS = 2000;
 
 /** A stretch of the answer, as it is drawn. */
 type Piece =
@@ -65,7 +63,7 @@ type Group =
   | { kind: "tools"; at: number; calls: ChatToolCall[] };
 
 /** The answer's parts, grouped as they are drawn. */
-export function grouped(parts: readonly ChatPart[]): Piece[] {
+function grouped(parts: readonly ChatPart[]): Piece[] {
   const pieces: Piece[] = [];
   parts.forEach((part, at) => {
     if (part.kind === "text") {
@@ -221,38 +219,16 @@ function AnswerActionBar({
   last: boolean;
   actions: AnswerActions;
 }>) {
-  const [copied, setCopied] = useState(false);
-  const shown = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (shown.current !== null) clearTimeout(shown.current);
-    },
-    [],
-  );
-
-  function copy() {
-    const text = textOf(message);
-    if (text === "" || typeof navigator.clipboard === "undefined") return;
-    navigator.clipboard.writeText(text).then(
-      () => {
-        if (shown.current !== null) clearTimeout(shown.current);
-        setCopied(true);
-        shown.current = setTimeout(() => {
-          shown.current = null;
-          setCopied(false);
-        }, COPIED_MS);
-      },
-      // A clipboard the browser refused: nothing was copied, and nothing
-      // says that it was.
-      () => undefined,
-    );
-  }
+  const { copied, copy } = useCopied();
 
   return (
     <div className="chat-actions chat-answer-actions">
       <IconButton
         label="Copy"
-        onClick={copy}
+        onClick={() => {
+          const text = textOf(message);
+          if (text !== "") copy(text);
+        }}
         disabled={!copyable(message)}
         className={copied ? "chat-copied" : undefined}
       >

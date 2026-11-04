@@ -3,7 +3,7 @@
 
 /**
  * A button that is an icon: Copy, Refresh, Resume, More, Edit, scroll to
- * bottom.
+ * bottom, and a code block's Copy code.
  *
  * Its name is `label`, given twice: as `aria-label`, which is what is read and
  * what a test or the end-to-end suite finds it by, and as `title`, which is

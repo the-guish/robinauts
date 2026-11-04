@@ -108,7 +108,7 @@ export type Block =
   | { type: "thematicBreak" }
   | { type: "table"; align: Align[]; head: Inline[][]; rows: Inline[][][] };
 
-export interface ParseOptions {
+interface ParseOptions {
   /** The text is still arriving: see the module comment. */
   streaming?: boolean;
 }
@@ -121,7 +121,7 @@ export interface ParseOptions {
 export const MAX_BLOCK_DEPTH = 32;
 
 /** How many inline elements (emphasis, links) may nest before flattening. */
-export const MAX_INLINE_DEPTH = 24;
+const MAX_INLINE_DEPTH = 24;
 
 /**
  * How many columns a table may have. Wider than any table a person reads in

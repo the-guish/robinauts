@@ -31,11 +31,6 @@ export const LUCIDE: Readonly<Record<string, IconNode>> = {
   ],
   check: [["path", { d: "M20 6 9 17l-5-5" }]],
   "chevron-down": [["path", { d: "m6 9 6 6 6-6" }]],
-  "circle-alert": [
-    ["circle", { cx: "12", cy: "12", r: "10" }],
-    ["line", { x1: "12", x2: "12", y1: "8", y2: "12" }],
-    ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16" }],
-  ],
   "circle-x": [
     ["circle", { cx: "12", cy: "12", r: "10" }],
     ["path", { d: "m15 9-6 6" }],

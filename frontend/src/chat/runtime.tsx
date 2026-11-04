@@ -158,7 +158,7 @@ function forItsModel(failure: unknown): boolean {
 }
 
 /** A box of the chat's: what it says, and how to change that. */
-export interface ChatBox {
+interface ChatBox {
   text: string;
   setText: (text: string) => void;
 }

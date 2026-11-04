@@ -2,14 +2,16 @@
 // Copyright The Robinauts Authors
 
 /**
- * The shell is dependency-free: a guard that it stays so.
+ * The interface is dependency-free: a guard that it stays so.
  *
- * The shell, the history, the sign-in page and the two pages around them
- * draw their icons from `../icons` and their styles from plain stylesheets
- * over `../tokens.css`. Nothing in the type checker or the build would notice
- * one of them going back to `lucide-react`, or the global stylesheet going
- * back to `@import "tailwindcss"`, while those packages are still installed;
- * these tests do.
+ * The shell, the history, the sign-in page and the two pages around them,
+ * the chat window and the icons draw their icons from `../icons` and their
+ * styles from plain stylesheets over `../tokens.css`. Those packages are no
+ * longer installed, so the build would refuse an import of `lucide-react`
+ * today; but it would accept one again the day the package came back into
+ * the tree for any other reason, and a stylesheet's `@import "tailwindcss"`
+ * or Tailwind at-rule is not something it reads at all. These tests refuse
+ * them whatever is installed.
  *
  * Each rule is tested on what it must refuse as well as on the tree, because
  * a rule that refuses nothing passes over every tree.
@@ -36,6 +38,14 @@ const shellSources = [
   ...SHELL_DIRECTORIES.flatMap((name) => filesUnder(join(src, name))),
   ...SHELL_FILES.map((name) => join(src, name)),
 ];
+
+/**
+ * The chat window's and the icons' sources: code and stylesheets, and not
+ * the prose beside them, where a package is named in backticks as a name.
+ */
+const chatSources = ["chat", "icons"]
+  .flatMap((name) => filesUnder(join(src, name)))
+  .filter((path) => /\.(?:tsx?|css)$/.test(path));
 
 /**
  * Where a module names `lucide-react`, or a path inside it: an `import ...
@@ -134,6 +144,38 @@ describe("the shell", () => {
   ];
 
   test("has stylesheets of its own", () => {
+    expect(stylesheets.length).toBeGreaterThan(1);
+  });
+
+  for (const path of stylesheets) {
+    const name = relative(src, path);
+    test(`${name} names no package and no Tailwind at-rule`, () => {
+      const css = readFileSync(path, "utf8");
+      expect(packagesImportedBy(css)).toEqual([]);
+      expect(tailwindRulesIn(css)).toEqual([]);
+    });
+  }
+});
+
+describe("the chat window and the icons", () => {
+  test("have sources to look at", () => {
+    expect(chatSources.length).toBeGreaterThan(10);
+    // The icon data names the package it was copied from, in a comment.
+    expect(chatSources.map((path) => relative(src, path))).toContain(
+      join("icons", "lucide.ts"),
+    );
+  });
+
+  for (const path of chatSources) {
+    const name = relative(src, path);
+    test(`${name} does not import lucide-react`, () => {
+      expect(lucideIn(readFileSync(path, "utf8"))).toEqual([]);
+    });
+  }
+
+  const stylesheets = chatSources.filter((path) => path.endsWith(".css"));
+
+  test("have stylesheets of their own", () => {
     expect(stylesheets.length).toBeGreaterThan(1);
   });
 

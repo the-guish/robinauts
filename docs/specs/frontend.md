@@ -109,7 +109,7 @@ neorc's rules (`neorc/contributing/js-dependencies.md`):
   outline in `src/styles.css`, and one stylesheet per area, with class names
   prefixed by the area. No utility classes.
 - The runtime dependencies are `react` and `react-dom`, and nothing else
-  (2026-11-04). The icons are 23 inline SVG components in `src/icons/`, over
+  (2026-11-04). The icons are 22 inline SVG components in `src/icons/`, over
   path data copied from `lucide-react` 1.61.0 (ISC, and MIT for the icons
   lucide derives from Feather), recorded in
   [legal/ip-clearance.md](../legal/ip-clearance.md). No package is reached

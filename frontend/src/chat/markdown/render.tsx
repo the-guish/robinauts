@@ -13,9 +13,11 @@
  * paragraph, the last list item, the last table cell or the last code
  * block -- wherever that is, rather than after the block that holds it.
  */
-import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 import { CheckIcon, CopyIcon } from "../../icons";
+import { IconButton } from "../IconButton";
+import { useCopied } from "../useCopied";
 import {
   fenceLanguage,
   safeHref,
@@ -23,9 +25,6 @@ import {
   type Inline,
   type ListItem,
 } from "./parse";
-
-/** How long the copy button shows its tick. */
-export const COPIED_FOR_MS = 2000;
 
 /** The "working" dot the chat shows while an answer is arriving. */
 function Cursor(): ReactNode {
@@ -312,40 +311,24 @@ function CodeBlock({ lang: given, value, cursor }: Readonly<CodeBlockProps>) {
 }
 
 /**
- * Copies the code, then shows a tick for `COPIED_FOR_MS`.
- *
- * Where there is no clipboard -- an insecure origin, an old browser, a
- * refusal -- the button does nothing rather than fail: there is nothing
- * the reader could do about it, and selecting the code still works.
+ * Copies the code, then shows a tick for a moment (`../useCopied.ts`, which
+ * also says what happens where there is no clipboard).
  */
 function CopyButton({ text }: Readonly<{ text: string }>) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return undefined;
-    const timer = setTimeout(() => setCopied(false), COPIED_FOR_MS);
-    return () => clearTimeout(timer);
-  }, [copied]);
-  const copy = () => {
-    const clipboard =
-      typeof navigator === "undefined" ? undefined : navigator.clipboard;
-    if (typeof clipboard?.writeText !== "function") return;
-    clipboard.writeText(text).then(
-      () => setCopied(true),
-      () => undefined,
-    );
-  };
+  const { copied, copy } = useCopied();
   return (
-    <button
-      type="button"
+    <IconButton
+      label="Copy code"
       className="md-code-copy"
-      aria-label="Copy code"
-      onClick={copy}
+      onClick={() => {
+        copy(text);
+      }}
     >
       {copied ? (
         <CheckIcon className="md-code-copy-icon" size={14} />
       ) : (
         <CopyIcon className="md-code-copy-icon" size={14} />
       )}
-    </button>
+    </IconButton>
   );
 }

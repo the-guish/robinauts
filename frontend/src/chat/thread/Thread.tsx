@@ -27,7 +27,7 @@ import { useChatContext } from "../runtime";
 import type { ChatMessage } from "../state";
 import { AssistantMessage, type AnswerActions } from "./AssistantMessage";
 import { Composer } from "./Composer";
-import { IconButton } from "./IconButton";
+import { IconButton } from "../IconButton";
 import { useStickToBottom } from "./scroll";
 import { UserMessage, type QuestionActions } from "./UserMessage";
 

@@ -54,7 +54,7 @@ function usePresent(open: boolean): boolean {
 }
 
 /** What a disclosure's button and its panel share. */
-export interface DisclosureState {
+interface DisclosureState {
   open: boolean;
   /** The panel's id, which the button names. */
   id: string;

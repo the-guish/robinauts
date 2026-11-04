@@ -30,7 +30,7 @@ import { lessMotion } from "./Disclosure";
 /** How near the bottom counts as at it: a pixel's rounding and a little. */
 const NEAR = 4;
 
-export interface StickToBottom {
+interface StickToBottom {
   /** The element that scrolls. */
   viewport: RefObject<HTMLDivElement | null>;
   /** What is in it, whose height is watched. */

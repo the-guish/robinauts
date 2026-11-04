@@ -12,9 +12,9 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { COPIED_MS } from "../useCopied";
 import { Markdown } from "./Markdown";
 import { parse } from "./parse";
-import { COPIED_FOR_MS } from "./render";
 
 // The real parser, watched, so that the memoisation can be counted.
 vi.mock("./parse", async (importOriginal) => {
@@ -318,7 +318,32 @@ describe("the copy button", () => {
     expect(button.querySelector('[data-icon="copy"]')).toBeNull();
 
     act(() => {
-      vi.advanceTimersByTime(COPIED_FOR_MS - 1);
+      vi.advanceTimersByTime(COPIED_MS - 1);
+    });
+    expect(button.querySelector('[data-icon="check"]')).not.toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(button.querySelector('[data-icon="copy"]')).not.toBeNull();
+  });
+
+  it("starts the tick again on a second copy, and names the button twice", async () => {
+    vi.useFakeTimers();
+    draw("```\nx\n```");
+    const button = screen.getByRole("button", { name: "Copy code" });
+    expect(button).toHaveAttribute("title", "Copy code");
+    const press = () =>
+      act(async () => {
+        fireEvent.click(button);
+        await Promise.resolve();
+      });
+    await press();
+    act(() => {
+      vi.advanceTimersByTime(COPIED_MS - 500);
+    });
+    await press();
+    act(() => {
+      vi.advanceTimersByTime(COPIED_MS - 1);
     });
     expect(button.querySelector('[data-icon="check"]')).not.toBeNull();
     act(() => {

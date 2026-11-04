@@ -245,6 +245,13 @@
   text-transform: lowercase;
 }
 
+/*
+ * The chat's icon button (`../IconButton.tsx`, styled in `thread.css`), as a
+ * code block's header has it: pushed to the end, a little rounder, quieter,
+ * and with the smaller icon of a smaller line. Both classes, so that this
+ * wins over the button's own rules whichever stylesheet comes first.
+ */
+.chat-icon-button.md-code-copy,
 .md-code-copy {
   display: inline-flex;
   align-items: center;
@@ -252,13 +259,20 @@
   width: 1.5rem;
   height: 1.5rem;
   margin-inline-start: auto;
+  padding: 0;
   border-radius: var(--radius);
   color: var(--muted);
 }
 
+.chat-icon-button.md-code-copy:hover,
 .md-code-copy:hover {
   background-color: var(--hover);
   color: var(--ink);
+}
+
+.chat-icon-button.md-code-copy > .icon {
+  width: 14px;
+  height: 14px;
 }
 
 .md-code {

@@ -35,7 +35,7 @@ import { DisclosurePanel, useDisclosure } from "./Disclosure";
 export const TOOL_FAILED = "The tool answered that this call failed.";
 
 /** How a call stands, and why it did not finish when it did not. */
-export interface CallStatus {
+interface CallStatus {
   how: "running" | "complete" | "cancelled" | "failed";
   /** The answer's sentence, when the answer failed before the call's result. */
   reason?: string;
@@ -47,10 +47,7 @@ export interface CallStatus {
  * A call with a result is complete, whatever happened to the answer after it;
  * one without takes the answer's state, because it ended with the answer.
  */
-export function callStatus(
-  call: ChatToolCall,
-  message: ChatMessage,
-): CallStatus {
+function callStatus(call: ChatToolCall, message: ChatMessage): CallStatus {
   if (call.result !== undefined) return { how: "complete" };
   switch (message.state) {
     case "running":

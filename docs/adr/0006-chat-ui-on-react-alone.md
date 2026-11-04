@@ -67,7 +67,7 @@ dependencies are `react` and `react-dom`, and nothing else.**
   since the Content-Security-Policy allows no remote image anyway. Text
   still arriving is ordinary input: an unclosed fence, emphasis or table is
   drawn as far as it goes and never throws.
-- **The icons.** The 23 icons the interface draws are inline SVG components
+- **The icons.** The 22 icons the interface draws are inline SVG components
   in `src/icons/`. The component (`index.tsx`) is ours. The path data
   (`lucide.ts`) is copied from `lucide-react` 1.61.0 under its licence
   (ISC, and MIT for the icons lucide derives from Feather), with the licence

@@ -14,7 +14,7 @@ import { memo, useEffect, useRef, type FormEvent } from "react";
 
 import { PencilIcon } from "../../icons";
 import type { ChatMessage } from "../state";
-import { IconButton } from "./IconButton";
+import { IconButton } from "../IconButton";
 import { isSend, useAutosize } from "./textarea";
 
 /** What a question can be asked to do, made once for the whole thread. */
