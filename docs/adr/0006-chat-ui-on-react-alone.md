@@ -125,7 +125,7 @@ Good:
 - **The runtime closure is three packages**: `react`, `react-dom`, and the
   `scheduler` `react-dom` depends on, down from 205. The bundle record,
   the licence gate and every audit read three entries.
-- **The bundle is <<AFTER_KB>> gzipped**, from 303.8 KB of JavaScript and
+- **The bundle is 100.8 KB gzipped**, from 303.8 KB of JavaScript and
   12.3 KB of CSS. `react` and `react-dom` alone are about 76 KB of it. The
   budget stays at 400 KB.
 - **A class of attack is gone rather than mitigated.** No HTML is ever
@@ -148,9 +148,14 @@ Costs:
 - **A new feature is styling work**, not an upstream component. ADR 0001
   counted that as the cost of alternative B, and it is the cost we take.
 - **The dev tooling is unchanged** but for `@tailwindcss/vite`, which goes
-  with Tailwind, and TypeScript, which moves from 5.9.3 to 7.0.2 if the
-  checks allow it (7.0.2 was published on 2026-07-08, outside the ten-day
-  cooldown).
+  with Tailwind. TypeScript stays at 5.9.3. Moving it to 7.0.2 (published
+  2026-07-08, outside the ten-day cooldown) was tried: `tsc` itself builds
+  the tree, but the two tools that read the compiler's own API refuse it --
+  `typescript-eslint` 8.72.0 declines TypeScript 7 outright, and
+  `openapi-typescript` 7.13.0 needs the JavaScript API the 7.x package no
+  longer ships. An `overrides` entry pinning a nested 5.9.3 for those two
+  does not take, because TypeScript is a peer dependency of theirs. The
+  move waits on those two tools.
 
 ## Alternatives considered
 

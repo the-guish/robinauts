@@ -384,7 +384,7 @@ test("the branch picker never renders: there is one thread", async () => {
   });
   expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Previous" })).toBeNull();
-  expect(document.querySelector(".aui-branch-picker-state")).toBeNull();
+  expect(screen.queryByText(/^\d+ \/ \d+$/)).toBeNull();
 });
 
 test("a message that was not sent says so, where it can be read", async () => {
@@ -492,7 +492,7 @@ test("the seam is a component and eight names, and nothing of a library", () => 
     onConversationStarted: () => undefined,
     // @ts-expect-error -- nothing of a chat library crosses this seam, and
     // nothing else is added to it without being written down above.
-    runtime: "assistant-ui",
+    runtime: "a chat library",
   } satisfies ChatProps;
   // And `ConversationId`, `AgentId` and `ModelId` are what the rest of the
   // application already calls these, which is a string and not a library's

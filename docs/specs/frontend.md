@@ -123,7 +123,7 @@ neorc's rules (`neorc/contributing/js-dependencies.md`):
   measure: with the chat in it that is 278.6 KB (step 21, 2026-09-23), so the
   budget is that with room for the features named above and none for a
   dependency an order of magnitude too big. With the chat on React alone it is
-  <<AFTER_KB>> (2026-11-04), from 303.8 KB of JavaScript and 12.3 KB of CSS
+  100.8 KB (2026-11-04), from 303.8 KB of JavaScript and 12.3 KB of CSS
   before; `react` and `react-dom` are about 76 KB of that. The budget was left
   where it was. It is `SIZE_BUDGET_BYTES` in
   `frontend/vite.config.ts` and the build fails over it; raising it is a

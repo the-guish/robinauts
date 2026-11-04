@@ -6,8 +6,9 @@
  * history, and the profile block pinned to the bottom
  * (`docs/specs/frontend.md`).
  *
- * **The panel is ours**, not the chat library's (ADR 0001). Nothing here
- * knows about assistant-ui, and nothing here ever will.
+ * **The panel is ours** (ADR 0001, kept by ADR 0006): it reads the API
+ * directly and knows nothing of what draws the chat, and nothing here ever
+ * will.
  *
  * There is **no projects section**: projects are out of the POC. The spec's
  * panel has one, and it goes here, between the history and the profile

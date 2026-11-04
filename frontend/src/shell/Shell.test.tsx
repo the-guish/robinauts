@@ -703,7 +703,7 @@ test("a model no longer offered is shown, and a turn refused for it says why", a
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await settled();
   });
-  // The chat's own sentence for it (`src/chat/assistant-ui/runtime.tsx`),
+  // The chat's own sentence for it (`src/chat/state.ts`),
   // and what was written is back in the box to send once another is picked.
   expect(screen.getByRole("status")).toHaveTextContent(
     /model is no longer offered/,

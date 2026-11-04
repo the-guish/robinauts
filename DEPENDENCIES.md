@@ -321,12 +321,6 @@ the bundle, and excuses nothing there.
 | `@isaacs/nonrecursive-glob-match` | 1.0.1 | development | BlueOak-1.0.0 | the same licence and the same reason. Brought by `minimatch` 11, and under the same cooldown exception |
 | `argparse` | 2.0.1 | development | Python-2.0 | SPDX `Python-2.0` and SPDX `PSF-2.0` are **different identifiers** — the first is the CNRI-era Python 2.0 licence, the second the PSF licence agreement — so the allowed list's PSF-2.0 does not cover this and a row is the honest way to record it. Both are permissive, non-copyleft and Apache-compatible in the ASF's own category A. The argument parser `js-yaml` uses, brought by `openapi-typescript` |
 
-<!-- INTEGRATOR: <<TS7_PLATFORM_ROWS>> If TypeScript moves to 7.0.2, check
-whether its platform packages state a licence outside the allowed list, and
-add rows for them here, with the names and versions the lockfile has. Their
-names are not written here because they were not read. Delete this comment
-either way. -->
-
 ### What the bundle's record does not see
 
 `rollup-plugin-license` reads **rollup's module graph**, so it names every

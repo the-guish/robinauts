@@ -325,7 +325,7 @@ export function refuseStylesheets(): Plugin {
       if (!path.endsWith(".css")) {
         throw new Error(
           `${path} is a stylesheet in a language this project does not use. ` +
-            "It writes plain CSS, and Tailwind on top of it. Write .css.",
+            "It writes plain CSS. Write .css.",
         );
       }
       return null;
