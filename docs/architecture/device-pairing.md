@@ -385,9 +385,12 @@ refuses it, like the other sign-in keys, and runs on the default.
   because it runs on the browser's session. Nothing of the chat library is
   involved. The panel and the shell are ours.
 - **"Link a phone"** and **"New token"** want a session younger than ten
-  minutes. Without one the button reads "Sign in again to link a phone",
-  and pressing it is the sign-in page's own navigation, with `return_to`
-  set to this page. "Link a phone" then opens a dialog. It
+  minutes. The session's answer does not say its age, so the button always
+  reads "Link a phone", and the gate is met at the mint: its 403,
+  `FreshSignInRequired`, is answered with an offer to sign in again ("Sign
+  in again to link a phone" in the dialog), one button per provider, each
+  the sign-in page's own navigation, with `return_to` set to this page.
+  "Link a phone" then opens a dialog. It
   asks for a code and shows the QR, with the sentence of step 2. The state is written under it: *waiting*;
   *a phone scanned your code, type the number it shows* with a six-digit
   field, **Link** and **No**; *that is not the number, two tries left*;
