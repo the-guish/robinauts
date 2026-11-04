@@ -47,6 +47,46 @@ code. The **device secret** is what the phone keeps. The device secret is
 the claim secret, promoted when the browser approves. So no secret is ever
 stored in the clear, and nothing is handed over after the approval.
 
+```mermaid
+sequenceDiagram
+    participant B as Browser, signed in
+    participant S as Server
+    participant P as Phone, the app
+
+    B->>S: POST /auth/pairings, with the cookie
+    S-->>B: id, expires_at, the QR picture
+    Note over B: shows the QR
+    loop every 2 s, until claimed or expired
+        B->>S: GET /auth/pairings/{id}
+        S-->>B: state: waiting
+    end
+    Note over B,P: the person scans the QR with the app
+    P->>S: POST /auth/pairings/claim, with the code and a name
+    Note over S: code spent, pairing claimed
+    S-->>P: secret, inert until approved
+    B->>S: GET /auth/pairings/{id}
+    S-->>B: state: claimed, device "Pixel 8"
+    Note over B: "Is that your phone?"
+    loop every 2 s, until approved or expired
+        P->>S: GET /auth/session, Bearer secret
+        S-->>P: user: null, pairing: claimed
+    end
+    alt Yes, link it
+        B->>S: POST /auth/pairings/{id}/approve
+        Note over S: device session, from the claim's hash
+        S-->>B: the device
+        P->>S: GET /auth/session, Bearer secret
+        S-->>P: user, device
+        Note over P: keeps the secret and is in
+    else No
+        B->>S: DELETE /auth/pairings/{id}
+        S-->>B: 204
+        P->>S: GET /auth/session, Bearer secret
+        S-->>P: user: null, no pairing
+        Note over P: offers to scan again
+    end
+```
+
 1. **The browser asks for a code.** `POST /auth/pairings`, with the session
    cookie. The server mints a pairing: an id, a 256-bit code, two minutes
    of life, owned by the signed-in user. It answers the id, the expiry and
