@@ -16,3 +16,4 @@ history only. Skip it unless you need that history.
 | [0003](0003-single-visible-thread.md) | One visible thread: the tree stays in storage, users see the newest path |
 | [0004](0004-context-management-in-the-adapter.md) | Superseded by 0005. Context management belongs to the agent adapter |
 | [0005](0005-the-framework-owns-the-loop-and-the-memory.md) | The framework owns the loop, the context and the model's memory; the platform keeps the transcript. Supersedes 0002 and 0004 |
+| [0006](0006-mobile-sign-in-by-device-pairing.md) | Proposed. A phone gets in by pairing with a signed-in browser: the browser shows a code, the phone scans it, the browser confirms; device sessions listed under "Linked devices" |
