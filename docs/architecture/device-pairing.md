@@ -67,6 +67,33 @@ address into a phone.
   development mode every request is the mode's one user, and counts as
   the browser's.
 
+## While a device lives
+
+- **The allow list is checked again when a device is used.** The user
+  record keeps what the last sign-in said: provider, subject, verified
+  email, hosted domain and groups, refreshed at every sign-in. A device's
+  resolve checks that against the allow list as it is now, on a
+  sixty-second cache per device. A person the operator takes out of the
+  allow list loses their phone within a minute. The same check runs for a
+  token and for a browser session.
+- **A refused sign-in ends every credential of that identity.** When the
+  allow list refuses someone the provider has just vouched for, their
+  browser sessions, devices and tokens are deleted in the same breath.
+  That is the moment the platform learns the person is out.
+- **Minting needs a fresh sign-in.** `POST /auth/pairings` and
+  `POST /auth/tokens` require a browser session younger than ten minutes.
+  An older one is answered 403, `fresh_sign_in`, and the page offers to
+  sign in again, coming back to `#/devices`. A stolen twelve-hour cookie
+  can therefore install a thirty-day device only in the ten minutes after
+  the person signed in, and a new sign-in is something the thief cannot
+  complete: it needs the person's session at the provider. Removing a
+  device needs no fresh sign-in. Taking access away is never gated.
+- **The operator ends devices from the command line.**
+  `robinauts devices end --user <email>`, `--device <id>` or `--all`, and
+  `robinauts devices list`. They read the database the server reads, and
+  need no browser and no admin account: for an incident, or a deployment
+  where nobody is an admin yet.
+
 ## The flow
 
 Three secrets and one number take part. Each does one thing. The
@@ -92,6 +119,7 @@ sequenceDiagram
         S-->>B: state: waiting
     end
     Note over B,P: the person scans the QR with the app
+    Note over P: "Set up Robinauts at robinauts.example.com?" Yes
     P->>S: POST /auth/pairings/claim, with the code and a name
     Note over S: code spent, pairing claimed, number minted
     S-->>P: secret, inert until approved, and the number
@@ -132,11 +160,18 @@ sequenceDiagram
        {public_url}/#/link?v=1&c=<code>
 
    The app takes the origin as the server to talk to, and `c` as the code.
-   It accepts `https` only. Development builds also accept `http` on a
-   loopback or private address. A plain camera app opens the URL in a
-   browser. The interface's `#/link` route then says the code is for the
-   app on a phone, and does not use it. The code is in the fragment, so a
-   browser does not send it, and no server or proxy logs it.
+   Before it sends anything, it shows the origin exactly as it will use
+   it, an internationalised name in punycode, and asks: "Set up Robinauts
+   at robinauts.example.com?" Only after a Yes does it present the code.
+   It accepts `https` only. The exception for `http` on a loopback or a
+   private address exists in development builds and is compiled out of
+   release builds; there is no switch. Where the company configures the
+   app with its server, the origin in the code has to equal the configured
+   one, and any other is refused before the question is asked. A plain
+   camera app opens the URL in a browser. The interface's `#/link` route
+   then says the code is for the app on a phone, and does not use it. The
+   code is in the fragment, so a browser does not send it, and no server
+   or proxy logs it.
 4. **The phone presents it.** `POST /auth/pairings/claim`, with no
    credential. The body is `{"code": …, "device": {"name": …,
    "platform": …, "app_version": …}}`. In one statement the server finds
@@ -219,7 +254,7 @@ would read it off the shared screen and type it itself.
 
 | route | who | purpose |
 |---|---|---|
-| `POST /auth/pairings` | cookie | mint; answers `{id, expires_at, qr_svg}`; 429 `busy` over the cap; 403 where `device_days` is 0 |
+| `POST /auth/pairings` | fresh cookie | mint; answers `{id, expires_at, qr_svg}`; 429 `busy` over the cap; 403 `fresh_sign_in` on a session older than ten minutes; 403 where `device_days` is 0 |
 | `GET /auth/pairings/{id}` | cookie, owner | `{state, expires_at, device}`; 404 for another's, or one gone |
 | `POST /auth/pairings/{id}/approve` | cookie, owner | body `{number}`; link the device and answer it; 403 `wrong_number`; 409 unless `claimed` |
 | `DELETE /auth/pairings/{id}` | cookie, owner | refuse, or cancel; 204 |
@@ -231,7 +266,8 @@ would read it off the shared screen and type it itself.
 
 The API token routes follow the same rule. `POST /auth/tokens` and
 `DELETE /auth/tokens/{token_id}` are the browser's, and answer a bearer
-403. `GET /auth/tokens` answers a bearer too.
+403. `POST /auth/tokens` also wants the session younger than ten minutes.
+`GET /auth/tokens` answers a bearer too.
 
 `GET /auth/session` answers for a bearer as it does for a cookie. For a
 device session it answers the user and
@@ -278,7 +314,9 @@ Two tables, kept through the credentials port like the other three
 `last_used_at` is written by the resolve that finds the device, at most
 once a minute per device, in the same statement: an `UPDATE … RETURNING`
 joined to `users`. The list says "last used" without a write on every
-request.
+request. The same join brings the user's `hosted_domain` and `groups`,
+two columns `users` gains for the allow-list check above, refreshed by
+`ensure_user` at every sign-in beside the name and the email.
 
 The credentials port has one operation per step: `add_pairing`,
 `claim_pairing`, `pairing_of(user_id, pairing_id)`, `approve_pairing`,
@@ -310,8 +348,11 @@ refuses it, like the other sign-in keys, and runs on the default.
   secret once. This page is the one place a credential is made or ended,
   because it runs on the browser's session. Nothing of the chat library is
   involved. The panel and the shell are ours.
-- **"Link a phone"** opens a dialog. It asks for a code and shows the QR,
-  with the sentence of step 2. The state is written under it: *waiting*;
+- **"Link a phone"** and **"New token"** want a session younger than ten
+  minutes. On an older one the button reads "Sign in again to link a
+  phone", and pressing it is the sign-in page's own navigation, with
+  `return_to` set to this page. "Link a phone" then opens a dialog. It
+  asks for a code and shows the QR, with the sentence of step 2. The state is written under it: *waiting*;
   *a phone scanned your code, type the number it shows* with a six-digit
   field, **Link** and **No**; *that is not the number, two tries left*;
   *linked*; *the code expired* with **Show a new code**. Polling runs while
@@ -338,8 +379,12 @@ refuses it, like the other sign-in keys, and runs on the default.
 The app is a repository of its own. This is what it does against the API.
 
 - **One origin, from the code.** The app has no server address until it
-  scans one. It talks to that origin alone. Release builds speak `https`
-  only.
+  scans one. It shows that origin and asks before it sends a byte, as
+  step 3 says. The secret is stored with the origin it came from, and is
+  sent to that origin and no other. A later code that names another
+  origin does not move the secret. It starts a new pairing, and the app
+  says it is leaving the first server. Release builds speak `https` only,
+  and carry no exception.
 - **The number.** After the claim the app shows the number, large, with
   one sentence: "Type this number in your browser." It keeps the screen on
   and polls until the browser does, or the pairing expires. It does not
@@ -417,14 +462,31 @@ The app is a repository of its own. This is what it does against the API.
   its removal, and the list is the whole of the person's control. The
   secret lives in the Keystore, out of backups, and never in a log, which
   is what makes stealing it hard in the first place.
+- **A stolen browser cookie.** It is a session for up to twelve hours. It
+  can mint a device, or a token, only while the session is under ten
+  minutes old. After that, minting asks for a sign-in the thief cannot
+  complete.
+- **A lookalike code.** A "set up Robinauts" QR that names another host
+  would make that host the account. The app shows the origin, in
+  punycode, and asks before it sends anything. A company that configures
+  the app's server has every other origin refused outright. The secret,
+  once held, goes to the origin it came from and nowhere else.
+- **A person who has left.** Taken out of the allow list, they lose the
+  phone within a minute. Refused at their next sign-in, they lose every
+  credential at once. Known to an admin or an operator, they lose it on
+  the admins' screen or at the command line. Known to nobody, they lose it
+  when `device_days` pass.
 
 ## Known limits
 
-- **A device outlives the sign-in that made it.** A browser session lasts
-  twelve hours. A device lasts `device_days`. The allow list is checked at
-  sign-in only, so a person removed at the identity provider keeps their
-  phone for up to `device_days`. The operator's control is `device_days`.
-  The person's is the list.
+- **A change at the identity provider is seen late.** The allow-list
+  check on use reads what the last sign-in recorded. A person removed from
+  a group at the provider, but still matched by that group in the allow
+  list, keeps their phone until their next sign-in is refused, until an
+  admin or the operator ends it, or until `device_days` pass. The
+  platform keeps no provider token, so it cannot ask the provider in
+  between. The operator's controls are the allow list, which is read
+  every minute, the admins' screen, the command line, and `device_days`.
 - **A person with only their phone cannot pair.** Pairing needs a second
   screen. The browser hand-off is not here yet: the app opens the system
   browser on `/auth/login/{provider}`, the callback redirects to the app
