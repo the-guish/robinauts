@@ -10,8 +10,8 @@ import {
 import { useEffect, type ReactNode } from "react";
 import { expect, expectTypeOf, test, vi } from "vitest";
 
-import { json, refusal, type Call } from "../../test/api";
-import type { Conversation } from "../../conversation/conversation";
+import { json, refusal, type Call } from "../test/api";
+import type { Conversation } from "../conversation/conversation";
 import {
   calling,
   conversation,
@@ -19,16 +19,16 @@ import {
   message,
   opened,
   results,
-} from "../../test/conversations";
-import { event, streamed, streamHeaders, writable } from "../../test/stream";
-import { TOOL_FAILED } from "./ToolCall";
+} from "../test/conversations";
+import { event, streamed, streamHeaders, writable } from "../test/stream";
+import { TOOL_FAILED } from "./thread/ToolCall";
 import {
   Chat,
   type AgentId,
   type ChatProps,
   type ConversationId,
   type ModelId,
-} from "../index";
+} from "./index";
 
 const RUN = "11111111-2222-4333-8444-555555555555";
 const CONVERSATION = id(1);
@@ -73,7 +73,7 @@ function draw(props: Partial<ChatProps> = {}) {
 const settle = () =>
   act(async () => new Promise((done) => setTimeout(done, 0)));
 
-/** Write into the box and press the send button the vendored composer draws. */
+/** Write into the box and press the send button beside it. */
 async function send(text: string) {
   const box = screen.getByRole("textbox", { name: "Message input" });
   fireEvent.change(box, { target: { value: text } });
@@ -108,7 +108,7 @@ test("a tool call is drawn as data: the name, the arguments and the result as te
   await waitFor(() => {
     expect(screen.getByText("None.")).toBeInTheDocument();
   });
-  // The vendored Thread folds the calls of an answer behind one trigger, and
+  // The thread folds the calls of an answer behind one trigger, and
   // each call behind its own, which names the tool as text.
   fireEvent.click(screen.getByRole("button", { name: "1 tool call" }));
   const trigger = await screen.findByRole("button", {
@@ -224,8 +224,8 @@ test("an answer arriving is on the screen before the run has ended", async () =>
   write(event("TEXT_MESSAGE_START", { messageId: "m2", role: "assistant" }, 2));
   write(event("TEXT_MESSAGE_CONTENT", { messageId: "m2", delta: "Half" }, 3));
   await settle();
-  // The copied Markdown component eases text in a few characters at a time,
-  // so what is waited for is that it arrives rather than that it is instant.
+  // What is waited for is that the text arrives, rather than that it is
+  // there the instant it is written.
   await waitFor(() => {
     expect(screen.getByText("Half")).toBeInTheDocument();
   });
@@ -276,7 +276,7 @@ test("thinking is shown while it arrives, and it is collapsed", async () => {
   write(event("TEXT_MESSAGE_CONTENT", { messageId: "m2", delta: "Quiet." }, 5));
   await settle();
 
-  // The disclosure the copied reasoning components draw, shut. **Thinking is
+  // The disclosure the thread draws, shut. **Thinking is
   // kept apart from the answer** (`docs/specs/conversations.md`,
   // "Reasoning"): every watcher sees it arrive and no message holds any of
   // it, so it is something to open rather than something to read.
@@ -302,9 +302,8 @@ test("thinking is shown while it arrives, and it is collapsed", async () => {
 });
 
 test("the box does not offer stopping before there is a run to stop", async () => {
-  // assistant-ui's own stop takes a trailing question out of the thread and
-  // puts its text back into the box. Between the send and the response's
-  // headers there is no run, so the composer must still be a composer.
+  // Between the send and the response's headers there is no run, so the
+  // box must still be a box: there is nothing yet to stop.
   const { response, write, close } = writable({
     headers: streamHeaders(RUN, CONVERSATION),
   });
@@ -371,9 +370,8 @@ test("the action bar of a finished answer: copy, regenerate and edit", async () 
 });
 
 test("the branch picker never renders: there is one thread", async () => {
-  // The vendored Thread still carries a BranchPicker, hidden when a message
-  // has one branch -- and every message has, because what is handed over is
-  // a chain (ADR 0003). Nothing an edit put aside is here to be a branch.
+  // There is one thread (ADR 0003): nothing an edit put aside is here to
+  // be a branch, and nothing offers to switch to one.
   stub((call) => {
     if (call.url === `/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
@@ -475,7 +473,7 @@ test("the seam is a component and eight names, and nothing of a library", () => 
   // **A claim about the types, checked by the type checker.** `tsc -b` reads
   // this file, so the four assertions below fail the build rather than a
   // run: the seam is exactly these eight names, they are exactly these types,
-  // and none of them comes from assistant-ui (ADR 0001, the discard test).
+  // and none of them comes from a chat library (ADR 0001, the discard test).
   expectTypeOf<ChatProps>().toEqualTypeOf<{
     conversationId: ConversationId | null;
     agentId: AgentId | null;

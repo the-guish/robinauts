@@ -5,15 +5,14 @@
  * The chat seam (ADR 0001).
  *
  * This module is the only thing about the chat that the rest of the
- * application may import. assistant-ui lives under `src/chat/assistant-ui/`,
- * and nothing outside that directory may name it or its packages;
- * `eslint.config.js` refuses an import that tries.
+ * application may import. The chat itself -- its runtime, its thread, its
+ * Markdown -- lives beside this file, written in this repository over React
+ * alone, and nothing outside `src/chat/` reaches into it.
  *
  * What goes here is a small interface this project owns -- in essence a
  * `<Chat>` taking a conversation id and callbacks -- whose types mention
- * nothing from assistant-ui. Deleting `src/chat/assistant-ui/` and the
- * `@assistant-ui/*` packages must leave exactly one thing broken: the
- * implementation behind this file.
+ * nothing of how the chat is drawn. Replacing everything behind this file
+ * must leave exactly one thing to change: the implementation it names.
  *
  * What is written here is what the application hands a `<Chat>` and what it
  * needs back from one; nothing in it names, or could name, a chat library.
@@ -28,12 +27,9 @@ import type { Conversation } from "../conversation/conversation";
 /**
  * The chat window: the messages, the box to write in, and the stream.
  *
- * This is the whole of what the application may reach for. It is implemented
- * on assistant-ui, and this file is the only one outside
- * `src/chat/assistant-ui/` that may say so -- by this one import, which the
- * lint rules allow here and nowhere else (ADR 0001).
+ * This is the whole of what the application may reach for (ADR 0001).
  */
-export { Chat } from "./assistant-ui/Chat";
+export { Chat } from "./Chat";
 
 /**
  * A conversation, as the rest of the application refers to one: the id the
