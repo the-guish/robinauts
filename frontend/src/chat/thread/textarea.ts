@@ -11,15 +11,33 @@
  * what the text measures to, which no stylesheet can know.
  */
 import {
+  useEffect,
   useLayoutEffect,
   useRef,
   type KeyboardEvent,
   type RefObject,
 } from "react";
 
+/** The box made as tall as its text, or left to the stylesheet's minimum. */
+function fit(element: HTMLTextAreaElement): void {
+  // Back to its smallest first, so that a box that is emptied shrinks:
+  // `scrollHeight` is never less than the height it already has.
+  element.style.height = "auto";
+  const needed = element.scrollHeight;
+  // Nothing to measure where there is no layout (a test's DOM): the
+  // stylesheet's minimum is the height then.
+  if (needed > 0) element.style.height = `${needed}px`;
+  else element.style.removeProperty("height");
+}
+
 /**
- * A box that grows to its text whenever the text changes: the ref to give
- * the `<textarea>` that shows `text`.
+ * A box that grows to its text whenever the text changes, or its width does:
+ * the ref to give the `<textarea>` that shows `text`.
+ *
+ * The same text takes more lines in a narrower box, so a window made
+ * narrower, or a panel opened beside the chat, has to measure it again. Only
+ * a change of width does: the height is what this writes, and measuring on
+ * that would answer every change with another.
  */
 export function useAutosize(
   text: string,
@@ -27,16 +45,25 @@ export function useAutosize(
   const box = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
     const element = box.current;
-    if (element === null) return;
-    // Back to its smallest first, so that a box that is emptied shrinks:
-    // `scrollHeight` is never less than the height it already has.
-    element.style.height = "auto";
-    const needed = element.scrollHeight;
-    // Nothing to measure where there is no layout (a test's DOM): the
-    // stylesheet's minimum is the height then.
-    if (needed > 0) element.style.height = `${needed}px`;
-    else element.style.removeProperty("height");
+    if (element !== null) fit(element);
   }, [text]);
+  useEffect(() => {
+    const element = box.current;
+    // A browser without it keeps the height the text last gave the box.
+    if (element === null || typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+    let width = element.clientWidth;
+    const watcher = new ResizeObserver(() => {
+      if (element.clientWidth === width) return;
+      width = element.clientWidth;
+      fit(element);
+    });
+    watcher.observe(element);
+    return () => {
+      watcher.disconnect();
+    };
+  }, []);
   return box;
 }
 

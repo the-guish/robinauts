@@ -186,6 +186,24 @@ describe("code", () => {
     ]);
   });
 
+  it("keeps the language's own punctuation, as in c++ and c#", () => {
+    expect(parse("```c++\nint main();\n```")[0]).toMatchObject({
+      lang: "c++",
+    });
+    expect(parse("```c#\n```")[0]).toMatchObject({ lang: "c#" });
+  });
+
+  it("ends the language at the first character a class name cannot hold", () => {
+    // A form feed would start a second class, written or as a reference.
+    expect(parse("```js&#12;chat-visually-hidden\n```")[0]).toMatchObject({
+      lang: "js",
+    });
+    expect(parse("```js\fchat-visually-hidden\n```")[0]).toMatchObject({
+      lang: "js",
+    });
+    expect(parse("```{.python}\n```")[0]).toMatchObject({ lang: "" });
+  });
+
   it("refuses a backtick in a backtick fence's info string", () => {
     expect(parse("``` a`b\n")[0]?.type).toBe("paragraph");
   });
@@ -214,12 +232,15 @@ describe("code", () => {
     ]);
   });
 
-  it("decodes escapes and references in the language", () => {
+  it("ends the language at an escape or a reference, undecoded", () => {
+    // Read before decoding, so that nothing a reference spells can reach the
+    // class name; `c++` is written as itself.
     expect(parse("``` c&#43;&#43;\nx\n```")[0]).toEqual({
       type: "code",
-      lang: "c++",
+      lang: "c",
       value: "x",
     });
+    expect(parse("``` c\\+\nx\n```")[0]).toMatchObject({ lang: "c" });
   });
 
   it("reads indented code, without trailing blank lines", () => {
@@ -1015,6 +1036,19 @@ describe("tables", () => {
   it("is not a table without a pipe anywhere", () => {
     expect(parse("a\n---")[0]?.type).toBe("heading");
   });
+
+  it("is a table up to 128 columns, and text past them", () => {
+    const table = (width: number) =>
+      "|a".repeat(width) + "|\n" + "|-".repeat(width) + "|\n|b|";
+    const widest = parse(table(128))[0];
+    expect(widest?.type).toBe("table");
+    if (widest?.type !== "table") return;
+    expect(widest.head).toHaveLength(128);
+    // The one-cell row has the header's width.
+    expect(widest.rows).toHaveLength(1);
+    expect(widest.rows[0]).toHaveLength(128);
+    expect(parse(table(129)).map((block) => block.type)).toEqual(["paragraph"]);
+  });
 });
 
 describe("streaming", () => {
@@ -1230,6 +1264,39 @@ describe("performance", () => {
     ["a megabyte paragraph", () => "Robins sing before dawn. ".repeat(42_000)],
     ["a megabyte of lines", () => "a line of prose\n".repeat(64_000)],
   ];
+
+  // Wide tables, smaller than the cases above but quadratic in a parser that
+  // pads every short row to the header: a header of thousands of columns
+  // over thousands of one-cell rows. Past `MAX_TABLE_COLUMNS` it is no table.
+  const wide: [string, () => string][] = [
+    [
+      "a 2000-column header over 2000 short rows",
+      () =>
+        "|a".repeat(2000) +
+        "|\n" +
+        "|-".repeat(2000) +
+        "|\n" +
+        "b\n".repeat(2000),
+    ],
+    [
+      "a 5000-column header over 66666 short rows",
+      () =>
+        "|a".repeat(5000) +
+        "|\n" +
+        "|-".repeat(5000) +
+        "|\n" +
+        "b\n".repeat(66666),
+    ],
+  ];
+
+  it.each(wide)("parses %s in well under a second", (_name, make) => {
+    const source = make();
+    for (const streaming of [false, true]) {
+      const started = performance.now();
+      parse(source, { streaming });
+      expect(performance.now() - started).toBeLessThan(BOUND_MS);
+    }
+  });
 
   it.each(cases)("parses %s in well under a second", (_name, make) => {
     const source = make();

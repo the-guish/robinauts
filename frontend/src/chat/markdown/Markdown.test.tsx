@@ -263,6 +263,21 @@ describe("code blocks", () => {
     ).toBeInTheDocument();
   });
 
+  it("draws only the language's safe prefix, as the class and the label", () => {
+    const root = draw("```js&#12;chat-visually-hidden\nlet a;\n```");
+    expect([...root.querySelector("code")!.classList]).toEqual([
+      "md-code-text",
+      "language-js",
+    ]);
+    expect(root.querySelector(".md-code-lang")?.textContent).toBe("js");
+  });
+
+  it("keeps a language's own punctuation", () => {
+    const root = draw("```c++\nint main();\n```");
+    expect(root.querySelector("code")).toHaveClass("language-c++");
+    expect(root.querySelector(".md-code-lang")?.textContent).toBe("c++");
+  });
+
   it("keeps markup in code as text", () => {
     const root = draw("```html\n<script>alert(1)</script>\n```");
     expect(root.querySelector("script")).toBeNull();

@@ -13,11 +13,26 @@
  * index of its first part -- never moves while an answer streams.
  *
  * **One thread** (ADR 0003): nothing here switches between versions of an
- * answer, and there is no feedback, no export and no attachment.
+ * answer, and there is no feedback and no attachment. An answer can be
+ * exported, as it always could, from its "More" menu.
  */
-import { memo, useEffect, useRef, useState } from "react";
+import {
+  memo,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FocusEvent,
+  type KeyboardEvent,
+} from "react";
 
-import { CheckIcon, CopyIcon, PlayIcon, RefreshCwIcon } from "../../icons";
+import {
+  CheckIcon,
+  CopyIcon,
+  EllipsisIcon,
+  PlayIcon,
+  RefreshCwIcon,
+} from "../../icons";
 import { Markdown } from "../markdown/Markdown";
 import { textOf } from "../runtime";
 import type {
@@ -171,9 +186,11 @@ export const AssistantMessage = memo(function AssistantMessage({
           </span>
         )}
         {message.state === "failed" && (
-          // Where the answer would be, in the palette's quiet colours rather
-          // than as an alarm (`docs/specs/ui.md`), and said politely.
-          <div className="chat-error" aria-live="polite">
+          // Where the answer would be, in the palette's quiet colours
+          // (`docs/specs/ui.md`), and an alert, as it always was: a box that
+          // arrives already holding its words is read out only as an alert,
+          // and a polite live region would say nothing at all.
+          <div className="chat-error" role="alert">
             <span className="chat-error-text">{message.detail ?? ""}</span>
           </div>
         )}
@@ -188,7 +205,7 @@ export const AssistantMessage = memo(function AssistantMessage({
 });
 
 /**
- * Copy, Refresh, and Resume on the last answer when it failed.
+ * Copy, Refresh, Resume on the last answer when it failed, and More.
  *
  * Refresh is a regeneration, or a retry on an answer that failed; Resume goes
  * on with a failed answer's turn, and the backend resumes a conversation's
@@ -259,6 +276,128 @@ function AnswerActionBar({
           <PlayIcon />
         </IconButton>
       )}
+      <MoreMenu message={message} />
     </div>
+  );
+}
+
+/**
+ * The answer saved as a Markdown file: its words, as Copy copies them, in a
+ * download named for the moment it was made.
+ *
+ * The browser is handed the file through an object URL and a link clicked on
+ * its behalf; the URL is let go of once the click has handed it over, so that
+ * the file is not kept in memory for as long as the page is open.
+ */
+function exportMarkdown(message: ChatMessage): void {
+  const file = new Blob([textOf(message)], { type: "text/markdown" });
+  const url = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `message-${Date.now()}.md`;
+  link.rel = "noopener";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 0);
+}
+
+/**
+ * "More": a menu of what is done with an answer less often, which is one
+ * thing, Export as Markdown.
+ *
+ * A menu button as the ARIA pattern has it: opening it puts the keyboard on
+ * its item, Escape shuts it and gives the keyboard back to the button, and a
+ * click anywhere else or a Tab out of it shuts it where the reader went. A
+ * Shift+Tab back onto the button leaves it open, as the button is the
+ * menu's own; pressing it, or Escape there, shuts it.
+ */
+function MoreMenu({ message }: Readonly<{ message: ChatMessage }>) {
+  const [open, setOpen] = useState(false);
+  const menuId = useId();
+  const button = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const item = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    item.current?.focus();
+    // A press anywhere but the menu and its button shuts it. The button's
+    // own press is its click's to answer, which shuts it as it opened it.
+    function pressed(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (menu.current?.contains(target) === true) return;
+      if (button.current?.contains(target) === true) return;
+      setOpen(false);
+    }
+    document.addEventListener("pointerdown", pressed);
+    return () => {
+      document.removeEventListener("pointerdown", pressed);
+    };
+  }, [open]);
+
+  function shut() {
+    setOpen(false);
+    button.current?.focus();
+  }
+
+  function keyed(event: KeyboardEvent) {
+    if (event.key !== "Escape" || !open) return;
+    // Escape is the menu's here, and not the chat's, which would stop a run.
+    event.preventDefault();
+    event.stopPropagation();
+    shut();
+  }
+
+  function left(event: FocusEvent) {
+    const to = event.relatedTarget;
+    if (!(to instanceof Node)) return;
+    if (menu.current?.contains(to) === true) return;
+    if (button.current?.contains(to) === true) return;
+    setOpen(false);
+  }
+
+  return (
+    <span className="chat-more">
+      <IconButton
+        ref={button}
+        label="More"
+        className={open ? "chat-more-open" : undefined}
+        onClick={() => {
+          setOpen((was) => !was);
+        }}
+        onKeyDown={keyed}
+        popup={{ id: menuId, open }}
+      >
+        <EllipsisIcon />
+      </IconButton>
+      {open && (
+        <div
+          ref={menu}
+          id={menuId}
+          className="chat-menu"
+          role="menu"
+          aria-label="More"
+          onKeyDown={keyed}
+          onBlur={left}
+        >
+          <button
+            ref={item}
+            type="button"
+            className="chat-menu-item"
+            role="menuitem"
+            onClick={() => {
+              exportMarkdown(message);
+              shut();
+            }}
+          >
+            Export as Markdown
+          </button>
+        </div>
+      )}
+    </span>
   );
 }

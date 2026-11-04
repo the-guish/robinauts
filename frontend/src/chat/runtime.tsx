@@ -180,7 +180,10 @@ export interface Chatting {
   state: ChatState;
   /** A run this chat knows the id of is in flight: what stop is offered for. */
   running: boolean;
-  /** There is nobody to send a first message to; the box still takes text. */
+  /**
+   * There is nobody to send a first message to, or the conversation is still
+   * being read; the box still takes text.
+   */
   sendDisabled: boolean;
   /** The main box. */
   composer: ChatBox;
@@ -320,8 +323,13 @@ export function useChat(props: ChatProps): Chatting {
   // is refused instead (`turnsOf`, `busy`).
   const running = state.runId !== null;
   // There is nothing to send a first message to when the deployment has no
-  // agent; the box still takes what is typed into it.
-  const sendDisabled = state.conversationId === null && props.agentId === null;
+  // agent, and nothing yet to send one under while the conversation is being
+  // read: where it would go is the end of a thread that has not arrived
+  // (`askedIn`). The box still takes what is typed into it either way, and
+  // keeps it, rather than emptying itself for a send that does not happen.
+  const sendDisabled =
+    (state.conversationId === null && props.agentId === null) ||
+    (state.conversationId !== null && state.loading);
   // What a control reads when it is used. Written as the render is put on the
   // screen, before anything on it can be clicked: a passive effect may still
   // be pending when a click lands, and Edit would then open on nothing.

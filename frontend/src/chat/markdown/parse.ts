@@ -53,7 +53,16 @@
  *   full HTML5 table; numeric ones are complete.
  * - Link destinations are not percent-encoded; the browser does that.
  * - Unicode case folding of reference labels is `toLowerCase().toUpperCase()`.
- * - A table needs a `|` in its header or delimiter row.
+ * - A table needs a `|` in its header or delimiter row, and at most
+ *   `MAX_TABLE_COLUMNS` cells in its header; a wider one is not a table, and
+ *   its lines stay text. Every row has the header's width, padded or cut, so
+ *   a table's cells are at most that many per line of input: linear, where a
+ *   wide header over many short rows would otherwise be quadratic.
+ * - A fence's language is the longest prefix of its info string made of
+ *   letters, digits and `_+#.-`, read before escapes and character
+ *   references are decoded, and none when that prefix is empty. It becomes a
+ *   class name, which no other character could be trusted in: a form feed,
+ *   written or as `&#12;`, would start a second class.
  */
 
 /** A piece of inline content. */
@@ -113,6 +122,23 @@ export const MAX_BLOCK_DEPTH = 32;
 
 /** How many inline elements (emphasis, links) may nest before flattening. */
 export const MAX_INLINE_DEPTH = 24;
+
+/**
+ * How many columns a table may have. Wider than any table a person reads in
+ * a chat, and what bounds the cells a table can make of its input.
+ */
+const MAX_TABLE_COLUMNS = 128;
+
+/** What a fence's language may be made of, from the start of its info. */
+const LANGUAGE = /^[A-Za-z0-9_+#.-]*/;
+
+/**
+ * A fence's language: the longest prefix of the info string that `LANGUAGE`
+ * allows, or `""` for none (see the module comment).
+ */
+export function fenceLanguage(info: string): string {
+  return LANGUAGE.exec(info)?.[0] ?? "";
+}
 
 /** Look-ahead allowed for free, before the per-character allowance. */
 const BUDGET_BASE = 100_000;
@@ -543,6 +569,7 @@ interface BlockNode {
   fenceChar: string;
   fenceLength: number;
   fenceOffset: number;
+  /** A fence's language, which is all that is kept of its info string. */
   info: string;
   list: ListData | null;
   tight: boolean;
@@ -1076,7 +1103,9 @@ class BlockParser {
     fence.fenceChar = char;
     fence.fenceLength = length;
     fence.fenceOffset = this.indent;
-    fence.info = unescape(info);
+    // Only the language is kept of the info string, as the code block uses
+    // nothing else of it.
+    fence.info = fenceLanguage(info);
     this.advanceToEnd();
     return true;
   }
@@ -1091,6 +1120,8 @@ class BlockParser {
       return false;
     }
     const head = splitRow(header);
+    // Too wide to be a table at all: what would bound its cells is gone.
+    if (head.length > MAX_TABLE_COLUMNS) return false;
     if (align.length !== head.length) {
       // A delimiter row still being typed has fewer cells than the header.
       if (!lenient || align.length > head.length) return false;
@@ -1302,15 +1333,13 @@ function convertBlocks(nodes: BlockNode[], ctx: Context): Block[] {
           children: parseInline(trimEnd(node.lines.join("\n")), ctx),
         });
         break;
-      case "fence": {
-        const space = node.info.search(/[ \t]/);
+      case "fence":
         out.push({
           type: "code",
-          lang: space < 0 ? node.info : node.info.slice(0, space),
+          lang: node.info,
           value: node.lines.join("\n"),
         });
         break;
-      }
       case "indented":
         out.push({ type: "code", lang: "", value: node.lines.join("\n") });
         break;
@@ -1333,7 +1362,8 @@ function convertBlocks(nodes: BlockNode[], ctx: Context): Block[] {
         });
         break;
       case "table": {
-        // Short rows are padded and long ones cut to the header, as GFM has it.
+        // Short rows are padded and long ones cut to the header, as GFM has
+        // it; the header is at most `MAX_TABLE_COLUMNS` wide (`table`).
         const width = node.head.length;
         out.push({
           type: "table",

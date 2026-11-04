@@ -17,6 +17,7 @@ import type { ChatMessage } from "../state";
 import { AssistantMessage, COPIED_MS } from "./AssistantMessage";
 import { DISCLOSURE_MS } from "./Disclosure";
 import { useStickToBottom } from "./scroll";
+import { useAutosize } from "./textarea";
 
 const RUN = "11111111-2222-4333-8444-555555555555";
 const CONVERSATION = id(1);
@@ -203,6 +204,152 @@ test("the box grows with what is written, and shrinks back", async () => {
   Reflect.deleteProperty(HTMLTextAreaElement.prototype, "scrollHeight");
 });
 
+test("the box measures itself again when its width changes", () => {
+  const watched: Element[] = [];
+  let changed: () => void = () => undefined;
+  const disconnect = vi.fn();
+  class Watcher {
+    constructor(callback: () => void) {
+      changed = callback;
+    }
+    observe(element: Element) {
+      watched.push(element);
+    }
+    unobserve() {}
+    disconnect = disconnect;
+  }
+  vi.stubGlobal("ResizeObserver", Watcher);
+  let width = 300;
+  let lines = 1;
+  Object.defineProperty(HTMLTextAreaElement.prototype, "clientWidth", {
+    configurable: true,
+    get: () => width,
+  });
+  Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", {
+    configurable: true,
+    get: () => lines * 24,
+  });
+  function Box() {
+    const box = useAutosize("a long line that wraps when the box is narrow");
+    return <textarea ref={box} aria-label="Box" readOnly />;
+  }
+  try {
+    const drawn = render(<Box />);
+    const box = screen.getByRole("textbox", { name: "Box" });
+    expect(watched).toEqual([box]);
+    expect(box.style.height).toBe("24px");
+    // The same text over more lines in a narrower box.
+    width = 150;
+    lines = 2;
+    act(() => {
+      changed();
+    });
+    expect(box.style.height).toBe("48px");
+    // A change of height alone is the box's own doing, and not measured.
+    lines = 3;
+    act(() => {
+      changed();
+    });
+    expect(box.style.height).toBe("48px");
+    drawn.unmount();
+    expect(disconnect).toHaveBeenCalled();
+  } finally {
+    Reflect.deleteProperty(HTMLTextAreaElement.prototype, "clientWidth");
+    Reflect.deleteProperty(HTMLTextAreaElement.prototype, "scrollHeight");
+  }
+});
+
+test("the box keeps the keyboard when Send is clicked", async () => {
+  const { write, close } = await conversationWithStream();
+  const box = screen.getByRole("textbox", { name: "Message input" });
+  fireEvent.change(box, { target: { value: "And at night?" } });
+  const send = screen.getByRole("button", { name: "Send message" });
+  // A click on a button focuses it before it is a click.
+  send.focus();
+  await act(async () => {
+    fireEvent.click(send);
+    await settle();
+  });
+  expect(
+    screen.getByRole("button", { name: "Stop generating" }),
+  ).toBeInTheDocument();
+  expect(box).toHaveFocus();
+  write(event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 2));
+  close();
+});
+
+test("the box keeps the keyboard when Send is pressed from the keyboard", async () => {
+  const { write, close } = await conversationWithStream();
+  const box = screen.getByRole("textbox", { name: "Message input" });
+  fireEvent.change(box, { target: { value: "And at night?" } });
+  // Tab from the box is Send; Enter on a button is a click on it, which is
+  // what jsdom, which has no default actions, is given here.
+  const send = screen.getByRole("button", { name: "Send message" });
+  send.focus();
+  expect(send).toHaveFocus();
+  await act(async () => {
+    fireEvent.keyDown(send, { key: "Enter" });
+    fireEvent.click(send);
+    await settle();
+  });
+  expect(
+    screen.getByRole("button", { name: "Stop generating" }),
+  ).toBeInTheDocument();
+  expect(box).toHaveFocus();
+  write(event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 2));
+  close();
+});
+
+test("the box takes the keyboard back from Stop when the run ends", async () => {
+  const { write, close } = await conversationWithStream();
+  const box = screen.getByRole("textbox", { name: "Message input" });
+  fireEvent.change(box, { target: { value: "And at night?" } });
+  fireEvent.keyDown(box, { key: "Enter" });
+  await settle();
+  const stop = screen.getByRole("button", { name: "Stop generating" });
+  stop.focus();
+  write(event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 2));
+  close();
+  await waitFor(() => {
+    expect(
+      screen.queryByRole("button", { name: "Stop generating" }),
+    ).toBeNull();
+  });
+  expect(box).toHaveFocus();
+});
+
+test("nothing is sent while the conversation is read, and the box keeps its text", async () => {
+  let answerRead: (response: Response) => void = () => undefined;
+  const reading = new Promise<Response>((done) => {
+    answerRead = done;
+  });
+  const fetch = vi.fn<typeof globalThis.fetch>((input) =>
+    String(input) === `/api/conversations/${CONVERSATION}`
+      ? reading
+      : Promise.reject(new Error(`nothing answers ${String(input)}`)),
+  );
+  vi.stubGlobal("fetch", fetch);
+  draw();
+  await settle();
+  const box = screen.getByRole("textbox", { name: "Message input" });
+  fireEvent.change(box, { target: { value: "Typed early" } });
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+  fireEvent.keyDown(box, { key: "Enter" });
+  await settle();
+  expect(box).toHaveValue("Typed early");
+  expect(turnsIn(fetch as ReturnType<typeof stub>)).toEqual([]);
+
+  // Read, and the same text can be sent.
+  await act(async () => {
+    answerRead(json(opened(conversation(1), TREE)));
+    await settle();
+  });
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
+  });
+  expect(box).toHaveValue("Typed early");
+});
+
 // ------------------------------------------------------------ a question
 
 test("Edit opens the question's own box, and Escape closes it again", async () => {
@@ -321,10 +468,10 @@ test("a failed answer says so quietly, and the last one can be resumed", async (
     failed,
   ]);
   const said = screen.getByText(/This answer did not finish/);
-  // In the answer, and not an alarm.
+  // In the answer, and an alert, so that it is read out: the box arrives
+  // already holding its words.
   expect(said.closest('[data-role="assistant"]')).not.toBeNull();
-  expect(said.closest('[role="alert"]')).toBeNull();
-  expect(said.closest("[aria-live]")).toHaveAttribute("aria-live", "polite");
+  expect(said.closest('[role="alert"]')).toHaveClass("chat-error");
   // Said once: by the answer, not again under the thread.
   expect(screen.getAllByText(/This answer did not finish/)).toHaveLength(1);
 
@@ -413,6 +560,150 @@ test("Copy copies the answer's words, and says so for two seconds", async () => 
   });
   expect(copy.querySelector('[data-icon="copy"]')).not.toBeNull();
   Reflect.deleteProperty(navigator, "clipboard");
+});
+
+/** An answer of two texts and a call, drawn alone with its actions. */
+function drawAnswer() {
+  const answer: ChatMessage = {
+    id: "m2",
+    role: "assistant",
+    parts: [
+      { kind: "text", text: "# One" },
+      { kind: "tool-call", id: "c", name: "echo", argsText: "{}" },
+      { kind: "text", text: "Two." },
+    ],
+    state: "stored",
+  };
+  const actions = { regenerate: vi.fn(), resume: vi.fn() };
+  return render(
+    <>
+      <AssistantMessage
+        message={answer}
+        last
+        running={false}
+        actions={actions}
+      />
+      <button type="button">Elsewhere</button>
+    </>,
+  );
+}
+
+test("More opens a menu from the keyboard, and Escape gives the keyboard back", () => {
+  drawAnswer();
+  const more = screen.getByRole("button", { name: "More" });
+  expect(more).toHaveAttribute("title", "More");
+  expect(more).toHaveAttribute("aria-haspopup", "menu");
+  expect(more).toHaveAttribute("aria-expanded", "false");
+  expect(more.querySelector('[data-icon="ellipsis"]')).not.toBeNull();
+  // After Refresh, as the bar always had it.
+  const names = [
+    ...more.closest(".chat-answer-actions")!.querySelectorAll("button"),
+  ].map((button) => button.getAttribute("aria-label"));
+  expect(names).toEqual(["Copy", "Refresh", "More"]);
+  expect(screen.queryByRole("menu")).toBeNull();
+
+  more.focus();
+  fireEvent.click(more);
+  const menu = screen.getByRole("menu");
+  expect(more).toHaveAttribute("aria-expanded", "true");
+  expect(more).toHaveAttribute("aria-controls", menu.id);
+  const item = screen.getByRole("menuitem", { name: "Export as Markdown" });
+  expect(menu).toContainElement(item);
+  expect(item).toHaveFocus();
+
+  fireEvent.keyDown(item, { key: "Escape" });
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(more).toHaveAttribute("aria-expanded", "false");
+  expect(more).toHaveFocus();
+});
+
+test("More's menu shuts on a press outside it, and on a Tab out of it", () => {
+  drawAnswer();
+  const more = screen.getByRole("button", { name: "More" });
+  fireEvent.click(more);
+  expect(screen.getByRole("menu")).toBeInTheDocument();
+  // A press on the menu itself leaves it open.
+  fireEvent.pointerDown(screen.getByRole("menu"));
+  expect(screen.getByRole("menu")).toBeInTheDocument();
+  fireEvent.pointerDown(document.body);
+  expect(screen.queryByRole("menu")).toBeNull();
+
+  fireEvent.click(more);
+  const item = screen.getByRole("menuitem", { name: "Export as Markdown" });
+  const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
+  fireEvent.blur(item, { relatedTarget: elsewhere });
+  expect(screen.queryByRole("menu")).toBeNull();
+
+  // And More's own press shuts what it opened.
+  fireEvent.click(more);
+  fireEvent.pointerDown(more);
+  fireEvent.click(more);
+  expect(screen.queryByRole("menu")).toBeNull();
+});
+
+test("Export as Markdown downloads the answer's words as a .md file", async () => {
+  vi.useFakeTimers();
+  const made: Blob[] = [];
+  const createObjectURL = vi.fn((file: Blob) => {
+    made.push(file);
+    return "blob:answer";
+  });
+  const revokeObjectURL = vi.fn();
+  const had = {
+    create: Object.getOwnPropertyDescriptor(URL, "createObjectURL"),
+    revoke: Object.getOwnPropertyDescriptor(URL, "revokeObjectURL"),
+  };
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: createObjectURL,
+  });
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    value: revokeObjectURL,
+  });
+  const clicked: HTMLAnchorElement[] = [];
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+    this: HTMLAnchorElement,
+  ) {
+    clicked.push(this);
+  });
+  try {
+    drawAnswer();
+    const more = screen.getByRole("button", { name: "More" });
+    fireEvent.click(more);
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Export as Markdown" }),
+    );
+
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    const file = made[0]!;
+    expect(file).toBeInstanceOf(Blob);
+    expect(file.type).toBe("text/markdown");
+    expect(clicked).toHaveLength(1);
+    const link = clicked[0]!;
+    expect(link.download).toMatch(/^message-\d+\.md$/);
+    expect(link.rel).toBe("noopener");
+    expect(link.getAttribute("href")).toBe("blob:answer");
+    // Clicked and gone, and the URL let go of once the click had it.
+    expect(link.isConnected).toBe(false);
+    act(() => {
+      vi.runAllTimers();
+    });
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:answer");
+    // The menu shuts, and the keyboard is back on More.
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(more).toHaveFocus();
+    vi.useRealTimers();
+    expect(await file.text()).toBe("# One\n\nTwo.");
+  } finally {
+    for (const [name, was] of [
+      ["createObjectURL", had.create],
+      ["revokeObjectURL", had.revoke],
+    ] as const) {
+      if (was === undefined) Reflect.deleteProperty(URL, name);
+      else Object.defineProperty(URL, name, was);
+    }
+  }
 });
 
 test("there is nothing to copy in an answer with no words, or one still arriving", () => {

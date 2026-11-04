@@ -16,7 +16,13 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 
 import { CheckIcon, CopyIcon } from "../../icons";
-import { safeHref, type Block, type Inline, type ListItem } from "./parse";
+import {
+  fenceLanguage,
+  safeHref,
+  type Block,
+  type Inline,
+  type ListItem,
+} from "./parse";
 
 /** How long the copy button shows its tick. */
 export const COPIED_FOR_MS = 2000;
@@ -280,7 +286,11 @@ interface CodeBlockProps {
 }
 
 /** A fenced or indented code block, with its language and a copy button. */
-function CodeBlock({ lang, value, cursor }: Readonly<CodeBlockProps>) {
+function CodeBlock({ lang: given, value, cursor }: Readonly<CodeBlockProps>) {
+  // Checked again here, cheaply, as a link's destination is: the language
+  // becomes a class name, and this file is safe on its own whatever tree it
+  // is handed.
+  const lang = fenceLanguage(given);
   return (
     <div className="md-code-block">
       <div className="md-code-header">
