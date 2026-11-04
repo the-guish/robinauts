@@ -17,6 +17,7 @@ import { request } from "../api/client";
 import type { components } from "../api/schema";
 import { type Offered, useOffered } from "./offered";
 import { remember, remembered } from "./storage";
+import "./picker.css";
 
 export type Agent = components["schemas"]["AgentSummary"];
 
@@ -87,26 +88,22 @@ export function AgentPicker({
   onChoose: (id: string) => void;
 }>) {
   if (agents.status === "loading") {
-    return <p className="text-sm text-muted-foreground">Loading the agents…</p>;
+    return <p className="picker-note">Loading the agents…</p>;
   }
   if (agents.status === "failed") {
     return (
-      <p role="alert" className="text-sm text-bad">
+      <p role="alert" className="picker-failed">
         The agents could not be loaded: {agents.detail}
       </p>
     );
   }
   if (agents.items.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-2">
-        <select
-          aria-label="Agent"
-          disabled
-          className="rounded-ui border border-edge bg-paper px-2 py-1 text-ink"
-        >
+      <div className="picker-none">
+        <select aria-label="Agent" disabled className="picker-select">
           <option>No agent</option>
         </select>
-        <p role="alert" className="text-sm text-muted-foreground">
+        <p role="alert" className="picker-note">
           This deployment has no agent configured, so there is nobody to talk
           to. Whoever runs it adds one to the configuration file.
         </p>
@@ -114,14 +111,14 @@ export function AgentPicker({
     );
   }
   return (
-    <label className="flex items-center gap-2 text-sm text-muted-foreground">
+    <label className="picker">
       <span>Agent</span>
       <select
         value={chosen ?? ""}
         onChange={(event) => {
           onChoose(event.target.value);
         }}
-        className="rounded-ui border border-edge bg-paper px-2 py-1 text-ink"
+        className="picker-select"
       >
         {agents.items.map((agent) => (
           <option key={agent.id} value={agent.id}>

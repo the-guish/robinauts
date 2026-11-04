@@ -9,19 +9,20 @@
  * `data-theme="light"`, `data-theme="dark"`, or no attribute at all for the
  * operating system's. It is remembered per browser.
  */
-import { Monitor, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { MonitorIcon, MoonIcon, SunIcon } from "../icons";
 import { remember, remembered } from "./storage";
+import "./theme.css";
 
 export type Theme = "light" | "dark" | "system";
 
 export const THEME_KEY = "theme";
 
-const OPTIONS: { id: Theme; label: string; Icon: typeof Sun }[] = [
-  { id: "light", label: "Light", Icon: Sun },
-  { id: "dark", label: "Dark", Icon: Moon },
-  { id: "system", label: "System", Icon: Monitor },
+const OPTIONS: { id: Theme; label: string; Icon: typeof SunIcon }[] = [
+  { id: "light", label: "Light", Icon: SunIcon },
+  { id: "dark", label: "Dark", Icon: MoonIcon },
+  { id: "system", label: "System", Icon: MonitorIcon },
 ];
 
 function isTheme(value: string | null): value is Theme {
@@ -62,11 +63,7 @@ export function ThemeToggle() {
     remember(THEME_KEY, theme);
   }, [theme]);
   return (
-    <div
-      role="group"
-      aria-label="Theme"
-      className="inline-flex overflow-hidden rounded-ui border border-edge"
-    >
+    <div role="group" aria-label="Theme" className="theme">
       {OPTIONS.map(({ id, label, Icon }) => (
         <button
           key={id}
@@ -76,14 +73,10 @@ export function ThemeToggle() {
           onClick={() => {
             setTheme(id);
           }}
-          className={`flex items-center justify-center border-l border-edge px-2 py-1.5 first:border-l-0 ${
-            theme === id
-              ? "bg-tint text-ink"
-              : "bg-paper text-muted-foreground hover:bg-hover hover:text-ink"
-          }`}
+          className="theme-option"
         >
-          <Icon size={16} aria-hidden="true" />
-          <span className="sr-only">{label}</span>
+          <Icon className="theme-icon" />
+          <span className="theme-label">{label}</span>
         </button>
       ))}
     </div>

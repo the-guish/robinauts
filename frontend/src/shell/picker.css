@@ -1,0 +1,55 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright The Robinauts Authors */
+
+/*
+ * The agent and model pickers, and the sentences that stand in for them
+ * while their lists load or when a list cannot be had (`./AgentPicker.tsx`,
+ * `./ModelPicker.tsx`). The `<select>` keeps the browser's own arrow and list;
+ * only its box is drawn here.
+ */
+
+.picker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  line-height: calc(1.25 / 0.875);
+  color: var(--muted);
+}
+
+.picker-select {
+  border-radius: var(--radius);
+  border-width: 1px;
+  border-color: var(--edge);
+  background-color: var(--paper);
+  padding: 0.25rem 0.5rem;
+  color: var(--ink);
+}
+
+/* No agent configured: the disabled picker over the sentence that says why. */
+.picker-none {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.picker-note,
+.picker-failed {
+  font-size: 0.875rem;
+  line-height: calc(1.25 / 0.875);
+  color: var(--muted);
+}
+
+.picker-failed {
+  color: var(--bad);
+}
+
+/* A refused model change, on a line of its own under the conversation's. */
+.picker-line {
+  flex-basis: 100%;
+}
+
+.picker-value {
+  color: var(--ink);
+}

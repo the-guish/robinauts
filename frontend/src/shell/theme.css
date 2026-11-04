@@ -1,0 +1,62 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright The Robinauts Authors */
+
+/*
+ * The theme toggle: three buttons in one bordered strip, the chosen one
+ * pressed (`./ThemeToggle.tsx`). `aria-pressed` is what draws the choice, so
+ * what a reader is told and what is seen cannot disagree.
+ */
+
+.theme {
+  display: inline-flex;
+  overflow: hidden;
+  border-radius: var(--radius);
+  border-width: 1px;
+  border-color: var(--edge);
+}
+
+.theme-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left-width: 1px;
+  border-color: var(--edge);
+  background-color: var(--paper);
+  padding: 0.375rem 0.5rem;
+  color: var(--muted);
+}
+
+.theme-option:first-child {
+  border-left-width: 0;
+}
+
+.theme-option[aria-pressed="true"] {
+  background-color: var(--tint);
+  color: var(--ink);
+}
+
+@media (hover: hover) {
+  .theme-option:not([aria-pressed="true"]):hover {
+    background-color: var(--hover);
+    color: var(--ink);
+  }
+}
+
+.theme-icon {
+  width: 16px;
+  height: 16px;
+  max-width: none;
+}
+
+/* The button's name, for a reader only: the icon is what is seen. */
+.theme-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border-width: 0;
+}

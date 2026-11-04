@@ -22,6 +22,7 @@ import type { ConversationId } from "../chat";
 import { type Conversation, setModel } from "../conversation/conversation";
 import { type Offered, useOffered } from "./offered";
 import { forget, remember, remembered } from "./storage";
+import "./picker.css";
 
 export type Model = components["schemas"]["ModelSummary"];
 
@@ -104,8 +105,6 @@ export function useChosenModel(
   ];
 }
 
-const SELECT = "rounded-ui border border-edge bg-paper px-2 py-1 text-ink";
-
 /**
  * The `<select>` itself, over the list the deployment offers.
  *
@@ -128,18 +127,18 @@ export function ModelPicker({
   busy?: boolean;
 }>) {
   if (models.status === "loading") {
-    return <p className="text-sm text-muted-foreground">Loading the models…</p>;
+    return <p className="picker-note">Loading the models…</p>;
   }
   if (models.status === "failed") {
     return (
-      <p role="alert" className="text-sm text-bad">
+      <p role="alert" className="picker-failed">
         The models could not be loaded: {models.detail}
       </p>
     );
   }
   const stale = chosen !== null && isOffered(models, chosen) === false;
   return (
-    <label className="flex items-center gap-2 text-sm text-muted-foreground">
+    <label className="picker">
       <span>Model</span>
       <select
         value={chosen ?? ""}
@@ -150,7 +149,7 @@ export function ModelPicker({
         onChange={(event) => {
           onChoose(event.target.value);
         }}
-        className={SELECT}
+        className="picker-select"
       >
         {stale && (
           <option value={chosen} disabled>
@@ -259,11 +258,11 @@ export function ConversationModel({
   if (models.status !== "ready") {
     return (
       <>
-        <p className="text-sm text-muted-foreground">
-          Model <span className="text-ink">{model}</span>
+        <p className="picker-note">
+          Model <span className="picker-value">{model}</span>
         </p>
         {models.status === "failed" && (
-          <p role="alert" className="text-sm text-bad">
+          <p role="alert" className="picker-failed">
             The models could not be loaded: {models.detail}
           </p>
         )}
@@ -282,7 +281,7 @@ export function ConversationModel({
         }}
       />
       {refused !== null && (
-        <p role="alert" className="basis-full text-sm text-bad">
+        <p role="alert" className="picker-failed picker-line">
           The model could not be changed: {refused}
         </p>
       )}

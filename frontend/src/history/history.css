@@ -1,0 +1,212 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright The Robinauts Authors */
+
+/*
+ * The history in the panel: a row per conversation, the row's actions, its
+ * rename box and its delete confirm, and the lines under the list
+ * (`./HistoryList.tsx`).
+ *
+ * The conversation the page is on is drawn by `aria-current="page"` on its
+ * link, and a pending write by `aria-disabled="true"` on its control, so the
+ * look follows what a reader is told rather than a class kept beside it.
+ */
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * The list takes the focus only when the row that had it has gone; it is a
+ * place for the keyboard to be, not a control, so it draws no ring.
+ */
+.history-list:focus,
+.history-list:focus-visible {
+  outline: none;
+}
+
+.history-note,
+.history-failed {
+  padding-inline: 0.5rem;
+  font-size: 0.875rem;
+  line-height: calc(1.25 / 0.875);
+  color: var(--muted);
+}
+
+.history-failed {
+  color: var(--bad);
+}
+
+/* "Try again" and "Load more", under the list. */
+.history-retry,
+.history-more {
+  margin-top: 0.25rem;
+  align-self: flex-start;
+  border-radius: var(--radius);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  line-height: calc(1.25 / 0.875);
+}
+
+.history-retry {
+  border-width: 1px;
+  border-color: var(--edge);
+  background-color: var(--paper);
+}
+
+.history-more {
+  color: var(--muted);
+}
+
+.history-more:disabled {
+  opacity: 0.6;
+}
+
+.history-item {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius);
+}
+
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.history-link {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: var(--radius);
+  padding: 0.375rem 0.5rem;
+  font-size: 0.875rem;
+  line-height: calc(1.25 / 0.875);
+  color: var(--ink);
+}
+
+.history-link[aria-current="page"] {
+  background-color: var(--tint);
+  font-weight: 600;
+}
+
+/* The row's icon buttons: its actions, and save and cancel in the rename. */
+.history-tool {
+  border-radius: var(--radius);
+  padding: 0.25rem;
+  color: var(--muted);
+}
+
+.history-actions {
+  margin-right: 0.25rem;
+  flex-shrink: 0;
+}
+
+.history-icon {
+  width: 16px;
+  height: 16px;
+  max-width: none;
+}
+
+.history-icon-small {
+  width: 14px;
+  height: 14px;
+  max-width: none;
+}
+
+.history-rename {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+}
+
+.history-title-box {
+  min-width: 0;
+  flex: 1;
+  border-radius: var(--radius);
+  border-width: 1px;
+  border-color: var(--edge);
+  background-color: var(--paper);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  line-height: calc(1.25 / 0.875);
+  color: var(--ink);
+}
+
+/* Rename and Delete: a disclosure of two buttons under the row. */
+.history-menu {
+  display: flex;
+  gap: 0.25rem;
+  padding-inline: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+
+.history-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: var(--radius);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  line-height: calc(1.25 / 0.875);
+  color: var(--muted);
+}
+
+.history-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding-inline: 0.5rem;
+  padding-bottom: 0.25rem;
+  font-size: 0.875rem;
+  line-height: calc(1.25 / 0.875);
+}
+
+/* "Yes, delete" and "No, keep it". */
+.history-answer {
+  border-radius: var(--radius);
+  border-width: 1px;
+  border-color: var(--edge);
+  background-color: var(--paper);
+  padding: 0.125rem 0.5rem;
+}
+
+.history-yes {
+  color: var(--bad);
+}
+
+.history-tool[aria-disabled="true"],
+.history-answer[aria-disabled="true"] {
+  opacity: 0.6;
+}
+
+.history-refused {
+  padding-inline: 0.5rem;
+  padding-bottom: 0.25rem;
+  font-size: 0.75rem;
+  line-height: calc(1 / 0.75);
+  color: var(--bad);
+}
+
+@media (hover: hover) {
+  .history-item:hover,
+  .history-retry:hover,
+  .history-answer:hover {
+    background-color: var(--hover);
+  }
+
+  .history-more:hover {
+    background-color: var(--hover);
+    color: var(--ink);
+  }
+
+  .history-tool:hover,
+  .history-menu-item:hover {
+    background-color: var(--tint);
+    color: var(--ink);
+  }
+}

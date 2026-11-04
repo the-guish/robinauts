@@ -17,11 +17,11 @@
  * The shape is neorc's, written again for this project; recorded in
  * `docs/legal/ip-clearance.md`.
  */
-import { Menu } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Chat } from "../chat";
 import { conversationIn, useHistory } from "../history/history";
+import { MenuIcon } from "../icons";
 import { navigate, NEW_CHAT, useRoute } from "../router";
 import type { Session } from "../session/session";
 import { signOut as endSession } from "../session/session";
@@ -42,6 +42,7 @@ import {
 } from "./ModelPicker";
 import { PANEL_ID, Panel } from "./Panel";
 import { remember, remembered } from "./storage";
+import "./shell.css";
 
 export const PANEL_KEY = "panel";
 
@@ -282,7 +283,7 @@ export function Shell({
     [history],
   );
   const welcome = (
-    <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+    <div className="shell-welcome">
       <AgentPicker agents={agents} chosen={agentId} onChoose={chooseAgent} />
       {/* Only once there is an agent to talk to: with none, the agent
           picker's sentence is the whole of what there is to say. */}
@@ -313,7 +314,7 @@ export function Shell({
   );
 
   return (
-    <div className="flex h-screen bg-ground text-ink">
+    <div className="shell">
       <Panel
         user={session.user ?? null}
         history={history}
@@ -336,10 +337,10 @@ export function Shell({
           data-backdrop=""
           aria-hidden="true"
           onClick={close}
-          className="fixed inset-0 z-10 bg-scrim md:hidden"
+          className="shell-backdrop"
         />
       )}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="shell-column">
         <LocalModeBanner local={session.local_development ?? false} />
         {/* The one thing above the chat, and only where the panel is a
             drawer: `docs/specs/frontend.md` says there is no top bar, so
@@ -354,9 +355,9 @@ export function Shell({
           onClick={() => {
             setDrawer(true);
           }}
-          className="m-2 self-start rounded-ui p-1.5 text-muted-foreground hover:bg-hover hover:text-ink md:hidden"
+          className="shell-opener"
         >
-          <Menu size={16} aria-hidden="true" />
+          <MenuIcon className="shell-icon" />
         </button>
         {/* The heading is the first line of the page, because
             `docs/specs/frontend.md` leaves no top bar to put it in. It is the
@@ -369,8 +370,8 @@ export function Shell({
             conversation is on the screen is a prop it handles itself; the
             `chat` count is what "New chat" remounts it by, so that nothing
             typed into one carries over into the next. */}
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <h1 className="mx-auto w-full max-w-3xl px-6 pt-4 text-xl font-semibold">
+        <main className="shell-main">
+          <h1 className="shell-title">
             {route.kind === "conversation"
               ? title === null
                 ? "…"
@@ -384,8 +385,8 @@ export function Shell({
               that could not be changed. The model is still a choice, so
               beside it is the model picker (`./ModelPicker.tsx`). */}
           {withAgent !== null && (
-            <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-4 gap-y-1 px-6 pt-1">
-              <p data-agent="" className="text-sm text-muted-foreground">
+            <div className="shell-about">
+              <p data-agent="" className="shell-agent">
                 with {withAgent}
               </p>
               {current !== null && conversationModel !== null && (

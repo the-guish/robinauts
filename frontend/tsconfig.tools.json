@@ -24,6 +24,7 @@
     "src/test/seam-rule.test.ts",
     "src/test/licence-gate.test.ts",
     "src/test/build-rules.test.ts",
+    "src/test/dependency-free.test.ts",
     "src/test/vendor.test.ts"
   ]
 }

@@ -1,0 +1,119 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright The Robinauts Authors */
+
+/*
+ * The shell's frame: the panel beside the page, the column the chat lives
+ * in, the conversation's title and the line under it, and the banner of the
+ * local development mode (`./Shell.tsx`, `./LocalModeBanner.tsx`).
+ *
+ * **One breakpoint, 48rem**, and it is the number in `./breakpoint.ts` too:
+ * below it the panel is a drawer and this column carries the button that
+ * opens it; at it and above, the panel stands beside the page and the button
+ * is gone. Written in `rem` for the reason that file gives.
+ *
+ * Hover is asked for only where there is a pointer that hovers, so a tap on a
+ * touch screen does not leave a control looking hovered after it.
+ */
+
+.shell {
+  display: flex;
+  height: 100vh;
+  background-color: var(--ground);
+  color: var(--ink);
+}
+
+/* Behind the open drawer; a click on it closes the drawer. */
+.shell-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background-color: var(--scrim);
+}
+
+/* The column beside the panel, and the page inside it under the banner. */
+.shell-column,
+.shell-main {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.shell-opener {
+  margin: 0.5rem;
+  align-self: flex-start;
+  border-radius: var(--radius);
+  padding: 0.375rem;
+  color: var(--muted);
+}
+
+.shell-icon {
+  width: 16px;
+  height: 16px;
+  max-width: none;
+}
+
+.shell-title {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 48rem;
+  padding-inline: 1.5rem;
+  padding-top: 1rem;
+  font-size: 1.25rem;
+  line-height: calc(1.75 / 1.25);
+  font-weight: 600;
+}
+
+/* "with <agent>" and the model picker, under the title. */
+.shell-about {
+  margin-inline: auto;
+  display: flex;
+  width: 100%;
+  max-width: 48rem;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 1rem;
+  row-gap: 0.25rem;
+  padding-inline: 1.5rem;
+  padding-top: 0.25rem;
+}
+
+.shell-agent {
+  font-size: 0.875rem;
+  line-height: calc(1.25 / 0.875);
+  color: var(--muted);
+}
+
+/* The pickers the empty chat draws above its box. */
+.shell-welcome {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  column-gap: 1rem;
+  row-gap: 0.5rem;
+}
+
+.banner-local {
+  margin: 0;
+  background-color: var(--warn-bg);
+  padding: 0.375rem 1rem;
+  font-size: 0.875rem;
+  line-height: calc(1.25 / 0.875);
+  color: var(--warn-ink);
+}
+
+@media (hover: hover) {
+  .shell-opener:hover {
+    background-color: var(--hover);
+    color: var(--ink);
+  }
+}
+
+@media (width >= 48rem) {
+  .shell-backdrop,
+  .shell-opener {
+    display: none;
+  }
+}
