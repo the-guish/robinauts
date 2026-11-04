@@ -125,7 +125,7 @@ Good:
 - **The runtime closure is three packages**: `react`, `react-dom`, and the
   `scheduler` `react-dom` depends on, down from 205. The bundle record,
   the licence gate and every audit read three entries.
-- **The bundle is 100.8 KB gzipped**, from 303.8 KB of JavaScript and
+- **The bundle is 101.5 KB gzipped**, from 303.8 KB of JavaScript and
   12.3 KB of CSS. `react` and `react-dom` alone are about 76 KB of it. The
   budget stays at 400 KB.
 - **A class of attack is gone rather than mitigated.** No HTML is ever
