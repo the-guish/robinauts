@@ -128,6 +128,24 @@ test("a 204 gives back nothing, and the write says it is JSON", async () => {
   expect(init?.body).toBeUndefined();
 });
 
+test("a 201 gives back the body of what it created", async () => {
+  answering(
+    201,
+    JSON.stringify({
+      id: "p-1",
+      expires_at: "2026-11-04T12:02:00Z",
+      qr_svg: "<svg/>",
+    }),
+  );
+
+  const minted = await request("post", "/auth/pairings");
+
+  // Typed as the route's 201 body: a 201 is not a 204, and has one.
+  const id: string = minted.id;
+  expect(id).toBe("p-1");
+  expect(minted.qr_svg).toBe("<svg/>");
+});
+
 test("a bodyless POST says it is JSON as well", async () => {
   const fetch = answering(200, JSON.stringify({ cancelled: true }));
 

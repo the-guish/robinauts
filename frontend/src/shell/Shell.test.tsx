@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 
@@ -1092,4 +1093,36 @@ test("a first message refused as not there keeps the text and the pick", async (
   );
   expect(localStorage.getItem("robinauts.model")).toBe("opus");
   expect(screen.getByLabelText("Model")).toHaveValue("opus");
+});
+
+test("the profile block links to the linked devices, beside sign-out", async () => {
+  await shell();
+  const profile = screen.getByRole("region", { name: "Profile" });
+  expect(
+    within(profile).getByRole("link", { name: "Linked devices" }),
+  ).toHaveAttribute("href", "#/devices");
+  expect(
+    within(profile).getByRole("button", { name: "Sign out" }),
+  ).toBeVisible();
+});
+
+test("in the rail the link keeps its name, as sign-out does", async () => {
+  localStorage.setItem(`robinauts.${PANEL_KEY}`, "rail");
+  await shell();
+  const link = screen.getByRole("link", { name: "Linked devices" });
+  expect(link).toHaveAttribute("title", "Linked devices");
+});
+
+test("#/devices is a page of the shell: the panel stays, the chat goes", async () => {
+  location.hash = "#/devices";
+  await shell();
+  expect(panel()).toBeVisible();
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Linked devices" }),
+  ).toBeVisible();
+  expect(screen.queryByRole("heading", { name: "New chat" })).toBeNull();
+  expect(screen.getByRole("link", { name: "Linked devices" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
 });

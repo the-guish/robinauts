@@ -6,14 +6,22 @@
  * to show, and with nobody signed in the sign-in page stands in place of
  * every page (`docs/specs/sign-in.md`, `docs/specs/frontend.md`).
  *
- * **The session is read before the route is.** Which page the hash names is
- * the shell's business (`src/router.ts`), and it only ever has one while
- * somebody is signed in; until then the hash is the sign-in page's, which
- * reads its error code and its return target out of it for itself.
+ * **The session is read before the route is**, with one exception. Which
+ * page the hash names is the shell's business (`src/router.ts`), and it only
+ * ever has one while somebody is signed in; until then the hash is the
+ * sign-in page's, which reads its error code and its return target out of
+ * it for itself.
+ *
+ * The exception is `#/link`, the page a pairing code opens in a browser
+ * (`./session/LinkPage.tsx`). It is shown whatever the session says, before
+ * it has even answered: the browser a phone's camera app opens is signed in
+ * to nothing, and the page needs nothing from a session to say what it says.
  */
 import type { ReactNode } from "react";
 
 import { ErrorBoundary } from "./ErrorBoundary";
+import { useRoute } from "./router";
+import { LinkPage } from "./session/LinkPage";
 import { loadSession, useSession } from "./session/session";
 import "./session/session.css";
 import { SignInPage } from "./session/SignInPage";
@@ -39,6 +47,10 @@ export function App() {
 
 function Pages() {
   const { status, session, error } = useSession();
+  const route = useRoute();
+  if (route.kind === "link") {
+    return <LinkPage />;
+  }
   if (status === "loading") {
     return <Centred>Loading…</Centred>;
   }
