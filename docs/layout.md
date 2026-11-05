@@ -27,3 +27,5 @@ robinauts/
 - The controller: [architecture/controller.md](architecture/controller.md).
 - The web layer: [architecture/web.md](architecture/web.md).
 - The stored records: [architecture/data-model.md](architecture/data-model.md).
+- Sandboxed agents, each session in a virtual machine of its own:
+  [architecture/coding-agents.md](architecture/coding-agents.md).
