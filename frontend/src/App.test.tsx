@@ -51,6 +51,40 @@ test("nobody signed in: the sign-in page in place of every page", async () => {
   expect(screen.queryByRole("complementary", { name: "Panel" })).toBeNull();
 });
 
+test("a pairing code opened in a browser: the link page, signed out", async () => {
+  location.hash = "#/link?v=1&c=abc123";
+  answering({
+    sign_in: true,
+    local_development: false,
+    providers: [{ id: "google", title: "Google" }],
+    user: null,
+  });
+  await app();
+  expect(
+    screen.getByText(
+      "This code is for the Robinauts app on a phone. Open the app and scan it there.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("heading", { name: "Sign in to Robinauts" }),
+  ).toBeNull();
+  // It reads no parameter, and leaves the hash as it found it.
+  expect(location.hash).toBe("#/link?v=1&c=abc123");
+});
+
+test("the link page is the same for somebody signed in", async () => {
+  location.hash = "#/link";
+  answering({
+    sign_in: true,
+    local_development: false,
+    providers: [{ id: "google", title: "Google" }],
+    user: { id: "u-1", provider: "google", name: "Ada", email: "ada@x.test" },
+  });
+  await app();
+  expect(screen.getByText(/This code is for the Robinauts app/)).toBeVisible();
+  expect(screen.queryByRole("complementary", { name: "Panel" })).toBeNull();
+});
+
 test("signed in: the shell, with the panel and the empty chat", async () => {
   answering({
     sign_in: true,

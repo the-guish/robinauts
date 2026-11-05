@@ -14,8 +14,8 @@
  *     node scripts/fixture-server.mjs signed-in 5173
  *
  * The scene is the first argument: `signed-in`, `one-agent`, `no-agents`,
- * `local`, `signed-out`, `history`, `conversation`, `streaming`, `reattach`
- * or `error`. It binds loopback only.
+ * `local`, `signed-out`, `history`, `conversation`, `streaming`, `reattach`,
+ * `error` or `stale-session`. It binds loopback only.
  *
  * A failed sign-in is the `signed-out` scene at the hash the backend
  * redirects to: `http://127.0.0.1:5173/#/sign-in?error=not_allowed`.
@@ -49,6 +49,14 @@
  *
  * A turn really writes its messages into the conversation, so the reread that
  * follows one shows what the store would.
+ *
+ * **"Linked devices"** (`#/devices`) is answered in every scene with somebody
+ * signed in: a few phones and tokens, a Remove and a Revoke that really
+ * remove, a New token that really adds and answers a secret, and a pairing
+ * whose poll says `waiting` twice and `claimed` after that. The number the
+ * fixture phone shows is `482 913`; anything else is a wrong number, and the
+ * third ends the pairing. `stale-session` is `signed-in` with a session too
+ * old to mint, so both mints answer 403 `FreshSignInRequired`.
  */
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -325,12 +333,19 @@ function tree(n) {
  *   stream?: "finishes" | "fails",
  *   inFlight?: number,
  *   dropAt?: number,
+ *   stale?: boolean,
  * }>}
  */
 const SCENES = {
   "signed-in": {
     session: SIGNED_IN,
     agents: AGENTS,
+  },
+  /** Signed in more than ten minutes ago: minting wants a fresh sign-in. */
+  "stale-session": {
+    session: SIGNED_IN,
+    agents: AGENTS,
+    stale: true,
   },
   history: {
     session: SIGNED_IN,
@@ -1069,6 +1084,289 @@ if (fixture.inFlight !== undefined) {
   }
 }
 
+/* ---------------------------------------------------------- linked devices */
+
+/** The phones linked, oldest first, as `GET /auth/devices` answers them. */
+const devices = [
+  {
+    id: "d0000000-0000-4000-8000-000000000001",
+    name: "Pixel 8",
+    platform: "android",
+    created_at: "2026-10-12T08:14:00Z",
+    last_used_at: "2026-11-04T07:52:00Z",
+    expires_at: "2026-11-11T08:14:00Z",
+  },
+  {
+    id: "d0000000-0000-4000-8000-000000000002",
+    name: "Ada's tablet",
+    platform: "android",
+    created_at: "2026-10-30T19:03:00Z",
+    last_used_at: "2026-11-01T21:40:00Z",
+    expires_at: "2026-11-29T19:03:00Z",
+  },
+];
+
+/** The API tokens, as `GET /auth/tokens` answers them. */
+const tokens = [
+  {
+    id: "e0000000-0000-4000-8000-000000000001",
+    name: "nightly export",
+    created_at: "2026-09-02T06:00:00Z",
+    expires_at: "2026-12-01T06:00:00Z",
+  },
+];
+
+/** A session too old to mint with (`stale-session`). */
+const stale = fixture.stale === true;
+
+/** What the fixture phone shows, and the backend's own pattern for a number. */
+const NUMBER = "482913";
+const NUMBER_PATTERN = /^[0-9]{3} ?[0-9]{3}$/;
+
+/** How long a pairing lives, from the mint and again from the claim. */
+const PAIRING_LIFE_MS = 120_000;
+
+const NOT_FRESH =
+  "minting a credential wants a sign-in less than 10 minutes old: sign in again";
+
+/**
+ * The pairings minted, by id: how often each was polled, and what is left.
+ *
+ * @type {Map<string, {polls: number, state: "waiting" | "claimed" | "approved", wrong: number, expiresAt: number}>}
+ */
+const pairings = new Map();
+
+/**
+ * Something that looks like a QR code: the three finder squares and a few
+ * modules, drawn by hand on a 29-module grid with its quiet zone. It encodes
+ * nothing; it is a picture of the right shape for the dialog to show.
+ */
+const FAKE_QR = (() => {
+  /** @type {string[]} */
+  const dark = [];
+  /** @param {number} x @param {number} y */
+  const finder = (x, y) => {
+    dark.push(`M${x} ${y}h7v7h-7zM${x + 1} ${y + 1}v5h5v-5z`);
+    dark.push(`M${x + 2} ${y + 2}h3v3h-3z`);
+  };
+  finder(4, 4);
+  finder(18, 4);
+  finder(4, 18);
+  for (const [x, y] of [
+    [12, 4],
+    [14, 5],
+    [12, 7],
+    [13, 9],
+    [15, 10],
+    [4, 12],
+    [6, 13],
+    [9, 12],
+    [11, 12],
+    [13, 13],
+    [16, 12],
+    [19, 13],
+    [22, 12],
+    [24, 14],
+    [12, 16],
+    [14, 17],
+    [17, 18],
+    [20, 19],
+    [23, 20],
+    [18, 22],
+    [21, 23],
+    [24, 24],
+    [13, 21],
+    [15, 23],
+    [12, 24],
+    [19, 16],
+    [10, 14],
+    [8, 15],
+  ]) {
+    dark.push(`M${x} ${y}h1v1h-1z`);
+  }
+  return (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" shape-rendering="crispEdges">' +
+    '<rect width="29" height="29" fill="#fff"/>' +
+    `<path d="${dark.join("")}" fill="#000" fill-rule="evenodd"/>` +
+    "</svg>"
+  );
+})();
+
+const DEVICE = new RegExp(`^/auth/devices/(${UUID})$`);
+const TOKEN = new RegExp(`^/auth/tokens/(${UUID})$`);
+const PAIRING = new RegExp(`^/auth/pairings/(${UUID})$`);
+const APPROVE = new RegExp(`^/auth/pairings/(${UUID})/approve$`);
+
+/** @param {import("node:http").ServerResponse} response */
+const noPairing = (response) =>
+  refuse(response, 404, "NotFound", "you have no such pairing waiting");
+
+/**
+ * The routes of "Linked devices", as far as the page uses them.
+ *
+ * @param {import("node:http").IncomingMessage} request
+ * @param {import("node:http").ServerResponse} response
+ * @param {string} path
+ * @returns {Promise<boolean>}
+ */
+async function linkedDevices(request, response, path) {
+  const method = request.method ?? "GET";
+  if (path === "/auth/devices" && method === "GET") {
+    json(response, 200, { items: devices });
+    return true;
+  }
+  const device = DEVICE.exec(path);
+  if (device !== null && method === "DELETE") {
+    const index = devices.findIndex((each) => each.id === device[1]);
+    if (index === -1) {
+      refuse(response, 404, "NotFound", "you have no device of that id");
+      return true;
+    }
+    devices.splice(index, 1);
+    response.writeHead(204).end();
+    return true;
+  }
+  if (path === "/auth/tokens" && method === "GET") {
+    json(response, 200, { items: tokens });
+    return true;
+  }
+  if (path === "/auth/tokens" && method === "POST") {
+    const asked = await body(request);
+    if (stale) {
+      refuse(response, 403, "FreshSignInRequired", NOT_FRESH);
+      return true;
+    }
+    const name = typeof asked?.name === "string" ? asked.name.trim() : "";
+    if (name === "") {
+      refuse(response, 422, "InvalidValueError", "body.name: a name is needed");
+      return true;
+    }
+    const now = new Date();
+    const token = {
+      id: randomUUID(),
+      name,
+      created_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + 90 * 86_400_000).toISOString(),
+    };
+    tokens.push(token);
+    json(response, 201, {
+      ...token,
+      secret: `rbt_${randomUUID().replaceAll("-", "")}`,
+    });
+    return true;
+  }
+  const token = TOKEN.exec(path);
+  if (token !== null && method === "DELETE") {
+    const index = tokens.findIndex((each) => each.id === token[1]);
+    if (index === -1) {
+      refuse(response, 404, "NotFound", "you have no API token of that id");
+      return true;
+    }
+    tokens.splice(index, 1);
+    response.writeHead(204).end();
+    return true;
+  }
+  if (path === "/auth/pairings" && method === "POST") {
+    if (stale) {
+      refuse(response, 403, "FreshSignInRequired", NOT_FRESH);
+      return true;
+    }
+    const id = randomUUID();
+    const expiresAt = Date.now() + PAIRING_LIFE_MS;
+    pairings.set(id, { polls: 0, state: "waiting", wrong: 0, expiresAt });
+    json(response, 201, {
+      id,
+      expires_at: new Date(expiresAt).toISOString(),
+      qr_svg: FAKE_QR,
+    });
+    return true;
+  }
+  const pairing = PAIRING.exec(path);
+  if (pairing !== null) {
+    const id = pairing[1] ?? "";
+    const held = pairings.get(id);
+    if (method === "DELETE") {
+      pairings.delete(id);
+      response.writeHead(204).end();
+      return true;
+    }
+    if (method === "GET") {
+      if (held === undefined || held.expiresAt <= Date.now()) {
+        noPairing(response);
+        return true;
+      }
+      held.polls += 1;
+      // The fixture phone scans the code at the third poll.
+      if (held.state === "waiting" && held.polls > 2) {
+        held.state = "claimed";
+        held.expiresAt = Date.now() + PAIRING_LIFE_MS;
+      }
+      json(response, 200, {
+        state: held.state,
+        expires_at: new Date(held.expiresAt).toISOString(),
+        device:
+          held.state === "waiting"
+            ? null
+            : { name: "Pixel 9", platform: "android", app_version: "1.0.0" },
+      });
+      return true;
+    }
+  }
+  const approve = APPROVE.exec(path);
+  if (approve !== null && method === "POST") {
+    const id = approve[1] ?? "";
+    const held = pairings.get(id);
+    const asked = await body(request);
+    const typed = typeof asked?.number === "string" ? asked.number : "";
+    if (!NUMBER_PATTERN.test(typed)) {
+      refuse(response, 422, "InvalidValueError", "body.number: six digits");
+      return true;
+    }
+    if (held === undefined || held.expiresAt <= Date.now()) {
+      noPairing(response);
+      return true;
+    }
+    if (held.state !== "claimed") {
+      refuse(
+        response,
+        409,
+        "Conflict",
+        "no phone is waiting on this code for a number",
+      );
+      return true;
+    }
+    if (typed.replace(" ", "") !== NUMBER) {
+      held.wrong += 1;
+      if (held.wrong >= 3) {
+        pairings.delete(id);
+        noPairing(response);
+        return true;
+      }
+      refuse(
+        response,
+        403,
+        "WrongNumber",
+        "that is not the number the phone shows",
+      );
+      return true;
+    }
+    held.state = "approved";
+    const now = new Date();
+    const linked = {
+      id: randomUUID(),
+      name: "Pixel 9",
+      platform: "android",
+      created_at: now.toISOString(),
+      last_used_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + 30 * 86_400_000).toISOString(),
+    };
+    devices.push(linked);
+    json(response, 200, linked);
+    return true;
+  }
+  return false;
+}
+
 const server = createServer((request, response) => {
   const asked = new URL(request.url ?? "/", "http://127.0.0.1");
   const path = asked.pathname;
@@ -1086,6 +1384,28 @@ const server = createServer((request, response) => {
   }
   if (path === "/auth/logout") {
     response.writeHead(204).end();
+    return;
+  }
+  if (
+    path.startsWith("/auth/devices") ||
+    path.startsWith("/auth/tokens") ||
+    path.startsWith("/auth/pairings")
+  ) {
+    const user = /** @type {{user?: unknown}} */ (fixture.session).user;
+    if (user === null || user === undefined) {
+      refuse(
+        response,
+        401,
+        "NotSignedIn",
+        "nobody is signed in: sign in at /ui/",
+      );
+      return;
+    }
+    void linkedDevices(request, response, path).then((answered) => {
+      if (!answered) {
+        refuse(response, 404, "NotFoundError", "no such route here");
+      }
+    });
     return;
   }
   if (path === "/api/turns" && request.method === "POST") {

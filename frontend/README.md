@@ -8,7 +8,10 @@ What is here is the whole interface: the design tokens and the plain CSS
 over them, the collapsible panel with the profile block, the session
 and the sign-in page, the theme toggle and the banner of the local
 development mode, the hash routing, the history in the panel with renaming
-and deleting, the agent and model pickers, and **the chat** -- the message
+and deleting, the agent and model pickers, **"Linked devices"** -- the
+phones and the API tokens, and the "Link a phone" dialog that pairs one
+([../docs/architecture/device-pairing.md](../docs/architecture/device-pairing.md))
+-- with the page a pairing code opens in a browser, and **the chat** -- the message
 box, the answer arriving a word at a time, re-attaching to a run that is
 already going, stopping one, editing a question, asking for an answer again,
 and retrying or resuming an answer that failed.
@@ -29,6 +32,7 @@ src/
   shell/, history/, session/, api/, conversation/,
   App.tsx, ErrorBoundary.tsx, main.tsx, router.ts
                    the shell: the panel, the history, the session, the routes
+  devices/         "Linked devices", the "Link a phone" dialog and devices.css
   chat/
     index.ts       the seam: the one file the rest of the application imports
     Chat.tsx       the <Chat> of the seam, over the runtime and the thread
@@ -50,15 +54,19 @@ hash is the one part of a URL no server sees, so the static files need no
 fallback route and nothing depends on the `/ui/` the backend serves them
 under.
 
-| hash                    | what it is                                       |
-| ----------------------- | ------------------------------------------------ |
-| `#/`                    | the empty chat, with the agent and model pickers |
-| `#/c/<conversation id>` | that conversation, with its model picker         |
-| anything else           | the empty chat, with the hash left as it is      |
+| hash                    | what it is                                                    |
+| ----------------------- | ------------------------------------------------------------- |
+| `#/`                    | the empty chat, with the agent and model pickers              |
+| `#/c/<conversation id>` | that conversation, with its model picker                      |
+| `#/devices`             | "Linked devices": the phones and the API tokens, in the shell |
+| `#/link`                | the page a pairing code opens in a browser, signed in or not  |
+| anything else           | the empty chat, with the hash left as it is                   |
 
 `#/sign-in?error=<code>` is where the backend sends a failed sign-in; the
 sign-in page reads it for itself, and the router neither claims nor rewrites
-it.
+it. `#/link?v=1&c=<code>` is the URL inside a pairing QR
+([../docs/architecture/device-pairing.md](../docs/architecture/device-pairing.md));
+the query is cut off and never read, since the code is for the app.
 
 ## Running it
 
@@ -108,6 +116,18 @@ hash, so both conversation scenes serve every route; renaming, deleting,
 cancelling and changing a model really change what is served, for as long as
 the process runs. It is a development tool: it is in no check, no bundle and
 no wheel.
+
+Every scene with somebody signed in also answers **"Linked devices"**
+(`#/devices`): two phones and a token, a Remove and a Revoke that really
+remove, a New token that really adds one and answers its secret, and a
+"Link a phone" whose code is a hand-drawn picture of a QR. Its poll answers
+`waiting` twice and `claimed` after that; the number the fixture phone
+shows is `482 913`, anything else is a wrong number, and the third ends the
+pairing. One more scene is for this page alone:
+
+| scene           | what it does                                                                                              |
+| --------------- | --------------------------------------------------------------------------------------------------------- |
+| `stale-session` | `signed-in` with a session too old to mint: "Link a phone" and New token answer 403 `FreshSignInRequired` |
 
 Four more scenes **really stream**, over server-sent events, with a position
 on the last wire event derived from each of the run's own and the two headers

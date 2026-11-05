@@ -64,9 +64,9 @@ address into a phone.
 - The shell knows how the asker was named: by the session cookie, by a
   device secret, or by a token. The routes above take the stricter
   dependency, `browsing`, where the others take `asking`; the two that
-  mint take `browsing_fresh`, which also wants the session fresh. So do
-  `GET` and `DELETE /auth/pairings/{id}`: they are the browser's half of
-  the flow. In the local
+  mint take `browsing_fresh`, which also wants the session fresh. `GET`
+  and `DELETE /auth/pairings/{id}` take `browsing` too: they are the
+  browser's half of the flow. In the local
   development mode every request is the mode's one user, and counts as
   the browser's.
 
@@ -277,7 +277,7 @@ would read it off the shared screen and type it itself.
 | `POST /auth/pairings` | fresh cookie | mint; 201 `{id, expires_at, qr_svg}`; 429 `Busy` over the cap; 403 `FreshSignInRequired` on a session older than ten minutes; 403 `Forbidden` where `device_days` is 0 |
 | `GET /auth/pairings/{id}` | cookie, owner | `{state, expires_at, device}`, `device` being `{name, platform, app_version}` once claimed; 404 for another's, or one gone or expired |
 | `POST /auth/pairings/{id}/approve` | cookie, owner | body `{number}`; link the device and answer it; 403 `WrongNumber`; 404 for the third wrong one, and one gone; 409 `Conflict` unless `claimed`; 403 where `device_days` is 0 |
-| `DELETE /auth/pairings/{id}` | cookie, owner | refuse, or cancel; 204; on an approved one, 204, the row goes and the device stays |
+| `DELETE /auth/pairings/{id}` | cookie, owner | refuse, or cancel; 204; on an approved one, 204, the row goes and the device stays; 404 for one gone |
 | `POST /auth/pairings/claim` | nobody | present a code; answers `{secret, number, expires_at}`; 404 |
 | `GET /auth/session` | bearer | also answers `device`, `token` or `pairing`; never a 401 |
 | `GET /auth/devices` | cookie or bearer | the person's devices, oldest first |
@@ -385,15 +385,17 @@ refuses it, like the other sign-in keys, and runs on the default.
   because it runs on the browser's session. Nothing of the chat library is
   involved. The panel and the shell are ours.
 - **"Link a phone"** and **"New token"** want a session younger than ten
-  minutes. Without one the button reads "Sign in again to link a phone",
-  and pressing it is the sign-in page's own navigation, with `return_to`
-  set to this page. "Link a phone" then opens a dialog. It
+  minutes. The session's answer does not say its age, so the button always
+  reads "Link a phone". The gate is met at the mint: a 403
+  `FreshSignInRequired` turns the dialog into "Sign in again to link a
+  phone", with one button per provider. Each is the sign-in page's own
+  navigation, with `return_to` set to this page. Otherwise the dialog
   asks for a code and shows the QR, with the sentence of step 2. The state is written under it: *waiting*;
   *a phone scanned your code, type the number it shows* with a six-digit
   field, **Link** and **No**; *that is not the number, two tries left*;
   *linked*; *the code expired* with **Show a new code**. Polling runs while
   the dialog is open. It stops when the dialog closes or the tab is hidden.
-  Closing the dialog while a code waits deletes the pairing.
+  Closing the dialog while a code waits or is claimed deletes the pairing.
 - **"Devices", for admins**, is one of the admin screens. It lists every
   linked device and every API token of the instance, by person: name,
   platform, linked on, last used, expires. An admin ends one device, every

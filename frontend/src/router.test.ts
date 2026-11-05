@@ -4,8 +4,10 @@ import { act, renderHook } from "@testing-library/react";
 import { expect, test } from "vitest";
 
 import {
+  DEVICES,
   formatRoute,
   isConversationId,
+  LINK,
   navigate,
   NEW_CHAT,
   parseRoute,
@@ -33,6 +35,29 @@ test("and written back the same way", () => {
   });
 });
 
+test("the devices page and the link page are read out of the hash", () => {
+  expect(parseRoute("#/devices")).toEqual({ kind: "devices" });
+  expect(parseRoute("#/link")).toEqual({ kind: "link" });
+});
+
+test("and written back the same way, round trip included", () => {
+  expect(formatRoute(DEVICES)).toBe("#/devices");
+  expect(formatRoute(LINK)).toBe("#/link");
+  expect(parseRoute(formatRoute(DEVICES))).toEqual(DEVICES);
+  expect(parseRoute(formatRoute(LINK))).toEqual(LINK);
+});
+
+test("a pairing code's query is cut off, and the route is the link page", () => {
+  // The URL inside a pairing QR: the code is the app's, never this page's.
+  expect(parseRoute("#/link?v=1&c=abc123")).toEqual({ kind: "link" });
+});
+
+test("reading the link page's hash leaves the address bar as it was", () => {
+  location.hash = "#/link?v=1&c=abc123";
+  renderHook(() => useRoute());
+  expect(location.hash).toBe("#/link?v=1&c=abc123");
+});
+
 test("every other hash is the empty chat", () => {
   for (const hash of [
     "",
@@ -43,6 +68,10 @@ test("every other hash is the empty chat", () => {
     "#/c/",
     `#/c/${ID}/extra`,
     `#c/${ID}`,
+    "#/devices/",
+    "#/devices/x",
+    "#/link/x",
+    "#/Devices",
     // The sign-in page's own hash, which it reads for itself: this must not
     // claim it, and reading it writes nothing.
     "#/sign-in?error=not_allowed",
