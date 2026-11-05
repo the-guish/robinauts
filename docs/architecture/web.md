@@ -43,3 +43,18 @@ How a phone is linked and ended (`docs/architecture/device-pairing.md`). Minting
 - `resume_answer`: the turn of the session's latest answer, when it failed, continued from what its engine saved.
 - `cancel_turn`: stop the session's active turn.
 - `watch_turn`: the events of the session's active turn, from a position, as they happen.
+
+## The worker API
+
+What a sandbox worker calls, under `/api/worker/v1/`, outside the OpenAPI document
+(`docs/architecture/sandbox-workers.md`). Each call carries the sandbox workers' token as a
+bearer and names its sandbox in `Robinauts-Sandbox`; anything else is 401. No cookie is read
+there, so the browser's checks, the origin and the local development mode's host, do not
+apply. `start --refuse-host NAME` answers every other route 403 for the addresses `NAME`
+resolves to: the sandbox workers', which a container network lets reach every port.
+
+- `claim_task`: `GET /task?wait=<s>`, a long-poll; 204 when nothing came.
+- `load_turn`: `GET /turns/{turn}`.
+- `append_events`: `POST /turns/{turn}/events`.
+- `renew_lease`: `POST /lease`.
+- `finish_turn`: `POST /turns/{turn}/finish`.

@@ -19,6 +19,7 @@ from robinauts.agent_engines.contract.ports import EngineFactory, installed
 from robinauts.agent_engines.contract.ports import StorageConfig as EngineStorage
 from robinauts.agent_engines.contract.ports import StorageKind as EngineStorageKind
 from robinauts.controller.adapters.config_file import read_config
+from robinauts.controller.adapters.http.store import HttpStore
 from robinauts.controller.adapters.memory.credentials import MemoryCredentials
 from robinauts.controller.adapters.memory.store import MemoryStore
 from robinauts.controller.adapters.postgres.credentials import PostgresCredentials
@@ -31,8 +32,15 @@ from robinauts.controller.adapters.postgres.schema import (
 from robinauts.controller.adapters.postgres.store import PostgresStore
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.application.worker import Worker
-from robinauts.controller.contract.domain import Config, ConfigError, StorageConfig, StorageKind
-from robinauts.controller.contract.ports import Controller, Credentials
+from robinauts.controller.application.worker_api import SandboxWorkerApi
+from robinauts.controller.contract.domain import (
+    Config,
+    ConfigError,
+    MissingSecretError,
+    StorageConfig,
+    StorageKind,
+)
+from robinauts.controller.contract.ports import Controller, Credentials, WorkerApi
 from robinauts.controller.core.config import parse_config
 from robinauts.controller.core.engine_settings import SecretLookup, engine_settings
 from robinauts.controller.ports.store import Store
@@ -41,6 +49,9 @@ from robinauts.tools.contract.ports import ToolProvider
 
 DATABASE_URL_VARIABLE = "ROBINAUTS_DATABASE_URL"
 
+API_URL_VARIABLE = "ROBINAUTS_API_URL"
+"""Where a sandbox worker reaches the server: its base URL, the worker API under it."""
+
 
 def built_in_tools() -> dict[str, ToolProvider]:
     """This build's tools by id, loaded from a fixed list: the one place that names a tool."""
@@ -48,7 +59,9 @@ def built_in_tools() -> dict[str, ToolProvider]:
     return {tool.id: tool for tool in loaded}
 
 
-CONTROLLER_TABLES = frozenset({"model_providers", "models", "tool_servers", "agents", "work"})
+CONTROLLER_TABLES = frozenset(
+    {"model_providers", "models", "tool_servers", "agents", "work", "sandbox"}
+)
 """The file's tables that are the controller's, the ones `parse_config` reads."""
 
 SCHEMA_READY = "the database is at schema version {version} (schema.sql {digest})"
@@ -66,14 +79,16 @@ def storage_from(environ: Mapping[str, str]) -> StorageConfig:
 
 @dataclass(frozen=True, slots=True)
 class Composed:
-    """The controller, the credentials on its storage, and the worker. The credentials open
-    nothing: on PostgreSQL they use the store's pool, which `controller.open` opens and `close`
-    closes. The worker has a store of its own, which it opens at its start and closes at its
-    stop; it starts after `open` and stops before `close`, by the shell's hand."""
+    """The controller, the credentials on its storage, the worker, and the worker API. The
+    credentials and the worker API open nothing: they use the controller's store, which
+    `controller.open` opens and `close` closes. The worker has a store of its own, which it
+    opens at its start and closes at its stop; it starts after `open` and stops before
+    `close`, by the shell's hand."""
 
     controller: Controller
     credentials: Credentials
     worker: Worker
+    worker_api: WorkerApi
 
 
 def compose(
@@ -110,7 +125,38 @@ def compose(
         engines=engines,
         tools=built_in_tools(),
     )
-    return Composed(controller, credentials, worker)
+    worker_api = SandboxWorkerApi(config, store=store, secret_for=secret_for)
+    return Composed(controller, credentials, worker, worker_api)
+
+
+def compose_sandbox_worker(
+    config: Config,
+    *,
+    api_url: str,
+    secret_for: SecretLookup,
+    engines: Mapping[str, EngineFactory] | None = None,
+    transport: object | None = None,
+) -> Worker:
+    """A sandbox worker: the worker, on the worker API at ``api_url`` instead of a database,
+    with its engines' memory in this process (``docs/architecture/sandbox-workers.md``). It runs
+    the turns of sandboxed sessions alone, since those are all the API hands it, and none of
+    this build's tools, which read the store. ``MissingSecretError`` without the token
+    ``[sandbox] token_env`` names; ``ConfigError`` with no ``[sandbox]`` table.
+    ``transport`` is a test's, which serves the API in its own process."""
+    if config.sandbox is None:
+        raise ConfigError("a sandbox worker needs the [sandbox] table")
+    token = secret_for(config.sandbox.token_env)
+    if not token:
+        raise MissingSecretError(f"no sandbox worker token in {config.sandbox.token_env}")
+    store = HttpStore(api_url, token, transport=transport)  # type: ignore[arg-type]
+    return Worker(
+        store,
+        config,
+        storage=StorageConfig(StorageKind.IN_MEMORY),
+        secret_for=secret_for,
+        engines=engines,
+        wait_timeout=config.sandbox.long_poll_seconds,
+    )
 
 
 def build(config: Config, *, storage: StorageConfig, secret_for: SecretLookup) -> Controller:

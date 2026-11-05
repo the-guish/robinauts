@@ -209,3 +209,57 @@ def test_a_tool_server_may_not_take_the_id_of_a_tool_of_this_build() -> None:
         ConfigError, match=re.escape("tool_servers.sessions: the id of a tool of this build")
     ):
         parse_config(raw, tools={"sessions"})
+
+
+MODELS = {
+    "model_providers": {"p": {"kind": "anthropic", "api_key_env": "P_KEY"}},
+    "models": {"fast": {"provider": "p", "name": "fast-1"}},
+}
+
+
+def test_a_sandboxed_agent_runs_with_the_sandbox_table() -> None:
+    config = parse_config(
+        {
+            **MODELS,
+            "sandbox": {"token_env": "WORKERS_TOKEN", "long_poll_seconds": 20},
+            "agents": {"coder": {**AGENT, "engine": "langchain", "sandboxed": True}},
+        }
+    )
+    assert config.agents["coder"].sandboxed is True
+    assert config.sandbox is not None
+    assert (config.sandbox.token_env, config.sandbox.long_poll_seconds) == ("WORKERS_TOKEN", 20.0)
+    assert config.sandbox.gone_after_seconds == 120.0
+    assert parse_config(MODELS).sandbox is None
+
+
+def test_a_sandboxed_agent_needs_the_table_and_no_tool_of_this_build() -> None:
+    with pytest.raises(ConfigError) as raised:
+        parse_config(
+            {
+                **MODELS,
+                "agents": {
+                    "coder": {**AGENT, "engine": "echo", "sandboxed": True, "tools": ["sessions"]},
+                    "odd": {**AGENT, "engine": "echo", "sandboxed": "yes"},
+                },
+            },
+            tools=["sessions"],
+        )
+    message = str(raised.value)
+    assert "agents.coder: sandboxed, and the file has no [sandbox] table" in message
+    assert "agents.coder: sandboxed, and names tool(s) of this build: sessions" in message
+    assert "agents.odd: sandboxed is not true or false: 'yes'" in message
+
+
+@pytest.mark.parametrize(
+    ("sandbox", "problem"),
+    [
+        ({"colour": 1}, "sandbox: unknown key(s) colour"),
+        ({"long_poll_seconds": 0}, "sandbox: long_poll_seconds must be a positive number"),
+        ({"long_poll_seconds": 90}, "long_poll_seconds must be shorter than [work] lease_seconds"),
+        ({"gone_after_seconds": 30}, "gone_after_seconds must be longer than long_poll_seconds"),
+        ({"token_env": ""}, "sandbox: token_env is not the name of an environment variable"),
+    ],
+)
+def test_a_sandbox_table_that_cannot_work_is_refused(sandbox: dict, problem: str) -> None:
+    with pytest.raises(ConfigError, match=re.escape(problem)):
+        parse_config({**MODELS, "sandbox": sandbox})

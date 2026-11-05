@@ -68,6 +68,16 @@ class NoActiveTurnError(ControllerError):
     pass
 
 
+class SandboxGoneError(ControllerError):
+    """A turn asked of a sandboxed session whose sandbox is gone, with the engine's memory of
+    the session: the session is read-only, and the work goes on in a new conversation."""
+
+
+class WorkerRefusedError(ControllerError):
+    """A sandbox worker's request refused for what it sent: a document that does not decode,
+    an event it may not write, or one past a limit."""
+
+
 # --- configuration ------------------------------------------------------------
 
 
@@ -128,6 +138,9 @@ class AgentConfig:
     tools: tuple[str, ...] = ()
     # How long one of its turns may run; left out, ``[work]``'s ``max_turn_seconds``.
     turn_timeout_seconds: float | None = None
+    # Its sessions' turns run in a sandbox worker, reached over the worker API, and never in
+    # the server's workers (``docs/architecture/sandbox-workers.md``).
+    sandboxed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +156,25 @@ class WorkConfig:
     max_running_tasks_per_worker: int = 100
 
 
+SANDBOX_TOKEN_VARIABLE = "ROBINAUTS_SANDBOX_TOKEN"
+"""Where the sandbox workers' token is read from, unless ``[sandbox] token_env`` says."""
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxConfig:
+    """``[sandbox]``: how the server meets its sandbox workers, over the worker API.
+
+    ``token_env`` names the variable that holds the workers' token, which the server checks
+    every call of the worker API against and each worker sends. ``long_poll_seconds`` is the
+    longest the server holds a worker's claim before it answers that there is nothing.
+    ``gone_after_seconds`` is how long a sandbox may go unheard before it counts as gone, with
+    the memory of its sessions; a sandboxed turn waits that long queued at most."""
+
+    token_env: str = SANDBOX_TOKEN_VARIABLE
+    long_poll_seconds: float = 30.0
+    gone_after_seconds: float = 120.0
+
+
 @dataclass(frozen=True, slots=True)
 class Config:
     providers: Mapping[str, ProviderConfig] = field(default_factory=dict)
@@ -150,6 +182,8 @@ class Config:
     tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
     agents: Mapping[str, AgentConfig] = field(default_factory=dict)
     work: WorkConfig = field(default_factory=WorkConfig)
+    sandbox: SandboxConfig | None = None
+    """``None`` when the file has no ``[sandbox]`` table: no agent may be sandboxed."""
 
 
 class StorageKind(StrEnum):
@@ -388,6 +422,10 @@ class Session:
     created_at: datetime
     updated_at: datetime
     title: str = ""
+    sandboxed: bool = False
+    """Its turns run in a sandbox worker: the agent's flag when the session was made."""
+    sandbox_id: uuid.UUID | None = None
+    """The sandbox that holds the session's memory, from the claim of its first turn on."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -430,6 +468,8 @@ class Task:
     lease_until: datetime
     """While queued, how long the task may wait; once claimed, the worker's lease."""
     claimed_at: datetime | None = None
+    sandboxed: bool = False
+    """A turn of a sandboxed session: claimed by a sandbox worker, never by the server's."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -469,6 +509,8 @@ class OpenedSession:
     active: ActiveTurn | None = None
     ended_badly: Turn | None = None
     """The session's last turn, when it failed, was cancelled or was interrupted."""
+    sandbox_gone: bool = False
+    """A sandboxed session whose sandbox is gone: read-only from then on."""
 
 
 # --- turns --------------------------------------------------------------------
@@ -554,6 +596,16 @@ TurnEvent = (
     | MessageCompleted
     | TurnEnded
 )
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedTurn:
+    """What a sandbox worker reads to run a turn: the turn, its session, and the session's
+    messages, oldest first, as their documents."""
+
+    turn: Turn
+    session: Session
+    messages: tuple[Mapping[str, Any], ...]
 
 
 @dataclass(frozen=True, slots=True)

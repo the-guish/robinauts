@@ -37,6 +37,7 @@ import {
   reduce,
   ONE_AT_A_TIME,
   ONE_AT_A_TIME_ANSWER,
+  SANDBOX_GONE,
   saidFor,
   STOP_DID_NOT_ARRIVE,
   storedParent,
@@ -2107,6 +2108,32 @@ test("an edit refused because the conversation is answering goes back into its e
   expect(result.current.state.ended).toBe(STILL_ANSWERING);
   expect(result.current.editing).toEqual({ id: "m1", text: "why, really?" });
   expect(result.current.composer.text).toBe("");
+});
+
+test("a conversation whose sandbox is gone says so, and a turn refused for it too", async () => {
+  // The sandbox held the agent's memory of the conversation: the server
+  // refuses every further turn (409), under a name of its own, which is not
+  // a conversation that is still answering.
+  stub((call) => {
+    if (call.url === `/api/conversations/${CONVERSATION}`) {
+      return json(opened(conversation(1), TREE, { sandbox_gone: true }));
+    }
+    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+      return refusal(409, "SandboxGoneError", "the sandbox is gone");
+    }
+    return undefined;
+  });
+  const { result } = chatting({ conversationId: CONVERSATION });
+  await waitFor(() => {
+    expect(result.current.state.messages).toHaveLength(2);
+  });
+  expect(result.current.state.ended).toBe(SANDBOX_GONE);
+  await act(async () => {
+    result.current.send("and then?");
+    await settle();
+  });
+  expect(result.current.state.ended).toBe(SANDBOX_GONE);
+  expect(result.current.state.ended).not.toBe(STILL_ANSWERING);
 });
 
 /** A conversation of `TREE` with a run going in it, as a chat sees it. */

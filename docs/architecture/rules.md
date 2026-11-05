@@ -30,7 +30,7 @@ no tool imports another; only controller.composition imports a tool
 contract -> nothing from robinauts
 ports -> contract
 core -> contract, ports, agent_engines.contract; pure functions, no I/O
-adapters -> contract, ports
+adapters -> contract, ports; adapters.http is the sandbox worker's store, over the worker API
 application -> contract, ports, core, agent_engines.contract, tools.contract
 composition -> contract, ports, core, adapters, application, tools; imported by web alone
 
@@ -40,6 +40,6 @@ langchain, langchain_core, langchain_*, langgraph, langchain_mcp_adapters, langs
 pydantic_ai, pydantic_graph, fastmcp, logfire, logfire_api, opentelemetry -> pydantic_ai_engine
 anthropic, openai, mcp -> langchain_engine, pydantic_ai_engine
 asyncpg, sqlite3, aiosqlite -> langchain_engine, pydantic_ai_engine, controller.adapters
-httpx -> web, langchain_engine, pydantic_ai_engine
+httpx -> web, langchain_engine, pydantic_ai_engine, controller.adapters.http
 fastapi, starlette, uvicorn, ag_ui -> web
 qrcodegen -> web

@@ -129,6 +129,13 @@ CREATE TABLE IF NOT EXISTS users (
 --
 -- `owner_id` cascades: a user's sessions are private to them, and there is
 -- nobody else for them to belong to once the user is gone.
+--
+-- `sandboxed` is the agent's flag when the session was made, as `engine` is
+-- its engine: its turns run in a sandbox worker
+-- (docs/architecture/sandbox-workers.md). `sandbox_id` is the sandbox that holds its memory, set by
+-- the claim of its first turn and never changed. Not a foreign key: a sandbox
+-- is a process that comes and goes, and its row says when it was last heard
+-- from, not whether the session may keep its id.
 CREATE TABLE IF NOT EXISTS sessions (
     id uuid
         CONSTRAINT sessions_pkey PRIMARY KEY,
@@ -139,7 +146,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     title text NOT NULL,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
-    deleted_at timestamptz
+    deleted_at timestamptz,
+    sandboxed boolean NOT NULL,
+    sandbox_id uuid,
+    -- Only a sandboxed session has a sandbox.
+    CONSTRAINT sessions_sandbox_only_when_sandboxed CHECK (sandboxed OR sandbox_id IS NULL)
 );
 
 -- The listing: one owner's sessions, most recently updated first, ties broken
@@ -246,16 +257,38 @@ CREATE TABLE IF NOT EXISTS tasks (
     created_at timestamptz NOT NULL,
     lease_until timestamptz NOT NULL,
     claimed_at timestamptz,
-    cancel_requested_at timestamptz
+    cancel_requested_at timestamptz,
+    -- A turn of a sandboxed session: a sandbox worker claims it, through the
+    -- worker API, and the server's workers never do.
+    sandboxed boolean NOT NULL
 );
 
--- What a worker claims from: the queued tasks, oldest first.
+-- What a worker claims from: the queued tasks, oldest first, the server's
+-- apart from the sandboxes'.
 CREATE INDEX IF NOT EXISTS tasks_queued_idx
-    ON tasks (created_at, id) WHERE state = 'queued';
+    ON tasks (sandboxed, created_at, id) WHERE state = 'queued';
 
 -- What the sweep reads: the tasks not done whose lease has passed.
 CREATE INDEX IF NOT EXISTS tasks_lease_until_idx
     ON tasks (lease_until) WHERE state <> 'done';
+
+
+-- ---------------------------------------------------------------------------
+-- Sandboxes.
+-- ---------------------------------------------------------------------------
+
+-- A sandbox worker, by the id it minted when its process started, and when it
+-- was last heard from: its claims and its lease renewals write `heard_at`. A
+-- sandbox not heard from for `[sandbox] gone_after_seconds` is gone, and its
+-- memory with it: its sessions are read-only. A process that starts again is a
+-- new sandbox, with a new id. Nothing references a row, and nothing deletes
+-- one yet: a row is a few bytes for each start of a sandbox worker.
+CREATE TABLE IF NOT EXISTS sandboxes (
+    id uuid
+        CONSTRAINT sandboxes_pkey PRIMARY KEY,
+    first_heard_at timestamptz NOT NULL,
+    heard_at timestamptz NOT NULL
+);
 
 
 -- ---------------------------------------------------------------------------

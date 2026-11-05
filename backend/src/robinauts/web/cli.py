@@ -2,6 +2,7 @@
 # Copyright The Robinauts Authors
 
 """``robinauts start`` serves the web shell; ``robinauts db init`` makes the database ready;
+``robinauts sandbox-worker`` runs a sandbox worker against a server's worker API;
 ``robinauts version`` prints the version;
 ``robinauts devices list`` and ``robinauts devices end`` are the operator's hold on linked
 devices (``docs/architecture/device-pairing.md``), over the database the server reads.
@@ -27,6 +28,7 @@ import asyncio
 import importlib.metadata
 import logging
 import os
+import signal
 import sys
 import uuid
 from collections.abc import Mapping, Sequence
@@ -37,10 +39,12 @@ from typing import Any
 import uvicorn
 
 from robinauts.controller.composition import (
+    API_URL_VARIABLE,
     CONTROLLER_TABLES,
     DATABASE_URL_VARIABLE,
     SecretLookup,
     compose,
+    compose_sandbox_worker,
     configure,
     init_database,
     load,
@@ -51,6 +55,7 @@ from robinauts.controller.contract.domain import (
     Config,
     ConfigError,
     DeviceSession,
+    MissingSecretError,
     StorageConfig,
     StorageKind,
     User,
@@ -71,6 +76,10 @@ NO_PROVIDER = (
 )
 NO_DATABASE = f"no database: set {DATABASE_URL_VARIABLE} to the PostgreSQL this deployment uses"
 SIGN_IN_OFF = "sign-in is off: the local development mode, one local user, loopback only"
+IN_A_CONTAINER = (
+    "sign-in is off: the local development mode, one local user, in a container whose port"
+    " the host must publish on its loopback interface alone"
+)
 
 
 def interface() -> Path:
@@ -86,11 +95,22 @@ def interface() -> Path:
 
 
 def serving(
-    tables: Mapping[str, Any], environ: Mapping[str, str], *, host: str, dev_no_sign_in: bool
+    tables: Mapping[str, Any],
+    environ: Mapping[str, str],
+    *,
+    host: str,
+    dev_no_sign_in: bool,
+    dev_container: bool = False,
 ) -> tuple[Config, SecretLookup, SignInConfig | None]:
     """What ``start`` serves with: the controller's configuration, how a secret is read, and
     sign-in's, ``None`` in the local development mode. ``ConfigError`` names every problem of
-    a start that is refused."""
+    a start that is refused.
+
+    ``dev_container`` is the local development mode in a container, which binds the
+    container's interfaces, since the host reaches it through a port it publishes and never
+    through the container's loopback: the host's publishing that port on its own loopback
+    alone is what keeps the mode on one machine then. It is an argument, like the mode, so
+    that nothing a process inherits turns it on."""
     problems = [
         f"{key}: unknown key, neither a table of the controller's nor of sign-in's"
         for key in tables
@@ -103,12 +123,14 @@ def serving(
                 "--dev-no-sign-in cannot be combined with a sign-in configuration, and the file"
                 f" holds {', '.join(held)}"
             )
-        if not is_loopback(host):
+        if not is_loopback(host) and not dev_container:
             problems.append(
                 f"--dev-no-sign-in serves this machine alone: --host {host} is not a loopback"
                 " address or localhost"
             )
     else:
+        if dev_container:
+            problems.append("--dev-container is the local development mode's: --dev-no-sign-in")
         try:
             sign_in = parse_sign_in(tables)
         except ConfigError as refused:
@@ -127,12 +149,23 @@ def serving(
     return config, secret_for, sign_in
 
 
-def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
+def start(
+    host: str,
+    port: int,
+    *,
+    dev_no_sign_in: bool,
+    dev_container: bool = False,
+    refused_hosts: Sequence[str] = (),
+) -> int:
     ui_dir = interface()
     tables = read_tables(Path(os.environ["ROBINAUTS_CONFIG"]))
     try:
         config, secret_for, sign_in = serving(
-            tables, os.environ, host=host, dev_no_sign_in=dev_no_sign_in
+            tables,
+            os.environ,
+            host=host,
+            dev_no_sign_in=dev_no_sign_in,
+            dev_container=dev_container,
         )
     except ConfigError as refused:
         print(refused, file=sys.stderr)
@@ -141,7 +174,7 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     composed = compose(config, storage=storage, secret_for=secret_for)
     logging.basicConfig(level=logging.INFO)
     if dev_no_sign_in:
-        logging.getLogger(__name__).warning(SIGN_IN_OFF)
+        logging.getLogger(__name__).warning(IN_A_CONTAINER if dev_container else SIGN_IN_OFF)
     uvicorn.run(
         create_app(
             composed,
@@ -150,11 +183,49 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
             ui_dir=ui_dir,
             # A store in memory is this process's alone: its worker runs here.
             spawn_worker_in_subprocess=storage.kind is StorageKind.POSTGRES,
+            fenced_hosts=refused_hosts,
         ),
         host=host,
         port=port,
         timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
     )
+    return 0
+
+
+def sandbox_worker() -> int:
+    """A sandbox worker: the turns of sandboxed sessions, run in this process and stored over
+    the worker API at ``ROBINAUTS_API_URL``, until SIGTERM or SIGINT. Every engine keeps its
+    memory in this process, so a session's work lives as long as the process does."""
+    api_url = os.environ.get(API_URL_VARIABLE)
+    if not api_url:
+        print(
+            f"{API_URL_VARIABLE} is not set: the server's URL, as this worker reaches it",
+            file=sys.stderr,
+        )
+        return 2
+    logging.basicConfig(level=logging.INFO)
+    # A line for every call of the worker API, a long-poll among them, says nothing.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    try:
+        config, secret_for = load(Path(os.environ["ROBINAUTS_CONFIG"]), os.environ)
+        worker = compose_sandbox_worker(config, api_url=api_url, secret_for=secret_for)
+    except (ConfigError, MissingSecretError) as refused:
+        print(refused, file=sys.stderr)
+        return 1
+
+    async def run() -> None:
+        stopping = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(signum, stopping.set)
+        await worker.start()
+        logging.getLogger(__name__).info("sandbox worker started, on %s", api_url)
+        try:
+            await stopping.wait()
+        finally:
+            await worker.stop()
+
+    asyncio.run(run())
     return 0
 
 
@@ -259,9 +330,25 @@ def run(argv: Sequence[str] | None = None) -> None:
         action="store_true",
         help="the local development mode: no sign-in, one local user, loopback only",
     )
+    serve.add_argument(
+        "--dev-container",
+        action="store_true",
+        help="with --dev-no-sign-in, in a container: bind its interfaces, for the host to"
+        " publish on its loopback alone",
+    )
+    serve.add_argument(
+        "--refuse-host",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="a sandbox worker's host: its requests reach the worker API and nothing else",
+    )
     database = commands.add_parser("db", help="the deployment's database")
     database_commands = database.add_subparsers(dest="database_command", required=True)
     database_commands.add_parser("init", help="create this build's schema in an empty database")
+    commands.add_parser(
+        "sandbox-worker", help="run sandboxed sessions' turns, over a server's worker API"
+    )
     commands.add_parser("version")
     linked = commands.add_parser("devices", help="the linked devices, for the operator")
     linked_commands = linked.add_subparsers(dest="devices_command", required=True)
@@ -273,7 +360,15 @@ def run(argv: Sequence[str] | None = None) -> None:
     which.add_argument("--all", action="store_true", help="every device of the deployment")
     arguments = parser.parse_args(argv)
     if arguments.command == "start":
-        status = start(arguments.host, arguments.port, dev_no_sign_in=arguments.dev_no_sign_in)
+        status = start(
+            arguments.host,
+            arguments.port,
+            dev_no_sign_in=arguments.dev_no_sign_in,
+            dev_container=arguments.dev_container,
+            refused_hosts=arguments.refuse_host,
+        )
+    elif arguments.command == "sandbox-worker":
+        status = sandbox_worker()
     elif arguments.command == "db":
         status = database_init()
     elif arguments.command == "devices":

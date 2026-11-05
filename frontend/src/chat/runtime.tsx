@@ -50,6 +50,7 @@ import {
   isRefusal,
   MODEL_NOT_OFFERED,
   request,
+  SANDBOX_GONE_ERROR,
   UNKNOWN_MODEL,
 } from "../api/client";
 import { cancelRun } from "../conversation/conversation";
@@ -68,6 +69,7 @@ import {
   ONE_AT_A_TIME,
   ONE_AT_A_TIME_ANSWER,
   reduce,
+  SANDBOX_GONE,
   STOP_DID_NOT_ARRIVE,
   storedParent,
   turnStart,
@@ -144,6 +146,8 @@ export const LOST_TOUCH =
 function said(failure: unknown): string {
   if (isRefusal(failure, MODEL_NOT_OFFERED)) return MODEL_GONE;
   if (isRefusal(failure, UNKNOWN_MODEL)) return MODEL_GONE_NEW_CHAT;
+  // Shares its 409 with a conversation that is still answering.
+  if (isRefusal(failure, SANDBOX_GONE_ERROR)) return SANDBOX_GONE;
   if (failure instanceof ApiError && failure.status === 409) {
     return STILL_ANSWERING;
   }
@@ -592,6 +596,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
           ? null
           : (ENDED_BADLY.get(opened.ended_badly.state) ?? null),
       endedState: opened.ended_badly === null ? null : opened.ended_badly.state,
+      sandboxGone: opened.sandbox_gone,
     });
     // Every complete message has just been loaded, so attaching at
     // `resume.after` replays exactly the one still being produced and none

@@ -53,6 +53,9 @@ export const UNKNOWN_MODEL = "UnknownModelError";
  */
 export const MODEL_NOT_OFFERED = "ModelNotOfferedError";
 
+/** A sandboxed conversation whose sandbox is gone: it takes no more turns. */
+export const SANDBOX_GONE_ERROR = "SandboxGoneError";
+
 /** Whether that failure is the backend refusing with the error of that name. */
 export function isRefusal(failure: unknown, error: string): boolean {
   return failure instanceof ApiError && failure.error === error;

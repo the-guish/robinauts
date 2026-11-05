@@ -9,12 +9,14 @@ from collections.abc import Callable, Collection, Mapping
 from typing import Any
 
 from robinauts.controller.contract.domain import (
+    SANDBOX_TOKEN_VARIABLE,
     AgentConfig,
     Config,
     ConfigError,
     ModelConfig,
     ProviderConfig,
     ProviderKind,
+    SandboxConfig,
     ToolServerAuth,
     ToolServerConfig,
     WorkConfig,
@@ -46,6 +48,42 @@ def _seconds(value: Any) -> float:
     return float(value)
 
 
+def _flag(value: Any) -> bool:
+    if value is not True and value is not False:
+        raise ValueError(f"sandboxed is not true or false: {value!r}")
+    return value
+
+
+def _sandbox(given: Any, work: WorkConfig, problems: list[str]) -> SandboxConfig | None:
+    """``[sandbox]``, or ``None`` when the file has none."""
+    if given is None:
+        return None
+    if not isinstance(given, Mapping):
+        problems.append("sandbox: not a table")
+        return None
+    known = {field.name for field in dataclasses.fields(SandboxConfig)}
+    if unknown := sorted(set(given) - known):
+        problems.append(f"sandbox: unknown key(s) {', '.join(unknown)}")
+        return None
+    seconds = {k: v for k, v in given.items() if k != "token_env"}
+    if wrong := sorted(key for key, value in seconds.items() if not _positive(value)):
+        problems.append(f"sandbox: {', '.join(wrong)} must be a positive number of seconds")
+        return None
+    token_env = given.get("token_env", SANDBOX_TOKEN_VARIABLE)
+    if not isinstance(token_env, str) or not token_env:
+        problems.append("sandbox: token_env is not the name of an environment variable")
+        return None
+    sandbox = SandboxConfig(token_env, **{k: float(v) for k, v in seconds.items()})
+    if sandbox.long_poll_seconds >= work.lease_seconds:
+        problems.append("sandbox: long_poll_seconds must be shorter than [work] lease_seconds")
+    if sandbox.gone_after_seconds <= max(sandbox.long_poll_seconds, work.heartbeat_seconds):
+        problems.append(
+            "sandbox: gone_after_seconds must be longer than long_poll_seconds and than"
+            " [work] heartbeat_seconds, which are how often a sandbox worker is heard from"
+        )
+    return sandbox
+
+
 def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
     """``tools`` are the ids of the tools this build runs in process, which an agent's ``tools``
     may name beside the tool servers."""
@@ -68,7 +106,9 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
     providers = build("model_providers", ProviderConfig, kind=ProviderKind)
     models = build("models", ModelConfig)
     tool_servers = build("tool_servers", ToolServerConfig, auth=ToolServerAuth, exclude=_names)
-    agents = build("agents", AgentConfig, tools=tuple, turn_timeout_seconds=_seconds)
+    agents = build(
+        "agents", AgentConfig, tools=tuple, turn_timeout_seconds=_seconds, sandboxed=_flag
+    )
 
     work = WorkConfig()
     given = dict(raw.get("work", {}))
@@ -84,6 +124,8 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
         work = WorkConfig(**seconds, max_running_tasks_per_worker=tasks)
         if work.heartbeat_seconds * 2 > work.lease_seconds:
             problems.append("work: heartbeat_seconds must be at most half of lease_seconds")
+
+    sandbox = _sandbox(raw.get("sandbox"), work, problems)
 
     for server in tool_servers.values():
         if server.auth is ToolServerAuth.HEADER:
@@ -119,6 +161,17 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
             problems.append(f"agents.{agent.id}: tool(s) named twice: {', '.join(twice)}")
         if agent.engine not in ENGINES:
             problems.append(f"agents.{agent.id}: engine {agent.engine!r} is not one of {ENGINES}")
+        if agent.sandboxed:
+            if "sandbox" not in raw:
+                problems.append(
+                    f"agents.{agent.id}: sandboxed, and the file has no [sandbox] table"
+                )
+            # This build's tools read the store, which a sandbox does not reach.
+            if built_in := sorted(tool for tool in agent.tools if tool in tools):
+                problems.append(
+                    f"agents.{agent.id}: sandboxed, and names tool(s) of this build:"
+                    f" {', '.join(built_in)}"
+                )
     if problems:
         raise ConfigError("\n".join(problems))
-    return Config(providers, models, tool_servers, agents, work)
+    return Config(providers, models, tool_servers, agents, work, sandbox)

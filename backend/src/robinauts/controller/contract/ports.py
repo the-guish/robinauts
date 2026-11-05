@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from datetime import datetime
+from typing import Any
 
 from robinauts.controller.contract.domain import (
     AgentListing,
@@ -17,6 +18,7 @@ from robinauts.controller.contract.domain import (
     DeviceDescription,
     DeviceSession,
     Identity,
+    LoadedTurn,
     ModelListing,
     NumberedEvent,
     OpenedSession,
@@ -25,7 +27,9 @@ from robinauts.controller.contract.domain import (
     PendingLogin,
     Session,
     SessionPage,
+    Task,
     TurnStarted,
+    TurnState,
     User,
     UserSession,
 )
@@ -373,4 +377,52 @@ class Credentials(ABC):
     async def delete_credentials_of_identity(self, provider: str, subject: str) -> int:
         """As ``delete_credentials_of``, for the user of that identity, if there is one: what
         an allow-list refusal at sign-in does."""
+        raise NotImplementedError
+
+
+class WorkerApi(ABC):
+    """What the server answers its sandbox workers (``docs/architecture/sandbox-workers.md``,
+    "The worker API"). Every call names the sandbox that asks, and reaches only the sessions
+    that sandbox holds: a turn of any other is ``SessionNotFoundError``. A write past the
+    turn's lease, or on a turn that ended, is ``TurnLostError``; anything a worker may not
+    send is ``WorkerRefusedError``."""
+
+    @abstractmethod
+    def accepts(self, token: str) -> bool:
+        """Whether ``token`` is the sandbox workers' token."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def claim(self, sandbox: uuid.UUID, wait: float) -> Task | None:
+        """The next task for that sandbox, claimed with a lease, waiting up to ``wait``
+        seconds, at most ``[sandbox] long_poll_seconds``, for one to be queued."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def load_turn(self, sandbox: uuid.UUID, turn: uuid.UUID) -> LoadedTurn:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def append_events(
+        self, sandbox: uuid.UUID, turn: uuid.UUID, events: Sequence[Mapping[str, Any]]
+    ) -> None:
+        """Each event at the position its document names, the first after the last stored."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def renew(self, sandbox: uuid.UUID, tasks: Sequence[uuid.UUID]) -> list[uuid.UUID]:
+        """Renew the leases of those of the tasks the sandbox runs; the ones asked to stop."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def finish(
+        self,
+        sandbox: uuid.UUID,
+        turn: uuid.UUID,
+        state: TurnState,
+        error: str | None,
+        answer: Mapping[str, Any] | None,
+        events: Sequence[Mapping[str, Any]],
+    ) -> None:
+        """Store the answer and the last events, and end the turn, in one operation."""
         raise NotImplementedError

@@ -63,12 +63,14 @@ ONE_ACTIVE = "turns_one_active_per_session"
 POSITION_TAKEN = "turn_events_pkey"
 USER_EXISTS = "users_provider_subject_key"
 
-_SESSION_COLUMNS = "id, owner_id, agent, engine, title, created_at, updated_at"
+_SESSION_COLUMNS = (
+    "id, owner_id, agent, engine, title, created_at, updated_at, sandboxed, sandbox_id"
+)
 _TURN_COLUMNS = (
     "id, session_id, follows, model, state, started_at, ended_at, error, retries_message_id,"
     " task_id"
 )
-_TASK_COLUMNS = "id, task_name, payload, state, created_at, lease_until, claimed_at"
+_TASK_COLUMNS = "id, task_name, payload, state, created_at, lease_until, claimed_at, sandboxed"
 
 _VISIBLE = "SELECT 1 FROM sessions WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL"
 
@@ -103,15 +105,51 @@ UPDATE tasks
 SET state = 'running', lease_until = $2, claimed_at = $1
 WHERE state = 'queued' AND id IN (
   SELECT id FROM tasks
-  WHERE state = 'queued' AND lease_until > $1
-  ORDER BY created_at, id
+  WHERE state = 'queued' AND NOT sandboxed AND lease_until > $1
+  ORDER BY sandboxed, created_at, id
   LIMIT $3
   FOR UPDATE SKIP LOCKED
 )
 RETURNING {_TASK_COLUMNS}
 """
 
-_CLAIMABLE = "SELECT EXISTS (SELECT 1 FROM tasks WHERE state = 'queued' AND lease_until > $1)"
+_SANDBOX_TASKS = """
+FROM tasks AS k
+JOIN turns AS t ON t.task_id = k.id
+JOIN sessions AS s ON s.id = t.session_id
+WHERE k.state = 'queued' AND k.sandboxed AND k.lease_until > $1
+  AND s.deleted_at IS NULL AND (s.sandbox_id IS NULL OR s.sandbox_id = {sandbox})
+"""
+"""The queued tasks a sandbox may claim: of the sessions it holds, or that no sandbox does."""
+
+_K_COLUMNS = ", ".join("tasks." + c for c in _TASK_COLUMNS.split(", "))
+
+# The sessions no sandbox held become this one's in the same statement: a data-modifying
+# CTE runs whether or not the statement reads it.
+_CLAIM_FOR_SANDBOX = f"""
+WITH picked AS (
+  SELECT k.id AS task_id, t.session_id
+  {_SANDBOX_TASKS.format(sandbox="$4")}
+  ORDER BY k.sandboxed, k.created_at, k.id
+  LIMIT $3
+  FOR UPDATE OF k SKIP LOCKED
+), bound AS (
+  UPDATE sessions SET sandbox_id = $4
+  WHERE id IN (SELECT session_id FROM picked) AND sandbox_id IS NULL
+)
+UPDATE tasks
+SET state = 'running', lease_until = $2, claimed_at = $1
+FROM picked
+WHERE tasks.id = picked.task_id
+RETURNING {_K_COLUMNS}
+"""
+
+_CLAIMABLE = (
+    "SELECT EXISTS (SELECT 1 FROM tasks"
+    " WHERE state = 'queued' AND NOT sandboxed AND lease_until > $1)"
+)
+
+_CLAIMABLE_FOR_SANDBOX = f"SELECT EXISTS (SELECT 1 {_SANDBOX_TASKS.format(sandbox='$2')})"
 
 
 def _session(row: asyncpg.Record) -> Session:
@@ -123,6 +161,8 @@ def _session(row: asyncpg.Record) -> Session:
         row["created_at"],
         row["updated_at"],
         row["title"],
+        row["sandboxed"],
+        row["sandbox_id"],
     )
 
 
@@ -150,6 +190,7 @@ def _task(row: asyncpg.Record) -> Task:
         row["created_at"],
         row["lease_until"],
         row["claimed_at"],
+        row["sandboxed"],
     )
 
 
@@ -243,7 +284,8 @@ class PostgresStore(Store):
 
     async def add_session(self, session: Session) -> None:
         await self._pool.execute(
-            f"INSERT INTO sessions ({_SESSION_COLUMNS}) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            f"INSERT INTO sessions ({_SESSION_COLUMNS})"
+            " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             session.id,
             session.owner_id,
             session.agent,
@@ -251,6 +293,8 @@ class PostgresStore(Store):
             session.title,
             session.created_at,
             session.updated_at,
+            session.sandboxed,
+            session.sandbox_id,
         )
 
     async def get_session(self, owner: uuid.UUID, session: uuid.UUID) -> Session:
@@ -341,7 +385,8 @@ class PostgresStore(Store):
                     await self._insert_message(connection, question)
                 # The task first: the turn refers to it.
                 await connection.execute(
-                    f"INSERT INTO tasks ({_TASK_COLUMNS}) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                    f"INSERT INTO tasks ({_TASK_COLUMNS})"
+                    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                     task.id,
                     task.name,
                     task.payload,
@@ -349,6 +394,7 @@ class PostgresStore(Store):
                     task.created_at,
                     task.lease_until,
                     task.claimed_at,
+                    task.sandboxed,
                 )
                 await connection.execute(
                     f"INSERT INTO turns ({_TURN_COLUMNS})"
@@ -532,16 +578,27 @@ class PostgresStore(Store):
         )
         return [row["id"] for row in rows if row["cancel_requested_at"] is not None]
 
-    async def claim_tasks(self, now: datetime, until: datetime, limit: int) -> list[Task]:
-        rows = await self._pool.fetch(_CLAIM, now, until, limit)
+    async def claim_tasks(
+        self, now: datetime, until: datetime, limit: int, sandbox: uuid.UUID | None = None
+    ) -> list[Task]:
+        if sandbox is None:
+            rows = await self._pool.fetch(_CLAIM, now, until, limit)
+        else:
+            rows = await self._pool.fetch(_CLAIM_FOR_SANDBOX, now, until, limit, sandbox)
         return [_task(row) for row in rows]
 
-    async def wait_for_queued(self, now: datetime, timeout: float) -> bool:
+    async def wait_for_queued(
+        self, now: datetime, timeout: float, sandbox: uuid.UUID | None = None
+    ) -> bool:
         await self._listen()
         woken: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self._queued_waiters.add(woken)
         try:
-            if await self._pool.fetchval(_CLAIMABLE, now):
+            if sandbox is None:
+                claimable = await self._pool.fetchval(_CLAIMABLE, now)
+            else:
+                claimable = await self._pool.fetchval(_CLAIMABLE_FOR_SANDBOX, now, sandbox)
+            if claimable:
                 return True
             try:
                 await asyncio.wait_for(asyncio.shield(woken), timeout)
@@ -550,6 +607,18 @@ class PostgresStore(Store):
             return True
         finally:
             self._queued_waiters.discard(woken)
+
+    async def hear_from_sandbox(self, sandbox: uuid.UUID, now: datetime) -> None:
+        await self._pool.execute(
+            "INSERT INTO sandboxes (id, first_heard_at, heard_at) VALUES ($1, $2, $2)"
+            " ON CONFLICT ON CONSTRAINT sandboxes_pkey DO UPDATE"
+            " SET heard_at = greatest(sandboxes.heard_at, excluded.heard_at)",
+            sandbox,
+            now,
+        )
+
+    async def sandbox_heard_at(self, sandbox: uuid.UUID) -> datetime | None:
+        return await self._pool.fetchval("SELECT heard_at FROM sandboxes WHERE id = $1", sandbox)
 
     async def request_cancel(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, at: datetime

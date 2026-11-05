@@ -44,6 +44,7 @@ class MemoryStore(Store):
         self._changed = asyncio.Condition()
         self._cancel_requested: set[uuid.UUID] = set()
         self._stops: list[Callable[[uuid.UUID], object]] = []
+        self._heard: dict[uuid.UUID, datetime] = {}
 
     async def open(self) -> None:
         """Nothing to open: the engines keep their memory in this process too."""
@@ -69,11 +70,29 @@ class MemoryStore(Store):
             None,
         )
 
-    def _claimable(self, now: datetime) -> list[Task]:
+    def _claimable(self, now: datetime, sandbox: uuid.UUID | None = None) -> list[Task]:
         queued = [
-            k for k in self._tasks.values() if k.state is TaskState.QUEUED and k.lease_until > now
+            k
+            for k in self._tasks.values()
+            if k.state is TaskState.QUEUED
+            and k.lease_until > now
+            and k.sandboxed is (sandbox is not None)
+            and (sandbox is None or self._holdable(k, sandbox))
         ]
         return sorted(queued, key=lambda k: (k.created_at, k.id))
+
+    def _session_of_task(self, task: Task) -> Session | None:
+        turn = next((t for t in self._turns.values() if t.task_id == task.id), None)
+        return None if turn is None else self._sessions.get(turn.session_id)
+
+    def _holdable(self, task: Task, sandbox: uuid.UUID) -> bool:
+        """Whether the task's session is visible, and that sandbox's or no sandbox's."""
+        session = self._session_of_task(task)
+        return (
+            session is not None
+            and session.id not in self._hidden
+            and session.sandbox_id in (None, sandbox)
+        )
 
     def _holds(self, turn: Turn | None, at: datetime) -> bool:
         """Whether the turn is active and its task runs with a lease not passed ``at``."""
@@ -124,7 +143,11 @@ class MemoryStore(Store):
         return self._visible(owner, session)
 
     async def update_session(self, session: Session) -> None:
-        self._sessions[session.id] = session
+        # The title and the time alone, as on PostgreSQL: a sandbox a claim bound it to stays.
+        there = self._sessions[session.id]
+        self._sessions[session.id] = dataclasses.replace(
+            there, title=session.title, updated_at=session.updated_at
+        )
 
     async def sessions_of(
         self, owner: uuid.UUID, limit: int, before: Cursor | None
@@ -273,15 +296,27 @@ class MemoryStore(Store):
                 renewed.append(task)
         return [k for k in renewed if k in self._cancel_requested]
 
-    async def claim_tasks(self, now: datetime, until: datetime, limit: int) -> list[Task]:
+    async def claim_tasks(
+        self, now: datetime, until: datetime, limit: int, sandbox: uuid.UUID | None = None
+    ) -> list[Task]:
         claimed = []
-        for found in self._claimable(now)[:limit]:
+        for found in self._claimable(now, sandbox)[:limit]:
             running = dataclasses.replace(
                 found, state=TaskState.RUNNING, lease_until=until, claimed_at=now
             )
             self._tasks[found.id] = running
             claimed.append(running)
+            session = self._session_of_task(found)
+            if sandbox is not None and session is not None and session.sandbox_id is None:
+                self._sessions[session.id] = dataclasses.replace(session, sandbox_id=sandbox)
         return claimed
+
+    async def hear_from_sandbox(self, sandbox: uuid.UUID, now: datetime) -> None:
+        heard = self._heard.get(sandbox)
+        self._heard[sandbox] = now if heard is None else max(heard, now)
+
+    async def sandbox_heard_at(self, sandbox: uuid.UUID) -> datetime | None:
+        return self._heard.get(sandbox)
 
     async def get_task(self, task: uuid.UUID) -> Task | None:
         return self._tasks.get(task)
@@ -292,11 +327,13 @@ class MemoryStore(Store):
             return None
         return self._sessions[found.session_id].owner_id, found
 
-    async def wait_for_queued(self, now: datetime, timeout: float) -> bool:
+    async def wait_for_queued(
+        self, now: datetime, timeout: float, sandbox: uuid.UUID | None = None
+    ) -> bool:
         async with self._changed:
             try:
                 await asyncio.wait_for(
-                    self._changed.wait_for(lambda: bool(self._claimable(now))), timeout
+                    self._changed.wait_for(lambda: bool(self._claimable(now, sandbox))), timeout
                 )
             except TimeoutError:
                 return False

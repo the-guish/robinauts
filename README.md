@@ -120,6 +120,12 @@ OpenRouter key ([demo/README.md](demo/README.md)):
 
     demo/start.sh          # demo/stop.sh takes it down
 
+Or in Docker, with a sandboxed agent whose turns run in a container of their
+own, apart from the application and the database
+([docker/README.md](docker/README.md)):
+
+    docker/start.sh        # docker/stop.sh takes it down
+
 ## Planned
 
 - Prepare and stress test performance behind a load balancer.

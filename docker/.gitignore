@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+#
+# The keys and the tokens: docker/.env.example is what to copy it from.
+.env

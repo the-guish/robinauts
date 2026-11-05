@@ -1,0 +1,110 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+#
+# Robinauts in three containers: the control plane (`api`), the sandbox worker
+# that runs every sandboxed agent's turns (`sandbox`), and PostgreSQL. Started
+# by docker/start.sh, with the values of docker/.env (docker/README.md).
+#
+# They meet on three networks, so that each reaches what it needs and no more:
+#
+#   data     api, postgres   internal: no way out, and no sandbox in it
+#   front    api             the port the host publishes, and the way out to
+#                            the model providers for the agents that are not
+#                            sandboxed
+#   sandbox  api, sandbox    the worker API, and the sandbox's way out to its
+#                            model provider and to GitHub
+#
+# The sandbox never reaches the database: it reaches the control plane's
+# worker API, over HTTP, and the control plane stores what it sends. Its
+# requests reach nothing else of the control plane's (`--refuse-host sandbox`).
+
+name: robinauts
+
+x-config: &config
+  type: bind
+  source: ./robinauts.toml
+  target: /etc/robinauts/robinauts.toml
+  read_only: true
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: robinauts
+      POSTGRES_DB: robinauts
+      POSTGRES_PASSWORD: ${ROBINAUTS_POSTGRES_PASSWORD:?run docker/start.sh, which makes one}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    networks: [data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "robinauts", "-d", "robinauts"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: api
+    image: robinauts/api:dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ROBINAUTS_CONFIG: /etc/robinauts/robinauts.toml
+      ROBINAUTS_DATABASE_URL: postgresql://robinauts:${ROBINAUTS_POSTGRES_PASSWORD}@postgres:5432/robinauts
+      ROBINAUTS_SANDBOX_TOKEN: ${ROBINAUTS_SANDBOX_TOKEN:?run docker/start.sh, which makes one}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      - *config
+    # The schema first, which is safe to repeat; then the server, in the local
+    # development mode, inside this container (docker/README.md, "Sign-in").
+    command:
+      - sh
+      - -c
+      - >-
+        robinauts db init &&
+        exec robinauts start --dev-no-sign-in --dev-container
+        --host 0.0.0.0 --port 8000 --refuse-host sandbox
+    ports:
+      # The host's loopback alone: the local development mode has no sign-in.
+      - "127.0.0.1:${ROBINAUTS_PORT:-8000}:8000"
+    networks: [data, front, sandbox]
+    restart: unless-stopped
+
+  sandbox:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: sandbox
+    image: robinauts/sandbox:dev
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      ROBINAUTS_CONFIG: /etc/robinauts/robinauts.toml
+      ROBINAUTS_API_URL: http://api:8000
+      ROBINAUTS_SANDBOX_TOKEN: ${ROBINAUTS_SANDBOX_TOKEN:?run docker/start.sh, which makes one}
+      ROBINAUTS_GITHUB_TOKEN: ${ROBINAUTS_GITHUB_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      - *config
+    networks: [sandbox]
+    restart: unless-stopped
+    # The worker waits for its turns before it stops: longer than its 10 s.
+    stop_grace_period: 20s
+
+networks:
+  data:
+    internal: true
+  front: {}
+  sandbox: {}
+
+volumes:
+  postgres: {}
