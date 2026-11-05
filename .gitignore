@@ -23,6 +23,3 @@ frontend/src/api/schema.d.ts
 
 # Scratch space: review findings and other working files.
 tmp/
-
-# Local clone of the OpenHands repository, kept beside this project for reference.
-/OpenHands/
