@@ -2,9 +2,11 @@
 # Copyright The Robinauts Authors
 
 """Loads a configuration file, and builds a controller: the store for the storage asked, the
-application over it, and the worker that claims and runs its turns, with the credentials
-sign-in keeps on the same storage. The file holds web's tables
-beside the controller's, so web is handed the tables of one reading and parses its own. Also
+application over it, what a worker needs of the core over that store, and the worker that
+claims and runs its turns through it, with the credentials sign-in keeps on the same storage.
+A worker in a process of its own is built with `compose_worker`, over the core it is handed.
+The file holds web's tables beside the controller's, so web is handed the tables of one
+reading and parses its own. Also
 what `robinauts db init` does, since it is the one other thing that names the store and the
 engines together."""
 
@@ -22,6 +24,7 @@ from robinauts.controller.adapters.config_file import read_config
 from robinauts.controller.adapters.memory.credentials import MemoryCredentials
 from robinauts.controller.adapters.memory.store import MemoryStore
 from robinauts.controller.adapters.postgres.credentials import PostgresCredentials
+from robinauts.controller.adapters.postgres.engine_memory import PostgresEngineMemory
 from robinauts.controller.adapters.postgres.pool import open_pool
 from robinauts.controller.adapters.postgres.schema import (
     SCHEMA_SHA256,
@@ -31,8 +34,9 @@ from robinauts.controller.adapters.postgres.schema import (
 from robinauts.controller.adapters.postgres.store import PostgresStore
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.application.worker import Worker
+from robinauts.controller.application.worker_core import InProcessCore
 from robinauts.controller.contract.domain import Config, ConfigError, StorageConfig, StorageKind
-from robinauts.controller.contract.ports import Controller, Credentials
+from robinauts.controller.contract.ports import Controller, Credentials, WorkerCore
 from robinauts.controller.core.config import parse_config
 from robinauts.controller.core.engine_settings import SecretLookup, engine_settings
 from robinauts.controller.ports.store import Store
@@ -66,14 +70,18 @@ def storage_from(environ: Mapping[str, str]) -> StorageConfig:
 
 @dataclass(frozen=True, slots=True)
 class Composed:
-    """The controller, the credentials on its storage, and the worker. The credentials open
-    nothing: on PostgreSQL they use the store's pool, which `controller.open` opens and `close`
-    closes. The worker has a store of its own, which it opens at its start and closes at its
-    stop; it starts after `open` and stops before `close`, by the shell's hand."""
+    """The controller, the credentials on its storage, what a worker needs of the core, and
+    the worker over it. The credentials and the core open nothing: they use the store, which
+    `controller.open` opens and `close` closes. The worker starts after `open` and stops before
+    `close`, by the shell's hand; the engines' memory is its own, which it opens at its start
+    and closes at its stop."""
 
     controller: Controller
     credentials: Credentials
     worker: Worker
+    core: WorkerCore
+    """Over the controller's store: the worker's in this process, and what the API serves a
+    worker in a process of its own."""
 
 
 def compose(
@@ -85,32 +93,50 @@ def compose(
 ) -> Composed:
     """`engines` are the factories by engine name; the installed ones when not given."""
     store: Store
-    worker_store: Store
     credentials: Credentials
     if storage.kind is StorageKind.POSTGRES:
         if not storage.url:
             raise ConfigError(f"{DATABASE_URL_VARIABLE} is not set")
         postgres = PostgresStore(dsn=storage.url)
         store, credentials = postgres, PostgresCredentials(postgres)
-        # Its own pool and listener: it meets the controller in the database alone.
-        worker_store = PostgresStore(dsn=storage.url)
     elif storage.kind is StorageKind.IN_MEMORY:
         memory = MemoryStore()
         store, credentials = memory, MemoryCredentials(memory)
-        # The memory is the data: another instance would hold no turn.
-        worker_store = memory
     else:
         raise NotImplementedError(f"{storage.kind} storage")
     controller = RobinautsController(config, store=store)
-    worker = Worker(
-        worker_store,
+    core = InProcessCore(store)
+    worker = compose_worker(
+        config, storage=storage, secret_for=secret_for, core=core, engines=engines
+    )
+    return Composed(controller, credentials, worker, core)
+
+
+def compose_worker(
+    config: Config,
+    *,
+    storage: StorageConfig,
+    secret_for: SecretLookup,
+    core: WorkerCore,
+    engines: Mapping[str, EngineFactory] | None = None,
+) -> Worker:
+    """A worker that reaches the core through `core` alone. Its engines keep their memory on
+    `storage`: on PostgreSQL in a pool of the worker's own, which reads and writes the
+    engines' tables, never the core's."""
+    engine_memory = None
+    if storage.kind is StorageKind.POSTGRES:
+        if not storage.url:
+            raise ConfigError(f"{DATABASE_URL_VARIABLE} is not set")
+        engine_memory = PostgresEngineMemory(storage.url)
+    return Worker(
+        core,
         config,
         storage=storage,
         secret_for=secret_for,
+        engine_memory=engine_memory,
         engines=engines,
         tools=built_in_tools(),
     )
-    return Composed(controller, credentials, worker)
 
 
 def build(config: Config, *, storage: StorageConfig, secret_for: SecretLookup) -> Controller:

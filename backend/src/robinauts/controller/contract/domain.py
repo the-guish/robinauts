@@ -562,3 +562,33 @@ class NumberedEvent:
 
     position: int
     event: TurnEvent
+
+
+# --- records, as a store keeps them and a worker writes them ---------------------
+
+Document = Mapping[str, Any]
+"""A message or an event, whole, as the encoder wrote it."""
+
+Cursor = tuple[datetime, uuid.UUID]
+"""Where a page of sessions ended: the ``(updated_at, id)`` of its last session."""
+
+
+@dataclass(frozen=True, slots=True)
+class StoredMessage:
+    """A message as a store keeps it: the columns it orders and joins by, and the document."""
+
+    id: uuid.UUID
+    session_id: uuid.UUID
+    parent_id: uuid.UUID | None
+    role: Role
+    created_at: datetime
+    document: Document
+
+
+@dataclass(frozen=True, slots=True)
+class StoredEvent:
+    """One of a turn's events: its position, its document, and when it expires."""
+
+    position: int
+    document: Document
+    expires_at: datetime

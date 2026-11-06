@@ -29,7 +29,7 @@ import logging
 import os
 import sys
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -127,6 +127,34 @@ def serving(
     return config, secret_for, sign_in
 
 
+def worker_core_url(host: str, port: int) -> str:
+    """Where a worker on this machine reaches the server that listens on ``host``: a loopback
+    address for a server that listens on every address, else that host."""
+    if host in ("", "0.0.0.0"):
+        host = "127.0.0.1"
+    elif host == "::":
+        host = "::1"
+    if ":" in host:
+        host = f"[{host}]"
+    return f"http://{host}:{port}"
+
+
+class Server(uvicorn.Server):
+    """uvicorn's server, which stops the worker before it stops listening: a worker in a
+    process of its own ends the turns it runs through this server's API, which the app's
+    lifespan, run once nothing listens any more, would be too late for."""
+
+    def __init__(self, config: uvicorn.Config, stop_worker: Callable[[], Awaitable[None]]) -> None:
+        super().__init__(config)
+        self._stop_worker = stop_worker
+
+    async def shutdown(self, sockets: list[Any] | None = None) -> None:
+        try:
+            await self._stop_worker()
+        finally:
+            await super().shutdown(sockets=sockets)
+
+
 def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     ui_dir = interface()
     tables = read_tables(Path(os.environ["ROBINAUTS_CONFIG"]))
@@ -142,19 +170,20 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     logging.basicConfig(level=logging.INFO)
     if dev_no_sign_in:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
-    uvicorn.run(
-        create_app(
-            composed,
-            sign_in=sign_in,
-            secret_for=secret_for,
-            ui_dir=ui_dir,
-            # A store in memory is this process's alone: its worker runs here.
-            spawn_worker_in_subprocess=storage.kind is StorageKind.POSTGRES,
+    app = create_app(
+        composed,
+        sign_in=sign_in,
+        secret_for=secret_for,
+        ui_dir=ui_dir,
+        # A store in memory is this process's alone: its worker runs here.
+        worker_core_url=(
+            worker_core_url(host, port) if storage.kind is StorageKind.POSTGRES else None
         ),
-        host=host,
-        port=port,
-        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
     )
+    config = uvicorn.Config(
+        app, host=host, port=port, timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS
+    )
+    Server(config, app.state.lifecycle.stop_worker).run()
     return 0
 
 

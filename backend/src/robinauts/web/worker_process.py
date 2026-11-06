@@ -3,10 +3,12 @@
 
 """The worker in a process of its own, which ``Lifecycle`` spawns on PostgreSQL.
 
-It reads the configuration and the environment ``robinauts start`` read, composes as the
-server does, and runs only the worker, until SIGTERM or SIGINT. It then stops the worker,
-which waits for its tasks. It writes a line to its parent once the worker has started. On
-Linux it also ends with its parent, killed or not.
+It reads the configuration and the environment ``robinauts start`` read, and runs only the
+worker, until SIGTERM or SIGINT. It then stops the worker, which waits for its tasks. It
+reaches the core through its parent's API alone (``web/worker_client.py``), at the URL its
+environment names, with the secret its parent wrote to a pipe; the database it opens is for
+the engines' memory. It writes a line to its parent once the worker has started. On Linux it
+also ends with its parent, killed or not.
 """
 
 from __future__ import annotations
@@ -19,7 +21,8 @@ import signal
 import sys
 from pathlib import Path
 
-from robinauts.controller.composition import compose, load, storage_from
+from robinauts.controller.composition import compose_worker, load, storage_from
+from robinauts.web.worker_client import HttpCore, QuietRequests
 
 PARENT_VARIABLE = "ROBINAUTS_WORKER_PARENT"
 """The id of the process that spawned this one, which it ends with."""
@@ -32,6 +35,12 @@ READY_LINE = b"ready\n"
 ACTIVITY_VARIABLE = "ROBINAUTS_WORKER_ACTIVITY_FILE"
 """The file this process's worker touches at every heartbeat, which its parent's health check
 reads."""
+
+CORE_URL_VARIABLE = "ROBINAUTS_WORKER_CORE_URL"
+"""The root of the API this process reaches the core through: its parent's."""
+
+SECRET_VARIABLE = "ROBINAUTS_WORKER_SECRET_FD"
+"""The pipe this process reads the secret it presents to that API from, to its end."""
 
 _PR_SET_PDEATHSIG = 1
 
@@ -47,9 +56,26 @@ def _end_with_parent() -> None:
         os.kill(os.getpid(), signal.SIGTERM)
 
 
+def _read_secret() -> str:
+    """The secret, read to the pipe's end, which the parent closed before this one began."""
+    pipe = int(os.environ[SECRET_VARIABLE])
+    read = b""
+    try:
+        while chunk := os.read(pipe, 4096):
+            read += chunk
+    finally:
+        os.close(pipe)
+    return read.decode()
+
+
 async def _run() -> None:
     config, secret_for = load(Path(os.environ["ROBINAUTS_CONFIG"]), os.environ)
-    worker = compose(config, storage=storage_from(os.environ), secret_for=secret_for).worker
+    url = os.environ[CORE_URL_VARIABLE]
+    logging.getLogger("httpx").addFilter(QuietRequests(url))
+    core = HttpCore(url, _read_secret())
+    worker = compose_worker(
+        config, storage=storage_from(os.environ), secret_for=secret_for, core=core
+    )
     worker.activity_file = Path(os.environ[ACTIVITY_VARIABLE])
     stopping = asyncio.Event()
     loop = asyncio.get_running_loop()

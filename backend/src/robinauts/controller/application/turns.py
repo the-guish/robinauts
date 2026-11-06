@@ -52,6 +52,7 @@ from robinauts.controller.contract.domain import (
     TurnLostError,
     TurnState,
 )
+from robinauts.controller.contract.ports import WorkerCore
 from robinauts.controller.core.documents import (
     clean_text,
     event_to_document,
@@ -81,13 +82,16 @@ TIMED_OUT = "a call timed out before the turn's deadline"
 """The error of a turn whose silent ``TimeoutError`` came early, such as a query's."""
 
 
-async def load_messages(store: Store, owner: uuid.UUID, session: uuid.UUID) -> list[Message]:
-    """Every message of the session, decoded, oldest first."""
-    return [message_from_document(d) for d in await store.messages_of(owner, session)]
+async def load_messages(
+    source: Store | WorkerCore, owner: uuid.UUID, session: uuid.UUID
+) -> list[Message]:
+    """Every message of the session, decoded, oldest first: from the store for the controller,
+    from the core for a worker."""
+    return [message_from_document(d) for d in await source.messages_of(owner, session)]
 
 
 async def end_if_running(
-    store: Store,
+    core: WorkerCore,
     owner: uuid.UUID,
     session: uuid.UUID,
     turn: uuid.UUID,
@@ -98,7 +102,7 @@ async def end_if_running(
     task holds a lease: a runner that never claimed it wrote nothing. A turn lost, or a
     session gone, is left as it is."""
     try:
-        await store.finish_turn(owner, session, turn, state, now, None, None, [], now)
+        await core.finish_turn(owner, session, turn, state, now, None, None, [], now)
     except (TurnLostError, SessionNotFoundError):
         return
 
@@ -106,8 +110,8 @@ async def end_if_running(
 class _Writer:
     """The turn's events, numbered and written one at a time."""
 
-    def __init__(self, store: Store, owner: uuid.UUID, turn: Turn) -> None:
-        self._store = store
+    def __init__(self, core: WorkerCore, owner: uuid.UUID, turn: Turn) -> None:
+        self._core = core
         self._owner = owner
         self._turn = turn
         self.position = 0
@@ -115,7 +119,7 @@ class _Writer:
     async def append(self, event: TurnEvent) -> None:
         self.position += 1
         now = datetime.now(UTC)
-        await self._store.append_event(
+        await self._core.append_event(
             self._owner,
             self._turn.session_id,
             self._turn.id,
@@ -143,7 +147,7 @@ class _Writer:
         events: Sequence[StoredEvent],
     ) -> None:
         now = datetime.now(UTC)
-        await self._store.finish_turn(
+        await self._core.finish_turn(
             self._owner,
             self._turn.session_id,
             self._turn.id,
@@ -157,7 +161,7 @@ class _Writer:
 
 
 async def run_turn(
-    store: Store,
+    core: WorkerCore,
     engine: AgentEngine,
     owner: uuid.UUID,
     session: Session,
@@ -181,7 +185,7 @@ async def run_turn(
         return
     answer_id = uuid.uuid4()
     parts: list[MessagePart] = []
-    writer = _Writer(store, owner, turn)
+    writer = _Writer(core, owner, turn)
     try:
         await writer.append(MessageStarted(answer_id, parent_id=question.id))
     except TurnLostError:

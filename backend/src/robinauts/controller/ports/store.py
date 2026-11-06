@@ -16,39 +16,20 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
 from datetime import datetime
-from typing import Any
 
-from robinauts.controller.contract.domain import Role, Session, Task, Turn, TurnState, User
-
-Document = Mapping[str, Any]
-"""A message or an event, whole, as the encoder wrote it."""
-
-Cursor = tuple[datetime, uuid.UUID]
-"""Where a page of sessions ended: the ``(updated_at, id)`` of its last session."""
-
-
-@dataclass(frozen=True, slots=True)
-class StoredMessage:
-    """A message as a store keeps it: the columns it orders and joins by, and the document."""
-
-    id: uuid.UUID
-    session_id: uuid.UUID
-    parent_id: uuid.UUID | None
-    role: Role
-    created_at: datetime
-    document: Document
-
-
-@dataclass(frozen=True, slots=True)
-class StoredEvent:
-    """One of a turn's events: its position, its document, and when it expires."""
-
-    position: int
-    document: Document
-    expires_at: datetime
+from robinauts.controller.contract.domain import (
+    Cursor,
+    Document,
+    Session,
+    StoredEvent,
+    StoredMessage,
+    Task,
+    Turn,
+    TurnState,
+    User,
+)
 
 
 class Store(ABC):

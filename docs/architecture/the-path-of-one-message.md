@@ -86,10 +86,12 @@ first by `add_message`, and `start_turn(session, follows)` has no turn id.
 
 A worker claims the task, whose payload names the turn, and runs it.
 
-- **PostgreSQL:** every uvicorn process runs a worker that hears `robinauts_queued`.
-  The worker claims queued tasks with one `UPDATE … FOR UPDATE SKIP LOCKED`, which
-  makes them `running` with a new lease. It runs each as
-  `asyncio.create_task(run_task(…))` in its own process. With several processes, the
+- **PostgreSQL:** every uvicorn process spawns a worker, in a process of its own, which
+  reaches the core through that server's `/internal/worker/` routes alone. The server hears
+  `robinauts_queued` and answers the worker's wait. The worker claims queued tasks through
+  it, which the store does with one `UPDATE … FOR UPDATE SKIP LOCKED` that makes them
+  `running` with a new lease. It runs each as `asyncio.create_task(run_task(…))` in its own
+  process. With several processes, the
   worker that claims the task first runs it, whichever process took the request.
 - **AWS:** `lambda:Invoke` with `InvocationType=Event` on the worker Lambda, with
   retries set to zero and the event's age bounded below the lease. It returns in

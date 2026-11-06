@@ -3,7 +3,8 @@
 
 """A server killed in the middle of a turn: the next server ends the turn as interrupted, and
 leaves it so. Asked to resume it, it goes on from the rounds its engine saved, in both
-engines."""
+engines. A server stopped in the middle of a turn ends it as interrupted itself: its worker
+writes the end through the server's API, which still listens."""
 
 from __future__ import annotations
 
@@ -165,3 +166,37 @@ def test_a_crashed_turn_waits_until_asked_to_resume(
     assert [part["text"] for part in answer["parts"] if part["kind"] == "text"] == ["done"]
     # The rounds it had saved are not run again; the call cut short is.
     assert counted == [0, 1, 2, 2]
+
+
+def test_a_stopped_server_ends_its_turn_through_its_api_before_it_stops_listening(
+    model_server: FakeLocalGPTServer, counter_url: str, tmp_path: Path
+) -> None:
+    model_server.model = CountingModel()
+    counted.clear()
+    released.clear()
+    config = tmp_path / "robinauts.toml"
+    counter = COUNTER.format(tools_url=counter_url, system_prompt=stack.SYSTEM_PROMPT)
+    # The default lease, 90 s: a turn the worker did not end stays active past this test.
+    config.write_text(stack.config_for(model_server.base_url) + counter)
+    started: list[subprocess.Popen[bytes]] = []
+    try:
+        with stack.database(config) as url, ThreadPoolExecutor(1) as thread:
+            with stack.server(config, url, stack.API_KEY, started) as first:
+                asking = thread.submit(start_turn, first, "langchain_counter")
+                wait_for(lambda: len(counted) == ROUNDS)
+                # Its worker waits for the turn, bounded, then interrupts it. uvicorn, once
+                # it has shut down, ends as the signal it was stopped with.
+                started[0].terminate()
+                assert started[0].wait(timeout=40) == -signal.SIGTERM
+            asking.result(timeout=30)
+
+            with (
+                stack.server(config, url, stack.API_KEY) as second,
+                httpx.Client(base_url=second, timeout=60.0) as api,
+            ):
+                ended = opened(api)
+                assert ended["run_id"] is None
+                assert ended["ended_badly"]["state"] == "interrupted"
+                assert ended["messages"][-1]["failed"]
+    finally:
+        released.set()

@@ -43,3 +43,24 @@ How a phone is linked and ended (`docs/architecture/device-pairing.md`). Minting
 - `resume_answer`: the turn of the session's latest answer, when it failed, continued from what its engine saved.
 - `cancel_turn`: stop the session's active turn.
 - `watch_turn`: the events of the session's active turn, from a position, as they happen.
+
+## Worker
+
+What a worker in a process of its own reaches the core through: the operations of
+`WorkerCore` (`docs/architecture/controller.md`, "Worker"), one route each under
+`/internal/worker/`, served over the controller's store. They are not the frontend's and are
+not in the OpenAPI document.
+
+- The server makes a secret at its start and writes it to a pipe the worker's process reads
+  at its own; it is in no environment variable and no file. Every route wants it as
+  `Authorization: Bearer`: any other credential is 401. With no worker process running, the
+  routes answer 404.
+- The worker reaches the server where it listens, on a loopback address when it listens on
+  every address.
+- A turn lost is 409 `turn_lost`, a session not found 404 `session_not_found`: the worker
+  raises the core's own errors for them.
+- `listen_for_cancels` is a long poll past a cursor. A cancel the worker misses is named by
+  its next renewal of the leases.
+- A server stops its worker before it stops listening, since the worker ends its turns
+  through these routes; the waits it holds end at once when the worker has stopped.
+

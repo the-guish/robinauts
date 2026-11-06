@@ -23,7 +23,7 @@ from robinauts.controller.contract.domain import (
     StorageConfig,
     StorageKind,
 )
-from robinauts.web.cli import devices_command, run, serving
+from robinauts.web.cli import devices_command, run, serving, worker_core_url
 from util.aio import asyncio_test
 
 SIGN_IN = {
@@ -73,14 +73,29 @@ def test_the_mode_serves_a_loopback_host(host: str) -> None:
     assert sign_in is None
 
 
+@pytest.mark.parametrize(
+    ("host", "url"),
+    [
+        ("127.0.0.1", "http://127.0.0.1:8000"),
+        ("0.0.0.0", "http://127.0.0.1:8000"),
+        ("::", "http://[::1]:8000"),
+        ("::1", "http://[::1]:8000"),
+        ("localhost", "http://localhost:8000"),
+        ("10.0.0.7", "http://10.0.0.7:8000"),
+    ],
+)
+def test_a_worker_process_reaches_its_server_where_it_listens(host: str, url: str) -> None:
+    assert worker_core_url(host, 8000) == url
+
+
 def test_a_refused_start_exits_before_it_binds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     path = tmp_path / "robinauts.toml"
     path.write_text('public_url = "https://robinauts.example.com"\n')
     monkeypatch.setenv("ROBINAUTS_CONFIG", str(path))
-    serve = create_autospec(uvicorn.run, spec_set=True)
-    monkeypatch.setattr(uvicorn, "run", serve)
+    serve = create_autospec(uvicorn.Server.run, spec_set=True)
+    monkeypatch.setattr(uvicorn.Server, "run", serve)
     with pytest.raises(SystemExit) as exited:
         run(["start", "--dev-no-sign-in"])
     assert exited.value.code == 1

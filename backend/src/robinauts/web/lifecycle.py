@@ -3,13 +3,15 @@
 
 """The start and the stop of what the composition built, in order: what the app's lifespan
 runs, and what a test that needs no app runs in its place. The worker runs in this process,
-or in a process of its own (``spawn_worker_in_subprocess``)."""
+or in a process of its own (``core_url``), which reaches the core through this server's API
+alone, with a secret handed to it at its start through a pipe, never its environment."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
+import secrets
 import signal
 import sys
 import tempfile
@@ -17,11 +19,14 @@ import time
 from pathlib import Path
 
 from robinauts.controller.composition import Composed
+from robinauts.web.worker_api import WorkerAccess
 from robinauts.web.worker_process import (
     ACTIVITY_VARIABLE,
+    CORE_URL_VARIABLE,
     PARENT_VARIABLE,
     READY_LINE,
     READY_VARIABLE,
+    SECRET_VARIABLE,
 )
 
 _log = logging.getLogger(__name__)
@@ -41,41 +46,73 @@ than the worker waits for its tasks."""
 
 
 class Lifecycle:
-    def __init__(self, composed: Composed, *, spawn_worker_in_subprocess: bool = False) -> None:
-        """``spawn_worker_in_subprocess`` runs the worker in a process of its own, which suits
-        PostgreSQL alone: a store in memory cannot be shared between processes."""
+    def __init__(self, composed: Composed, *, core_url: str | None = None) -> None:
+        """``core_url`` runs the worker in a process of its own, which reaches the core at that
+        URL: this server's, as the worker's machine reaches it. That suits PostgreSQL alone,
+        where the engines' memory is in the database: an engine in memory would hold nothing of
+        a session another process ran."""
         self.composed = composed
-        self._spawn_worker_in_subprocess = spawn_worker_in_subprocess
+        self._core_url = core_url
+        self._worker_running = False
         self._process: asyncio.subprocess.Process | None = None
         self._watching: asyncio.Task[None] | None = None
+        self.access = WorkerAccess()
+        """What lets the worker's process in through the API, while it runs."""
         self.activity_file = Path(tempfile.gettempdir()) / f"robinauts-worker-{os.getpid()}.alive"
         """What this node's worker touches at every heartbeat, in this process or its own."""
 
     async def start(self) -> None:
-        """Open the controller, then start the worker, which opens a store of its own. Return
-        once the worker has started, so that a server which says it is up runs turns."""
+        """Open the controller, then start the worker. Return once the worker has started, so
+        that a server which says it is up runs turns. A worker process is let in through the
+        API from then on, with the secret it reads from a pipe at its start."""
         await self.composed.controller.open()
-        if not self._spawn_worker_in_subprocess:
+        if self._core_url is None:
             self.composed.worker.activity_file = self.activity_file
             await self.composed.worker.start()
+            self._worker_running = True
             return
-        read_end, write_end = os.pipe()
+        secret = secrets.token_urlsafe(32)
+        self.access.open(secret)
+        await self.composed.core.listen_for_cancels(self.access.stop_requested)
         environment = {
             **os.environ,
             PARENT_VARIABLE: str(os.getpid()),
-            READY_VARIABLE: str(write_end),
             ACTIVITY_VARIABLE: str(self.activity_file),
+            CORE_URL_VARIABLE: self._core_url,
         }
         try:
+            # The secret, whole, before the worker exists: far shorter than a pipe holds.
+            secret_end, secret_write = os.pipe()
             try:
-                self._process = await asyncio.create_subprocess_exec(
-                    sys.executable, "-m", WORKER_MODULE, env=environment, pass_fds=(write_end,)
-                )
+                os.write(secret_write, secret.encode())
             finally:
-                os.close(write_end)
-            await self._wait_until_ready(self._process, read_end)
-        finally:
-            os.close(read_end)
+                os.close(secret_write)
+            try:
+                read_end, write_end = os.pipe()
+            except BaseException:
+                os.close(secret_end)
+                raise
+            environment[READY_VARIABLE] = str(write_end)
+            environment[SECRET_VARIABLE] = str(secret_end)
+            try:
+                try:
+                    self._process = await asyncio.create_subprocess_exec(
+                        sys.executable,
+                        "-m",
+                        WORKER_MODULE,
+                        env=environment,
+                        pass_fds=(write_end, secret_end),
+                    )
+                finally:
+                    os.close(write_end)
+                    os.close(secret_end)
+                await self._wait_until_ready(self._process, read_end)
+            finally:
+                os.close(read_end)
+        except BaseException:
+            self.access.close()
+            raise
+        self._worker_running = True
         self._watching = asyncio.create_task(self._watch(self._process), name="worker process")
 
     async def _wait_until_ready(self, process: asyncio.subprocess.Process, ready: int) -> None:
@@ -107,12 +144,21 @@ class Lifecycle:
             return False
         return time.time() - touched <= HEALTHY_WITHIN
 
+    async def stop_worker(self) -> None:
+        """Stop the worker, which waits for the turns it runs, unless it is stopped already. A
+        server does it while it still listens: a worker in a process of its own ends its turns
+        through the API. Then the API lets no worker in."""
+        if self._worker_running:
+            self._worker_running = False
+            if self._process is None:
+                await self.composed.worker.stop()
+            else:
+                await self._stop_process(self._process)
+        self.access.close()
+
     async def stop(self) -> None:
-        """Stop the worker, which waits for the turns it runs, then close the controller."""
-        if self._process is None:
-            await self.composed.worker.stop()
-        else:
-            await self._stop_process(self._process)
+        """Stop the worker, if it still runs, then close the controller."""
+        await self.stop_worker()
         self.activity_file.unlink(missing_ok=True)
         await self.composed.controller.close()
 

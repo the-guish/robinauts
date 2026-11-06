@@ -15,7 +15,9 @@ younger than ``FRESH_MINUTES``. A write that carries the session cookie
 must carry ``Origin`` equal to ``public_url``, else 403; a write with a bearer alone need not.
 In the local development mode every request must name ``localhost`` or an IP address as its
 ``Host``, and a write that carries ``Origin`` must name that ``Host``, else 403.
-A controller operation that is not implemented answers 501.
+A controller operation that is not implemented answers 501. The ``/internal/worker/`` routes
+answer the server's own worker process alone, by the secret it was handed
+(``web/worker_api.py``).
 The shapes are the ones the frontend reads (``docs/specs/wire.md``); a turn's stream is
 AG-UI over SSE, its run id is the turn's id, and its thread id the session's.
 """
@@ -96,6 +98,7 @@ from robinauts.web.sign_in import (
     secret_hash,
     secret_of_kind,
 )
+from robinauts.web.worker_api import worker_router
 
 DEFAULT_PAGE = 30
 
@@ -592,12 +595,14 @@ def create_app(
     sign_in: SignInConfig | None,
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
-    spawn_worker_in_subprocess: bool = False,
+    worker_core_url: str | None = None,
 ) -> FastAPI:
-    """``sign_in`` is ``None`` in the local development mode. ``spawn_worker_in_subprocess``
-    runs the worker in a process of its own."""
+    """``sign_in`` is ``None`` in the local development mode. ``worker_core_url`` runs the
+    worker in a process of its own, which reaches this app's ``/internal/worker/`` routes at
+    that URL. The app's ``state.lifecycle`` is its ``Lifecycle``: a server stops its worker
+    with ``stop_worker`` before it stops listening."""
     controller, credentials = composed.controller, composed.credentials
-    lifecycle = Lifecycle(composed, spawn_worker_in_subprocess=spawn_worker_in_subprocess)
+    lifecycle = Lifecycle(composed, core_url=worker_core_url)
     exchange: Exchange | None = None
     flow: SignIn | None = None
     if sign_in is not None:
@@ -729,6 +734,7 @@ def create_app(
         redoc_url=None,
         responses={"default": {"model": ErrorResponse, "description": "A refusal"}},
     )
+    app.state.lifecycle = lifecycle
 
     app.add_middleware(Guard, check=same_origin)
     app.add_middleware(SecurityHeaders)
@@ -1089,6 +1095,10 @@ def create_app(
         conversation_id: uuid.UUID, run_id: uuid.UUID, user: User = asking
     ) -> None:
         await controller.cancel_turn(user, conversation_id, run_id)
+
+    # --- a worker in a process of its own ------------------------------------------
+
+    app.include_router(worker_router(composed.core, lifecycle.access))
 
     # --- liveness --------------------------------------------------------------
 
