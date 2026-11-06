@@ -26,7 +26,7 @@ from datetime import datetime
 
 import asyncpg
 
-from robinauts.controller.adapters.postgres.pool import COMMAND_TIMEOUT, open_pool
+from robinauts.controller.adapters.postgres.pool import close_pool, open_pool
 from robinauts.controller.adapters.postgres.schema import check_schema
 from robinauts.controller.contract.domain import (
     Role,
@@ -208,16 +208,7 @@ class PostgresStore(Store):
             await listener.close()
         if self._owns_pool and self._pool is not None:
             pool, self._pool = self._pool, None  # type: ignore[assignment]
-            # Closing waits for every connection to come back: a task holding one hangs it.
-            try:
-                await asyncio.wait_for(pool.close(), COMMAND_TIMEOUT)
-            except TimeoutError:
-                _log.warning(
-                    "the pool did not close in %s s, as a query or a task still held a"
-                    " connection: terminated",
-                    COMMAND_TIMEOUT,
-                )
-                pool.terminate()
+            await close_pool(pool)
 
     # --- users --------------------------------------------------------------
 

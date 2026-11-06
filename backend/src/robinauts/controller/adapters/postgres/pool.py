@@ -16,12 +16,16 @@ string, which is where the password is.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from typing import Any
 
 import asyncpg
 
 from robinauts.controller.contract.domain import ConfigError
+
+_log = logging.getLogger(__name__)
 
 MIN_POOL_SIZE = 2
 MAX_POOL_SIZE = 10
@@ -76,3 +80,17 @@ async def open_pool(
         )
     except OPENING_FAILURES as refused:
         raise ConfigError(f"the database could not be opened: {refused}") from refused
+
+
+async def close_pool(pool: asyncpg.Pool) -> None:
+    """Close a pool ``open_pool`` made. Closing waits for every connection to come back, and a
+    task holding one hangs it: past ``COMMAND_TIMEOUT``, the pool is terminated."""
+    try:
+        await asyncio.wait_for(pool.close(), COMMAND_TIMEOUT)
+    except TimeoutError:
+        _log.warning(
+            "the pool did not close in %s s, as a query or a task still held a"
+            " connection: terminated",
+            COMMAND_TIMEOUT,
+        )
+        pool.terminate()
