@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""What a worker in a process of its own needs from the core, over HTTP: the routes of
+"""The turn broker of a worker in a process of its own, over HTTP: the routes of
 ``web/worker_api.py``, at the server that spawned it, with the secret it was handed.
 
 A worker starts before its server listens, and stops while it still does, so a connection
@@ -34,7 +34,7 @@ from robinauts.controller.contract.domain import (
     TurnLostError,
     TurnState,
 )
-from robinauts.controller.contract.ports import WorkerCore
+from robinauts.controller.contract.ports import TurnBroker
 from robinauts.web.worker_wire import (
     PREFIX,
     SESSION_NOT_FOUND,
@@ -87,7 +87,7 @@ class QuietRequests(logging.Filter):
         return not any(str(arg).startswith(self._root) for arg in args)
 
 
-class CoreRefusedError(Exception):
+class BrokerRefusedError(Exception):
     """The server answered a worker's request with a status that is not one of the refusals
     the worker acts on."""
 
@@ -96,7 +96,7 @@ def _ids(path: str, *ids: object) -> str:
     return path.format(*(str(i) for i in ids))
 
 
-class HttpCore(WorkerCore):
+class HttpTurnBroker(TurnBroker):
     def __init__(
         self,
         url: str,
@@ -158,7 +158,7 @@ class HttpCore(WorkerCore):
             raise TurnLostError(refusal.detail)
         if refusal is not None and refusal.error == SESSION_NOT_FOUND:
             raise SessionNotFoundError(refusal.detail)
-        raise CoreRefusedError(f"the server answered {response.status_code} to {method} {path}")
+        raise BrokerRefusedError(f"the server answered {response.status_code} to {method} {path}")
 
     async def claim_tasks(self, now: datetime, until: datetime, limit: int) -> list[Task]:
         answer = await self._call(

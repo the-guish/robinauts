@@ -4,7 +4,7 @@
 """Where the engines keep their memory: the handle an engine's storage takes.
 
 It is the engines' alone, apart from the core's records, which a worker reaches through its
-``WorkerCore``. On PostgreSQL it is a pool of the worker's own, which the engines' tables are
+``TurnBroker``. On PostgreSQL it is a pool of the worker's own, which the engines' tables are
 read and written through; the core's tables never are.
 """
 

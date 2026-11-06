@@ -28,7 +28,7 @@ controller. The shell starts it after `open` and stops it before `close`
 (`web/lifecycle.py`). A server finishes its start-up once its worker has started, and stops
 its worker before it stops listening.
 
-The worker reaches the core through one port, `WorkerCore` (`contract/ports.py`), and never
+The worker reaches the core through one port, `TurnBroker` (`contract/ports.py`), and never
 through the store. These are its operations, the store's of the same names:
 
 - `claim_tasks`, `wait_for_queued`: the queued tasks, made the worker's.
@@ -39,7 +39,7 @@ through the store. These are its operations, the store's of the same names:
 - `append_event`, `finish_turn`: what a turn writes.
 
 A worker in the server's process has it over the controller's store
-(`application/worker_core.py`). A worker in a process of its own, which a server on
+(`application/turn_broker.py`). A worker in a process of its own, which a server on
 PostgreSQL spawns, has it over HTTP: the same operations as the API's `/internal/worker/`
 routes (`docs/architecture/web.md`), with the secret its server handed it at its start. The
 engines keep their memory apart, in the worker's `EngineMemory`: on PostgreSQL a pool of the

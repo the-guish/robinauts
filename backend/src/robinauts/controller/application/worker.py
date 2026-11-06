@@ -7,7 +7,7 @@ It builds the engines, claims queued tasks and runs each as an asyncio task with
 ``run_task``. It renews the leases of the tasks it runs, and stops a task asked to stop, from
 any process. A task is claimed by one worker, whichever process stored it.
 
-It reaches the core through its ``WorkerCore`` alone, never the core's store: in the server's
+It reaches the core through its ``TurnBroker`` alone, never the core's store: in the server's
 process, or over HTTP from a process of its own. The engines keep their memory in its
 ``EngineMemory``.
 """
@@ -45,7 +45,7 @@ from robinauts.controller.contract.domain import (
     TurnState,
     UnknownEngineError,
 )
-from robinauts.controller.contract.ports import WorkerCore
+from robinauts.controller.contract.ports import TurnBroker
 from robinauts.controller.core.engine_settings import (
     SecretLookup,
     engine_settings,
@@ -75,7 +75,7 @@ def _text(message: Message) -> str:
 class Worker:
     def __init__(
         self,
-        core: WorkerCore,
+        broker: TurnBroker,
         config: Config,
         *,
         storage: StorageConfig,
@@ -90,7 +90,7 @@ class Worker:
         """``engines`` are the factories by engine name; the installed ones when not given.
         ``tools`` are this build's tools by id; none when not given. ``engine_memory`` is
         where the engines keep their memory; none, an engine's storage takes no handle."""
-        self._core = core
+        self._broker = broker
         self._engine_memory = engine_memory
         self._config = config
         self._work = config.work
@@ -132,7 +132,7 @@ class Worker:
             self._factories,
             setup=self._sets_up_engines(),
         )
-        await self._core.listen_for_cancels(self._cancel_requested)
+        await self._broker.listen_for_cancels(self._cancel_requested)
         self._touch()
         self._heartbeat = asyncio.create_task(
             run_at_intervals(self._work.heartbeat_seconds, self._beat), name="heartbeat"
@@ -150,7 +150,7 @@ class Worker:
         await _cancel_and_wait(self._heartbeat)
         self._heartbeat = None
         self._engines = {}
-        await self._core.close()
+        await self._broker.close()
         if self._engine_memory is not None:
             await self._engine_memory.close()
 
@@ -164,7 +164,7 @@ class Worker:
             now = self._now()
             until = now + timedelta(seconds=self._work.lease_seconds)
             limit = min(CLAIM_LIMIT, room)
-            claimed = await self._core.claim_tasks(now, until, limit)
+            claimed = await self._broker.claim_tasks(now, until, limit)
             for task in claimed:
                 self._dispatch(task)
             if len(claimed) < limit:
@@ -189,7 +189,7 @@ class Worker:
                 if now - self._progress.get(task, now) > quiet:
                     self._stop(task, STALLED)
             until = now + timedelta(seconds=self._work.lease_seconds)
-            for task in await self._core.renew_leases(tasks, now, until):
+            for task in await self._broker.renew_leases(tasks, now, until):
                 self._cancel_requested(task)
 
     def _cancel_requested(self, task: uuid.UUID) -> None:
@@ -208,21 +208,21 @@ class Worker:
             return
         self._stop(task)
         await asyncio.wait({running})
-        stopped = await self._core.get_task(task)
+        stopped = await self._broker.get_task(task)
         if stopped is None or stopped.name != RUN_TURN:
             return
-        found = await self._core.find_turn(uuid.UUID(stopped.payload["turn_id"]))
+        found = await self._broker.find_turn(uuid.UUID(stopped.payload["turn_id"]))
         if found is not None:
             owner, turn = found
             await end_if_running(
-                self._core, owner, turn.session_id, turn.id, TurnState.CANCELLED, self._now()
+                self._broker, owner, turn.session_id, turn.id, TurnState.CANCELLED, self._now()
             )
 
     async def run_task(self, task: Task) -> None:
         """Run a claimed task, which names its turn."""
         if task.name != RUN_TURN:
             raise ValueError(f"a task this build does not run: {task.name!r}")
-        found = await self._core.find_turn(uuid.UUID(task.payload["turn_id"]))
+        found = await self._broker.find_turn(uuid.UUID(task.payload["turn_id"]))
         if found is None:
             return
         owner, turn = found
@@ -236,7 +236,7 @@ class Worker:
                 state = TurnState.INTERRUPTED
             elif STALLED in exc.args:
                 state = TurnState.FAILED
-            await end_if_running(self._core, owner, turn.session_id, turn.id, state, self._now())
+            await end_if_running(self._broker, owner, turn.session_id, turn.id, state, self._now())
             raise
 
     async def _engine(self, name: str) -> AgentEngine:
@@ -256,12 +256,12 @@ class Worker:
 
     async def _run_turn(self, owner: uuid.UUID, turn: Turn, task: Task) -> None:
         session_id = turn.session_id
-        session = await self._core.get_session(owner, session_id)
+        session = await self._broker.get_session(owner, session_id)
         engine = await self._engine(session.engine)
         if task.payload.get("create_session"):
             # A conversation's first turn: its engine holds nothing of it yet.
             await engine.create(session_id)
-        by_id = {m.id: m for m in await load_messages(self._core, owner, session_id)}
+        by_id = {m.id: m for m in await load_messages(self._broker, owner, session_id)}
         question = by_id[turn.follows]
         # The nearest answer up the thread that has a checkpoint: a failed answer has
         # none, and continuing from nothing would start the engine's memory again.
@@ -289,10 +289,10 @@ class Worker:
         definition = AgentDefinition(
             agent_config.system_prompt,
             tuple(name for name in agent_config.tools if name not in self._tools),
-            functions_for(agent_config, self._tools, self._core, owner, session),
+            functions_for(agent_config, self._tools, self._broker, owner, session),
         )
         await run_turn(
-            self._core,
+            self._broker,
             engine,
             owner,
             session,
@@ -348,7 +348,7 @@ class Worker:
                 if await self.dispatch_queued():
                     await asyncio.sleep(self._wait_timeout)
                 else:
-                    await self._core.wait_for_queued(self._now(), self._wait_timeout)
+                    await self._broker.wait_for_queued(self._now(), self._wait_timeout)
             except Exception:
                 _log.exception("the worker could not claim tasks")
                 await asyncio.sleep(self._wait_timeout)

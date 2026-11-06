@@ -384,7 +384,7 @@ class Credentials(ABC):
         raise NotImplementedError
 
 
-class WorkerCore(ABC):
+class TurnBroker(ABC):
     """What a worker needs from the core, and all it reaches of it: the tasks it claims, renews
     and is asked to stop, the turn each names, the session and the messages a turn reads, and
     the events and the end it writes (``docs/architecture/controller.md``, "Worker").

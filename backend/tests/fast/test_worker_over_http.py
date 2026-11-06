@@ -39,7 +39,7 @@ from robinauts.controller.contract.domain import (
 from robinauts.web.app import create_app
 from robinauts.web.lifecycle import Lifecycle
 from robinauts.web.worker_api import WorkerAccess
-from robinauts.web.worker_client import HttpCore, QuietRequests
+from robinauts.web.worker_client import HttpTurnBroker, QuietRequests
 from robinauts.web.worker_wire import PREFIX
 from util.aio import asyncio_test
 
@@ -52,7 +52,7 @@ class OverHttp:
     composed: Composed
     access: WorkerAccess
     app: Any
-    core: HttpCore
+    broker: HttpTurnBroker
     worker: Worker
 
 
@@ -66,12 +66,14 @@ async def over_http(engine: AgentEngine | None = None) -> AsyncIterator[OverHttp
     lifecycle: Lifecycle = app.state.lifecycle
     await composed.controller.open()
     lifecycle.access.open(SECRET)
-    await composed.core.listen_for_cancels(lifecycle.access.stop_requested)
-    core = HttpCore("http://127.0.0.1", SECRET, transport=httpx.ASGITransport(app=app))
-    worker = compose_worker(CONFIG, storage=MEMORY, secret_for={}.get, core=core, engines=engines)
+    await composed.broker.listen_for_cancels(lifecycle.access.stop_requested)
+    broker = HttpTurnBroker("http://127.0.0.1", SECRET, transport=httpx.ASGITransport(app=app))
+    worker = compose_worker(
+        CONFIG, storage=MEMORY, secret_for={}.get, broker=broker, engines=engines
+    )
     await worker.start()
     try:
-        yield OverHttp(composed, lifecycle.access, app, core, worker)
+        yield OverHttp(composed, lifecycle.access, app, broker, worker)
     finally:
         await worker.stop()
         lifecycle.access.close()
@@ -139,16 +141,16 @@ async def test_the_refusals_a_worker_acts_on_cross_as_themselves() -> None:
         controller = running.composed.controller
         user = await controller.ensure_user(Identity("local", "me"))
         with pytest.raises(SessionNotFoundError):
-            await running.core.get_session(user.id, uuid.uuid4())
+            await running.broker.get_session(user.id, uuid.uuid4())
         started = await controller.start_session(user, agent="echo", model="echo", text="hello")
         await asyncio.wait_for(wait_for_turn_end(controller, user, started), 10)
         now = datetime.now(UTC)
         with pytest.raises(TurnLostError):
-            await running.core.append_event(
+            await running.broker.append_event(
                 user.id, started.session_id, started.turn_id, 99, {"v": 1}, now, now
             )
-        assert await running.core.find_turn(uuid.uuid4()) is None
-        assert await running.core.get_task(uuid.uuid4()) is None
+        assert await running.broker.find_turn(uuid.uuid4()) is None
+        assert await running.broker.get_task(uuid.uuid4()) is None
 
 
 @asyncio_test
@@ -178,7 +180,7 @@ async def test_with_no_worker_process_the_routes_are_not_there() -> None:
 @asyncio_test
 async def test_a_wait_ends_as_soon_as_the_worker_is_let_go() -> None:
     async with over_http() as running:
-        waiting = asyncio.ensure_future(running.core.wait_for_queued(datetime.now(UTC), 25.0))
+        waiting = asyncio.ensure_future(running.broker.wait_for_queued(datetime.now(UTC), 25.0))
         cancels = asyncio.ensure_future(running.access.cancels_after(0, 25.0))
         await asyncio.sleep(0.1)
         assert not waiting.done()
@@ -211,13 +213,13 @@ async def test_a_refused_connection_is_tried_again_for_a_while_alone() -> None:
     with socket.socket() as unused:
         unused.bind(("127.0.0.1", 0))
         port = unused.getsockname()[1]
-    core = HttpCore(f"http://127.0.0.1:{port}", SECRET, connect_patience=0.3)
+    broker = HttpTurnBroker(f"http://127.0.0.1:{port}", SECRET, connect_patience=0.3)
     loop = asyncio.get_running_loop()
     began = loop.time()
     with pytest.raises(httpx.ConnectError):
-        await core.get_task(uuid.uuid4())
+        await broker.get_task(uuid.uuid4())
     assert 0.1 <= loop.time() - began < 3
-    await core.close()
+    await broker.close()
 
 
 @asyncio_test

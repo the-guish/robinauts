@@ -47,7 +47,7 @@ How a phone is linked and ended (`docs/architecture/device-pairing.md`). Minting
 ## Worker
 
 What a worker in a process of its own reaches the core through: the operations of
-`WorkerCore` (`docs/architecture/controller.md`, "Worker"), one route each under
+`TurnBroker` (`docs/architecture/controller.md`, "Worker"), one route each under
 `/internal/worker/`, served over the controller's store. They are not the frontend's and are
 not in the OpenAPI document.
 

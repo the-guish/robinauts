@@ -127,7 +127,7 @@ def serving(
     return config, secret_for, sign_in
 
 
-def worker_core_url(host: str, port: int) -> str:
+def worker_broker_url(host: str, port: int) -> str:
     """Where a worker on this machine reaches the server that listens on ``host``: a loopback
     address for a server that listens on every address, else that host."""
     if host in ("", "0.0.0.0"):
@@ -176,8 +176,8 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         secret_for=secret_for,
         ui_dir=ui_dir,
         # A store in memory is this process's alone: its worker runs here.
-        worker_core_url=(
-            worker_core_url(host, port) if storage.kind is StorageKind.POSTGRES else None
+        worker_broker_url=(
+            worker_broker_url(host, port) if storage.kind is StorageKind.POSTGRES else None
         ),
     )
     config = uvicorn.Config(

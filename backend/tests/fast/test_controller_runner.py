@@ -20,8 +20,8 @@ from robinauts.agent_engines.echo_engine.engine import EchoEngine
 from robinauts.controller.adapters.memory.credentials import MemoryCredentials
 from robinauts.controller.adapters.memory.store import MemoryStore
 from robinauts.controller.application.controller import RobinautsController
+from robinauts.controller.application.turn_broker import InProcessTurnBroker
 from robinauts.controller.application.worker import Worker
-from robinauts.controller.application.worker_core import InProcessCore
 from robinauts.controller.composition import Composed
 from robinauts.controller.contract.domain import (
     ActiveTurn,
@@ -72,16 +72,16 @@ async def over(
 ) -> Lifecycle:
     """A controller over that store, wired as the composition wires one, and started."""
     controller = RobinautsController(CONFIG, store=store, **options)
-    core = InProcessCore(store)
+    broker = InProcessTurnBroker(store)
     worker = Worker(
-        core,
+        broker,
         CONFIG,
         storage=StorageConfig(StorageKind.IN_MEMORY),
         secret_for={}.get,
         engines=engines,
         close_timeout=close_timeout,
     )
-    composed = Composed(controller, MemoryCredentials(store), worker, core)
+    composed = Composed(controller, MemoryCredentials(store), worker, broker)
     lifecycle = Lifecycle(composed)
     await lifecycle.start()
     return lifecycle

@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 from robinauts.controller.composition import compose_worker, load, storage_from
-from robinauts.web.worker_client import HttpCore, QuietRequests
+from robinauts.web.worker_client import HttpTurnBroker, QuietRequests
 
 PARENT_VARIABLE = "ROBINAUTS_WORKER_PARENT"
 """The id of the process that spawned this one, which it ends with."""
@@ -36,7 +36,7 @@ ACTIVITY_VARIABLE = "ROBINAUTS_WORKER_ACTIVITY_FILE"
 """The file this process's worker touches at every heartbeat, which its parent's health check
 reads."""
 
-CORE_URL_VARIABLE = "ROBINAUTS_WORKER_CORE_URL"
+BROKER_URL_VARIABLE = "ROBINAUTS_WORKER_BROKER_URL"
 """The root of the API this process reaches the core through: its parent's."""
 
 SECRET_VARIABLE = "ROBINAUTS_WORKER_SECRET_FD"
@@ -70,11 +70,11 @@ def _read_secret() -> str:
 
 async def _run() -> None:
     config, secret_for = load(Path(os.environ["ROBINAUTS_CONFIG"]), os.environ)
-    url = os.environ[CORE_URL_VARIABLE]
+    url = os.environ[BROKER_URL_VARIABLE]
     logging.getLogger("httpx").addFilter(QuietRequests(url))
-    core = HttpCore(url, _read_secret())
+    broker = HttpTurnBroker(url, _read_secret())
     worker = compose_worker(
-        config, storage=storage_from(os.environ), secret_for=secret_for, core=core
+        config, storage=storage_from(os.environ), secret_for=secret_for, broker=broker
     )
     worker.activity_file = Path(os.environ[ACTIVITY_VARIABLE])
     stopping = asyncio.Event()

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""What a worker needs from the core, in this process: the controller's own store.
+"""The turn broker in this process: what a worker needs from the core, over the controller's
+own store.
 
 The worker of a server that runs it in this process has it, and so has the API that serves a
 worker in a process of its own (``web/worker_api.py``). The store is the controller's, which
@@ -24,11 +25,11 @@ from robinauts.controller.contract.domain import (
     Turn,
     TurnState,
 )
-from robinauts.controller.contract.ports import WorkerCore
+from robinauts.controller.contract.ports import TurnBroker
 from robinauts.controller.ports.store import Store
 
 
-class InProcessCore(WorkerCore):
+class InProcessTurnBroker(TurnBroker):
     def __init__(self, store: Store) -> None:
         self._store = store
 

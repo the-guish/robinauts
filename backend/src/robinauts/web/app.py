@@ -595,14 +595,14 @@ def create_app(
     sign_in: SignInConfig | None,
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
-    worker_core_url: str | None = None,
+    worker_broker_url: str | None = None,
 ) -> FastAPI:
-    """``sign_in`` is ``None`` in the local development mode. ``worker_core_url`` runs the
+    """``sign_in`` is ``None`` in the local development mode. ``worker_broker_url`` runs the
     worker in a process of its own, which reaches this app's ``/internal/worker/`` routes at
     that URL. The app's ``state.lifecycle`` is its ``Lifecycle``: a server stops its worker
     with ``stop_worker`` before it stops listening."""
     controller, credentials = composed.controller, composed.credentials
-    lifecycle = Lifecycle(composed, core_url=worker_core_url)
+    lifecycle = Lifecycle(composed, broker_url=worker_broker_url)
     exchange: Exchange | None = None
     flow: SignIn | None = None
     if sign_in is not None:
@@ -1098,7 +1098,7 @@ def create_app(
 
     # --- a worker in a process of its own ------------------------------------------
 
-    app.include_router(worker_router(composed.core, lifecycle.access))
+    app.include_router(worker_router(composed.broker, lifecycle.access))
 
     # --- liveness --------------------------------------------------------------
 

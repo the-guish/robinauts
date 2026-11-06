@@ -23,7 +23,7 @@ from robinauts.controller.contract.domain import (
     StorageConfig,
     StorageKind,
 )
-from robinauts.web.cli import devices_command, run, serving, worker_core_url
+from robinauts.web.cli import devices_command, run, serving, worker_broker_url
 from util.aio import asyncio_test
 
 SIGN_IN = {
@@ -85,7 +85,7 @@ def test_the_mode_serves_a_loopback_host(host: str) -> None:
     ],
 )
 def test_a_worker_process_reaches_its_server_where_it_listens(host: str, url: str) -> None:
-    assert worker_core_url(host, 8000) == url
+    assert worker_broker_url(host, 8000) == url
 
 
 def test_a_refused_start_exits_before_it_binds(

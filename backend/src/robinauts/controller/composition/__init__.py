@@ -33,10 +33,10 @@ from robinauts.controller.adapters.postgres.schema import (
 )
 from robinauts.controller.adapters.postgres.store import PostgresStore
 from robinauts.controller.application.controller import RobinautsController
+from robinauts.controller.application.turn_broker import InProcessTurnBroker
 from robinauts.controller.application.worker import Worker
-from robinauts.controller.application.worker_core import InProcessCore
 from robinauts.controller.contract.domain import Config, ConfigError, StorageConfig, StorageKind
-from robinauts.controller.contract.ports import Controller, Credentials, WorkerCore
+from robinauts.controller.contract.ports import Controller, Credentials, TurnBroker
 from robinauts.controller.core.config import parse_config
 from robinauts.controller.core.engine_settings import SecretLookup, engine_settings
 from robinauts.controller.ports.store import Store
@@ -79,7 +79,7 @@ class Composed:
     controller: Controller
     credentials: Credentials
     worker: Worker
-    core: WorkerCore
+    broker: TurnBroker
     """Over the controller's store: the worker's in this process, and what the API serves a
     worker in a process of its own."""
 
@@ -105,11 +105,11 @@ def compose(
     else:
         raise NotImplementedError(f"{storage.kind} storage")
     controller = RobinautsController(config, store=store)
-    core = InProcessCore(store)
+    broker = InProcessTurnBroker(store)
     worker = compose_worker(
-        config, storage=storage, secret_for=secret_for, core=core, engines=engines
+        config, storage=storage, secret_for=secret_for, broker=broker, engines=engines
     )
-    return Composed(controller, credentials, worker, core)
+    return Composed(controller, credentials, worker, broker)
 
 
 def compose_worker(
@@ -117,7 +117,7 @@ def compose_worker(
     *,
     storage: StorageConfig,
     secret_for: SecretLookup,
-    core: WorkerCore,
+    broker: TurnBroker,
     engines: Mapping[str, EngineFactory] | None = None,
 ) -> Worker:
     """A worker that reaches the core through `core` alone. Its engines keep their memory on
@@ -129,7 +129,7 @@ def compose_worker(
             raise ConfigError(f"{DATABASE_URL_VARIABLE} is not set")
         engine_memory = PostgresEngineMemory(storage.url)
     return Worker(
-        core,
+        broker,
         config,
         storage=storage,
         secret_for=secret_for,

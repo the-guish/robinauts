@@ -2,7 +2,7 @@
 # Copyright The Robinauts Authors
 
 """The API's routes a worker in a process of its own reaches the core through: the operations
-of ``WorkerCore`` (``web/worker_wire.py``), served by the core over the controller's store.
+of ``TurnBroker`` (``web/worker_wire.py``), served by the core over the controller's store.
 
 They answer only while such a worker runs, and only the secret the server handed it at its
 start, which ``WorkerAccess`` holds: 404 while none runs, 401 for any other credential. The
@@ -26,7 +26,7 @@ from fastapi.routing import APIRoute
 from pydantic import AwareDatetime
 
 from robinauts.controller.contract.domain import SessionNotFoundError, TurnLostError
-from robinauts.controller.contract.ports import WorkerCore
+from robinauts.controller.contract.ports import TurnBroker
 from robinauts.web.worker_wire import (
     MAX_WAIT_SECONDS,
     PREFIX,
@@ -145,8 +145,8 @@ class _Refusing(APIRoute):
         return refusing
 
 
-def worker_router(core: WorkerCore, access: WorkerAccess) -> APIRouter:
-    """The routes of ``PREFIX``, over ``core``, for the worker ``access`` lets in."""
+def worker_router(broker: TurnBroker, access: WorkerAccess) -> APIRouter:
+    """The routes of ``PREFIX``, over ``broker``, for the worker ``access`` lets in."""
 
     def worker_only(request: Request) -> None:
         if not access.is_open:
@@ -163,21 +163,21 @@ def worker_router(core: WorkerCore, access: WorkerAccess) -> APIRouter:
 
     @router.post("/tasks/claim")
     async def claim_tasks(body: ClaimRequest) -> TasksResponse:
-        tasks = await core.claim_tasks(body.now, body.until, body.limit)
+        tasks = await broker.claim_tasks(body.now, body.until, body.limit)
         return TasksResponse(tasks=[TaskWire.of(t) for t in tasks])
 
     @router.post("/tasks/wait")
     async def wait_for_queued(body: WaitRequest) -> WaitResponse:
-        queued = await access.unless_closed(core.wait_for_queued(body.now, body.timeout), False)
+        queued = await access.unless_closed(broker.wait_for_queued(body.now, body.timeout), False)
         return WaitResponse(queued=queued)
 
     @router.post("/tasks/renew")
     async def renew_leases(body: RenewRequest) -> RenewResponse:
-        return RenewResponse(stop=await core.renew_leases(body.tasks, body.now, body.until))
+        return RenewResponse(stop=await broker.renew_leases(body.tasks, body.now, body.until))
 
     @router.get("/tasks/{task_id}")
     async def get_task(task_id: uuid.UUID) -> TaskResponse:
-        task = await core.get_task(task_id)
+        task = await broker.get_task(task_id)
         return TaskResponse(task=None if task is None else TaskWire.of(task))
 
     @router.get("/cancels")
@@ -190,7 +190,7 @@ def worker_router(core: WorkerCore, access: WorkerAccess) -> APIRouter:
 
     @router.get("/turns/{turn_id}")
     async def find_turn(turn_id: uuid.UUID) -> FoundTurnResponse:
-        found = await core.find_turn(turn_id)
+        found = await broker.find_turn(turn_id)
         if found is None:
             return FoundTurnResponse(owner=None, turn=None)
         owner, turn = found
@@ -206,16 +206,16 @@ def worker_router(core: WorkerCore, access: WorkerAccess) -> APIRouter:
         before = None
         if before_updated_at is not None and before_id is not None:
             before = (before_updated_at, before_id)
-        sessions = await core.sessions_of(owner, limit, before)
+        sessions = await broker.sessions_of(owner, limit, before)
         return SessionsResponse(sessions=[SessionWire.of(s) for s in sessions])
 
     @router.get("/users/{owner}/sessions/{session_id}")
     async def get_session(owner: uuid.UUID, session_id: uuid.UUID) -> SessionWire:
-        return SessionWire.of(await core.get_session(owner, session_id))
+        return SessionWire.of(await broker.get_session(owner, session_id))
 
     @router.get("/users/{owner}/sessions/{session_id}/messages")
     async def messages_of(owner: uuid.UUID, session_id: uuid.UUID) -> MessagesResponse:
-        documents = await core.messages_of(owner, session_id)
+        documents = await broker.messages_of(owner, session_id)
         return MessagesResponse(messages=[dict(d) for d in documents])
 
     @router.put(
@@ -229,7 +229,7 @@ def worker_router(core: WorkerCore, access: WorkerAccess) -> APIRouter:
         position: Annotated[int, Path(ge=1)],
         body: AppendRequest,
     ) -> None:
-        await core.append_event(
+        await broker.append_event(
             owner, session_id, turn_id, position, body.document, body.written_at, body.expires_at
         )
 
@@ -237,7 +237,7 @@ def worker_router(core: WorkerCore, access: WorkerAccess) -> APIRouter:
     async def finish_turn(
         owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID, body: FinishRequest
     ) -> None:
-        await core.finish_turn(
+        await broker.finish_turn(
             owner,
             session_id,
             turn_id,

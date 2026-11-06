@@ -3,7 +3,7 @@
 
 """The start and the stop of what the composition built, in order: what the app's lifespan
 runs, and what a test that needs no app runs in its place. The worker runs in this process,
-or in a process of its own (``core_url``), which reaches the core through this server's API
+or in a process of its own (``broker_url``), which reaches the core through this server's API
 alone, with a secret handed to it at its start through a pipe, never its environment."""
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from robinauts.controller.composition import Composed
 from robinauts.web.worker_api import WorkerAccess
 from robinauts.web.worker_process import (
     ACTIVITY_VARIABLE,
-    CORE_URL_VARIABLE,
+    BROKER_URL_VARIABLE,
     PARENT_VARIABLE,
     READY_LINE,
     READY_VARIABLE,
@@ -46,13 +46,13 @@ than the worker waits for its tasks."""
 
 
 class Lifecycle:
-    def __init__(self, composed: Composed, *, core_url: str | None = None) -> None:
-        """``core_url`` runs the worker in a process of its own, which reaches the core at that
+    def __init__(self, composed: Composed, *, broker_url: str | None = None) -> None:
+        """``broker_url`` runs the worker in a process of its own, which reaches the core at that
         URL: this server's, as the worker's machine reaches it. That suits PostgreSQL alone,
         where the engines' memory is in the database: an engine in memory would hold nothing of
         a session another process ran."""
         self.composed = composed
-        self._core_url = core_url
+        self._broker_url = broker_url
         self._worker_running = False
         self._process: asyncio.subprocess.Process | None = None
         self._watching: asyncio.Task[None] | None = None
@@ -66,19 +66,19 @@ class Lifecycle:
         that a server which says it is up runs turns. A worker process is let in through the
         API from then on, with the secret it reads from a pipe at its start."""
         await self.composed.controller.open()
-        if self._core_url is None:
+        if self._broker_url is None:
             self.composed.worker.activity_file = self.activity_file
             await self.composed.worker.start()
             self._worker_running = True
             return
         secret = secrets.token_urlsafe(32)
         self.access.open(secret)
-        await self.composed.core.listen_for_cancels(self.access.stop_requested)
+        await self.composed.broker.listen_for_cancels(self.access.stop_requested)
         environment = {
             **os.environ,
             PARENT_VARIABLE: str(os.getpid()),
             ACTIVITY_VARIABLE: str(self.activity_file),
-            CORE_URL_VARIABLE: self._core_url,
+            BROKER_URL_VARIABLE: self._broker_url,
         }
         try:
             # The secret, whole, before the worker exists: far shorter than a pipe holds.

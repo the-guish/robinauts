@@ -2,7 +2,7 @@
 # Copyright The Robinauts Authors
 
 """What crosses between a worker in a process of its own and the server that spawned it: the
-operations of ``WorkerCore`` as HTTP under ``PREFIX``, one route each, and their bodies.
+operations of ``TurnBroker`` as HTTP under ``PREFIX``, one route each, and their bodies.
 
 Every route wants ``Authorization: Bearer`` and the secret the server handed its worker at
 its start. Times are ISO 8601 with their offset, ids are strings, and a message or an event is
