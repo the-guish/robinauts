@@ -3,7 +3,7 @@
 
 """The everyday operations of ``tests/e2e/master``, step for step, over the HTTP API in process.
 
-The configuration is the one of ``util.stack``, the store is in memory, and each engine is a
+The configuration is the one of ``util.stack``, the store is in this process, and each engine is a
 ``create_autospec`` of ``AgentEngine`` injected into ``compose``. The engine answers with its
 prompt and a checkpoint numbered after its call, so the checkpoint a turn is given shows what the
 engine was asked to remember. To "alpha three" it also reasons, and calls a tool in the middle
@@ -119,7 +119,7 @@ async def test_everyday_use(agent: str) -> None:
     engine = engines[config.agents[agent].engine]
     composed = compose(
         config,
-        storage=StorageConfig(StorageKind.IN_MEMORY),
+        storage=StorageConfig(StorageKind.IN_PROCESS),
         secret_for=secret_for,
         engines={name: lambda *_, built=built: built for name, built in engines.items()},
     )

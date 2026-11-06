@@ -356,7 +356,7 @@ one of approved, wrong number, not claimed (waiting still, or approved
 already), or gone; the third wrong number deletes the pairing and answers
 gone. A cookie's resolve answers the session beside the user, since its
 `created_at` is what fresh means. Each has its
-row in the contract suite, which the memory and the PostgreSQL adapters
+row in the contract suite, which the in-process and the PostgreSQL adapters
 both pass, and so do the details above: the expiry and the wrong try in
 the approve, the hash that moves, the delete of an approved pairing, and
 the wipe that only an allow-list refusal triggers. The flow lives in `web/pairing.py`, beside `web/sign_in.py`,

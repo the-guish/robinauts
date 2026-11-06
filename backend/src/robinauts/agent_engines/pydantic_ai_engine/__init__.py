@@ -12,12 +12,15 @@ from robinauts.agent_engines.contract.ports import (
     StorageKind,
 )
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
-from robinauts.agent_engines.pydantic_ai_engine.memory import InProcessMemory, PostgresMemory
+from robinauts.agent_engines.pydantic_ai_engine.session_store import (
+    InProcessSessionStore,
+    PostgresSessionStore,
+)
 
 
 def init_pydantic_ai(settings: EngineSettings, storage: StorageConfig) -> AgentEngine:
-    """The engine over the storage asked: its memory in the controller's PostgreSQL, else
+    """The engine over the storage asked: its sessions in the controller's PostgreSQL, else
     kept in this process."""
     if storage.kind is StorageKind.POSTGRES:
-        return PydanticAIEngine(settings, PostgresMemory(storage.options["pool"]))
-    return PydanticAIEngine(settings, InProcessMemory())
+        return PydanticAIEngine(settings, PostgresSessionStore(storage.options["pool"]))
+    return PydanticAIEngine(settings, InProcessSessionStore())

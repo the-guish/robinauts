@@ -21,8 +21,8 @@ from robinauts.agent_engines.contract.ports import EngineFactory, installed
 from robinauts.agent_engines.contract.ports import StorageConfig as EngineStorage
 from robinauts.agent_engines.contract.ports import StorageKind as EngineStorageKind
 from robinauts.controller.adapters.config_file import read_config
-from robinauts.controller.adapters.memory.credentials import MemoryCredentials
-from robinauts.controller.adapters.memory.store import MemoryStore
+from robinauts.controller.adapters.in_process.credentials import InProcessCredentials
+from robinauts.controller.adapters.in_process.store import InProcessStore
 from robinauts.controller.adapters.postgres.agent_engine_store import PostgresAgentEngineStore
 from robinauts.controller.adapters.postgres.credentials import PostgresCredentials
 from robinauts.controller.adapters.postgres.pool import open_pool
@@ -61,11 +61,11 @@ promise is the state of the database, not the work it did."""
 
 
 def storage_from(environ: Mapping[str, str]) -> StorageConfig:
-    """PostgreSQL when `ROBINAUTS_DATABASE_URL` is set, in memory otherwise."""
+    """PostgreSQL when `ROBINAUTS_DATABASE_URL` is set, in this process otherwise."""
     url = environ.get(DATABASE_URL_VARIABLE)
     if url:
         return StorageConfig(StorageKind.POSTGRES, url=url)
-    return StorageConfig(StorageKind.IN_MEMORY)
+    return StorageConfig(StorageKind.IN_PROCESS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,9 +99,9 @@ def compose(
             raise ConfigError(f"{DATABASE_URL_VARIABLE} is not set")
         postgres = PostgresStore(dsn=storage.url)
         store, credentials = postgres, PostgresCredentials(postgres)
-    elif storage.kind is StorageKind.IN_MEMORY:
-        memory = MemoryStore()
-        store, credentials = memory, MemoryCredentials(memory)
+    elif storage.kind is StorageKind.IN_PROCESS:
+        in_process = InProcessStore()
+        store, credentials = in_process, InProcessCredentials(in_process)
     else:
         raise NotImplementedError(f"{storage.kind} storage")
     controller = RobinautsController(config, store=store)

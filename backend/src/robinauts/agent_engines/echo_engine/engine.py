@@ -7,7 +7,7 @@ A prompt that starts with ``poison`` ends its turn badly instead: the tool retur
 the engine raises, as a real engine does when a tool keeps failing.
 
 It keeps nothing: every session exists, every checkpoint is accepted, each turn hands out a new
-one, and no turn reads an earlier one. So it does not keep the memory half of the contract, and
+one, and no turn reads an earlier one. So it does not keep the session half of the contract, and
 is for quick smoke tests of the interface and for tests that need a turn and nothing more.
 """
 
@@ -44,7 +44,7 @@ class EchoEngine(AgentEngine):
         return frozenset(ProviderKind)
 
     async def setup(self) -> None:
-        # Nothing to set up: it keeps no memory.
+        # Nothing to set up: it keeps no state.
         pass
 
     async def create(self, session_id: uuid.UUID) -> None:
@@ -81,5 +81,5 @@ class EchoEngine(AgentEngine):
         pass
 
     async def forget(self, session_id: uuid.UUID) -> None:
-        # Nothing to delete: it keeps no memory.
+        # Nothing to delete: it keeps no state.
         pass

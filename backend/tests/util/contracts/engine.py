@@ -3,7 +3,7 @@
 
 """What every ``AgentEngine`` must do, as ``docs/specs/agent-engines.md`` says.
 
-Subclass ``EngineMemoryContract`` and override ``new_engine``, which returns an engine set up
+Subclass ``EngineSessionContract`` and override ``new_engine``, which returns an engine set up
 and ready, whose ``MODEL`` answers without reaching anything.
 
 Subclass ``EngineTurnContract`` and override ``new_engine(script)``, which returns an engine set
@@ -72,11 +72,11 @@ async def turn(
     return done
 
 
-class EngineMemoryContract:
+class EngineSessionContract:
     MODEL = "m"
 
     async def new_engine(self) -> AgentEngine:
-        raise NotImplementedError("an EngineMemoryContract subclass overrides `new_engine`")
+        raise NotImplementedError("an EngineSessionContract subclass overrides `new_engine`")
 
     async def release(self) -> None:
         """Let go of what the engines of this test held; nothing by default."""

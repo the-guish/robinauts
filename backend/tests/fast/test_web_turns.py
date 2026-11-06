@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""Web's turn routes over a controller on the echo engine and the in-memory store, beyond
+"""Web's turn routes over a controller on the echo engine and the in-process store, beyond
 what tests/fast/test_everyday_use.py walks through."""
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from util.aio import asyncio_test
 
 @asynccontextmanager
 async def client() -> AsyncIterator[httpx.AsyncClient]:
-    composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
+    composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get)
     app = create_app(composed, sign_in=None, secret_for={}.get)
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)

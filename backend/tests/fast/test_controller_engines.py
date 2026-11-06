@@ -33,7 +33,7 @@ async def build(
     config: domain.Config, factories: Mapping[str, EngineFactory]
 ) -> dict[str, AgentEngine]:
     settings = engine_settings(config, {"ACME_KEY": "sk-1"}.get)
-    storage = engine_storage(domain.StorageConfig(domain.StorageKind.IN_MEMORY), None)
+    storage = engine_storage(domain.StorageConfig(domain.StorageKind.IN_PROCESS), None)
     return await build_engines(config, settings, storage, factories)
 
 

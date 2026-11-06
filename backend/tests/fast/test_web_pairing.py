@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""Linking a phone over the web app on the memory credentials
+"""Linking a phone over the web app on the in-process credentials
 (``docs/architecture/device-pairing.md``): the browser, with its session cookie, mints a code
 and approves the number; a pretend phone, httpx with a bearer and no cookie, claims the code,
 polls ``/auth/session`` and, once in, reads the API until the browser removes it. And the
@@ -106,7 +106,7 @@ async def rig(
         return codes[-1]
 
     monkeypatch.setattr(pairing, "random_secret", recorded)
-    composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
+    composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get)
     app = create_app(composed, sign_in=sign_in, secret_for={}.get)
     async with app.router.lifespan_context(app):
         ada = await composed.controller.ensure_user(ADA)

@@ -106,7 +106,7 @@ def test_a_sign_in_returns_only_to_a_path_of_this_origin(given: str | None, kept
 
 @asyncio_test
 async def test_a_session_naming_the_local_user_signs_nobody_in() -> None:
-    composed = compose(Config(), storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
+    composed = compose(Config(), storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get)
     local = await composed.controller.ensure_user(LOCAL_IDENTITY)
     now = datetime.now(UTC)
     secret = random_secret()

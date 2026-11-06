@@ -30,7 +30,7 @@ from robinauts.controller.composition import compose
 from robinauts.web.app import create_app
 
 composed = compose(
-    Config(), storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get
+    Config(), storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get
 )
 app = create_app(composed, sign_in=None, secret_for={}.get)
 document = app.openapi()

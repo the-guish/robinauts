@@ -79,7 +79,7 @@ class Controller(ABC):
 
     @abstractmethod
     async def delete_session(self, user: User, session_id: uuid.UUID) -> None:
-        """``SessionNotFoundError``. The engine's memory goes with the records."""
+        """``SessionNotFoundError``. The engine's state goes with the records."""
         raise NotImplementedError
 
     @abstractmethod

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""Signing in through the stand-in provider, over the web app on the memory credentials: the
+"""Signing in through the stand-in provider, over the web app on the in-process credentials: the
 login cookie, the callback, the session cookie, who is asking, the ``Origin`` check and
 signing out; a refusal of the allow list ending every credential of that identity; and the
 local development mode beside it. Marked ``io``: the stand-in listens on
@@ -71,7 +71,7 @@ async def browser(stand_in: StandInProvider | None) -> AsyncIterator[httpx.Async
         allow = (AllowEntry("okta", Matcher.GROUP, "robinauts-users"),)
         sign_in = SignInConfig(public_url=PUBLIC_URL, providers={"okta": okta}, allow=allow)
         secret_for = {SECRET_ENV: stand_in.client_secret}.get
-    composed = compose(ECHO, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for=secret_for)
+    composed = compose(ECHO, storage=StorageConfig(StorageKind.IN_PROCESS), secret_for=secret_for)
     app = create_app(
         composed,
         sign_in=sign_in,

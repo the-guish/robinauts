@@ -91,4 +91,4 @@ def engine_storage(storage: domain.StorageConfig, pool: object | None) -> Storag
         return StorageConfig(StorageKind.POSTGRES, {"pool": pool})
     if storage.kind is domain.StorageKind.LOCAL:
         return StorageConfig(StorageKind.LOCAL, {"path": storage.path})
-    return StorageConfig(StorageKind.IN_MEMORY, {})
+    return StorageConfig(StorageKind.IN_PROCESS, {})

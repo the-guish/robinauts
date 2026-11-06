@@ -46,14 +46,14 @@ from robinauts.agent_engines.langchain_engine import engine as engine_module
 from robinauts.agent_engines.langchain_engine import init_langchain
 from robinauts.agent_engines.langchain_engine.clients import chat_model
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine, middleware_for
-from robinauts.agent_engines.langchain_engine.memory import InProcessMemory
+from robinauts.agent_engines.langchain_engine.session_store import InProcessSessionStore
 from robinauts.agent_engines.langchain_engine.tools import connection_for, tools_for
 from util.aio import asyncio_test
 from util.contracts.engine import (
     ANSWER,
     CALL_ID,
     CALLS,
-    EngineMemoryContract,
+    EngineSessionContract,
     EngineTurnContract,
     ModelFailure,
     Script,
@@ -113,18 +113,18 @@ def test_the_engine_answers_the_four_kinds_and_turns_hosted_tracing_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LANGSMITH_TRACING", "true")
-    engine = LangChainEngine(settings_for(ProviderKind.ANTHROPIC), InProcessMemory())
+    engine = LangChainEngine(settings_for(ProviderKind.ANTHROPIC), InProcessSessionStore())
     assert engine.kinds() == frozenset(ProviderKind)
     assert not langsmith.utils.tracing_is_enabled()
 
 
-def test_init_langchain_keeps_memory_in_this_process_without_postgres() -> None:
+def test_init_langchain_keeps_sessions_in_this_process_without_postgres() -> None:
     engine = init_langchain(
-        settings_for(ProviderKind.ANTHROPIC), StorageConfig(StorageKind.IN_MEMORY, {})
+        settings_for(ProviderKind.ANTHROPIC), StorageConfig(StorageKind.IN_PROCESS, {})
     )
     assert isinstance(engine, LangChainEngine)
-    assert isinstance(engine._memory, InProcessMemory)
-    assert isinstance(engine._memory.saver, InMemorySaver)
+    assert isinstance(engine._session_store, InProcessSessionStore)
+    assert isinstance(engine._session_store.saver, InMemorySaver)
 
 
 class FixedSecret(ToolSecretLookup):
@@ -194,14 +194,14 @@ async def test_an_agent_without_tools_has_none() -> None:
     assert await tools_for(AgentDefinition("be brief"), tool_settings(NoSecrets())) == []
 
 
-class TestLangChainEngineMemory(EngineMemoryContract):
+class TestLangChainEngineSessions(EngineSessionContract):
     @pytest.fixture(autouse=True)
     def scripted_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
         model = GenericFakeChatModel(messages=itertools.repeat("An answer."))
         monkeypatch.setattr(engine_module, "chat_model", lambda *_: model)
 
     async def new_engine(self) -> AgentEngine:
-        engine = LangChainEngine(settings_for(ProviderKind.ANTHROPIC), InProcessMemory())
+        engine = LangChainEngine(settings_for(ProviderKind.ANTHROPIC), InProcessSessionStore())
         await engine.setup()
         return engine
 
@@ -247,7 +247,7 @@ class TestLangChainEngineTurn(EngineTurnContract):
     async def new_engine(self, script: Script) -> AgentEngine:
         model = ScriptedChatModel(script=script)
         self.monkeypatch.setattr(engine_module, "chat_model", lambda *_: model)
-        engine = LangChainEngine(settings_for(ProviderKind.ANTHROPIC), InProcessMemory())
+        engine = LangChainEngine(settings_for(ProviderKind.ANTHROPIC), InProcessSessionStore())
         await engine.setup()
         return engine
 

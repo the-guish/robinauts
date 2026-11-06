@@ -7,7 +7,7 @@ The ``main.py`` of `agent-framework-examples
 <https://github.com/the-guish/agent-framework-examples>`_, as the platform
 would write it against ``robinauts.agent_engines.contract.ports.AgentEngine``: the
 same two questions -- the warmer of three cities, then the coolest, which
-only the memory can answer -- through each engine in turn.
+only the session's state can answer -- through each engine in turn.
 
 Not runnable until an engine implements the port: ``ENGINES`` is empty, and
 an adapter is added to it the day it does. What is here is the caller's side,
@@ -80,7 +80,7 @@ async def converse(engine: AgentEngine) -> None:
             timeout_seconds=TURN_SECONDS,
         )
     )
-    # The platform stores the answer with `first` on it. That is all it keeps of the memory,
+    # The platform stores the answer with `first` on it. That is all it keeps of the state,
     # and it is what the next turn is told to continue from.
     print(f"(the answer is stored with checkpoint {first})")
 

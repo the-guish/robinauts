@@ -286,7 +286,7 @@ def is_allowed(allow: Iterable[AllowEntry], provider_id: str, claims: Claims) ->
 
 class RecentChecks:
     """The credentials whose user passed the allow list lately, by the credential's hash, in
-    this process's memory. Only a pass is kept: a failure deletes the credential."""
+    this process. Only a pass is kept: a failure deletes the credential."""
 
     def __init__(self, life: timedelta = ALLOW_CHECK_LIFE, kept: int = RECENT_CHECKS_KEPT):
         self._life = life

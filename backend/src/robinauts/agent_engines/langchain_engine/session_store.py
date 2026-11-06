@@ -4,7 +4,7 @@
 """Where the LangChain engine keeps what it has: which sessions exist, and LangGraph's
 checkpoints of each, through a saver whose thread is the session.
 
-`Memory` is the shape; one implementation keeps it in this process, over LangGraph's own
+`SessionStore` is the shape; one implementation keeps it in this process, over LangGraph's own
 in-memory saver, and one in tables of the engine's own on PostgreSQL, made by `setup`,
 named after the engine, referencing nothing of the controller's, over the saver in
 `saver.py`. `forget` deletes everything held for a session."""
@@ -28,14 +28,14 @@ CREATE TABLE IF NOT EXISTS langgraph_sessions (
 """
 
 
-class Memory(ABC):
+class SessionStore(ABC):
     """The engine's sessions, and the saver its graphs checkpoint through."""
 
     saver: BaseCheckpointSaver[str]
 
     @abstractmethod
     async def setup(self) -> None:
-        """Make the memory ready. Safe to repeat."""
+        """Make the store ready. Safe to repeat."""
 
     @abstractmethod
     async def create(self, session_id: uuid.UUID) -> None:
@@ -49,7 +49,7 @@ class Memory(ABC):
         """Delete the session and every checkpoint of its thread; nothing if it is gone."""
 
 
-class InProcessMemory(Memory):
+class InProcessSessionStore(SessionStore):
     """In this process."""
 
     def __init__(self) -> None:
@@ -57,7 +57,7 @@ class InProcessMemory(Memory):
         self._known: set[uuid.UUID] = set()
 
     async def setup(self) -> None:
-        # Nothing to set up: this memory lives in the process and starts empty.
+        # Nothing to set up: this store lives in the process and starts empty.
         pass
 
     async def create(self, session_id: uuid.UUID) -> None:
@@ -73,7 +73,7 @@ class InProcessMemory(Memory):
         await self.saver.adelete_thread(str(session_id))
 
 
-class PostgresMemory(Memory):
+class PostgresSessionStore(SessionStore):
     """In the engine's own tables, through the pool it was given."""
 
     def __init__(self, pool: Any) -> None:

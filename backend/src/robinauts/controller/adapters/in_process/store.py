@@ -32,7 +32,7 @@ from robinauts.controller.ports.store import (
 )
 
 
-class MemoryStore(Store):
+class InProcessStore(Store):
     def __init__(self) -> None:
         self._users: dict[tuple[str, str], User] = {}
         self._sessions: dict[uuid.UUID, Session] = {}
@@ -46,7 +46,7 @@ class MemoryStore(Store):
         self._stops: list[Callable[[uuid.UUID], object]] = []
 
     async def open(self) -> None:
-        """Nothing to open: the engines keep their memory in this process too."""
+        """Nothing to open: the engines keep their state in this process too."""
 
     async def close(self) -> None:
         """Nothing to release."""
@@ -107,11 +107,11 @@ class MemoryStore(Store):
         return user
 
     def user_by_id(self, user_id: uuid.UUID) -> User | None:
-        """Not the port's: what ``MemoryCredentials`` resolves a secret to."""
+        """Not the port's: what ``InProcessCredentials`` resolves a secret to."""
         return next((u for u in self._users.values() if u.id == user_id), None)
 
     def all_users(self) -> list[User]:
-        """Not the port's: whom ``MemoryCredentials`` looks a person up among."""
+        """Not the port's: whom ``InProcessCredentials`` looks a person up among."""
         return list(self._users.values())
 
     # --- sessions -----------------------------------------------------------

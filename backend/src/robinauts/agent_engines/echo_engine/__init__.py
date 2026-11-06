@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The echo engine: no model, no network, no memory, one tool. For smoke tests."""
+"""The echo engine: no model, no network, no state, one tool. For smoke tests."""
 
 from __future__ import annotations
 

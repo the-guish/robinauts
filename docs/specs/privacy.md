@@ -42,7 +42,7 @@ on the company's servers; this document says who, inside them, sees what.
 
 - Deletion by the author hides the conversation at once, and purges it
   once no turn runs in it. A 30-day trash before the purge is planned.
-- **The engines' memory holds conversation content too**, in tables of
+- **The engines' state holds conversation content too**, in tables of
   each engine's own. A conversation's purge removes it. A failed or
   interrupted turn may leave a partial checkpoint there, which Resume
   reads.
@@ -83,7 +83,7 @@ Someone who can no longer sign in, or who was purged:
 ## Where it is enforced
 
 Authorization here is mostly ownership and membership, not roles. The
-controller decides it, and its tests prove it on the in-memory store and on
+controller decides it, and its tests prove it on the in-process store and on
 PostgreSQL. Roles are deferred ([sign-in.md](sign-in.md)).
 
 ## Open

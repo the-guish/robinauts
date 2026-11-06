@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""A LangGraph checkpoint saver over asyncpg, for the engine's memory on PostgreSQL.
+"""A LangGraph checkpoint saver over asyncpg, for the engine's sessions on PostgreSQL.
 
 Ours because `langgraph-checkpoint-postgres` depends on `psycopg`, which is LGPL
-(ADR 0002). Two tables, made by the memory's `setup` beside its own, named after the
+(ADR 0002). Two tables, made by the session store's `setup` beside its own, named after the
 engine, referencing nothing of the controller's: the checkpoints and the pending writes.
 A checkpoint and its metadata are written with the saver's own serializer
 (`dumps_typed`), as bytes beside their type, never pickled by us. The async methods are
@@ -62,7 +62,7 @@ _CHECKPOINT_COLUMNS = (
 
 
 class PostgresSaver(BaseCheckpointSaver[str]):
-    """Over the pool it is given; its tables are made by ``PostgresMemory.setup``."""
+    """Over the pool it is given; its tables are made by ``PostgresSessionStore.setup``."""
 
     def __init__(self, pool: Any) -> None:
         super().__init__()

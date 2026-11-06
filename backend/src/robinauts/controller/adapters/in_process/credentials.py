@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Iterable
 from datetime import datetime
 
-from robinauts.controller.adapters.memory.store import MemoryStore
+from robinauts.controller.adapters.in_process.store import InProcessStore
 from robinauts.controller.contract.domain import (
     LAST_USED_EVERY,
     PAIRING_WRONG_TRIES,
@@ -31,8 +31,8 @@ from robinauts.controller.contract.domain import (
 from robinauts.controller.contract.ports import Credentials
 
 
-class MemoryCredentials(Credentials):
-    def __init__(self, store: MemoryStore) -> None:
+class InProcessCredentials(Credentials):
+    def __init__(self, store: InProcessStore) -> None:
         self._store = store
         self._sessions: dict[str, UserSession] = {}
         self._pending: dict[str, PendingLogin] = {}

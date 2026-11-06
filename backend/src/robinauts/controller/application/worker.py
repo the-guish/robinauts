@@ -265,7 +265,7 @@ class Worker:
         by_id = {m.id: m for m in await load_messages(self._broker, owner, session_id)}
         question = by_id[turn.follows]
         # The nearest answer up the thread that has a checkpoint: a failed answer has
-        # none, and continuing from nothing would start the engine's memory again.
+        # none, and continuing from nothing would start the engine's state again.
         checkpoint_id = None
         above = question.parent_id
         while above is not None and checkpoint_id is None:

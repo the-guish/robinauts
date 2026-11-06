@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""A controller on the echo engine and the in-memory store, for the controller's own tests."""
+"""A controller on the echo engine and the in-process store, for the controller's own tests."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ async def start_echo_controller(engine: AgentEngine | None = None) -> Lifecycle:
     """Started on the echo engine, or on that engine in its place; ``stop`` it after."""
     engines = None if engine is None else {"echo": lambda *_: engine}
     composed = compose(
-        CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get, engines=engines
+        CONFIG, storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get, engines=engines
     )
     lifecycle = Lifecycle(composed)
     await lifecycle.start()

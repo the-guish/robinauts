@@ -3,7 +3,7 @@
 
 """The LangChain engine: a LangGraph agent per turn over a saver whose thread is the session.
 
-The engine is handed its memory; ``init_langchain`` picks it for the storage asked, and
+The engine is handed its session store; ``init_langchain`` picks it for the storage asked, and
 nothing here knows which storage that was.
 """
 
@@ -59,7 +59,7 @@ from robinauts.agent_engines.langchain_engine.clients import (
     chat_model,
     force_tracing_off,
 )
-from robinauts.agent_engines.langchain_engine.memory import Memory
+from robinauts.agent_engines.langchain_engine.session_store import SessionStore
 from robinauts.agent_engines.langchain_engine.tools import function_tools, tools_for
 
 FASTEST_MODEL_CALL = 1.0
@@ -80,22 +80,22 @@ CHARS_PER_TOKEN = 4
 
 
 class LangChainEngine(AgentEngine):
-    def __init__(self, settings: EngineSettings, memory: Memory) -> None:
+    def __init__(self, settings: EngineSettings, session_store: SessionStore) -> None:
         self._settings = settings
-        self._memory = memory
+        self._session_store = session_store
         force_tracing_off()
 
     def kinds(self) -> frozenset[ProviderKind]:
         return frozenset(ProviderKind)
 
     async def setup(self) -> None:
-        await self._memory.setup()
+        await self._session_store.setup()
 
     async def create(self, session_id: uuid.UUID) -> None:
-        await self._memory.create(session_id)
+        await self._session_store.create(session_id)
 
     async def exists(self, session_id: uuid.UUID) -> bool:
-        return await self._memory.exists(session_id)
+        return await self._session_store.exists(session_id)
 
     async def stream(
         self,
@@ -108,7 +108,7 @@ class LangChainEngine(AgentEngine):
         timeout_seconds: float,
         resume: bool = False,
     ) -> AsyncGenerator[Event, None]:
-        if not await self._memory.exists(session_id):
+        if not await self._session_store.exists(session_id):
             raise SessionNotFoundError(str(session_id))
         thread: RunnableConfig = {"configurable": {"thread_id": str(session_id)}}
         # Without a checkpoint the saver loads the thread's latest state: clear its messages.
@@ -117,7 +117,7 @@ class LangChainEngine(AgentEngine):
         if checkpoint_id is not None:
             fresh = []
             start = {"configurable": {"thread_id": str(session_id), "checkpoint_id": checkpoint_id}}
-            if await self._memory.saver.aget_tuple(start) is None:
+            if await self._session_store.saver.aget_tuple(start) is None:
                 raise CheckpointNotFoundError(checkpoint_id)
 
         chat = chat_model(model, self._settings)
@@ -125,7 +125,7 @@ class LangChainEngine(AgentEngine):
             chat,
             [*await tools_for(agent, self._settings), *function_tools(agent.functions)],
             system_prompt=agent.system_prompt,
-            checkpointer=self._memory.saver,
+            checkpointer=self._session_store.saver,
             middleware=middleware_for(chat, model, self._settings),
         )
         given: dict[str, Any] | None = {"messages": [*fresh, HumanMessage(prompt)]}
@@ -159,7 +159,7 @@ class LangChainEngine(AgentEngine):
         raise NotImplementedError("fork")
 
     async def forget(self, session_id: uuid.UUID) -> None:
-        await self._memory.forget(session_id)
+        await self._session_store.forget(session_id)
 
 
 def middleware_for(

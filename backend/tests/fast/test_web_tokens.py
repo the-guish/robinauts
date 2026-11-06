@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""API tokens over the web app on the memory credentials: minted by a person signed in with a
+"""API tokens over the web app on the in-process credentials: minted by a person signed in with a
 session cookie, shown once, listed, sent as a bearer with no cookie and no ``Origin``, and
 refused once revoked or past their expiry. No provider is asked: the session is added to the
 credentials directly."""
@@ -58,7 +58,7 @@ TURN = {"agent_id": "echo", "text": "hello"}
 async def signed_in() -> AsyncIterator[tuple[httpx.AsyncClient, Composed, User, dict[str, str]]]:
     """The app, a client, Ada, and the headers of her browser: her session cookie and the
     ``Origin`` a write with it needs."""
-    composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
+    composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get)
     app = create_app(composed, sign_in=SIGN_IN, secret_for={}.get)
     async with app.router.lifespan_context(app):
         ada = await composed.controller.ensure_user(ADA)
