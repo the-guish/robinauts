@@ -21,6 +21,7 @@ from robinauts.controller.adapters.memory.credentials import MemoryCredentials
 from robinauts.controller.adapters.memory.store import MemoryStore
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.application.worker import Worker
+from robinauts.controller.application.worker_api import SandboxWorkerApi
 from robinauts.controller.composition import Composed
 from robinauts.controller.contract.domain import (
     ActiveTurn,
@@ -79,7 +80,8 @@ async def over(
         engines=engines,
         close_timeout=close_timeout,
     )
-    composed = Composed(controller, MemoryCredentials(store), worker)
+    worker_api = SandboxWorkerApi(CONFIG, store=store, secret_for={}.get)
+    composed = Composed(controller, MemoryCredentials(store), worker, worker_api)
     lifecycle = Lifecycle(composed)
     await lifecycle.start()
     return lifecycle

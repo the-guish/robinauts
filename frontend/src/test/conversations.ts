@@ -130,6 +130,7 @@ export function opened(
     run_id: null,
     resume: null,
     ended_badly: null,
+    sandbox_gone: false,
     ...rest,
   };
 }

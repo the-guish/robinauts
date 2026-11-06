@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+#
+# The configuration both containers read: the control plane and the sandbox
+# worker, mounted read-only into each (docker/compose.yaml). It holds no key:
+# a provider names the variable its key is read from, and docker/.env holds
+# the value (docs/deployment.md).
+#
+# The local development mode reads the model half alone, so there is no
+# sign-in table here (docs/specs/sign-in.md, "Local development mode").
+
+# --- the model provider ---------------------------------------------------------
+# Anthropic, with ANTHROPIC_API_KEY. For OpenRouter instead, replace this table
+# and the two models below with:
+#
+#   [model_providers.main]
+#   kind = "anthropic-compatible"
+#   api_key_env = "OPENROUTER_API_KEY"
+#   base_url = "https://openrouter.ai/api"
+#
+#   [models.claude-sonnet-5]
+#   provider = "main"
+#   name = "anthropic/claude-sonnet-5"
+#   title = "Claude Sonnet 5"
+#
+# and for OpenAI, `kind = "openai"`, `api_key_env = "OPENAI_API_KEY"`, no
+# base_url, and its own model names (`gpt-5.5`), as demo/README.md lists them.
+[model_providers.main]
+kind = "anthropic"
+api_key_env = "ANTHROPIC_API_KEY"
+
+[models.claude-sonnet-5]
+provider = "main"
+name = "claude-sonnet-5"
+title = "Claude Sonnet 5"
+
+[models.claude-haiku-4-5]
+provider = "main"
+name = "claude-haiku-4-5"
+title = "Claude Haiku 4.5"
+
+# --- the sandbox worker -----------------------------------------------------------
+# What the control plane and the sandbox worker meet by: the variable that holds
+# the token the worker presents, and how long the server holds its long-poll.
+# A sandbox not heard from for gone_after_seconds is gone, with the memory of
+# its conversations, which are read-only from then on.
+[sandbox]
+token_env = "ROBINAUTS_SANDBOX_TOKEN"
+long_poll_seconds = 30
+gone_after_seconds = 120
+
+# --- tools ------------------------------------------------------------------------
+# GitHub's MCP server, with the token docker/.env gives the sandbox container
+# alone. Only the sandboxed agent names it.
+[tool_servers.github]
+url = "https://api.githubcopilot.com/mcp/"
+secret_env = "ROBINAUTS_GITHUB_TOKEN"
+
+# --- agents -----------------------------------------------------------------------
+# One of each kind. The assistant's turns run in the control plane's own worker,
+# as in any deployment. The coder's run in the sandbox container: the control
+# plane queues them, the sandbox worker claims each over the worker API, runs it
+# with its engine's memory in its own process, and sends the events back.
+[agents.assistant]
+title = "Assistant"
+model = "claude-sonnet-5"
+engine = "langchain"
+system_prompt = "You are a helpful assistant. Answer briefly."
+
+[agents.coder]
+title = "Coder (sandboxed)"
+model = "claude-sonnet-5"
+engine = "langchain"
+system_prompt = "You are a coding assistant. You work on GitHub through your tools."
+tools = ["github"]
+sandboxed = true

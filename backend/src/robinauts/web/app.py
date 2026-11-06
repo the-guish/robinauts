@@ -22,10 +22,13 @@ AG-UI over SSE, its run id is the turn's id, and its thread id the session's.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
+import json
 import logging
+import socket
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -55,6 +58,7 @@ from robinauts.controller.contract.domain import (
     OpenedSession,
     ReasoningPart,
     Role,
+    SandboxGoneError,
     Session,
     SessionNotFoundError,
     TextPart,
@@ -62,9 +66,18 @@ from robinauts.controller.contract.domain import (
     ToolResultPart,
     Turn,
     TurnActiveError,
+    TurnLostError,
+    TurnState,
     UnknownAgentError,
     UnknownModelError,
     User,
+    WorkerRefusedError,
+)
+from robinauts.controller.contract.worker_wire import PREFIX as WORKER_API
+from robinauts.controller.contract.worker_wire import (
+    SANDBOX_HEADER,
+    loaded_turn_to_wire,
+    task_to_wire,
 )
 from robinauts.web import agui
 from robinauts.web.cookies import Cookies
@@ -107,7 +120,20 @@ STATUS_OF: dict[type[ControllerError], int] = {
     UnknownModelError: 422,
     TurnActiveError: 409,
     NoActiveTurnError: 404,
+    SandboxGoneError: 409,
+    TurnLostError: 409,
+    WorkerRefusedError: 422,
 }
+
+MAX_WORKER_BODY = 16 * 1024 * 1024
+"""The largest request a sandbox worker may send: a finish with a long answer is the largest."""
+
+FENCE_SECONDS = 1.0
+
+FENCED = "a sandbox worker reaches the worker API and nothing else"
+
+NOT_A_WORKER = "the worker API takes the sandbox workers' token, and nothing else"
+NO_SANDBOX = f"a call of the worker API names its sandbox in {SANDBOX_HEADER}, an id"
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 SIGN_IN_PAGE = "/ui/#/sign-in?error="
@@ -199,6 +225,43 @@ class Refused(Exception):
 
     def answer(self) -> JSONResponse:
         return JSONResponse({"error": self.error, "detail": self.detail}, status_code=self.status)
+
+
+class Fence:
+    """Refuse every request but the worker API's from the addresses ``hosts`` resolve to: the
+    sandbox workers', which are untrusted, and which a container network lets reach every port
+    of the server. Resolved again on each request, at most every ``FENCE_SECONDS``, so that a
+    sandbox that comes back with another address is fenced at once."""
+
+    def __init__(self, app: ASGIApp, hosts: Sequence[str]) -> None:
+        self.app = app
+        self.hosts = tuple(hosts)
+        self._addresses: frozenset[str] = frozenset()
+        self._resolved_at = float("-inf")
+
+    async def _fenced(self) -> frozenset[str]:
+        loop = asyncio.get_running_loop()
+        if loop.time() - self._resolved_at > FENCE_SECONDS:
+            addresses: set[str] = set()
+            for host in self.hosts:
+                try:
+                    found = await loop.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+                except OSError:
+                    continue  # no such host now: nothing of it to fence
+                addresses.update(str(info[4][0]) for info in found)
+            self._addresses = frozenset(addresses)
+            self._resolved_at = loop.time()
+        return self._addresses
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and not scope["path"].startswith(WORKER_API + "/"):
+            client = scope.get("client")
+            fenced = await self._fenced()
+            if client is None or client[0] in fenced:
+                refused = Refused(403, "Forbidden", FENCED)
+                await refused.answer()(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 class Guard:
@@ -438,6 +501,9 @@ class OpenedConversationResponse(BaseModel):
     run_id: uuid.UUID | None
     resume: ResumeView | None
     ended_badly: EndedBadlyView | None
+    sandbox_gone: bool
+    """A sandboxed conversation whose sandbox is gone, with its work: it takes no more turns,
+    and the work goes on in a new conversation."""
 
 
 class RenameRequest(BaseModel):
@@ -561,6 +627,7 @@ def opened_view(opened: OpenedSession, default: str) -> OpenedConversationRespon
         run_id=None if active is None else active.turn_id,
         resume=None if active is None else ResumeView(after=0, follows=active.follows),
         ended_badly=ended_badly_view(opened.ended_badly),
+        sandbox_gone=opened.sandbox_gone,
     )
 
 
@@ -593,9 +660,11 @@ def create_app(
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
     spawn_worker_in_subprocess: bool = False,
+    fenced_hosts: Sequence[str] = (),
 ) -> FastAPI:
     """``sign_in`` is ``None`` in the local development mode. ``spawn_worker_in_subprocess``
-    runs the worker in a process of its own."""
+    runs the worker in a process of its own. ``fenced_hosts`` are the sandbox workers' hosts,
+    whose requests may reach the worker API alone."""
     controller, credentials = composed.controller, composed.credentials
     lifecycle = Lifecycle(composed, spawn_worker_in_subprocess=spawn_worker_in_subprocess)
     exchange: Exchange | None = None
@@ -624,6 +693,11 @@ def create_app(
     # --- who is asking -----------------------------------------------------------
 
     def same_origin(request: Request) -> None:
+        if request.url.path.startswith(WORKER_API + "/"):
+            # A sandbox worker, not a browser: no cookie is read there and no page can hold
+            # the token, so neither the origin nor, in the local development mode, the host
+            # says anything. The workers reach the server by its name on their network.
+            return
         if sign_in is None:
             host = local_host(request.headers.getlist("host"))
             if host is None:
@@ -731,6 +805,8 @@ def create_app(
     )
 
     app.add_middleware(Guard, check=same_origin)
+    if fenced_hosts:
+        app.add_middleware(Fence, hosts=fenced_hosts)
     app.add_middleware(SecurityHeaders)
 
     @app.exception_handler(Refused)
@@ -1089,6 +1165,88 @@ def create_app(
         conversation_id: uuid.UUID, run_id: uuid.UUID, user: User = asking
     ) -> None:
         await controller.cancel_turn(user, conversation_id, run_id)
+
+    # --- the worker API: sandbox workers, outside the OpenAPI document ----------
+
+    worker_api = composed.worker_api
+
+    def sandbox_of(request: Request) -> uuid.UUID:
+        """The sandbox asking, once its token is the workers'."""
+        token = bearer_of(request)
+        if token is None or not worker_api.accepts(token):
+            raise Refused(401, "Unauthorized", NOT_A_WORKER)
+        try:
+            return uuid.UUID(request.headers.get(SANDBOX_HEADER, ""))
+        except ValueError:
+            raise Refused(400, "BadRequest", NO_SANDBOX) from None
+
+    sandboxed = Depends(sandbox_of)
+
+    async def worker_body(request: Request) -> dict[str, object]:
+        declared = request.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > MAX_WORKER_BODY:
+            raise Refused(413, "TooLarge", f"a request over {MAX_WORKER_BODY} bytes")
+        raw = await request.body()
+        if len(raw) > MAX_WORKER_BODY:
+            raise Refused(413, "TooLarge", f"a request over {MAX_WORKER_BODY} bytes")
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            raise Refused(400, "BadRequest", "a body that is not JSON") from None
+        if not isinstance(body, dict):
+            raise Refused(400, "BadRequest", "a body that is not an object")
+        return body
+
+    def listed(body: dict[str, object], key: str) -> list[object]:
+        value = body.get(key, [])
+        if not isinstance(value, list):
+            raise WorkerRefusedError(f"{key} is not a list")
+        return value
+
+    @app.get(WORKER_API + "/task", include_in_schema=False)
+    async def claim_task(wait: float = 0.0, sandbox: uuid.UUID = sandboxed) -> Response:
+        task = await worker_api.claim(sandbox, wait)
+        if task is None:
+            return Response(status_code=204)
+        return JSONResponse({"task": task_to_wire(task)})
+
+    @app.get(WORKER_API + "/turns/{turn_id}", include_in_schema=False)
+    async def load_turn(turn_id: uuid.UUID, sandbox: uuid.UUID = sandboxed) -> JSONResponse:
+        return JSONResponse(loaded_turn_to_wire(await worker_api.load_turn(sandbox, turn_id)))
+
+    @app.post(WORKER_API + "/turns/{turn_id}/events", status_code=204, include_in_schema=False)
+    async def append_events(
+        turn_id: uuid.UUID, request: Request, sandbox: uuid.UUID = sandboxed
+    ) -> None:
+        body = await worker_body(request)
+        await worker_api.append_events(sandbox, turn_id, listed(body, "events"))  # type: ignore[arg-type]
+
+    @app.post(WORKER_API + "/lease", include_in_schema=False)
+    async def renew_lease(request: Request, sandbox: uuid.UUID = sandboxed) -> JSONResponse:
+        body = await worker_body(request)
+        try:
+            tasks = [uuid.UUID(str(task)) for task in listed(body, "tasks")]
+        except ValueError:
+            raise WorkerRefusedError("a task that is not an id") from None
+        cancel = await worker_api.renew(sandbox, tasks)
+        return JSONResponse({"cancel": [str(task) for task in cancel]})
+
+    @app.post(WORKER_API + "/turns/{turn_id}/finish", status_code=204, include_in_schema=False)
+    async def finish_turn(
+        turn_id: uuid.UUID, request: Request, sandbox: uuid.UUID = sandboxed
+    ) -> None:
+        body = await worker_body(request)
+        try:
+            state = TurnState(body.get("state"))
+        except ValueError:
+            raise WorkerRefusedError(f"a state that is not one: {body.get('state')!r}") from None
+        error, answer = body.get("error"), body.get("answer")
+        if error is not None and not isinstance(error, str):
+            raise WorkerRefusedError("an error that is not text")
+        if answer is not None and not isinstance(answer, dict):
+            raise WorkerRefusedError("an answer that is not a document")
+        events = listed(body, "events")
+        await worker_api.finish(sandbox, turn_id, state, error, answer, events)  # type: ignore[arg-type]
 
     # --- liveness --------------------------------------------------------------
 

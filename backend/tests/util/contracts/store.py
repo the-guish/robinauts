@@ -11,6 +11,7 @@ a store keeps them whole and never reads inside.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import uuid
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, timedelta
@@ -384,3 +385,65 @@ class StoreContract:
             me.id, one.id, running.id, TurnState.FINISHED, NOW, None, None, [piece(2)], NOW
         )
         assert await store.wait_for_events(me.id, one.id, running.id, 9, 0.05) is True
+
+    # --- sandboxes ----------------------------------------------------------
+
+    async def queue_sandboxed(self, store: Store, me: User) -> tuple[Session, Task]:
+        """A sandboxed session with its first question, whose turn's task is queued."""
+        one = dataclasses.replace(session(me.id), sandboxed=True)
+        await store.add_session(one)
+        asked = question(one.id)
+        queued, task = turn(one.id, asked.id, lease_until=NOW + 10 * MINUTE)
+        task = dataclasses.replace(task, state=TaskState.QUEUED, claimed_at=None, sandboxed=True)
+        await store.queue_turn(me.id, queued, task, asked)
+        return one, task
+
+    @store_test
+    async def test_a_sandboxed_task_is_a_sandboxs_alone_and_binds_its_session(
+        self, store: Store
+    ) -> None:
+        me = user()
+        await store.add_or_refresh_user(me)
+        one, task = await self.queue_sandboxed(store, me)
+        here, there = uuid.uuid4(), uuid.uuid4()
+        # The server's workers neither claim it nor wake for it.
+        assert await store.claim_tasks(NOW, NOW + MINUTE, 10) == []
+        assert await store.wait_for_queued(NOW, 0.05) is False
+        assert await store.wait_for_queued(NOW, 0.05, here) is True
+        (claimed,) = await store.claim_tasks(NOW, NOW + MINUTE, 10, here)
+        assert (claimed.id, claimed.state, claimed.sandboxed) == (task.id, TaskState.RUNNING, True)
+        assert (await store.get_session(me.id, one.id)).sandbox_id == here
+
+        # The next turn of that session is the same sandbox's, and no other's.
+        await store.finish_turn(
+            me.id, one.id, uuid.UUID(task.payload["turn_id"]), TurnState.FINISHED, NOW,
+            None, None, [], NOW,
+        )  # fmt: skip
+        asked = question(one.id, "again")
+        follow, follow_task = turn(one.id, asked.id, lease_until=NOW + 10 * MINUTE)
+        follow_task = dataclasses.replace(
+            follow_task, state=TaskState.QUEUED, claimed_at=None, sandboxed=True
+        )
+        await store.queue_turn(me.id, follow, follow_task, asked)
+        assert await store.claim_tasks(NOW, NOW + MINUTE, 10, there) == []
+        assert await store.wait_for_queued(NOW, 0.05, there) is False
+        (again,) = await store.claim_tasks(NOW, NOW + MINUTE, 10, here)
+        assert again.id == follow_task.id
+        # A rename keeps the sandbox.
+        renamed = dataclasses.replace(await store.get_session(me.id, one.id), title="renamed")
+        await store.update_session(dataclasses.replace(renamed, sandbox_id=None))
+        assert (await store.get_session(me.id, one.id)).sandbox_id == here
+
+    @store_test
+    async def test_a_task_that_is_not_sandboxed_is_never_a_sandboxs(self, store: Store) -> None:
+        await self.start_first_turn(store)
+        assert await store.wait_for_queued(NOW, 0.05, uuid.uuid4()) is False
+
+    @store_test
+    async def test_a_sandbox_is_heard_from_at_its_latest(self, store: Store) -> None:
+        sandbox = uuid.uuid4()
+        assert await store.sandbox_heard_at(sandbox) is None
+        await store.hear_from_sandbox(sandbox, NOW)
+        await store.hear_from_sandbox(sandbox, NOW + MINUTE)
+        await store.hear_from_sandbox(sandbox, NOW)
+        assert await store.sandbox_heard_at(sandbox) == NOW + MINUTE

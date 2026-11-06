@@ -629,6 +629,10 @@
               }
             ],
             "title": "Run Id"
+          },
+          "sandbox_gone": {
+            "title": "Sandbox Gone",
+            "type": "boolean"
           }
         },
         "required": [
@@ -636,7 +640,8 @@
           "messages",
           "run_id",
           "resume",
-          "ended_badly"
+          "ended_badly",
+          "sandbox_gone"
         ],
         "title": "OpenedConversationResponse",
         "type": "object"

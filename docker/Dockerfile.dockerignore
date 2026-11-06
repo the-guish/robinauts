@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+#
+# What the build context of docker/Dockerfile leaves out: the context is the
+# repository's root, and this file, beside the Dockerfile, is the one BuildKit
+# reads for it. Nothing that holds a key is ever sent to the builder.
+**/.env
+**/.env.*
+.git
+**/.venv
+**/__pycache__
+**/node_modules
+**/.pytest_cache
+**/.ruff_cache
+frontend/dist
+backend/dist
+demo/.state
+tmp

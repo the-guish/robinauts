@@ -18,6 +18,7 @@ path = [
     ".vscode/settings.json",
     "docs/**",
     "demo/README.md",
+    "docker/README.md",
     "backend/uv.lock",
     "backend/openapi.json",
     "scripts/licence-fixtures.json",

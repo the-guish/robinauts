@@ -86,6 +86,13 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   A worker's `claim_tasks` makes the task `running`, with a new lease, in one
   operation. Each task is claimed once, whichever process asks. The worker then
   dispatches it in its own process. The task's `payload` names its turn.
+- **A sandboxed task is a sandbox's alone** (`sandbox-workers.md`). A session made
+  for a sandboxed agent is `sandboxed`, and so is each of its tasks. The server's
+  workers never claim one; a sandbox worker claims those of the sessions it holds, or
+  that no sandbox holds yet, and a session of the second kind is that sandbox's from
+  then on, its `sandbox_id` set in the same operation. A sandbox records when it was
+  last heard from: one gone unheard for too long has taken the session's memory with
+  it, and the session takes no more turns.
 - **A turn finishes in one operation:** its answer, its last events, its state, its
   task `done`, and the session's `updated_at`.
 - **The runner numbers its turn's events** and is their only writer, one at a time, so

@@ -27,6 +27,17 @@ Its stop waits for those tasks, bounded, and interrupts the rest. The worker is 
 operation of the controller. The shell starts it after `open` and stops it before `close`
 (`web/lifecycle.py`). A server finishes its start-up once its worker has started.
 
+The server's worker never claims the turns of a sandboxed session. A sandbox worker does:
+the same worker, composed on the HTTP store, in a process of its own, which reaches the
+server over the worker API alone (`sandbox-workers.md`).
+
+## Worker API
+
+What web answers a sandbox worker, behind the `WorkerApi` port, for the sandbox each call
+names: `claim` a task, waiting for one; `load_turn`; `append_events`; `renew` the leases of the
+tasks it runs, answering those asked to stop; `finish` a turn. Everything a sandbox worker
+sends is checked before the store sees it.
+
 ## Users
 
 - `ensure_user`: the user for an identity, created on first sight. Web passes the provider and
@@ -40,7 +51,8 @@ operation of the controller. The shell starts it after `open` and stops it befor
 ## Sessions
 
 - `list_sessions`: most recently updated first, a page at a time.
-- `open_session`: one moment of a session, its messages and its active turn if any.
+- `open_session`: one moment of a session, its messages and its active turn if any, and
+  whether its sandbox is gone.
 - `rename_session`
 - `delete_session`: hide the session, after stopping a running turn. A soft delete: the records
   and the engine's memory stay.

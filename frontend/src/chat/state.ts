@@ -230,6 +230,16 @@ const ENDED_SOMEHOW = "This answer did not finish.";
  * it hands a message over, and a turn that went nowhere with a box that went
  * empty would be a message somebody thinks they sent.
  */
+/**
+ * What a sandboxed conversation says once its sandbox is gone.
+ *
+ * The sandbox held the agent's memory of the conversation and its work, and
+ * both went with it (`docs/architecture/sandbox-workers.md`): what is on the
+ * screen is all there is, and the server refuses every further turn.
+ */
+export const SANDBOX_GONE =
+  "This conversation's sandbox has been deleted, and its work with it. To continue, start a new conversation.";
+
 export const ONE_AT_A_TIME =
   "This conversation is already answering, and it takes one turn at a time. That message was not sent.";
 
@@ -356,6 +366,11 @@ export type ChatAction =
        * calls were never answered is shown as (`folded`).
        */
       endedState?: string | null;
+      /**
+       * A sandboxed conversation whose sandbox is gone, and its work with it:
+       * it takes no more turns (`SANDBOX_GONE`).
+       */
+      sandboxGone?: boolean;
     }
   /** It could not be read. */
   | { kind: "unopened"; detail: string; missing: boolean }
@@ -430,8 +445,14 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
         sending: false,
         writing: null,
         thinking: null,
-        // Said once: by the failed answer when there is one at the end.
-        ended: messages.at(-1)?.state === "failed" ? null : action.endedBadly,
+        // Said once: by the failed answer when there is one at the end. A
+        // sandbox that is gone outweighs how the last run ended: it is what
+        // decides what can be done next.
+        ended: action.sandboxGone
+          ? SANDBOX_GONE
+          : messages.at(-1)?.state === "failed"
+            ? null
+            : action.endedBadly,
         before: null,
       };
     }

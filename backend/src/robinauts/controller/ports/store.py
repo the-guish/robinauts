@@ -116,15 +116,33 @@ class Store(ABC):
         process waiting in ``wait_for_queued``."""
 
     @abstractmethod
-    async def claim_tasks(self, now: datetime, until: datetime, limit: int) -> list[Task]:
+    async def claim_tasks(
+        self, now: datetime, until: datetime, limit: int, sandbox: uuid.UUID | None = None
+    ) -> list[Task]:
         """Up to ``limit`` queued tasks whose lease has not passed ``now``, oldest first, made
         running, claimed at ``now`` with their lease until ``until``; in one operation. Each
-        task is claimed once, whichever process asks."""
+        task is claimed once, whichever process asks.
+
+        With no ``sandbox``, the tasks that are not sandboxed alone: the server's workers'.
+        With one, the sandboxed tasks of the sessions that sandbox holds or that no sandbox
+        holds yet; a session of the second kind is that sandbox's from then on, in the same
+        operation."""
 
     @abstractmethod
-    async def wait_for_queued(self, now: datetime, timeout: float) -> bool:
-        """Wait until a task ``claim_tasks`` would claim is queued, or ``timeout`` seconds
-        have passed: true in the first case, false in the second."""
+    async def wait_for_queued(
+        self, now: datetime, timeout: float, sandbox: uuid.UUID | None = None
+    ) -> bool:
+        """Wait until a task ``claim_tasks`` would claim for that ``sandbox``, or none, is
+        queued, or ``timeout`` seconds have passed: true in the first case, false in the
+        second."""
+
+    @abstractmethod
+    async def hear_from_sandbox(self, sandbox: uuid.UUID, now: datetime) -> None:
+        """Record that the sandbox was heard from at ``now``, the first time or again."""
+
+    @abstractmethod
+    async def sandbox_heard_at(self, sandbox: uuid.UUID) -> datetime | None:
+        """When the sandbox was last heard from; ``None`` for one never heard from."""
 
     @abstractmethod
     async def get_task(self, task: uuid.UUID) -> Task | None: ...

@@ -29,6 +29,8 @@ from robinauts.controller.contract.domain import (
     NumberedEvent,
     OpenedSession,
     Role,
+    SandboxConfig,
+    SandboxGoneError,
     Session,
     SessionPage,
     Task,
@@ -138,7 +140,8 @@ class RobinautsController(Controller):
         ended_badly = None
         if latest is not None and latest.state in ENDED_BADLY:
             ended_badly = latest
-        return OpenedSession(session, tuple(reversed(thread)), active, ended_badly)
+        gone = await self._sandbox_gone(session)
+        return OpenedSession(session, tuple(reversed(thread)), active, ended_badly, gone)
 
     async def rename_session(self, user: User, session_id: uuid.UUID, title: str) -> Session:
         session = await self._store.get_session(user.id, session_id)
@@ -172,6 +175,7 @@ class RobinautsController(Controller):
             created_at=now,
             updated_at=now,
             title=title_from_text(text),
+            sandboxed=agent_config.sandboxed,
         )
         question = Message(
             uuid.uuid4(),
@@ -324,18 +328,29 @@ class RobinautsController(Controller):
         if model_config is None:
             raise UnknownModelError(model)
         await self._end_expired(session)
+        if await self._sandbox_gone(session):
+            raise SandboxGoneError(
+                f"the sandbox of conversation {session.id} is gone, and its work with it:"
+                " continue in a new conversation"
+            )
         now = self._now()
         turn_id = uuid.uuid4()
         payload: dict[str, object] = {"turn_id": str(turn_id), "create_session": create_session}
         if resume:
             payload["resume"] = True
+        # A sandboxed turn waits as long as a sandbox may go unheard: past that, no sandbox is
+        # there to run it, and the turn ends as interrupted rather than waiting for days.
+        waits = MAX_QUEUED_TIME
+        if session.sandboxed:
+            waits = timedelta(seconds=self._sandbox_config.gone_after_seconds)
         task = Task(
             uuid.uuid4(),
             RUN_TURN,
             payload,
             TaskState.QUEUED,
             created_at=now,
-            lease_until=now + MAX_QUEUED_TIME,
+            lease_until=now + waits,
+            sandboxed=session.sandboxed,
         )
         turn = Turn(
             turn_id,
@@ -351,6 +366,22 @@ class RobinautsController(Controller):
         # A worker claims the task and dispatches it.
         await self._store.queue_turn(user.id, turn, task, stored)
         return turn
+
+    @property
+    def _sandbox_config(self) -> SandboxConfig:
+        # A session made sandboxed keeps its mode after the table is taken out.
+        return self._config.sandbox or SandboxConfig()
+
+    async def _sandbox_gone(self, session: Session) -> bool:
+        """Whether the sandbox that holds the session's memory has gone unheard for longer
+        than ``gone_after_seconds``. A session no sandbox has held yet has lost nothing."""
+        if not session.sandboxed or session.sandbox_id is None:
+            return False
+        heard = await self._store.sandbox_heard_at(session.sandbox_id)
+        if heard is None:
+            return True
+        quiet = self._now() - heard
+        return quiet > timedelta(seconds=self._sandbox_config.gone_after_seconds)
 
     async def watch_turn(
         self,
