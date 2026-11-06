@@ -32,11 +32,12 @@ from robinauts.agent_engines.contract.domain import (
     ToolResult,
 )
 from robinauts.agent_engines.contract.ports import AgentEngine
-from robinauts.composition import compose, configure
+from robinauts.cli.composition import compose, configure
 from robinauts.shared_domain.domain import StorageConfig, StorageKind
-from robinauts.web.app import LOCAL_IDENTITY, create_app
+from robinauts.web.app import LOCAL_IDENTITY
 from util import stack
 from util.aio import asyncio_test
+from util.app import running
 
 
 def mock_engine() -> MagicMock:
@@ -123,9 +124,8 @@ async def test_everyday_use(agent: str) -> None:
         secret_for=secret_for,
         engines={name: lambda *_, built=built: built for name, built in engines.items()},
     )
-    app = create_app(composed, sign_in=None, secret_for=secret_for)
     async with (
-        app.router.lifespan_context(app),
+        running(composed, sign_in=None, secret_for=secret_for) as app,
         httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
         ) as http,

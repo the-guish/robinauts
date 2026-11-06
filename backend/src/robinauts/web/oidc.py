@@ -17,7 +17,7 @@ import base64
 import hashlib
 import json
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -25,7 +25,6 @@ from urllib.parse import quote_plus, urlencode, urlsplit
 
 import httpx
 
-from robinauts.composition import SecretLookup
 from robinauts.controller.contract.domain import User
 from robinauts.web.sign_in import (
     GOOGLE_ISSUER,
@@ -48,6 +47,10 @@ CLOCK_SKEW_SECONDS = 60
 def s256(verifier: str) -> str:
     digest = hashlib.sha256(verifier.encode("ascii")).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
+SecretLookup = Callable[[str], str | None]
+"""A secret by the name of the environment variable that holds it."""
 
 
 @dataclass(frozen=True, slots=True)

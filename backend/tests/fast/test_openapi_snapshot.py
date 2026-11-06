@@ -14,9 +14,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from robinauts.composition import compose
+from robinauts.cli.composition import compose
+from robinauts.cli.lifecycle import Lifecycle
+from robinauts.cli.main import build_app
 from robinauts.shared_domain.domain import Config, StorageConfig, StorageKind
-from robinauts.web.app import create_app
 
 SNAPSHOT = Path(__file__).resolve().parents[2] / "openapi.json"
 
@@ -26,7 +27,7 @@ REGENERATE = "scripts/update-openapi.sh"
 def written() -> str:
     """The snapshot's one spelling, the one ``scripts/update-openapi.sh`` writes."""
     composed = compose(Config(), storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get)
-    app = create_app(composed, sign_in=None, secret_for={}.get)
+    app = build_app(composed, Lifecycle(composed), sign_in=None, secret_for={}.get)
     return json.dumps(app.openapi(), indent=2, sort_keys=True) + "\n"
 
 

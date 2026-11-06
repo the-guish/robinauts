@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""``robinauts start`` serves the web shell; ``robinauts db init`` makes the database ready;
-``robinauts version`` prints the version;
+"""The ``robinauts`` command: the one place that runs Robinauts, and that starts and stops its
+parts in order. ``robinauts start`` serves the web shell; ``robinauts db init`` makes the
+database ready; ``robinauts version`` prints the version;
 ``robinauts devices list`` and ``robinauts devices end`` are the operator's hold on linked
 devices (``docs/architecture/device-pairing.md``), over the database the server reads.
 
@@ -29,16 +30,18 @@ import logging
 import os
 import sys
 import uuid
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
 import uvicorn
+from fastapi import FastAPI
 
-from robinauts.composition import (
+from robinauts.cli.composition import (
     CONTROLLER_TABLES,
     DATABASE_URL_VARIABLE,
+    Composed,
     SecretLookup,
     compose,
     configure,
@@ -47,9 +50,10 @@ from robinauts.composition import (
     read_tables,
     storage_from,
 )
+from robinauts.cli.lifecycle import Lifecycle, WorkerStartError
 from robinauts.controller.contract.domain import ConfigError, DeviceSession, User
 from robinauts.controller.contract.ports import Credentials
-from robinauts.shared_domain.domain import Config, StorageConfig, StorageKind
+from robinauts.shared_domain.domain import Config, ControllerError, StorageConfig, StorageKind
 from robinauts.web.app import create_app
 from robinauts.web.contract.broker.wire import SERVER_KEEP_ALIVE_SECONDS
 from robinauts.web.sign_in import SIGN_IN_KEYS, SignInConfig, is_loopback, parse_sign_in
@@ -134,20 +138,58 @@ def worker_broker_url(host: str, port: int) -> str:
     return f"http://{host}:{port}"
 
 
-class Server(uvicorn.Server):
-    """uvicorn's server, which stops the worker before it stops listening: a worker in a
-    process of its own ends the turns it runs through this server's API, which the app's
-    lifespan, run once nothing listens any more, would be too late for."""
+def build_app(
+    composed: Composed,
+    lifecycle: Lifecycle,
+    *,
+    sign_in: SignInConfig | None,
+    secret_for: SecretLookup,
+    ui_dir: Path | None = None,
+) -> FastAPI:
+    """The HTTP server over what the composition built, with the lifecycle's gate for a worker
+    in a process of its own and its health. The app starts and stops nothing: ``serve`` does."""
+    return create_app(
+        composed.controller,
+        composed.credentials,
+        composed.broker,
+        worker_access=lifecycle.access,
+        healthy=lifecycle.healthy,
+        sign_in=sign_in,
+        secret_for=secret_for,
+        ui_dir=ui_dir,
+    )
 
-    def __init__(self, config: uvicorn.Config, stop_worker: Callable[[], Awaitable[None]]) -> None:
+
+async def serve(server: Server, lifecycle: Lifecycle) -> None:
+    """Open the controller and start the worker, then serve until asked to stop. ``Server``
+    stops them as it shuts down; the stop here is for a start that failed, or a server that
+    never got as far as its shut-down, and does nothing after the server's."""
+    try:
+        await lifecycle.start()
+        await server.serve()
+    finally:
+        await lifecycle.stop()
+
+
+class Server(uvicorn.Server):
+    """uvicorn's server, which stops the worker before it stops listening, and closes the
+    controller once it has. A worker in a process of its own ends the turns it runs through
+    this server's API, which the app's shut-down, run once nothing listens any more, would be
+    too late for. The controller is closed here, inside ``serve``, because uvicorn raises a
+    signal it caught again as ``serve`` returns: on SIGTERM nothing after it runs."""
+
+    def __init__(self, config: uvicorn.Config, lifecycle: Lifecycle) -> None:
         super().__init__(config)
-        self._stop_worker = stop_worker
+        self._lifecycle = lifecycle
 
     async def shutdown(self, sockets: list[Any] | None = None) -> None:
         try:
-            await self._stop_worker()
+            await self._lifecycle.stop_worker()
         finally:
-            await super().shutdown(sockets=sockets)
+            try:
+                await super().shutdown(sockets=sockets)
+            finally:
+                await self._lifecycle.stop()
 
 
 def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
@@ -165,16 +207,14 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     logging.basicConfig(level=logging.INFO)
     if dev_no_sign_in:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
-    app = create_app(
+    lifecycle = Lifecycle(
         composed,
-        sign_in=sign_in,
-        secret_for=secret_for,
-        ui_dir=ui_dir,
         # A store in this process is this process's alone: its worker runs here.
-        worker_broker_url=(
+        broker_url=(
             worker_broker_url(host, port) if storage.kind is StorageKind.POSTGRES else None
         ),
     )
+    app = build_app(composed, lifecycle, sign_in=sign_in, secret_for=secret_for, ui_dir=ui_dir)
     config = uvicorn.Config(
         app,
         host=host,
@@ -182,7 +222,14 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
         timeout_keep_alive=SERVER_KEEP_ALIVE_SECONDS,
     )
-    Server(config, app.state.lifecycle.stop_worker).run()
+    server = Server(config, lifecycle)
+    try:
+        asyncio.run(serve(server, lifecycle), loop_factory=config.get_loop_factory())
+    except (ControllerError, WorkerStartError) as refused:
+        # A database that will not open or is not this build's, an engine the build lacks or a
+        # secret missing, a worker process that did not start: said before anything listens.
+        print(refused, file=sys.stderr)
+        return 1
     return 0
 
 

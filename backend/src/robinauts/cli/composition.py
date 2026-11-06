@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The one package that imports both the controller and the worker, and the one web imports to
-get them. Loads a configuration file, and builds a controller: the store for the storage asked, the
-application over it, what a worker needs of the core over that store, and the worker that
+"""The one module that imports both the controller and the worker; the rest of ``cli`` gets
+them from here. Loads a configuration file, and builds a controller: the store for the storage
+asked, the application over it, what a worker needs of the core over that store, and the worker that
 claims and runs its turns through it, with the credentials sign-in keeps on the same storage.
 A worker in a process of its own is built with `compose_worker`, over the core it is handed:
 `http_turn_broker`, the server's API.

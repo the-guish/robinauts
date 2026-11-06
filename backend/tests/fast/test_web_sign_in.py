@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 import pytest
 
-from robinauts.composition import compose
+from robinauts.cli.composition import compose
 from robinauts.shared_domain.domain import (
     AgentConfig,
     Config,
@@ -26,9 +26,9 @@ from robinauts.shared_domain.domain import (
     StorageKind,
 )
 from robinauts.shared_domain.domain import ProviderConfig as ModelProvider
-from robinauts.web.app import create_app
 from robinauts.web.sign_in import AllowEntry, Matcher, ProviderConfig, SignInConfig
 from util.aio import asyncio_test
+from util.app import running
 from util.standin import Misbehaviour, StandInProvider, redirect_from
 
 pytestmark = pytest.mark.io
@@ -72,12 +72,7 @@ async def browser(stand_in: StandInProvider | None) -> AsyncIterator[httpx.Async
         sign_in = SignInConfig(public_url=PUBLIC_URL, providers={"okta": okta}, allow=allow)
         secret_for = {SECRET_ENV: stand_in.client_secret}.get
     composed = compose(ECHO, storage=StorageConfig(StorageKind.IN_PROCESS), secret_for=secret_for)
-    app = create_app(
-        composed,
-        sign_in=sign_in,
-        secret_for=secret_for,
-    )
-    async with app.router.lifespan_context(app):
+    async with running(composed, sign_in=sign_in, secret_for=secret_for) as app:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url=PUBLIC_URL) as http:
             yield http

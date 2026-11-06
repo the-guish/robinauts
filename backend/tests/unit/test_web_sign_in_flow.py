@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from robinauts.composition import compose
+from robinauts.cli.composition import compose
 from robinauts.controller.contract.domain import UserSession
 from robinauts.shared_domain.domain import Config, StorageConfig, StorageKind
 from robinauts.web.app import LOCAL_IDENTITY

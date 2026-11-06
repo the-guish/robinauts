@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The start and the stop of what the composition built, in order: what the app's lifespan
-runs, and what a test that needs no app runs in its place. The worker runs in this process,
+"""The start and the stop of what the composition built, in order: what ``robinauts start``
+runs around the HTTP server (``cli/main.py``), and what a test runs around an app or in its
+place. The worker runs in this process,
 or in a process of its own (``broker_url``), which reaches the core through this server's API
 alone, with a secret handed to it at its start through a pipe, never its environment."""
 
@@ -18,9 +19,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from robinauts.composition import Composed
-from robinauts.web.worker_api import WorkerAccess
-from robinauts.web.worker_process import (
+from robinauts.cli.composition import Composed
+from robinauts.cli.worker_process import (
     ACTIVITY_VARIABLE,
     BROKER_URL_VARIABLE,
     PARENT_VARIABLE,
@@ -28,10 +28,17 @@ from robinauts.web.worker_process import (
     READY_VARIABLE,
     SECRET_VARIABLE,
 )
+from robinauts.web.worker_api import WorkerAccess
 
 _log = logging.getLogger(__name__)
 
-WORKER_MODULE = "robinauts.web.worker_process"
+WORKER_MODULE = "robinauts.cli.worker_process"
+
+
+class WorkerStartError(RuntimeError):
+    """The worker's process ended, or said nothing for ``WORKER_START_SECONDS``, before its
+    worker started."""
+
 
 WORKER_START_SECONDS = 60.0
 """How long `start` waits for the worker's process to say its worker has started, before it
@@ -54,6 +61,7 @@ class Lifecycle:
         self.composed = composed
         self._broker_url = broker_url
         self._worker_running = False
+        self._opened = False
         self._process: asyncio.subprocess.Process | None = None
         self._watching: asyncio.Task[None] | None = None
         self.access = WorkerAccess()
@@ -66,6 +74,7 @@ class Lifecycle:
         that a server which says it is up runs turns. A worker process is let in through the
         API from then on, with the secret it reads from a pipe at its start."""
         await self.composed.controller.open()
+        self._opened = True
         if self._broker_url is None:
             self.composed.worker.activity_file = self.activity_file
             await self.composed.worker.start()
@@ -132,7 +141,7 @@ class Lifecycle:
             loop.remove_reader(ready)
         if line != READY_LINE:
             await self._stop_process(process)
-            raise RuntimeError(
+            raise WorkerStartError(
                 f"the worker process did not start within {WORKER_START_SECONDS:g} s"
             )
 
@@ -157,10 +166,15 @@ class Lifecycle:
         self.access.close()
 
     async def stop(self) -> None:
-        """Stop the worker, if it still runs, then close the controller."""
+        """Stop the worker, if it still runs, then close the controller, if it is open. Again,
+        or after a start that failed, it does only what is left, and awaits nothing once all
+        is done: a stop a signal has cancelled already must not be cut short by it."""
         await self.stop_worker()
         self.activity_file.unlink(missing_ok=True)
-        await self.composed.controller.close()
+        if self._opened:
+            self._opened = False
+            await self.composed.controller.close()
+            _log.info("the controller is closed")
 
     async def _stop_process(self, process: asyncio.subprocess.Process) -> None:
         if self._watching is not None:
