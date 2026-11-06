@@ -31,6 +31,7 @@ from robinauts.cli.worker_process import (
     READY_VARIABLE,
     SECRET_VARIABLE,
 )
+from robinauts.shared_domain.domain import DEFAULT_WORKER
 from robinauts.web.worker_api import WorkerAccess
 
 _log = logging.getLogger(__name__)
@@ -55,6 +56,13 @@ WORKER_STOP_SECONDS = 15.0
 than the worker waits for its tasks."""
 
 
+def activity_file(worker: str) -> Path:
+    """The file this server's worker ``worker`` touches at every heartbeat: the default's
+    is named after the server's process alone, the others after their worker too."""
+    suffix = "" if worker == DEFAULT_WORKER else f"-{worker}"
+    return Path(tempfile.gettempdir()) / f"robinauts-worker-{os.getpid()}{suffix}.alive"
+
+
 class Lifecycle:
     def __init__(self, composed: Composed, *, broker_url: str | None = None) -> None:
         """``broker_url`` runs each worker in a process of its own, which reaches the core at
@@ -69,10 +77,7 @@ class Lifecycle:
         self._watching: dict[str, asyncio.Task[None]] = {}
         self.access = WorkerAccess()
         """What lets the workers' processes in through the API, while they run."""
-        self.activity_files = {
-            name: Path(tempfile.gettempdir()) / f"robinauts-worker-{os.getpid()}-{name}.alive"
-            for name in composed.workers
-        }
+        self.activity_files = {name: activity_file(name) for name in composed.workers}
         """What each of this node's workers touches at every heartbeat, by worker, in this
         process or its own."""
 
