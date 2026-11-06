@@ -151,7 +151,7 @@ def build_app(
     return create_app(
         composed.controller,
         composed.credentials,
-        composed.broker,
+        composed.brokers,
         worker_access=lifecycle.access,
         healthy=lifecycle.healthy,
         sign_in=sign_in,

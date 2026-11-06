@@ -51,16 +51,20 @@ What a worker in a process of its own reaches the core through: the operations o
 `/internal/worker/`, served over the controller's store. They are not the frontend's and are
 not in the OpenAPI document.
 
-- The server makes a secret at its start and writes it to a pipe the worker's process reads
-  at its own; it is in no environment variable and no file. Every route wants it as
-  `Authorization: Bearer`: any other credential is 401. With no worker process running, the
-  routes answer 404.
+- There is one worker process per worker the configuration names (`AgentConfig.worker`,
+  `default` for an agent that names none). The server makes a secret for each at its start
+  and writes it to a pipe that worker's process reads at its own; it is in no environment
+  variable and no file. Every route wants one of them as `Authorization: Bearer`: any other
+  credential is 401. With no worker process running, the routes answer 404.
+- The secret says which worker asks, and each is served over a broker of its own: its claims
+  and waits see the tasks of its own agents alone, whatever the request says. Cancels are
+  every worker's alike; a worker ignores those of tasks it does not run.
 - The worker reaches the server where it listens, on a loopback address when it listens on
   every address.
 - A turn lost is 409 `turn_lost`, a session not found 404 `session_not_found`: the worker
   raises the core's own errors for them.
 - `listen_for_cancels` is a long poll past a cursor. A cancel the worker misses is named by
   its next renewal of the leases.
-- A server stops its worker before it stops listening, since the worker ends its turns
-  through these routes; the waits it holds end at once when the worker has stopped.
+- A server stops its workers before it stops listening, since a worker ends its turns
+  through these routes; the waits they hold end at once when the workers have stopped.
 

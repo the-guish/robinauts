@@ -28,15 +28,23 @@ so, and the worker creates the engine's session before it runs. It renews the ta
 every `heartbeat_seconds` and stops a task that any process asks to stop. Its stop waits for
 those tasks, bounded, and interrupts the rest. The worker is not an operation of the
 controller. The shell starts it after `open` and stops it before `close`
-(`cli/lifecycle.py`). A server finishes its start-up once its worker has started, and stops
-its worker before it stops listening.
+(`cli/lifecycle.py`). A server finishes its start-up once its workers have started, and stops
+them before it stops listening.
+
+A server runs one worker per name its agents give (`[agents.*] worker`), and `default`
+for the agents that give none; `default` always runs. When a turn is queued, its task is
+stamped with its agent's worker (`Config.worker_of`), and a worker claims and waits for the
+tasks stamped with its own name alone. Each worker builds the engines of its own agents at
+its start. On PostgreSQL each worker is a process of its own; in the server's process, with
+the store there too, they are workers side by side in that process.
 
 The worker reaches the core through one port, `TurnBroker` (`contract/broker/ports.py`), and
 never through the store. The broker's contract also holds what crosses it: the tasks, the
 messages and events as stored records, and their encoding as documents
 (`contract/broker/documents.py`), which the worker writes and the controller reads. These are its operations, the store's of the same names:
 
-- `claim_tasks`, `wait_for_queued`: the queued tasks, made the worker's.
+- `claim_tasks`, `wait_for_queued`: the queued tasks of the worker's agents, made the
+  worker's. A broker is one worker's; the store's operations take the worker's name.
 - `renew_leases`, `listen_for_cancels`: the leases of the tasks it runs, and the tasks asked
   to stop.
 - `get_task`, `find_turn`: what a task names.
@@ -46,7 +54,8 @@ messages and events as stored records, and their encoding as documents
 A worker in the server's process has it over the controller's store
 (`application/turn_broker.py`). A worker in a process of its own, which a server on
 PostgreSQL spawns, has it over HTTP: the same operations as the API's `/internal/worker/`
-routes (`docs/architecture/web.md`), with the secret its server handed it at its start. The
+routes (`docs/architecture/web.md`), with the secret its server handed it at its start, which
+tells the server which worker it is. The
 engines keep their state apart, in the worker's `AgentEngineStore`: on PostgreSQL a pool of the
 worker's own, for the engines' tables, never the core's.
 

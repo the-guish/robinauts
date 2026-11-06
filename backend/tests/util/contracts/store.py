@@ -11,6 +11,7 @@ a store keeps them whole and never reads inside.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import uuid
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, timedelta
@@ -22,6 +23,7 @@ from robinauts.controller.contract.broker.domain import RUN_TURN, Task, TaskStat
 from robinauts.controller.contract.domain import TurnActiveError, User
 from robinauts.controller.ports.store import Store, StoredEvent, StoredMessage
 from robinauts.shared_domain.domain import (
+    DEFAULT_WORKER,
     Role,
     Session,
     SessionNotFoundError,
@@ -113,6 +115,18 @@ class StoreContract:
         running, running_task = turn(one.id, asked.id)
         await store.queue_turn(me.id, running, running_task, asked)
         return me, one, asked, running
+
+    async def queue_for(self, store: Store, me: User, worker: str) -> Task:
+        """A session of ``me`` with a question, and its turn queued for ``worker``."""
+        one = session(me.id)
+        await store.add_session(one)
+        asked = question(one.id)
+        queued, running_task = turn(one.id, asked.id)
+        task = dataclasses.replace(
+            running_task, state=TaskState.QUEUED, claimed_at=None, worker=worker
+        )
+        await store.queue_turn(me.id, queued, task, asked)
+        return task
 
     async def append(
         self,
@@ -361,6 +375,45 @@ class StoreContract:
         assert await store.events_after(me.id, other.id, running.id, 0) == []
         assert await store.active_turn(me.id, other.id) is None
         assert await store.latest_turn(me.id, other.id) is None
+
+    # --- tasks ---------------------------------------------------------------
+
+    @store_test
+    async def test_a_queued_task_is_claimed_by_its_worker_alone(self, store: Store) -> None:
+        me = user()
+        await store.add_or_refresh_user(me)
+        tasks = {
+            worker: await self.queue_for(store, me, worker)
+            for worker in (DEFAULT_WORKER, "special")
+        }
+        assert await store.wait_for_queued(NOW, 0.05, "elsewhere") is False
+        assert await store.claim_tasks(NOW, NOW + MINUTE, 10, "elsewhere") == []
+        for worker, task in tasks.items():
+            assert await store.wait_for_queued(NOW, 0.05, worker) is True
+            claimed = await store.claim_tasks(NOW, NOW + MINUTE, 10, worker)
+            assert [(k.id, k.worker, k.state) for k in claimed] == [
+                (task.id, worker, TaskState.RUNNING)
+            ]
+            assert await store.claim_tasks(NOW, NOW + MINUTE, 10, worker) == []
+            found = await store.get_task(task.id)
+            assert found is not None
+            assert found.worker == worker
+
+    @store_test
+    async def test_a_wait_for_queued_ends_on_a_task_of_its_worker_alone(self, store: Store) -> None:
+        me = user()
+        await store.add_or_refresh_user(me)
+
+        async def soon(worker: str) -> None:
+            await asyncio.sleep(0.05)
+            await self.queue_for(store, me, worker)
+
+        queuing = asyncio.create_task(soon(DEFAULT_WORKER))
+        assert await store.wait_for_queued(NOW, 0.5, "special") is False
+        await queuing
+        queuing = asyncio.create_task(soon("special"))
+        assert await store.wait_for_queued(NOW, 5.0, "special") is True
+        await queuing
 
     @store_test
     async def test_wait_for_events_returns_on_an_append_and_at_its_timeout(
