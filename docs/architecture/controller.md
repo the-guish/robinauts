@@ -42,7 +42,7 @@ A worker in the server's process has it over the controller's store
 (`application/turn_broker.py`). A worker in a process of its own, which a server on
 PostgreSQL spawns, has it over HTTP: the same operations as the API's `/internal/worker/`
 routes (`docs/architecture/web.md`), with the secret its server handed it at its start. The
-engines keep their memory apart, in the worker's `EngineMemory`: on PostgreSQL a pool of the
+engines keep their state apart, in the worker's `AgentEngineStore`: on PostgreSQL a pool of the
 worker's own, for the engines' tables, never the core's.
 
 ## Users
