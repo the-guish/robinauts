@@ -48,7 +48,7 @@ reads."""
 BROKER_URL_VARIABLE = "ROBINAUTS_WORKER_BROKER_URL"
 """The root of the API this process reaches the core through: its parent's."""
 
-NAME_VARIABLE = "ROBINAUTS_WORKER_NAME"
+WORKER_NAME_VARIABLE = "ROBINAUTS_WORKER_NAME"
 """The worker this process runs: ``default`` when unset."""
 
 SECRET_VARIABLE = "ROBINAUTS_WORKER_SECRET_FD"
@@ -97,7 +97,7 @@ async def _run() -> None:
     config, secret_for = load(Path(os.environ["ROBINAUTS_CONFIG"]), os.environ)
     url = os.environ[BROKER_URL_VARIABLE]
     logging.getLogger("httpx").addFilter(QuietRequests(url))
-    name = os.environ.get(NAME_VARIABLE) or DEFAULT_WORKER
+    name = os.environ.get(WORKER_NAME_VARIABLE) or DEFAULT_WORKER
     broker = http_turn_broker(url, _read_secret())
     worker = compose_worker(
         config, storage=storage_from(os.environ), secret_for=secret_for, broker=broker, name=name
@@ -118,7 +118,7 @@ async def _run() -> None:
 
 
 def main() -> None:
-    name = os.environ.get(NAME_VARIABLE) or DEFAULT_WORKER
+    name = os.environ.get(WORKER_NAME_VARIABLE) or DEFAULT_WORKER
     logging.basicConfig(
         level=logging.INFO, format=f"%(levelname)s:worker {name}:%(name)s:%(message)s"
     )
