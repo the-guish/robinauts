@@ -27,7 +27,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import uuid
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -594,7 +594,7 @@ def event_stream(
 def create_app(
     controller: Controller,
     credentials: Credentials,
-    brokers: Mapping[str, TurnBroker],
+    broker: TurnBroker,
     *,
     worker_access: WorkerAccess,
     healthy: Callable[[], bool],
@@ -604,9 +604,10 @@ def create_app(
 ) -> FastAPI:
     """The HTTP server alone. Whoever runs it opens the controller and starts the worker before
     it serves, and stops the worker and closes the controller after (``cli/lifecycle.py``).
-    ``brokers``, one per worker by name, and ``worker_access`` serve the workers in processes
-    of their own at ``/internal/worker/``; ``healthy`` says whether this node's workers are
-    heard from, for ``/health``. ``sign_in`` is ``None`` in the local development mode."""
+    ``broker`` and ``worker_access`` serve the workers in processes of their own at
+    ``/internal/worker/``, each known by its secret; ``healthy`` says whether this node's
+    workers are heard from, for ``/health``. ``sign_in`` is ``None`` in the local development
+    mode."""
     exchange: Exchange | None = None
     flow: SignIn | None = None
     if sign_in is not None:
@@ -1098,7 +1099,7 @@ def create_app(
 
     # --- a worker in a process of its own ------------------------------------------
 
-    app.include_router(worker_router(brokers, worker_access))
+    app.include_router(worker_router(broker, worker_access))
 
     # --- liveness --------------------------------------------------------------
 

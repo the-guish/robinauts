@@ -9,7 +9,8 @@ A worker starts before its server listens, and stops while it still does, so a c
 refused is tried again, for up to ``CONNECT_PATIENCE`` seconds: the request was never sent.
 Nothing else is tried again. The cancels are polled for by a task of their own, from
 ``listen_for_cancels`` until ``close``; one lost while the poll fails is named by the next
-renewal of the leases.
+renewal of the leases. The worker a claim or a wait names is not sent: the server knows which
+worker asks by its secret, and claims for that one.
 """
 
 from __future__ import annotations
@@ -155,13 +156,15 @@ class HttpTurnBroker(TurnBroker):
             raise SessionNotFoundError(refusal.detail)
         raise BrokerRefusedError(f"the server answered {response.status_code} to {method} {path}")
 
-    async def claim_tasks(self, now: datetime, until: datetime, limit: int) -> list[Task]:
+    async def claim_tasks(
+        self, now: datetime, until: datetime, limit: int, worker: str
+    ) -> list[Task]:
         answer = await self._call(
             "POST", "/tasks/claim", body=ClaimRequest(now=now, until=until, limit=limit)
         )
         return TasksResponse.model_validate(answer).tasks
 
-    async def wait_for_queued(self, now: datetime, timeout: float) -> bool:
+    async def wait_for_queued(self, now: datetime, timeout: float, worker: str) -> bool:
         answer = await self._call(
             "POST", "/tasks/wait", body=WaitRequest(now=now, timeout=timeout), waits=timeout
         )

@@ -31,20 +31,24 @@ class TurnBroker(ABC):
     the worker's clock. A worker in this process has it over the controller's store; one in a
     process of its own, over HTTP, from the server that spawned it (``web/worker_api.py``).
 
-    A broker is one worker's: the tasks it claims and waits for are those of the agents that
-    worker runs (``AgentConfig.worker``), and no other worker's.
+    There is one broker for every worker. Its claims and waits name the worker they are for,
+    and see the tasks of that worker's agents alone (``AgentConfig.worker``). A worker in this
+    process names itself; for one in a process of its own, the server names it, from the
+    secret it presents, whatever the worker sends (``web/worker_api.py``).
     """
 
     @abstractmethod
-    async def claim_tasks(self, now: datetime, until: datetime, limit: int) -> list[Task]:
-        """Up to ``limit`` of this worker's queued tasks, made running, with their lease until
-        ``until``. Each task is claimed once, whichever process of the worker asks."""
+    async def claim_tasks(
+        self, now: datetime, until: datetime, limit: int, worker: str
+    ) -> list[Task]:
+        """Up to ``limit`` of ``worker``'s queued tasks, made running, with their lease until
+        ``until``. Each task is claimed once, whichever process asks."""
         raise NotImplementedError
 
     @abstractmethod
-    async def wait_for_queued(self, now: datetime, timeout: float) -> bool:
-        """Wait until a task ``claim_tasks`` would claim is queued, or ``timeout`` seconds
-        have passed: true in the first case, false in the second."""
+    async def wait_for_queued(self, now: datetime, timeout: float, worker: str) -> bool:
+        """Wait until a task ``claim_tasks`` would claim for ``worker`` is queued, or
+        ``timeout`` seconds have passed: true in the first case, false in the second."""
         raise NotImplementedError
 
     @abstractmethod

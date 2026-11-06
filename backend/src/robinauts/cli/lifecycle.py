@@ -94,10 +94,7 @@ class Lifecycle:
                 await worker.start()
             return
         self._workers_running = True
-        # Every worker's broker reaches the one store, which tells each listener every cancel.
-        await self.composed.brokers[next(iter(self.composed.brokers))].listen_for_cancels(
-            self.access.stop_requested
-        )
+        await self.composed.broker.listen_for_cancels(self.access.stop_requested)
         try:
             # Side by side: a server is up once its slowest worker is.
             spawning = [self._spawn(name, self._broker_url) for name in self.composed.workers]

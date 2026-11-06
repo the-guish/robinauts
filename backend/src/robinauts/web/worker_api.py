@@ -8,10 +8,11 @@ controller's store.
 There is one such worker per worker the configuration names (``AgentConfig.worker``), each
 with a secret of its own, which the server handed it at its start and ``WorkerAccess`` holds.
 They answer only while a worker runs, and only those secrets: 404 while none runs, 401 for any
-other credential. The secret says which worker asks, and each is served through its own
-broker: a worker claims and waits for the tasks of its own agents, and no other worker's,
-whatever it sends. The cancels a worker hears are numbered here as they come, every worker's
-alike, and it polls past the last it saw; one it misses, the next renewal of its leases names.
+other credential. The secret says which worker asks, and the claims and waits ask the one
+broker for that worker: a worker claims and waits for the tasks of its own agents, and no
+other worker's, whatever it sends. The cancels a worker hears are numbered here as they come,
+every worker's alike, and it polls past the last it saw; one it misses, the next renewal of its
+leases names.
 A wait gives up as soon as the workers are stopped, so that a server that stops them is not
 held by their own long polls.
 """
@@ -22,7 +23,7 @@ import asyncio
 import hmac
 import uuid
 from collections import deque
-from collections.abc import Awaitable, Callable, Coroutine, Mapping
+from collections.abc import Awaitable, Callable, Coroutine
 from typing import Annotated, Any, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
@@ -153,22 +154,18 @@ class _Refusing(APIRoute):
         return refusing
 
 
-def worker_router(brokers: Mapping[str, TurnBroker], access: WorkerAccess) -> APIRouter:
-    """The routes of ``PREFIX`` for the workers ``access`` lets in, each over its broker in
-    ``brokers``, by the worker's name."""
+def worker_router(broker: TurnBroker, access: WorkerAccess) -> APIRouter:
+    """The routes of ``PREFIX``, over ``broker``, for the workers ``access`` lets in."""
 
-    def worker_only(request: Request) -> TurnBroker:
-        """The broker of the worker that asks; FastAPI runs it once a request, for the router
+    def worker_only(request: Request) -> str:
+        """The name of the worker that asks; FastAPI runs it once a request, for the router
         and for the route that names it."""
         if not access.is_open:
             raise HTTPException(404)
         worker = access.admitted(request.headers.get("authorization"))
         if worker is None:
             raise HTTPException(401, headers={"WWW-Authenticate": "Bearer"})
-        broker = brokers.get(worker)
-        if broker is None:
-            raise HTTPException(404)
-        return broker
+        return worker
 
     asking = Depends(worker_only)
 
@@ -180,21 +177,22 @@ def worker_router(brokers: Mapping[str, TurnBroker], access: WorkerAccess) -> AP
     )
 
     @router.post("/tasks/claim")
-    async def claim_tasks(body: ClaimRequest, broker: TurnBroker = asking) -> TasksResponse:
-        tasks = await broker.claim_tasks(body.now, body.until, body.limit)
+    async def claim_tasks(body: ClaimRequest, worker: str = asking) -> TasksResponse:
+        tasks = await broker.claim_tasks(body.now, body.until, body.limit, worker)
         return TasksResponse(tasks=tasks)
 
     @router.post("/tasks/wait")
-    async def wait_for_queued(body: WaitRequest, broker: TurnBroker = asking) -> WaitResponse:
-        queued = await access.unless_closed(broker.wait_for_queued(body.now, body.timeout), False)
+    async def wait_for_queued(body: WaitRequest, worker: str = asking) -> WaitResponse:
+        waiting = broker.wait_for_queued(body.now, body.timeout, worker)
+        queued = await access.unless_closed(waiting, False)
         return WaitResponse(queued=queued)
 
     @router.post("/tasks/renew")
-    async def renew_leases(body: RenewRequest, broker: TurnBroker = asking) -> RenewResponse:
+    async def renew_leases(body: RenewRequest) -> RenewResponse:
         return RenewResponse(stop=await broker.renew_leases(body.tasks, body.now, body.until))
 
     @router.get("/tasks/{task_id}")
-    async def get_task(task_id: uuid.UUID, broker: TurnBroker = asking) -> TaskResponse:
+    async def get_task(task_id: uuid.UUID) -> TaskResponse:
         task = await broker.get_task(task_id)
         return TaskResponse(task=task)
 
@@ -207,7 +205,7 @@ def worker_router(brokers: Mapping[str, TurnBroker], access: WorkerAccess) -> AP
         return CancelsResponse(cursor=cursor, tasks=tasks)
 
     @router.get("/turns/{turn_id}")
-    async def find_turn(turn_id: uuid.UUID, broker: TurnBroker = asking) -> FoundTurnResponse:
+    async def find_turn(turn_id: uuid.UUID) -> FoundTurnResponse:
         found = await broker.find_turn(turn_id)
         if found is None:
             return FoundTurnResponse(owner=None, turn=None)
@@ -220,7 +218,6 @@ def worker_router(brokers: Mapping[str, TurnBroker], access: WorkerAccess) -> AP
         limit: Annotated[int, Query(ge=1, le=1000)],
         before_updated_at: AwareDatetime | None = None,
         before_id: uuid.UUID | None = None,
-        broker: TurnBroker = asking,
     ) -> SessionsResponse:
         before = None
         if before_updated_at is not None and before_id is not None:
@@ -229,15 +226,11 @@ def worker_router(brokers: Mapping[str, TurnBroker], access: WorkerAccess) -> AP
         return SessionsResponse(sessions=sessions)
 
     @router.get("/users/{owner}/sessions/{session_id}")
-    async def get_session(
-        owner: uuid.UUID, session_id: uuid.UUID, broker: TurnBroker = asking
-    ) -> SessionResponse:
+    async def get_session(owner: uuid.UUID, session_id: uuid.UUID) -> SessionResponse:
         return SessionResponse(session=await broker.get_session(owner, session_id))
 
     @router.get("/users/{owner}/sessions/{session_id}/messages")
-    async def messages_of(
-        owner: uuid.UUID, session_id: uuid.UUID, broker: TurnBroker = asking
-    ) -> MessagesResponse:
+    async def messages_of(owner: uuid.UUID, session_id: uuid.UUID) -> MessagesResponse:
         documents = await broker.messages_of(owner, session_id)
         return MessagesResponse(messages=[dict(d) for d in documents])
 
@@ -251,7 +244,6 @@ def worker_router(brokers: Mapping[str, TurnBroker], access: WorkerAccess) -> AP
         turn_id: uuid.UUID,
         position: Annotated[int, Path(ge=1)],
         body: AppendRequest,
-        broker: TurnBroker = asking,
     ) -> None:
         await broker.append_event(
             owner, session_id, turn_id, position, body.document, body.written_at, body.expires_at
@@ -263,7 +255,6 @@ def worker_router(brokers: Mapping[str, TurnBroker], access: WorkerAccess) -> AP
         session_id: uuid.UUID,
         turn_id: uuid.UUID,
         body: FinishRequest,
-        broker: TurnBroker = asking,
     ) -> None:
         await broker.finish_turn(
             owner,

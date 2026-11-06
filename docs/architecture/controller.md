@@ -44,7 +44,9 @@ messages and events as stored records, and their encoding as documents
 (`contract/broker/documents.py`), which the worker writes and the controller reads. These are its operations, the store's of the same names:
 
 - `claim_tasks`, `wait_for_queued`: the queued tasks of the worker's agents, made the
-  worker's. A broker is one worker's; the store's operations take the worker's name.
+  worker's. Both take the worker's name: there is one broker for every worker. A worker in
+  the server's process names itself; for one in a process of its own, the API names it from
+  its secret.
 - `renew_leases`, `listen_for_cancels`: the leases of the tasks it runs, and the tasks asked
   to stop.
 - `get_task`, `find_turn`: what a task names.

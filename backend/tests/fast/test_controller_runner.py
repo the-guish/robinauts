@@ -79,9 +79,7 @@ async def over(
         engines=engines,
         close_timeout=close_timeout,
     )
-    composed = Composed(
-        controller, InProcessCredentials(store), {DEFAULT_WORKER: worker}, {DEFAULT_WORKER: broker}
-    )
+    composed = Composed(controller, InProcessCredentials(store), {DEFAULT_WORKER: worker}, broker)
     lifecycle = Lifecycle(composed)
     await lifecycle.start()
     return lifecycle

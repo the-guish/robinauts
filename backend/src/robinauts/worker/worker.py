@@ -5,7 +5,7 @@
 
 It builds the engines of its agents, claims their queued tasks and runs each as an asyncio
 task with ``run_task``. A worker is named: its agents are those whose configuration names it
-(``AgentConfig.worker``), and its broker hands it their tasks alone. It renews the leases of
+(``AgentConfig.worker``), and it claims their tasks alone, by its name. It renews the leases of
 the tasks it runs, and stops a task asked to stop, from any process. A task is claimed by one
 worker, whichever process stored it.
 
@@ -93,7 +93,7 @@ class Worker:
         ``tools`` are this build's tools by id; none when not given. ``agent_engine_store`` is
         where the engines keep their state; none, an engine's storage takes no handle. ``name``
         is the worker's: ``start`` builds the engines of its agents alone, and an agent of
-        another's, whose turn its broker handed it all the same, gets its engine on demand."""
+        another's, whose turn it claimed all the same, gets its engine on demand."""
         self._broker = broker
         self.name = name
         self._agent_engine_store = agent_engine_store
@@ -170,7 +170,7 @@ class Worker:
             now = self._now()
             until = now + timedelta(seconds=self._work.lease_seconds)
             limit = min(CLAIM_LIMIT, room)
-            claimed = await self._broker.claim_tasks(now, until, limit)
+            claimed = await self._broker.claim_tasks(now, until, limit, self.name)
             for task in claimed:
                 self._dispatch(task)
             if len(claimed) < limit:
@@ -354,7 +354,7 @@ class Worker:
                 if await self.dispatch_queued():
                     await asyncio.sleep(self._wait_timeout)
                 else:
-                    await self._broker.wait_for_queued(self._now(), self._wait_timeout)
+                    await self._broker.wait_for_queued(self._now(), self._wait_timeout, self.name)
             except Exception:
                 _log.exception("the worker could not claim tasks")
                 await asyncio.sleep(self._wait_timeout)

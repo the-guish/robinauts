@@ -3,9 +3,9 @@
 
 """The one module that imports both the controller and the worker; the rest of ``cli`` gets
 them from here. Loads a configuration file, and builds a controller: the store for the storage
-asked, the application over it, and for each worker the configuration names, what it needs of
-the core over that store and the worker that claims and runs its agents' turns through it, with
-the credentials sign-in keeps on the same storage.
+asked, the application over it, what a worker needs of the core over that store, and for each
+worker the configuration names the worker that claims and runs its agents' turns through it,
+with the credentials sign-in keeps on the same storage.
 A worker in a process of its own is built with `compose_worker`, over the core it is handed:
 `http_turn_broker`, the server's API.
 The file holds web's tables beside the controller's, so web is handed the tables of one
@@ -76,8 +76,8 @@ def storage_from(environ: Mapping[str, str]) -> StorageConfig:
 
 @dataclass(frozen=True, slots=True)
 class Composed:
-    """The controller, the credentials on its storage, and for each worker by name what it
-    needs of the core and the worker over it. The credentials and the core open nothing: they
+    """The controller, the credentials on its storage, what a worker needs of the core, and
+    the workers over it, by name. The credentials and the core open nothing: they
     use the store, which `controller.open` opens and `close` closes. The workers start after
     `open` and stop before `close`, by the shell's hand; the agent engines' store is each
     worker's own, which it opens at its start and closes at its stop."""
@@ -86,9 +86,9 @@ class Composed:
     credentials: Credentials
     workers: Mapping[str, Worker]
     """By name, the default first: those that run in this process."""
-    brokers: Mapping[str, TurnBroker]
-    """By worker, over the controller's store: each worker's in this process, and what the API
-    serves the worker of that name in a process of its own."""
+    broker: TurnBroker
+    """Over the controller's store: every worker's in this process, and what the API serves
+    the workers in processes of their own, each claiming by its name."""
 
 
 def compose(
@@ -112,19 +112,19 @@ def compose(
     else:
         raise NotImplementedError(f"{storage.kind} storage")
     controller = RobinautsController(config, store=store)
-    brokers: dict[str, TurnBroker] = {}
-    workers: dict[str, Worker] = {}
-    for name in config.workers():
-        brokers[name] = InProcessTurnBroker(store, name)
-        workers[name] = compose_worker(
+    broker = InProcessTurnBroker(store)
+    workers = {
+        name: compose_worker(
             config,
             storage=storage,
             secret_for=secret_for,
-            broker=brokers[name],
+            broker=broker,
             engines=engines,
             name=name,
         )
-    return Composed(controller, credentials, workers, brokers)
+        for name in config.workers()
+    }
+    return Composed(controller, credentials, workers, broker)
 
 
 def compose_worker(

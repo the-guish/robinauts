@@ -56,8 +56,9 @@ not in the OpenAPI document.
   and writes it to a pipe that worker's process reads at its own; it is in no environment
   variable and no file. Every route wants one of them as `Authorization: Bearer`: any other
   credential is 401. With no worker process running, the routes answer 404.
-- The secret says which worker asks, and each is served over a broker of its own: its claims
-  and waits see the tasks of its own agents alone, whatever the request says. Cancels are
+- The secret says which worker asks: the web layer keeps every secret in memory, resolves it
+  to the worker's name, and asks the one broker's claims and waits for that worker. A worker
+  sees the tasks of its own agents alone, whatever the request says. Cancels are
   every worker's alike; a worker ignores those of tasks it does not run.
 - The worker reaches the server where it listens, on a loopback address when it listens on
   every address.
