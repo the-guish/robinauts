@@ -161,26 +161,32 @@ def build_app(
 
 
 async def serve(server: Server, lifecycle: Lifecycle) -> None:
-    """Open the controller and start the worker, then serve until asked to stop. ``Server``
-    stops them as it shuts down; the stop here is for a start that failed, or a server that
-    never got as far as its shut-down, and does nothing after the server's."""
+    """Serve until asked to stop: ``Server`` starts the controller and the worker as it starts
+    up and stops them as it shuts down. The stop here is for a server that never got as far
+    as its shut-down, and does nothing after the server's."""
     try:
-        await lifecycle.start()
         await server.serve()
     finally:
         await lifecycle.stop()
 
 
 class Server(uvicorn.Server):
-    """uvicorn's server, which stops the worker before it stops listening, and closes the
-    controller once it has. A worker in a process of its own ends the turns it runs through
-    this server's API, which the app's shut-down, run once nothing listens any more, would be
-    too late for. The controller is closed here, inside ``serve``, because uvicorn raises a
-    signal it caught again as ``serve`` returns: on SIGTERM nothing after it runs."""
+    """uvicorn's server, which opens the controller and starts the worker as it starts up,
+    stops the worker before it stops listening, and closes the controller once it has. A
+    worker in a process of its own ends the turns it runs through this server's API, which
+    the app's shut-down, run once nothing listens any more, would be too late for.
+
+    Both run inside ``serve``, where uvicorn holds the signals it handles: a signal during the
+    start waits for it to end and then shuts the server down, and one that stops the server is
+    raised again only once ``serve`` returns, which on SIGTERM ends the process at once."""
 
     def __init__(self, config: uvicorn.Config, lifecycle: Lifecycle) -> None:
         super().__init__(config)
         self._lifecycle = lifecycle
+
+    async def startup(self, sockets: list[Any] | None = None) -> None:
+        await self._lifecycle.start()
+        await super().startup(sockets=sockets)
 
     async def shutdown(self, sockets: list[Any] | None = None) -> None:
         try:

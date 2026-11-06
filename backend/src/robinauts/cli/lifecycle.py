@@ -72,13 +72,24 @@ class Lifecycle:
     async def start(self) -> None:
         """Open the controller, then start the worker. Return once the worker has started, so
         that a server which says it is up runs turns. A worker process is let in through the
-        API from then on, with the secret it reads from a pipe at its start."""
+        API from then on, with the secret it reads from a pipe at its start.
+
+        A start that fails, or is cancelled, part way stops what it had started before it
+        raises: the worker, in this process or its own, and the controller."""
+        try:
+            await self._start()
+        except BaseException:
+            await self.stop()
+            raise
+
+    async def _start(self) -> None:
         await self.composed.controller.open()
         self._opened = True
         if self._broker_url is None:
             self.composed.worker.activity_file = self.activity_file
-            await self.composed.worker.start()
+            # Before it starts: one that fails part way holds what it opened until stopped.
             self._worker_running = True
+            await self.composed.worker.start()
             return
         secret = secrets.token_urlsafe(32)
         self.access.open(secret)
@@ -112,6 +123,7 @@ class Lifecycle:
                         env=environment,
                         pass_fds=(write_end, secret_end),
                     )
+                    self._worker_running = True
                 finally:
                     os.close(write_end)
                     os.close(secret_end)
@@ -121,7 +133,6 @@ class Lifecycle:
         except BaseException:
             self.access.close()
             raise
-        self._worker_running = True
         self._watching = asyncio.create_task(self._watch(self._process), name="worker process")
 
     async def _wait_until_ready(self, process: asyncio.subprocess.Process, ready: int) -> None:
@@ -158,22 +169,24 @@ class Lifecycle:
         server does it while it still listens: a worker in a process of its own ends its turns
         through the API. Then the API lets no worker in."""
         if self._worker_running:
-            self._worker_running = False
-            if self._process is None:
+            if self._broker_url is None:
                 await self.composed.worker.stop()
-            else:
+            elif self._process is not None:
                 await self._stop_process(self._process)
+            # Once stopped: a stop that failed or was cancelled is done again by the next one.
+            self._worker_running = False
         self.access.close()
 
     async def stop(self) -> None:
-        """Stop the worker, if it still runs, then close the controller, if it is open. Again,
-        or after a start that failed, it does only what is left, and awaits nothing once all
-        is done: a stop a signal has cancelled already must not be cut short by it."""
+        """Stop the worker, if it still runs, then close the controller, if it is open. Each is
+        marked done only once it is, so a stop that failed or was cancelled part way is
+        finished by the next; and once all is done, a stop awaits nothing, so a cancellation
+        still pending cannot cut it short."""
         await self.stop_worker()
         self.activity_file.unlink(missing_ok=True)
         if self._opened:
-            self._opened = False
             await self.composed.controller.close()
+            self._opened = False
             _log.info("the controller is closed")
 
     async def _stop_process(self, process: asyncio.subprocess.Process) -> None:
