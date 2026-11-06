@@ -112,7 +112,7 @@ def ended(**which: object) -> argparse.Namespace:
 
 @asyncio_test
 async def test_the_operator_lists_and_ends_devices(capsys: pytest.CaptureFixture[str]) -> None:
-    composed = compose(Config(), storage=StorageConfig(StorageKind.IN_MEMORY), secret_for={}.get)
+    composed = compose(Config(), storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get)
     controller, credentials = composed.controller, composed.credentials
     ada = await controller.ensure_user(Identity("okta", "ada", email="ada@example.com"))
     grace = await controller.ensure_user(Identity("okta", "grace", email="grace@example.com"))

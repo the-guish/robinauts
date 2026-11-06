@@ -49,7 +49,7 @@ class EngineSettings:
 class StorageKind(Enum):
     POSTGRES = "postgres"  # options: {"pool": <the connection pool>}
     LOCAL = "local"  # options: {"path": <the folder>}
-    IN_MEMORY = "in-memory"  # no options
+    IN_PROCESS = "in-process"  # no options
 
 
 @dataclass(frozen=True, slots=True)

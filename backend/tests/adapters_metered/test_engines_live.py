@@ -28,9 +28,13 @@ from robinauts.agent_engines.contract.domain import (
 )
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings, ProviderKeyLookup
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
-from robinauts.agent_engines.langchain_engine.memory import InProcessMemory as LangChainMemory
+from robinauts.agent_engines.langchain_engine.session_store import (
+    InProcessSessionStore as LangChainSessionStore,
+)
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
-from robinauts.agent_engines.pydantic_ai_engine.memory import InProcessMemory as PydanticAIMemory
+from robinauts.agent_engines.pydantic_ai_engine.session_store import (
+    InProcessSessionStore as PydanticAISessionStore,
+)
 from util.aio import asyncio_test
 from util.engine_settings import NoSecrets
 
@@ -41,11 +45,11 @@ OPENROUTER_KEY = "ROBINAUTS_LIVE_OPENROUTER_KEY"
 
 
 def langchain(settings: EngineSettings) -> AgentEngine:
-    return LangChainEngine(settings, LangChainMemory())
+    return LangChainEngine(settings, LangChainSessionStore())
 
 
 def pydantic_ai(settings: EngineSettings) -> AgentEngine:
-    return PydanticAIEngine(settings, PydanticAIMemory())
+    return PydanticAIEngine(settings, PydanticAISessionStore())
 
 
 NewEngine = Callable[[EngineSettings], AgentEngine]

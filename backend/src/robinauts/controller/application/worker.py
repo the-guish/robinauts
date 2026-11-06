@@ -8,8 +8,8 @@ It builds the engines, claims queued tasks and runs each as an asyncio task with
 any process. A task is claimed by one worker, whichever process stored it.
 
 It reaches the core through its ``TurnBroker`` alone, never the core's store: in the server's
-process, or over HTTP from a process of its own. The engines keep their memory in its
-``EngineMemory``.
+process, or over HTTP from a process of its own. The engines keep their state in its
+``AgentEngineStore``.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ from robinauts.controller.core.engine_settings import (
     engine_storage,
 )
 from robinauts.controller.core.failures import prompt_after_failures
-from robinauts.controller.ports.engine_memory import EngineMemory
+from robinauts.controller.ports.agent_engine_store import AgentEngineStore
 from robinauts.tools.contract.ports import ToolProvider
 
 _log = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ class Worker:
         *,
         storage: StorageConfig,
         secret_for: SecretLookup,
-        engine_memory: EngineMemory | None = None,
+        agent_engine_store: AgentEngineStore | None = None,
         engines: Mapping[str, EngineFactory] | None = None,
         tools: Mapping[str, ToolProvider] | None = None,
         wait_timeout: float = QUEUE_WAIT_TIMEOUT,
@@ -88,10 +88,10 @@ class Worker:
         now: Callable[[], datetime] | None = None,
     ) -> None:
         """``engines`` are the factories by engine name; the installed ones when not given.
-        ``tools`` are this build's tools by id; none when not given. ``engine_memory`` is
-        where the engines keep their memory; none, an engine's storage takes no handle."""
+        ``tools`` are this build's tools by id; none when not given. ``agent_engine_store`` is
+        where the engines keep their state; none, an engine's storage takes no handle."""
         self._broker = broker
-        self._engine_memory = engine_memory
+        self._agent_engine_store = agent_engine_store
         self._config = config
         self._work = config.work
         self._storage = storage
@@ -121,9 +121,10 @@ class Worker:
         return self._storage.kind is not StorageKind.POSTGRES
 
     async def start(self) -> None:
-        """Open the engines' memory, build the engines on it, listen for cancels, then start
+        """Open the agent engines' store, build the engines on it, listen for cancels, then start
         renewing leases and claiming tasks."""
-        self._handle = None if self._engine_memory is None else await self._engine_memory.open()
+        store = self._agent_engine_store
+        self._handle = None if store is None else await store.open()
         self._factories = dict(installed() if self._given_engines is None else self._given_engines)
         self._engines = await build_engines(
             self._config,
@@ -141,7 +142,7 @@ class Worker:
 
     async def stop(self) -> None:
         """Stop claiming, wait for the turns this process runs, bounded, and interrupt the
-        rest, then let go of the core and of the engines' memory. The leases are renewed until
+        rest, then let go of the core and of the agent engines' store. The leases are renewed until
         the last turn has ended."""
         await _cancel_and_wait(self._claiming)
         self._claiming = None
@@ -151,8 +152,8 @@ class Worker:
         self._heartbeat = None
         self._engines = {}
         await self._broker.close()
-        if self._engine_memory is not None:
-            await self._engine_memory.close()
+        if self._agent_engine_store is not None:
+            await self._agent_engine_store.close()
 
     async def dispatch_queued(self) -> bool:
         """Claim the queued tasks and dispatch each, until none is left or this process runs
@@ -264,7 +265,7 @@ class Worker:
         by_id = {m.id: m for m in await load_messages(self._broker, owner, session_id)}
         question = by_id[turn.follows]
         # The nearest answer up the thread that has a checkpoint: a failed answer has
-        # none, and continuing from nothing would start the engine's memory again.
+        # none, and continuing from nothing would start the engine's state again.
         checkpoint_id = None
         above = question.parent_id
         while above is not None and checkpoint_id is None:

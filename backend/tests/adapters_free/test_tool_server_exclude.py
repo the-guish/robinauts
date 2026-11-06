@@ -25,10 +25,14 @@ from robinauts.agent_engines.contract.domain import (
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings
 from robinauts.agent_engines.langchain_engine import engine as langchain_module
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
-from robinauts.agent_engines.langchain_engine.memory import InProcessMemory as LangChainMemory
+from robinauts.agent_engines.langchain_engine.session_store import (
+    InProcessSessionStore as LangChainSessionStore,
+)
 from robinauts.agent_engines.pydantic_ai_engine import engine as pydantic_ai_module
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
-from robinauts.agent_engines.pydantic_ai_engine.memory import InProcessMemory as PydanticAIMemory
+from robinauts.agent_engines.pydantic_ai_engine.session_store import (
+    InProcessSessionStore as PydanticAISessionStore,
+)
 from util.aio import asyncio_test
 from util.chat_completions import Vendor, finished, said, streamed
 from util.mcp_server import mcp_server
@@ -55,7 +59,7 @@ def langchain(vendor: Vendor, settings: EngineSettings, mp: pytest.MonkeyPatch) 
         return model
 
     mp.setattr(langchain_module, "chat_model", plugged)
-    return LangChainEngine(settings, LangChainMemory())
+    return LangChainEngine(settings, LangChainSessionStore())
 
 
 def pydantic_ai(vendor: Vendor, settings: EngineSettings, mp: pytest.MonkeyPatch) -> AgentEngine:
@@ -67,7 +71,7 @@ def pydantic_ai(vendor: Vendor, settings: EngineSettings, mp: pytest.MonkeyPatch
         return model, model_settings
 
     mp.setattr(pydantic_ai_module, "chat_model", plugged)
-    return PydanticAIEngine(settings, PydanticAIMemory())
+    return PydanticAIEngine(settings, PydanticAISessionStore())
 
 
 Build = Callable[[Vendor, EngineSettings, pytest.MonkeyPatch], AgentEngine]

@@ -31,10 +31,14 @@ from robinauts.agent_engines.contract.domain import (
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings
 from robinauts.agent_engines.langchain_engine import engine as langchain_module
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
-from robinauts.agent_engines.langchain_engine.memory import InProcessMemory as LangChainMemory
+from robinauts.agent_engines.langchain_engine.session_store import (
+    InProcessSessionStore as LangChainSessionStore,
+)
 from robinauts.agent_engines.pydantic_ai_engine import engine as pydantic_ai_module
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
-from robinauts.agent_engines.pydantic_ai_engine.memory import InProcessMemory as PydanticAIMemory
+from robinauts.agent_engines.pydantic_ai_engine.session_store import (
+    InProcessSessionStore as PydanticAISessionStore,
+)
 from util.aio import asyncio_test
 from util.chat_completions import PATH, Vendor, calling, finished, said, streamed
 from util.contracts.engine import AGENT, ANSWER, ARGUMENTS, CALL_ID, add
@@ -70,7 +74,7 @@ def plug_langchain(vendor: Vendor, monkeypatch: pytest.MonkeyPatch) -> AgentEngi
 
     monkeypatch.setattr(langchain_module, "chat_model", plugged_chat_model)
     monkeypatch.setattr(langchain_module, "tools_for", tools_for)
-    return LangChainEngine(SETTINGS, LangChainMemory())
+    return LangChainEngine(SETTINGS, LangChainSessionStore())
 
 
 def plug_pydantic_ai(vendor: Vendor, monkeypatch: pytest.MonkeyPatch) -> AgentEngine:
@@ -86,7 +90,7 @@ def plug_pydantic_ai(vendor: Vendor, monkeypatch: pytest.MonkeyPatch) -> AgentEn
 
     monkeypatch.setattr(pydantic_ai_module, "chat_model", plugged_chat_model)
     monkeypatch.setattr(pydantic_ai_module, "toolsets_for", toolsets_for)
-    return PydanticAIEngine(SETTINGS, PydanticAIMemory())
+    return PydanticAIEngine(SETTINGS, PydanticAISessionStore())
 
 
 Plug = Callable[[Vendor, pytest.MonkeyPatch], AgentEngine]

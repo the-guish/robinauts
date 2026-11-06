@@ -155,7 +155,7 @@ class Config:
 class StorageKind(StrEnum):
     POSTGRES = "postgres"
     LOCAL = "local"
-    IN_MEMORY = "in-memory"
+    IN_PROCESS = "in-process"
 
 
 @dataclass(frozen=True, slots=True)
@@ -383,7 +383,7 @@ class Session:
     owner_id: uuid.UUID
     agent: str
     engine: str
-    """The engine that holds the session's memory: the agent's when the session was made."""
+    """The engine that holds the session's state: the agent's when the session was made."""
 
     created_at: datetime
     updated_at: datetime

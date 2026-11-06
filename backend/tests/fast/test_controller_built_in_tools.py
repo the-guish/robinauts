@@ -76,7 +76,7 @@ class SearchingEngine(EchoEngine):
 async def started_over(engine: SearchingEngine) -> Lifecycle:
     composed = compose(
         CONFIG,
-        storage=StorageConfig(StorageKind.IN_MEMORY),
+        storage=StorageConfig(StorageKind.IN_PROCESS),
         secret_for={}.get,
         engines={"echo": lambda *_: engine},
     )

@@ -2,13 +2,13 @@
 
 What the controller stores, and how a message and a turn's event are written as
 data. The model is the same in every store. `controller/adapters/postgres/schema.sql`
-is its PostgreSQL rendering, and the in-memory store holds the same model. Another
+is its PostgreSQL rendering, and the in-process store holds the same model. Another
 store, outside this repository, holds it on AWS serverless.
 
-Engines keep their memory apart, in storage of their own, and nothing here references
+Engines keep their state apart, in storage of their own, and nothing here references
 it (`docs/specs/agent-engines.md`). The controller keeps only the checkpoint id an
 engine hands back, on the answer, and the engine's name on the session and on the
-answer. A turn runs on the engine the session records, which holds its memory, and the
+answer. A turn runs on the engine the session records, which holds its state, and the
 purge forgets on it, whatever the agent's configuration names today; the worker
 builds that engine on demand when the configuration no longer names it. Moving an
 agent to another engine, and what its sessions then do, is stage two.
@@ -100,7 +100,7 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   runner mints the answer's id afresh and so no two claims are the same document.
 - **Deleting hides.** `deleted_at` makes a session not found and closes it to turns.
   The controller first asks a running turn to stop. The hide comes next, and a runner
-  in another process finds its next write refused. The records and the engine's memory
+  in another process finds its next write refused. The records and the engine's state
   stay. The purge, which calls `forget` and deletes the records, is deferred to a
   background task.
 - **A cancel goes through the store.** It ends a turn whose task is queued as
@@ -282,7 +282,7 @@ written for one would make nonsense of the other.
   zone or an id spelt another way is an error, never ignored and never guessed at.
 
 There is no reserved key for vendors' data. The signed thinking blocks a vendor needs
-back are in the engine's memory (ADR 0005), so nothing in a message needs one.
+back are in the engine's state (ADR 0005), so nothing in a message needs one.
 
 ### Size
 
@@ -292,5 +292,5 @@ it. That is the store's own business, invisible at the port.
 
 ## What this asks of the code
 
-Block 5 brought the contract, the store port, the memory store, the runner, web and the
+Block 5 brought the contract, the store port, the in-process store, the runner, web and the
 frontend in line with this model. PostgreSQL is block 6.

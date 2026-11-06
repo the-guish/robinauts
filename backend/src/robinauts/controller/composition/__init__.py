@@ -21,10 +21,10 @@ from robinauts.agent_engines.contract.ports import EngineFactory, installed
 from robinauts.agent_engines.contract.ports import StorageConfig as EngineStorage
 from robinauts.agent_engines.contract.ports import StorageKind as EngineStorageKind
 from robinauts.controller.adapters.config_file import read_config
-from robinauts.controller.adapters.memory.credentials import MemoryCredentials
-from robinauts.controller.adapters.memory.store import MemoryStore
+from robinauts.controller.adapters.in_process.credentials import InProcessCredentials
+from robinauts.controller.adapters.in_process.store import InProcessStore
+from robinauts.controller.adapters.postgres.agent_engine_store import PostgresAgentEngineStore
 from robinauts.controller.adapters.postgres.credentials import PostgresCredentials
-from robinauts.controller.adapters.postgres.engine_memory import PostgresEngineMemory
 from robinauts.controller.adapters.postgres.pool import open_pool
 from robinauts.controller.adapters.postgres.schema import (
     SCHEMA_SHA256,
@@ -61,11 +61,11 @@ promise is the state of the database, not the work it did."""
 
 
 def storage_from(environ: Mapping[str, str]) -> StorageConfig:
-    """PostgreSQL when `ROBINAUTS_DATABASE_URL` is set, in memory otherwise."""
+    """PostgreSQL when `ROBINAUTS_DATABASE_URL` is set, in this process otherwise."""
     url = environ.get(DATABASE_URL_VARIABLE)
     if url:
         return StorageConfig(StorageKind.POSTGRES, url=url)
-    return StorageConfig(StorageKind.IN_MEMORY)
+    return StorageConfig(StorageKind.IN_PROCESS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +73,7 @@ class Composed:
     """The controller, the credentials on its storage, what a worker needs of the core, and
     the worker over it. The credentials and the core open nothing: they use the store, which
     `controller.open` opens and `close` closes. The worker starts after `open` and stops before
-    `close`, by the shell's hand; the engines' memory is its own, which it opens at its start
+    `close`, by the shell's hand; the agent engines' store is its own, which it opens at its start
     and closes at its stop."""
 
     controller: Controller
@@ -99,9 +99,9 @@ def compose(
             raise ConfigError(f"{DATABASE_URL_VARIABLE} is not set")
         postgres = PostgresStore(dsn=storage.url)
         store, credentials = postgres, PostgresCredentials(postgres)
-    elif storage.kind is StorageKind.IN_MEMORY:
-        memory = MemoryStore()
-        store, credentials = memory, MemoryCredentials(memory)
+    elif storage.kind is StorageKind.IN_PROCESS:
+        in_process = InProcessStore()
+        store, credentials = in_process, InProcessCredentials(in_process)
     else:
         raise NotImplementedError(f"{storage.kind} storage")
     controller = RobinautsController(config, store=store)
@@ -120,20 +120,20 @@ def compose_worker(
     broker: TurnBroker,
     engines: Mapping[str, EngineFactory] | None = None,
 ) -> Worker:
-    """A worker that reaches the core through `core` alone. Its engines keep their memory on
+    """A worker that reaches the core through `core` alone. Its engines keep their state on
     `storage`: on PostgreSQL in a pool of the worker's own, which reads and writes the
     engines' tables, never the core's."""
-    engine_memory = None
+    agent_engine_store = None
     if storage.kind is StorageKind.POSTGRES:
         if not storage.url:
             raise ConfigError(f"{DATABASE_URL_VARIABLE} is not set")
-        engine_memory = PostgresEngineMemory(storage.url)
+        agent_engine_store = PostgresAgentEngineStore(storage.url)
     return Worker(
         broker,
         config,
         storage=storage,
         secret_for=secret_for,
-        engine_memory=engine_memory,
+        agent_engine_store=agent_engine_store,
         engines=engines,
         tools=built_in_tools(),
     )

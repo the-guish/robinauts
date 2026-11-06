@@ -4,7 +4,7 @@
 """Where the Pydantic AI engine keeps what it has: which sessions exist, and the history
 of each at every checkpoint.
 
-`Memory` is the shape; one implementation keeps it in this process, and one in two tables
+`SessionStore` is the shape; one implementation keeps it in this process, and one in two tables
 of the engine's own on PostgreSQL, made by `setup`, named after the engine, referencing
 nothing of the controller's. `forget` deletes everything held for a session."""
 
@@ -34,12 +34,12 @@ CREATE TABLE IF NOT EXISTS pydantic_ai_checkpoints (
 """
 
 
-class Memory(ABC):
+class SessionStore(ABC):
     """The engine's sessions, and the history each has at each checkpoint."""
 
     @abstractmethod
     async def setup(self) -> None:
-        """Make the memory ready. Safe to repeat."""
+        """Make the store ready. Safe to repeat."""
 
     @abstractmethod
     async def create(self, session_id: uuid.UUID) -> None:
@@ -67,14 +67,14 @@ class Memory(ABC):
         """Delete the session and every history of it; nothing if it is gone."""
 
 
-class InProcessMemory(Memory):
+class InProcessSessionStore(SessionStore):
     """In this process."""
 
     def __init__(self) -> None:
         self._sessions: dict[uuid.UUID, dict[str, list[ModelMessage]]] = {}
 
     async def setup(self) -> None:
-        # Nothing to set up: this memory lives in the process and starts empty.
+        # Nothing to set up: this store lives in the process and starts empty.
         pass
 
     async def create(self, session_id: uuid.UUID) -> None:
@@ -102,7 +102,7 @@ class InProcessMemory(Memory):
         self._sessions.pop(session_id, None)
 
 
-class PostgresMemory(Memory):
+class PostgresSessionStore(SessionStore):
     """In the engine's own tables, through the pool it was given."""
 
     def __init__(self, pool: Any) -> None:

@@ -17,8 +17,8 @@ from echo_controller import CONFIG, start_echo_controller, wait_for_turn_end
 from robinauts.agent_engines.contract.domain import Event
 from robinauts.agent_engines.contract.ports import AgentEngine
 from robinauts.agent_engines.echo_engine.engine import EchoEngine
-from robinauts.controller.adapters.memory.credentials import MemoryCredentials
-from robinauts.controller.adapters.memory.store import MemoryStore
+from robinauts.controller.adapters.in_process.credentials import InProcessCredentials
+from robinauts.controller.adapters.in_process.store import InProcessStore
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.application.turn_broker import InProcessTurnBroker
 from robinauts.controller.application.worker import Worker
@@ -58,14 +58,14 @@ def gated_engine() -> tuple[Any, asyncio.Event]:
     return engine, gate
 
 
-class SlowFinishStore(MemoryStore):
+class SlowFinishStore(InProcessStore):
     async def finish_turn(self, *args: Any, **kwargs: Any) -> None:
         await asyncio.sleep(0.1)
         await super().finish_turn(*args, **kwargs)
 
 
 async def over(
-    store: MemoryStore,
+    store: InProcessStore,
     close_timeout: float = 10.0,
     engines: dict[str, Any] | None = None,
     **options: Any,
@@ -76,12 +76,12 @@ async def over(
     worker = Worker(
         broker,
         CONFIG,
-        storage=StorageConfig(StorageKind.IN_MEMORY),
+        storage=StorageConfig(StorageKind.IN_PROCESS),
         secret_for={}.get,
         engines=engines,
         close_timeout=close_timeout,
     )
-    composed = Composed(controller, MemoryCredentials(store), worker, broker)
+    composed = Composed(controller, InProcessCredentials(store), worker, broker)
     lifecycle = Lifecycle(composed)
     await lifecycle.start()
     return lifecycle
@@ -96,7 +96,7 @@ async def gated_turn(
 ) -> tuple[Lifecycle, Any, Any, asyncio.Event, User, TurnStarted]:
     """A turn on a ``gated_engine``, started and held at the gate."""
     engine, gate = gated_engine()
-    lifecycle = await over(MemoryStore(), engines={"echo": lambda *_: engine}, **options)
+    lifecycle = await over(InProcessStore(), engines={"echo": lambda *_: engine}, **options)
     controller: Any = lifecycle.composed.controller
     user = await controller.ensure_user(Identity("local", "me"))
     started = await controller.start_session(user, agent="echo", model="echo", text="one")
@@ -184,7 +184,7 @@ async def test_a_cancel_before_the_runner_claimed_ends_the_turn_cancelled() -> N
 
 @asyncio_test
 async def test_a_cancel_of_a_turn_another_process_runs_reaches_it() -> None:
-    store = MemoryStore()
+    store = InProcessStore()
     engine, gate = gated_engine()
     first = await over(store, engines={"echo": lambda *_: engine})
     user = await first.composed.controller.ensure_user(Identity("local", "me"))

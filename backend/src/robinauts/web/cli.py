@@ -15,7 +15,7 @@ provider, every ``/api/`` route answers for the person signed in through it; in 
 development mode, for the mode's one local user. The interface is the directory
 ``ROBINAUTS_UI_DIR`` names, or the build an installed wheel carries, or ``frontend/dist`` of
 this checkout when it is built. Storage is the PostgreSQL ``ROBINAUTS_DATABASE_URL`` names,
-which a start with sign-in needs; the local development mode is in memory without it. The
+which a start with sign-in needs; the local development mode is in this process without it. The
 sign-in records are kept on the same storage. The server never changes the database: it
 refuses one that is not this build's and names the command.
 """
@@ -176,7 +176,7 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         sign_in=sign_in,
         secret_for=secret_for,
         ui_dir=ui_dir,
-        # A store in memory is this process's alone: its worker runs here.
+        # A store in this process is this process's alone: its worker runs here.
         worker_broker_url=(
             worker_broker_url(host, port) if storage.kind is StorageKind.POSTGRES else None
         ),

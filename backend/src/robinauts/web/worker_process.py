@@ -7,7 +7,7 @@ It reads the configuration and the environment ``robinauts start`` read, and run
 worker, until SIGTERM or SIGINT. It then stops the worker, which waits for its tasks. It
 reaches the core through its parent's API alone (``web/worker_client.py``), at the URL its
 environment names, with the secret its parent wrote to a pipe; the database it opens is for
-the engines' memory. It writes a line to its parent once the worker has started. On Linux it
+the engines' state. It writes a line to its parent once the worker has started. On Linux it
 also ends with its parent, killed or not.
 """
 

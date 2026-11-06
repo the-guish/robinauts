@@ -12,12 +12,15 @@ from robinauts.agent_engines.contract.ports import (
     StorageKind,
 )
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
-from robinauts.agent_engines.langchain_engine.memory import InProcessMemory, PostgresMemory
+from robinauts.agent_engines.langchain_engine.session_store import (
+    InProcessSessionStore,
+    PostgresSessionStore,
+)
 
 
 def init_langchain(settings: EngineSettings, storage: StorageConfig) -> AgentEngine:
-    """The engine over the storage asked: its memory in the controller's PostgreSQL, else
+    """The engine over the storage asked: its sessions in the controller's PostgreSQL, else
     kept in this process."""
     if storage.kind is StorageKind.POSTGRES:
-        return LangChainEngine(settings, PostgresMemory(storage.options["pool"]))
-    return LangChainEngine(settings, InProcessMemory())
+        return LangChainEngine(settings, PostgresSessionStore(storage.options["pool"]))
+    return LangChainEngine(settings, InProcessSessionStore())

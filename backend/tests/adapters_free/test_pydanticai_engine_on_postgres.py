@@ -15,9 +15,9 @@ from robinauts.agent_engines.contract.ports import AgentEngine, StorageConfig, S
 from robinauts.agent_engines.pydantic_ai_engine import engine as engine_module
 from robinauts.agent_engines.pydantic_ai_engine import init_pydantic_ai
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
-from robinauts.agent_engines.pydantic_ai_engine.memory import PostgresMemory
+from robinauts.agent_engines.pydantic_ai_engine.session_store import PostgresSessionStore
 from util.aio import asyncio_test
-from util.contracts.engine import EngineMemoryContract, EngineTurnContract, Script
+from util.contracts.engine import EngineSessionContract, EngineTurnContract, Script
 from util.controller_db import TemporarySchema, requires_postgres, temporary_schema
 from util.engine_settings import settings_for
 
@@ -33,7 +33,7 @@ class OnPostgres:
         schema = TemporarySchema(size=2)
         pool = await schema.open()
         self.__dict__.setdefault("schemas", []).append(schema)
-        engine = PydanticAIEngine(settings_for(ProviderKind.ANTHROPIC), PostgresMemory(pool))
+        engine = PydanticAIEngine(settings_for(ProviderKind.ANTHROPIC), PostgresSessionStore(pool))
         await engine.setup()
         return engine
 
@@ -42,7 +42,7 @@ class OnPostgres:
             await schema.close()
 
 
-class TestPydanticAIEngineMemoryOnPostgres(OnPostgres, EngineMemoryContract):
+class TestPydanticAIEngineSessionsOnPostgres(OnPostgres, EngineSessionContract):
     @pytest.fixture(autouse=True)
     def scripted_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from pydantic_ai.models.test import TestModel
@@ -74,14 +74,14 @@ class TestPydanticAIEngineTurnOnPostgres(OnPostgres, EngineTurnContract):
 
 
 @asyncio_test
-async def test_init_pydantic_ai_puts_memory_on_postgres_when_asked() -> None:
+async def test_init_pydantic_ai_puts_sessions_on_postgres_when_asked() -> None:
     async with temporary_schema(applied=False, size=2) as schema:
         engine = init_pydantic_ai(
             settings_for(ProviderKind.ANTHROPIC),
             StorageConfig(StorageKind.POSTGRES, {"pool": schema.pool}),
         )
         assert isinstance(engine, PydanticAIEngine)
-        assert isinstance(engine._memory, PostgresMemory)
+        assert isinstance(engine._session_store, PostgresSessionStore)
         await engine.setup()
         session = uuid.uuid4()
         await engine.create(session)

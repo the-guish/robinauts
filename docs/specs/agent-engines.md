@@ -16,11 +16,11 @@ contract.
 
 ## Words
 
-- **Session**: the engine's memory of one conversation, under an id the
+- **Session**: the engine's state for one conversation, under an id the
   caller chose.
 - **Turn**: one question and everything the agent does to answer it: model
   calls, tool calls, and the final answer.
-- **Checkpoint**: the memory as it was at the end of a finished turn. The
+- **Checkpoint**: the session's state as it was at the end of a finished turn. The
   engine names each one with an id. The caller keeps the id and never looks
   inside.
 - **Agent definition**: the system prompt and the tool servers an agent may
@@ -36,7 +36,7 @@ contract.
   pieces of the model's reasoning when there is any, each tool call once its
   arguments are known, each tool result as it comes back, and finally the
   answer together with the new checkpoint id.
-- **Keep the memory.** Store each session in the framework's own format, in
+- **Keep the sessions.** Store each session in the framework's own format, in
   storage the engine owns. Create sessions, continue them, fork them, delete
   them. Keep every checkpoint it has handed out, so a turn can continue from
   any of them and a fork can be taken at any of them.
@@ -65,7 +65,7 @@ contract.
 - Deciding when a turn runs, running it in the background, 
   retrying it, or scheduling it. The engine runs a turn when asked and does
   nothing on its own.
-- Storing anything but the memory. No conversation records, no run records,
+- Storing anything but the sessions. No conversation records, no run records,
   no user data.
 - Creating a session by itself. A session exists only when the caller
   creates it. A turn on a session the engine does not have is refused.
@@ -108,7 +108,7 @@ function receives:
   ask for a provider's key; a way to ask for a tool server's secret. Keys and
   secrets are asked for, never handed over in the open.
 - **Storage**: which kind, and what that kind needs. PostgreSQL with a
-  connection pool; local with a folder; or in-memory with nothing, for
+  connection pool; local with a folder; or in-process with nothing, for
   tests.
 
 It returns an engine. The caller then runs the engine's setup once before
@@ -126,11 +126,11 @@ anything else.
   and whether to resume. Yields the events as they happen and ends with
   the answer and a new checkpoint id.
 - **fork** a session into a new one, at a checkpoint of the source. The new
-  session has the memory as it was at that checkpoint and nothing after it.
+  session has the state as it was at that checkpoint and nothing after it.
   The source's earlier checkpoints stay valid in the fork. From then on the
   two are independent.
 - **forget** a session: delete everything the engine keeps for it. Safe to
-  repeat. This is the only way memory is deleted.
+  repeat. This is the only way a session's state is deleted.
 
 ### Events of a turn
 
@@ -151,7 +151,7 @@ caller adds those.
 
 ### How a turn ends
 
-- **Normally**: with Done. The memory already holds the turn when Done is
+- **Normally**: with Done. The session already holds the turn when Done is
   sent, so a turn that finished is remembered even if the caller then fails
   to store the answer.
 - **By an error**: the engine raises, sends nothing more, and the next turn
@@ -171,7 +171,7 @@ caller adds those.
 
 ### Refusals
 
-- A session created twice: an error, and the memory is left as it was.
+- A session created twice: an error, and the session is left as it was.
 - A turn or a fork on a session the engine does not have: an error.
 - A checkpoint id the engine does not hold for that session, including one
   of another session or of a turn that did not finish: an error, and nothing
@@ -192,5 +192,5 @@ caller adds those.
 - Cancel a turn by cancelling it and closing the stream, within a bound of
   the caller's choosing.
 - Keep a session with the engine that created it. Another engine cannot read
-  its memory; moving an agent to another engine means its conversations
+  its state; moving an agent to another engine means its conversations
   start again from nothing.

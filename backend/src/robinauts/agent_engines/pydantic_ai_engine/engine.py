@@ -3,7 +3,7 @@
 
 """The Pydantic AI engine: an agent per turn over the history it keeps per checkpoint.
 
-The engine is handed its memory; ``init_pydantic_ai`` picks it for the storage asked, and
+The engine is handed its session store; ``init_pydantic_ai`` picks it for the storage asked, and
 nothing here knows which storage that was.
 """
 
@@ -55,7 +55,7 @@ from robinauts.agent_engines.pydantic_ai_engine.clients import (
     release,
 )
 from robinauts.agent_engines.pydantic_ai_engine.context import within
-from robinauts.agent_engines.pydantic_ai_engine.memory import Memory
+from robinauts.agent_engines.pydantic_ai_engine.session_store import SessionStore
 from robinauts.agent_engines.pydantic_ai_engine.tools import function_toolsets, toolsets_for
 
 FASTEST_MODEL_CALL = 1.0
@@ -64,22 +64,22 @@ a loop faster than that is runaway, and this bounds what it costs."""
 
 
 class PydanticAIEngine(AgentEngine):
-    def __init__(self, settings: EngineSettings, memory: Memory) -> None:
+    def __init__(self, settings: EngineSettings, session_store: SessionStore) -> None:
         self._settings = settings
-        self._memory = memory
+        self._session_store = session_store
         force_tracing_off()
 
     def kinds(self) -> frozenset[ProviderKind]:
         return frozenset(ProviderKind)
 
     async def setup(self) -> None:
-        await self._memory.setup()
+        await self._session_store.setup()
 
     async def create(self, session_id: uuid.UUID) -> None:
-        await self._memory.create(session_id)
+        await self._session_store.create(session_id)
 
     async def exists(self, session_id: uuid.UUID) -> bool:
-        return await self._memory.exists(session_id)
+        return await self._session_store.exists(session_id)
 
     async def stream(
         self,
@@ -92,11 +92,11 @@ class PydanticAIEngine(AgentEngine):
         timeout_seconds: float,
         resume: bool = False,
     ) -> AsyncGenerator[Event, None]:
-        if not await self._memory.exists(session_id):
+        if not await self._session_store.exists(session_id):
             raise SessionNotFoundError(str(session_id))
         history = None
         if checkpoint_id is not None:
-            history = await self._memory.history(session_id, checkpoint_id)
+            history = await self._session_store.history(session_id, checkpoint_id)
             if history is None:
                 raise CheckpointNotFoundError(checkpoint_id)
 
@@ -113,7 +113,7 @@ class PydanticAIEngine(AgentEngine):
             asked = None
 
         async def save(messages: list[ModelMessage]) -> None:
-            await self._memory.save(session_id, checkpoint, messages)
+            await self._session_store.save(session_id, checkpoint, messages)
 
         client, model_settings = chat_model(model, self._settings)
         try:
@@ -153,7 +153,7 @@ class PydanticAIEngine(AgentEngine):
     ) -> tuple[str, list[ModelMessage]] | None:
         """The checkpoint saved last and its history, if it is a turn begun from ``history``,
         finished or not. Which question it asked is the caller's to know."""
-        latest = await self._memory.latest(session_id)
+        latest = await self._session_store.latest(session_id)
         if latest is None:
             return None
         before = history or []
@@ -171,7 +171,7 @@ class PydanticAIEngine(AgentEngine):
         raise NotImplementedError("fork")
 
     async def forget(self, session_id: uuid.UUID) -> None:
-        await self._memory.forget(session_id)
+        await self._session_store.forget(session_id)
 
 
 def _rendered(messages: list[ModelMessage]) -> object:

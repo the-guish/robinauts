@@ -137,7 +137,7 @@ returns without running the engine.
   - The lease tick is an `UpdateItem` with `ReturnValues`, which reads the cancel flag
     back in the same call.
 
-### 8. The engine loads its memory
+### 8. The engine loads its state
 
 `engine.stream(session_id, definition, prompt, model=…, checkpoint_id=…,
 timeout_seconds=120)`. The LangChain engine builds `create_agent(chat_model, tools,
@@ -149,7 +149,7 @@ system_prompt, checkpointer)` and starts from that checkpoint.
   which is LGPL (ADR 0002).
 - **AWS:** the engine's own DynamoDB table, through a storage the external package
   supplies; `langgraph-checkpoint-aws`'s `DynamoDBSaver` would be one. Today both
-  engines keep their memory in the process.
+  engines keep their state in the process.
 
 ### 9. The engine reaches the tool servers
 

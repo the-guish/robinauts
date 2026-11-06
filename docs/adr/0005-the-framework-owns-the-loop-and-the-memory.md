@@ -6,6 +6,10 @@
   the platform's. The frameworks are no longer stateless per turn, and a
   conversation no longer crosses engines.
 - Date: 2026-09-30
+- Terminology (2026-11-06): what this record calls the model's memory, the
+  code and the specs now call the engine's or the session's **state**, kept
+  in each engine's `SessionStore`. "Memory" is kept for what a person keeps
+  across conversations ([specs/core.md](../specs/core.md)).
 
 ## Context
 

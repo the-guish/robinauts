@@ -152,7 +152,7 @@ class RobinautsController(Controller):
         running = await self._store.active_turn(user.id, session_id)
         if running is not None:
             await self._cancel(user, running)
-        # A soft delete: the records and the engine's memory stay. A turn another process
+        # A soft delete: the records and the engine's state stay. A turn another process
         # runs stops at its next write.
         await self._store.hide_session(user.id, session_id, self._now())
 

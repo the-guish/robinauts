@@ -15,7 +15,7 @@ robinauts/
       agent_engines/    the agent port and its engines: contract/,
                         echo_engine/, langchain_engine/, pydantic_ai_engine/
       controller/       the application: contract/, core/, ports/,
-                        application/, adapters/{memory,postgres}/, composition/
+                        application/, adapters/{in_process,postgres}/, composition/
       web/              the HTTP server, sign-in, the CLI, the worker's process
     tests/              unit/, fast/, api/, adapters_free/, adapters_metered/,
                         e2e/, tooling/, util/

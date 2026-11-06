@@ -6,7 +6,7 @@ Sign-in is not here. A shell decides who is asking and names the user; every
 operation below is asked for a user, and answers only what that user owns.
 
 A session is one conversation of a user with an agent. To the controller it is the record,
-its messages and its turns, owned by one user. To an engine it is the memory it keeps under
+its messages and its turns, owned by one user. To an engine it is the state it keeps under
 the session's id, and nothing more. To web it is what the wire calls a conversation; who is
 signed in is web's own concern, the user session.
 
@@ -42,7 +42,7 @@ A worker in the server's process has it over the controller's store
 (`application/turn_broker.py`). A worker in a process of its own, which a server on
 PostgreSQL spawns, has it over HTTP: the same operations as the API's `/internal/worker/`
 routes (`docs/architecture/web.md`), with the secret its server handed it at its start. The
-engines keep their memory apart, in the worker's `EngineMemory`: on PostgreSQL a pool of the
+engines keep their state apart, in the worker's `AgentEngineStore`: on PostgreSQL a pool of the
 worker's own, for the engines' tables, never the core's.
 
 ## Users
@@ -61,7 +61,7 @@ worker's own, for the engines' tables, never the core's.
 - `open_session`: one moment of a session, its messages and its active turn if any.
 - `rename_session`
 - `delete_session`: hide the session, after stopping a running turn. A soft delete: the records
-  and the engine's memory stay.
+  and the engine's state stay.
 - `fork_session`: a new session from a message of another, independent from then on.
 
 ## Turns

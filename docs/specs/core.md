@@ -104,8 +104,8 @@ topic documents listed under [Documents](#documents).
 
 - The controller — the main application flow — is independent of any agent
   framework. It knows only the agent port: hand the adapter a question and
-  a checkpoint of the conversation's memory, and write down what it streams. The tool
-  loop, the context and the memory are the framework's, behind the port
+  a checkpoint of the conversation's state, and write down what it streams. The tool
+  loop, the context and the state are the framework's, behind the port
   ([ADR 0005](../adr/0005-the-framework-owns-the-loop-and-the-memory.md)).
 - There are two implementations: one on LangChain (or LangGraph; open
   source parts only, none of their commercial or hosted offerings), one on
@@ -114,13 +114,13 @@ topic documents listed under [Documents](#documents).
   seam is agent-framework agnostic and a third framework is a third
   adapter. A conversation stays with the engine it started on.
 
-### The transcript is the platform's; the memory is the framework's
+### The transcript is the platform's; the state is the framework's
 
 - Conversations are persisted in the database, in a format the platform
   owns — not the format of any agent framework or any model vendor — as
   the **transcript**: what the people reading the conversation see, what
   the exports carry, what analytics reads.
-- The model's **memory** — the framework's own history of the conversation,
+- The model's **state** — the framework's own history of the conversation,
   in the framework's own format, with whatever it kept in it — is kept by
   the engine, in tables of its own beside the platform's, as opaque data
   the platform never reads. The platform keeps only the checkpoint each
@@ -192,7 +192,7 @@ hard, the decision is taken with them in mind.
   tool server.
 - Memories a person keeps across conversations. When they come they live
   in the one database and are framework-neutral, like the transcript; the
-  model's memory of one conversation is the framework's and is already
+  model's state for one conversation is the framework's and is already
   stored ([agent-engines.md](agent-engines.md)).
 - Usage reporting (goal 7).
 - More delivery channels: a mobile application, a Slack bridge; and a way
@@ -212,7 +212,7 @@ hard, the decision is taken with them in mind.
 | [core.md](core.md) | goals, principles, the system in one page |
 | [sign-in.md](sign-in.md) | sign-in, users, roles |
 | [privacy.md](privacy.md) | visibility, projects, sharing, admins, retention, leavers, audit |
-| [agent-engines.md](agent-engines.md) | the agent engines: their contract, the turn, the memory |
+| [agent-engines.md](agent-engines.md) | the agent engines: their contract, the turn, the sessions |
 | [wire.md](wire.md) | the UI-to-backend protocol |
 | [frontend.md](frontend.md) | the interface, build, supply chain, packaging |
 | [operations.md](operations.md) | deployment, configuration, limits, usage (planned) |

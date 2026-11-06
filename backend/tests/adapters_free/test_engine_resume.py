@@ -2,7 +2,7 @@
 # Copyright The Robinauts Authors
 
 """A turn that ended early is resumed from the rounds it saved, in both engines: each on its
-memory on PostgreSQL, a model server over HTTP and a real MCP server."""
+session store on PostgreSQL, a model server over HTTP and a real MCP server."""
 
 from __future__ import annotations
 
@@ -25,9 +25,13 @@ from robinauts.agent_engines.contract.domain import (
 )
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
-from robinauts.agent_engines.langchain_engine.memory import PostgresMemory as LangChainMemory
+from robinauts.agent_engines.langchain_engine.session_store import (
+    PostgresSessionStore as LangChainSessionStore,
+)
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
-from robinauts.agent_engines.pydantic_ai_engine.memory import PostgresMemory as PydanticAIMemory
+from robinauts.agent_engines.pydantic_ai_engine.session_store import (
+    PostgresSessionStore as PydanticAISessionStore,
+)
 from util.aio import asyncio_test
 from util.controller_db import requires_postgres, temporary_schema
 from util.engine_settings import Keys, NoSecrets
@@ -101,8 +105,8 @@ Build = Callable[[EngineSettings, Any], AgentEngine]
 ENGINES = pytest.mark.parametrize(
     "build",
     [
-        lambda s, pool: LangChainEngine(s, LangChainMemory(pool)),
-        lambda s, pool: PydanticAIEngine(s, PydanticAIMemory(pool)),
+        lambda s, pool: LangChainEngine(s, LangChainSessionStore(pool)),
+        lambda s, pool: PydanticAIEngine(s, PydanticAISessionStore(pool)),
     ],
     ids=["langchain", "pydantic-ai"],
 )

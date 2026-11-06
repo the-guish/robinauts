@@ -49,7 +49,7 @@ class Lifecycle:
     def __init__(self, composed: Composed, *, broker_url: str | None = None) -> None:
         """``broker_url`` runs the worker in a process of its own, which reaches the core at that
         URL: this server's, as the worker's machine reaches it. That suits PostgreSQL alone,
-        where the engines' memory is in the database: an engine in memory would hold nothing of
+        where the engines' state is in the database: an engine in this process would hold nothing of
         a session another process ran."""
         self.composed = composed
         self._broker_url = broker_url

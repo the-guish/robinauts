@@ -7,7 +7,7 @@ second read from the cache the first wrote. Run by hand, never by CI.
 ``tests/adapters_metered`` is not collected by a plain run (``norecursedirs``); name the file
 to run it. Each test reads its key from a variable of its own and skips without it. Every test
 runs once per engine (the engine is in the test's id). The engine says nothing of usage, so
-the test reads it where the engine keeps it: in its memory, as its framework recorded the
+the test reads it where the engine keeps it: in its session store, as its framework recorded the
 vendor's answer.
 """
 
@@ -32,9 +32,13 @@ from robinauts.agent_engines.contract.domain import (
 )
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings, ProviderKeyLookup
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
-from robinauts.agent_engines.langchain_engine.memory import InProcessMemory as LangChainMemory
+from robinauts.agent_engines.langchain_engine.session_store import (
+    InProcessSessionStore as LangChainSessionStore,
+)
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
-from robinauts.agent_engines.pydantic_ai_engine.memory import InProcessMemory as PydanticAIMemory
+from robinauts.agent_engines.pydantic_ai_engine.session_store import (
+    InProcessSessionStore as PydanticAISessionStore,
+)
 from util.aio import asyncio_test
 from util.engine_settings import NoSecrets
 
@@ -59,11 +63,11 @@ class Key(ProviderKeyLookup):
 
 
 async def langchain_cache_read(settings: EngineSettings) -> tuple[AgentEngine, Any]:
-    memory = LangChainMemory()
+    sessions = LangChainSessionStore()
 
     async def read(session: uuid.UUID) -> int:
         """Tokens the last answer read from the cache."""
-        saved = await memory.saver.aget_tuple({"configurable": {"thread_id": str(session)}})
+        saved = await sessions.saver.aget_tuple({"configurable": {"thread_id": str(session)}})
         assert saved is not None
         answers = [
             m for m in saved.checkpoint["channel_values"]["messages"] if isinstance(m, AIMessage)
@@ -71,20 +75,20 @@ async def langchain_cache_read(settings: EngineSettings) -> tuple[AgentEngine, A
         details = (answers[-1].usage_metadata or {}).get("input_token_details", {})
         return int(details.get("cache_read", 0))
 
-    return LangChainEngine(settings, memory), read
+    return LangChainEngine(settings, sessions), read
 
 
 async def pydantic_ai_cache_read(settings: EngineSettings) -> tuple[AgentEngine, Any]:
-    memory = PydanticAIMemory()
+    sessions = PydanticAISessionStore()
 
     async def read(session: uuid.UUID) -> int:
         """Tokens the last answer read from the cache."""
-        latest = await memory.latest(session)
+        latest = await sessions.latest(session)
         assert latest is not None
         answers = [m for m in latest[1] if isinstance(m, ModelResponse)]
         return answers[-1].usage.cache_read_tokens
 
-    return PydanticAIEngine(settings, memory), read
+    return PydanticAIEngine(settings, sessions), read
 
 
 NewEngine = Callable[[EngineSettings], Any]
