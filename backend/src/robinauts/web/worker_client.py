@@ -39,6 +39,7 @@ from robinauts.web.worker_wire import (
     PREFIX,
     SESSION_NOT_FOUND,
     TURN_LOST,
+    WORKER_KEEP_ALIVE_SECONDS,
     AppendRequest,
     CancelsResponse,
     ClaimRequest,
@@ -108,6 +109,12 @@ class HttpTurnBroker(TurnBroker):
             base_url=url.rstrip("/") + PREFIX,
             headers={"Authorization": f"Bearer {secret}"},
             timeout=REQUEST_SECONDS,
+            # httpx's own limits, but for how long an idle connection is reused.
+            limits=httpx.Limits(
+                max_connections=100,
+                max_keepalive_connections=20,
+                keepalive_expiry=WORKER_KEEP_ALIVE_SECONDS,
+            ),
             transport=transport,
             # The server is this machine's, and no proxy stands between them.
             trust_env=False,

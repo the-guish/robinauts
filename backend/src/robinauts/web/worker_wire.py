@@ -40,6 +40,15 @@ MAX_WAIT_SECONDS = 30.0
 MAX_CLAIM = 100
 """The most tasks one claim asks for."""
 
+SERVER_KEEP_ALIVE_SECONDS = 5
+"""How long the server keeps an idle connection open before it closes it: uvicorn's
+``timeout_keep_alive``, which ``robinauts start`` sets."""
+
+WORKER_KEEP_ALIVE_SECONDS = 2.0
+"""How long a worker reuses an idle connection: well under ``SERVER_KEEP_ALIVE_SECONDS``. With
+the two equal, a request sent on a connection just as the server closes it fails, "Server
+disconnected" or reset, and the turn it writes for with it."""
+
 
 # --- the bodies of the routes --------------------------------------------------
 

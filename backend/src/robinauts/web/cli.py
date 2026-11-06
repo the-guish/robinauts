@@ -58,6 +58,7 @@ from robinauts.controller.contract.domain import (
 from robinauts.controller.contract.ports import Credentials
 from robinauts.web.app import create_app
 from robinauts.web.sign_in import SIGN_IN_KEYS, SignInConfig, is_loopback, parse_sign_in
+from robinauts.web.worker_wire import SERVER_KEEP_ALIVE_SECONDS
 
 REPO = Path(__file__).resolve().parents[4]
 
@@ -181,7 +182,11 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         ),
     )
     config = uvicorn.Config(
-        app, host=host, port=port, timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS
+        app,
+        host=host,
+        port=port,
+        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
+        timeout_keep_alive=SERVER_KEEP_ALIVE_SECONDS,
     )
     Server(config, app.state.lifecycle.stop_worker).run()
     return 0
