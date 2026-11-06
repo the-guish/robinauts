@@ -42,7 +42,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from robinauts.composition import Composed, SecretLookup
+from robinauts.controller.contract.broker.ports import TurnBroker
 from robinauts.controller.contract.domain import (
     ApiToken,
     DeviceDescription,
@@ -58,6 +58,7 @@ from robinauts.controller.contract.domain import (
     UnknownModelError,
     User,
 )
+from robinauts.controller.contract.ports import Controller, Credentials
 from robinauts.shared_domain.domain import (
     ControllerError,
     Message,
@@ -73,9 +74,8 @@ from robinauts.shared_domain.domain import (
 from robinauts.web import agui
 from robinauts.web.cookies import Cookies
 from robinauts.web.headers import SecurityHeaders
-from robinauts.web.lifecycle import Lifecycle
 from robinauts.web.logs import loggable
-from robinauts.web.oidc import Exchange, claims_from
+from robinauts.web.oidc import Exchange, SecretLookup, claims_from
 from robinauts.web.pairing import (
     FRESH_MINUTES,
     Pairing,
@@ -100,7 +100,7 @@ from robinauts.web.sign_in import (
     secret_hash,
     secret_of_kind,
 )
-from robinauts.web.worker_api import worker_router
+from robinauts.web.worker_api import WorkerAccess, worker_router
 
 DEFAULT_PAGE = 30
 
@@ -592,19 +592,21 @@ def event_stream(
 
 
 def create_app(
-    composed: Composed,
+    controller: Controller,
+    credentials: Credentials,
+    broker: TurnBroker,
     *,
+    worker_access: WorkerAccess,
+    healthy: Callable[[], bool],
     sign_in: SignInConfig | None,
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
-    worker_broker_url: str | None = None,
 ) -> FastAPI:
-    """``sign_in`` is ``None`` in the local development mode. ``worker_broker_url`` runs the
-    worker in a process of its own, which reaches this app's ``/internal/worker/`` routes at
-    that URL. The app's ``state.lifecycle`` is its ``Lifecycle``: a server stops its worker
-    with ``stop_worker`` before it stops listening."""
-    controller, credentials = composed.controller, composed.credentials
-    lifecycle = Lifecycle(composed, broker_url=worker_broker_url)
+    """The HTTP server alone. Whoever runs it opens the controller and starts the worker before
+    it serves, and stops the worker and closes the controller after (``cli/lifecycle.py``).
+    ``broker`` and ``worker_access`` serve a worker in a process of its own at
+    ``/internal/worker/``; ``healthy`` says whether this node's worker is heard from, for
+    ``/health``. ``sign_in`` is ``None`` in the local development mode."""
     exchange: Exchange | None = None
     flow: SignIn | None = None
     if sign_in is not None:
@@ -620,13 +622,11 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         nonlocal local_user
-        await lifecycle.start()
         if sign_in is None:
             local_user = await controller.ensure_user(LOCAL_IDENTITY)
         yield
         if exchange is not None:
             await exchange.aclose()
-        await lifecycle.stop()
 
     # --- who is asking -----------------------------------------------------------
 
@@ -736,8 +736,6 @@ def create_app(
         redoc_url=None,
         responses={"default": {"model": ErrorResponse, "description": "A refusal"}},
     )
-    app.state.lifecycle = lifecycle
-
     app.add_middleware(Guard, check=same_origin)
     app.add_middleware(SecurityHeaders)
 
@@ -1100,14 +1098,14 @@ def create_app(
 
     # --- a worker in a process of its own ------------------------------------------
 
-    app.include_router(worker_router(composed.broker, lifecycle.access))
+    app.include_router(worker_router(broker, worker_access))
 
     # --- liveness --------------------------------------------------------------
 
     @app.get("/health", include_in_schema=False)
     async def health() -> JSONResponse:
         # This node's worker, heard from within five minutes. Nothing is queried.
-        if lifecycle.healthy():
+        if healthy():
             return JSONResponse({"status": "ok"})
         return JSONResponse({"status": "the worker is not running"}, status_code=503)
 

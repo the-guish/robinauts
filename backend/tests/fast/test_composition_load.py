@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from robinauts.composition import load
+from robinauts.cli.composition import load
 
 EXAMPLES = Path(__file__).resolve().parents[3] / "examples"
 

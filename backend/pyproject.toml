@@ -53,7 +53,7 @@ dependencies = [
     # licence gate refuses that for a runtime dependency (DEPENDENCIES.md).
     "qrcodegen>=1.8,<2",
     # The ASGI server `robinauts start` runs (docs/specs/backend.md, "Web"),
-    # imported by `robinauts.web.cli` and by nothing else -- the import-linter
+    # imported by `robinauts.cli.main` and by nothing else -- the import-linter
     # contract below has named it since before it was a dependency. BSD-3-Clause,
     # bringing `click` (BSD-3-Clause) and `h11` (MIT), both already in the lock.
     # Not `uvicorn[standard]`: that adds `uvloop`, `httptools`, `watchfiles`,
@@ -103,7 +103,7 @@ environments = [
 ]
 
 [project.scripts]
-robinauts = "robinauts.web.cli:run"
+robinauts = "robinauts.cli.main:run"
 
 [build-system]
 requires = ["hatchling"]
@@ -118,7 +118,7 @@ path = "hatch_build.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/robinauts"]
 # The built interface (`frontend/dist` -> `robinauts/ui/`, which is what
-# `robinauts.web.cli.interface` reads) and the refusal to build a wheel without
+# `robinauts.cli.main.interface` reads) and the refusal to build a wheel without
 # it. Both are in the hook rather than in a `force-include` table here, because
 # an **editable** install has no built frontend by design and a declared
 # force-include is looked for whichever kind of build it is -- which would make
@@ -235,8 +235,8 @@ forbidden_modules = [
     "robinauts.controller",
     "robinauts.tools",
     "robinauts.worker",
-    "robinauts.composition",
     "robinauts.web",
+    "robinauts.cli",
 ]
 
 [[tool.importlinter.contracts]]
@@ -249,8 +249,8 @@ forbidden_modules = [
     "robinauts.controller",
     "robinauts.tools",
     "robinauts.worker",
-    "robinauts.composition",
     "robinauts.web",
+    "robinauts.cli",
 ]
 
 [[tool.importlinter.contracts]]
@@ -282,8 +282,8 @@ forbidden_modules = [
     "robinauts.agent_engines",
     "robinauts.tools",
     "robinauts.worker",
-    "robinauts.composition",
     "robinauts.web",
+    "robinauts.cli",
 ]
 
 [[tool.importlinter.contracts]]
@@ -296,7 +296,7 @@ forbidden_modules = [
     "robinauts.controller.core",
     "robinauts.controller.adapters",
     "robinauts.controller.application",
-    "robinauts.composition",
+    "robinauts.cli",
     "robinauts.agent_engines",
     "robinauts.tools",
     "robinauts.worker",
@@ -318,7 +318,7 @@ forbidden_modules = [
     "robinauts.controller.core",
     "robinauts.controller.adapters",
     "robinauts.controller.application",
-    "robinauts.composition",
+    "robinauts.cli",
     "robinauts.agent_engines",
     "robinauts.tools",
 ]
@@ -331,7 +331,7 @@ source_modules = ["robinauts.controller.adapters"]
 forbidden_modules = [
     "robinauts.controller.core",
     "robinauts.controller.application",
-    "robinauts.composition",
+    "robinauts.cli",
     "robinauts.agent_engines",
     "robinauts.tools",
 ]
@@ -344,7 +344,7 @@ source_modules = ["robinauts.controller.core"]
 forbidden_modules = [
     "robinauts.controller.adapters",
     "robinauts.controller.application",
-    "robinauts.composition",
+    "robinauts.cli",
     "robinauts.tools",
 ]
 
@@ -355,28 +355,16 @@ allow_indirect_imports = true
 source_modules = ["robinauts.controller.application"]
 forbidden_modules = [
     "robinauts.controller.adapters",
-    "robinauts.composition",
+    "robinauts.cli",
 ]
 
 [[tool.importlinter.contracts]]
-name = "composition is imported by web alone"
-type = "forbidden"
-allow_indirect_imports = true
-source_modules = [
-    "robinauts.shared_domain",
-    "robinauts.agent_engines",
-    "robinauts.controller",
-    "robinauts.tools",
-    "robinauts.worker",
-]
-forbidden_modules = ["robinauts.composition"]
-
-[[tool.importlinter.contracts]]
-name = "web imports only the controller's contract and composition"
+name = "web imports only the controller's contract"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts.web"]
 forbidden_modules = [
+    "robinauts.cli",
     "robinauts.controller.core",
     "robinauts.controller.ports",
     "robinauts.controller.adapters",
@@ -395,24 +383,20 @@ type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts.web.contract"]
 forbidden_modules = [
-    "robinauts.web.__main__",
     "robinauts.web.agui",
     "robinauts.web.app",
-    "robinauts.web.cli",
     "robinauts.web.cookies",
     "robinauts.web.headers",
-    "robinauts.web.lifecycle",
     "robinauts.web.logs",
     "robinauts.web.oidc",
     "robinauts.web.pairing",
     "robinauts.web.sign_in",
     "robinauts.web.worker_api",
-    "robinauts.web.worker_process",
     "robinauts.controller.ports",
     "robinauts.controller.core",
     "robinauts.controller.adapters",
     "robinauts.controller.application",
-    "robinauts.composition",
+    "robinauts.cli",
     "robinauts.agent_engines",
     "robinauts.tools",
     "robinauts.worker",
@@ -434,7 +418,7 @@ forbidden_modules = [
     "robinauts.controller.core",
     "robinauts.controller.adapters",
     "robinauts.controller.application",
-    "robinauts.composition",
+    "robinauts.cli",
     "robinauts.agent_engines.echo_engine",
     "robinauts.agent_engines.langchain_engine",
     "robinauts.agent_engines.pydantic_ai_engine",
@@ -445,7 +429,7 @@ forbidden_modules = [
 ignore_imports = ["robinauts.worker.** -> robinauts.web.contract.broker.**"]
 
 [[tool.importlinter.contracts]]
-name = "the worker is named by composition alone"
+name = "the worker is named by cli.composition alone"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = [
@@ -454,9 +438,44 @@ source_modules = [
     "robinauts.controller",
     "robinauts.tools",
     "robinauts.web",
+    "robinauts.cli",
 ]
 forbidden_modules = ["robinauts.worker"]
-ignore_imports = ["robinauts.composition -> robinauts.worker.*"]
+ignore_imports = ["robinauts.cli.composition -> robinauts.worker.*"]
+
+# --- cli -----------------------------------------------------------------------
+# What runs Robinauts: it builds the parts with composition and runs web over them.
+
+[[tool.importlinter.contracts]]
+name = "cli imports web and the controller's contract, but for its composition"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.cli"]
+forbidden_modules = [
+    "robinauts.controller.ports",
+    "robinauts.controller.core",
+    "robinauts.controller.adapters",
+    "robinauts.controller.application",
+    "robinauts.agent_engines",
+    "robinauts.tools",
+    "robinauts.worker",
+]
+# cli.composition builds every part, so it imports what the rest of cli may not.
+ignore_imports = ["robinauts.cli.composition -> robinauts.**"]
+
+[[tool.importlinter.contracts]]
+name = "nothing imports cli"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = [
+    "robinauts.shared_domain",
+    "robinauts.agent_engines",
+    "robinauts.controller",
+    "robinauts.tools",
+    "robinauts.worker",
+    "robinauts.web",
+]
+forbidden_modules = ["robinauts.cli"]
 
 # --- tools ---------------------------------------------------------------------
 # Everything about a tool is in its package. A new tool adds its package to the
@@ -471,7 +490,7 @@ allow_indirect_imports = true
 source_modules = ["robinauts.tools"]
 forbidden_modules = [
     "robinauts.controller",
-    "robinauts.composition",
+    "robinauts.cli",
     "robinauts.agent_engines.echo_engine",
     "robinauts.agent_engines.langchain_engine",
     "robinauts.agent_engines.pydantic_ai_engine",
@@ -482,7 +501,7 @@ forbidden_modules = [
 # A source that holds the forbidden module is not checked, so the layers are
 # named one by one rather than as `robinauts`.
 [[tool.importlinter.contracts]]
-name = "a tool is named by composition alone"
+name = "a tool is named by cli.composition alone"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = [
@@ -490,10 +509,11 @@ source_modules = [
     "robinauts.controller",
     "robinauts.worker",
     "robinauts.web",
+    "robinauts.cli",
     "robinauts.tools.contract",
 ]
 forbidden_modules = ["robinauts.tools.sessions"]
-ignore_imports = ["robinauts.composition -> robinauts.tools.sessions"]
+ignore_imports = ["robinauts.cli.composition -> robinauts.tools.sessions"]
 
 # --- third-party libraries: where each may be imported ----------------------
 # The source is the whole package, so a module added tomorrow is inside the
@@ -603,13 +623,39 @@ ignore_imports = [
 unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
-name = "FastAPI, Starlette, uvicorn and ag_ui only under web"
+name = "Starlette and ag_ui only under web"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts"]
-forbidden_modules = ["fastapi", "starlette", "uvicorn", "ag_ui"]
+forbidden_modules = ["starlette", "ag_ui"]
 ignore_imports = [
     "robinauts.web -> *",
     "robinauts.web.** -> *",
+]
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "FastAPI only under web and cli"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts"]
+forbidden_modules = ["fastapi"]
+ignore_imports = [
+    "robinauts.web -> *",
+    "robinauts.web.** -> *",
+    "robinauts.cli -> *",
+    "robinauts.cli.** -> *",
+]
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "uvicorn only under cli"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts"]
+forbidden_modules = ["uvicorn"]
+ignore_imports = [
+    "robinauts.cli -> *",
+    "robinauts.cli.** -> *",
 ]
 unmatched_ignore_imports_alerting = "none"

@@ -46,7 +46,7 @@ class _ToolSecrets(ToolSecretLookup):
 
 
 def engine_settings(config: shared.Config, secret_for: SecretLookup) -> EngineSettings:
-    """The controller's configuration as the engines take it: the same tables, no agents."""
+    """The configuration as the engines take it: the same tables, no agents."""
     models = engine_domain.ModelsConfig(
         providers={
             p.id: engine_domain.ModelProviderConfig(
@@ -86,7 +86,8 @@ def engine_settings(config: shared.Config, secret_for: SecretLookup) -> EngineSe
 
 
 def engine_storage(storage: shared.StorageConfig, pool: object | None) -> StorageConfig:
-    """The controller's storage as an engine takes it. A PostgreSQL pool is the controller's."""
+    """The storage asked for, as an engine takes it. A PostgreSQL pool is the worker's own
+    (``AgentEngineStore``), for the engines' tables, never the core's."""
     if storage.kind is shared.StorageKind.POSTGRES:
         return StorageConfig(StorageKind.POSTGRES, {"pool": pool})
     if storage.kind is shared.StorageKind.LOCAL:

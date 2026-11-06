@@ -14,7 +14,9 @@ from datetime import UTC, datetime, timedelta
 import asyncpg
 import pytest
 
-from robinauts.composition import SCHEMA_READY, compose, init_database
+from robinauts.cli.composition import SCHEMA_READY, compose, init_database
+from robinauts.cli.lifecycle import Lifecycle
+from robinauts.cli.main import run
 from robinauts.controller.contract.domain import ConfigError, Identity, UserSession
 from robinauts.shared_domain.domain import (
     AgentConfig,
@@ -26,8 +28,6 @@ from robinauts.shared_domain.domain import (
     StorageKind,
     TextPart,
 )
-from robinauts.web.cli import run
-from robinauts.web.lifecycle import Lifecycle
 from util.aio import asyncio_test
 from util.controller_db import requires_postgres, temporary_schema, url
 

@@ -21,7 +21,7 @@ import httpx
 import pytest
 from echo_controller import CONFIG
 
-from robinauts.composition import Composed, compose
+from robinauts.cli.composition import Composed, compose
 from robinauts.controller.contract.domain import (
     DeviceDescription,
     DeviceSession,
@@ -31,7 +31,6 @@ from robinauts.controller.contract.domain import (
 )
 from robinauts.shared_domain.domain import StorageConfig, StorageKind
 from robinauts.web import pairing
-from robinauts.web.app import create_app
 from robinauts.web.cookies import Cookies
 from robinauts.web.sign_in import (
     AllowEntry,
@@ -42,6 +41,7 @@ from robinauts.web.sign_in import (
     secret_hash,
 )
 from util.aio import asyncio_test
+from util.app import running
 
 PUBLIC_URL = "https://robinauts.example.com"
 OKTA = ProviderConfig(
@@ -106,8 +106,7 @@ async def rig(
 
     monkeypatch.setattr(pairing, "random_secret", recorded)
     composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get)
-    app = create_app(composed, sign_in=sign_in, secret_for={}.get)
-    async with app.router.lifespan_context(app):
+    async with running(composed, sign_in=sign_in, secret_for={}.get) as app:
         ada = await composed.controller.ensure_user(ADA)
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url=PUBLIC_URL) as http:

@@ -8,7 +8,7 @@ script an installation gets does: a command that failed must not leave a shell
 believing it worked.
 """
 
-from robinauts.web.cli import run
+from robinauts.cli.main import run
 
 if __name__ == "__main__":
     run()

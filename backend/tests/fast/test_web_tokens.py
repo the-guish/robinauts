@@ -16,10 +16,10 @@ from datetime import UTC, datetime, timedelta
 import httpx
 from echo_controller import CONFIG
 
-from robinauts.composition import Composed, compose
+from robinauts.cli.composition import Composed, compose
 from robinauts.controller.contract.domain import ApiToken, Identity, User, UserSession
 from robinauts.shared_domain.domain import StorageConfig, StorageKind
-from robinauts.web.app import LOCAL_IDENTITY, TOKEN_LIFE, create_app
+from robinauts.web.app import LOCAL_IDENTITY, TOKEN_LIFE
 from robinauts.web.cookies import Cookies
 from robinauts.web.sign_in import (
     AllowEntry,
@@ -30,6 +30,7 @@ from robinauts.web.sign_in import (
     secret_hash,
 )
 from util.aio import asyncio_test
+from util.app import running
 
 PUBLIC_URL = "https://robinauts.example.com"
 OKTA = ProviderConfig(
@@ -53,8 +54,7 @@ async def signed_in() -> AsyncIterator[tuple[httpx.AsyncClient, Composed, User, 
     """The app, a client, Ada, and the headers of her browser: her session cookie and the
     ``Origin`` a write with it needs."""
     composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get)
-    app = create_app(composed, sign_in=SIGN_IN, secret_for={}.get)
-    async with app.router.lifespan_context(app):
+    async with running(composed, sign_in=SIGN_IN, secret_for={}.get) as app:
         ada = await composed.controller.ensure_user(ADA)
         secret = random_secret()
         now = datetime.now(UTC)

@@ -13,7 +13,8 @@ from unittest.mock import create_autospec
 import pytest
 import uvicorn
 
-from robinauts.composition import compose
+from robinauts.cli.composition import compose
+from robinauts.cli.main import devices_command, run, serving, worker_broker_url
 from robinauts.controller.contract.domain import (
     ConfigError,
     DeviceDescription,
@@ -21,7 +22,6 @@ from robinauts.controller.contract.domain import (
     Identity,
 )
 from robinauts.shared_domain.domain import Config, StorageConfig, StorageKind
-from robinauts.web.cli import devices_command, run, serving, worker_broker_url
 from util.aio import asyncio_test
 
 SIGN_IN = {
@@ -92,8 +92,8 @@ def test_a_refused_start_exits_before_it_binds(
     path = tmp_path / "robinauts.toml"
     path.write_text('public_url = "https://robinauts.example.com"\n')
     monkeypatch.setenv("ROBINAUTS_CONFIG", str(path))
-    serve = create_autospec(uvicorn.Server.run, spec_set=True)
-    monkeypatch.setattr(uvicorn.Server, "run", serve)
+    serve = create_autospec(uvicorn.Server.serve, spec_set=True)
+    monkeypatch.setattr(uvicorn.Server, "serve", serve)
     with pytest.raises(SystemExit) as exited:
         run(["start", "--dev-no-sign-in"])
     assert exited.value.code == 1

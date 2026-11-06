@@ -11,8 +11,17 @@ agent_engines -> nothing from robinauts
 tools -> agent_engines.contract
 controller -> shared_domain
 worker -> controller.contract.broker, web.contract.broker, agent_engines.contract, tools.contract
-composition -> controller, worker, tools, agent_engines.contract; imported by web alone
-web -> controller.contract, composition
+web -> controller.contract
+cli -> web, controller, worker, tools, agent_engines.contract, all but web and controller.contract by cli.composition alone; imported by nothing
+
+```mermaid
+flowchart TD
+    web --> controller
+    worker -- "web/direct" --> controller
+    worker --> tools
+    worker --> agent_engines
+    tools --> agent_engines
+```
 
 ## Inside agent_engines
 
@@ -26,7 +35,7 @@ no engine imports another
 
 contract -> agent_engines.contract
 each tool (sessions) -> contract, agent_engines.contract
-no tool imports another; only composition imports a tool
+no tool imports another; only cli.composition imports a tool
 
 ## Inside controller
 
@@ -48,5 +57,7 @@ pydantic_ai, pydantic_graph, fastmcp, logfire, logfire_api, opentelemetry -> pyd
 anthropic, openai, mcp -> langchain_engine, pydantic_ai_engine
 asyncpg, sqlite3, aiosqlite -> langchain_engine, pydantic_ai_engine, controller.adapters
 httpx -> web, worker.http_turn_broker, langchain_engine, pydantic_ai_engine
-fastapi, starlette, uvicorn, ag_ui -> web
+fastapi -> web, cli
+starlette, ag_ui -> web
+uvicorn -> cli
 qrcodegen -> web

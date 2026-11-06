@@ -21,7 +21,7 @@ import signal
 import sys
 from pathlib import Path
 
-from robinauts.composition import (
+from robinauts.cli.composition import (
     compose_worker,
     http_turn_broker,
     load,

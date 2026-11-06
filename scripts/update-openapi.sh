@@ -25,14 +25,15 @@ uv run --locked --no-build python - <<'PY'
 import json
 from pathlib import Path
 
-from robinauts.controller.contract.domain import Config, StorageConfig, StorageKind
-from robinauts.composition import compose
-from robinauts.web.app import create_app
+from robinauts.cli.lifecycle import Lifecycle
+from robinauts.cli.main import build_app
+from robinauts.cli.composition import compose
+from robinauts.shared_domain.domain import Config, StorageConfig, StorageKind
 
 composed = compose(
     Config(), storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get
 )
-app = create_app(composed, sign_in=None, secret_for={}.get)
+app = build_app(composed, Lifecycle(composed), sign_in=None, secret_for={}.get)
 document = app.openapi()
 snapshot = Path("openapi.json")
 snapshot.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")

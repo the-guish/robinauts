@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""How the controller builds the engines its agents name, from the ones this build has.
+"""How the worker builds the engines its agents name, from the ones this build has.
 
-The controller names no engine: it is handed the engines this build has, by name, and
+The worker names no engine: it is handed the engines this build has, by name, and
 the configuration says which to build.
 """
 

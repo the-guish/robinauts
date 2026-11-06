@@ -14,17 +14,16 @@ from contextlib import asynccontextmanager
 import httpx
 from echo_controller import CONFIG
 
-from robinauts.composition import compose
+from robinauts.cli.composition import compose
 from robinauts.shared_domain.domain import StorageConfig, StorageKind
-from robinauts.web.app import create_app
 from util.aio import asyncio_test
+from util.app import running
 
 
 @asynccontextmanager
 async def client() -> AsyncIterator[httpx.AsyncClient]:
     composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get)
-    app = create_app(composed, sign_in=None, secret_for={}.get)
-    async with app.router.lifespan_context(app):
+    async with running(composed, sign_in=None, secret_for={}.get) as app:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as http:
             yield http
