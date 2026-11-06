@@ -47,10 +47,8 @@ from robinauts.web.worker_wire import (
     MessagesResponse,
     RenewRequest,
     RenewResponse,
+    SessionResponse,
     SessionsResponse,
-    SessionWire,
-    StoredEventWire,
-    StoredMessageWire,
     TaskResponse,
     TasksResponse,
     WaitRequest,
@@ -164,7 +162,7 @@ class HttpTurnBroker(TurnBroker):
         answer = await self._call(
             "POST", "/tasks/claim", body=ClaimRequest(now=now, until=until, limit=limit)
         )
-        return [t.domain() for t in TasksResponse.model_validate(answer).tasks]
+        return TasksResponse.model_validate(answer).tasks
 
     async def wait_for_queued(self, now: datetime, timeout: float) -> bool:
         answer = await self._call(
@@ -207,19 +205,18 @@ class HttpTurnBroker(TurnBroker):
 
     async def get_task(self, task: uuid.UUID) -> Task | None:
         answer = await self._call("GET", _ids("/tasks/{}", task))
-        found = TaskResponse.model_validate(answer).task
-        return None if found is None else found.domain()
+        return TaskResponse.model_validate(answer).task
 
     async def find_turn(self, turn: uuid.UUID) -> tuple[uuid.UUID, Turn] | None:
         answer = await self._call("GET", _ids("/turns/{}", turn))
         found = FoundTurnResponse.model_validate(answer)
         if found.owner is None or found.turn is None:
             return None
-        return found.owner, found.turn.domain()
+        return found.owner, found.turn
 
     async def get_session(self, owner: uuid.UUID, session: uuid.UUID) -> Session:
         answer = await self._call("GET", _ids("/users/{}/sessions/{}", owner, session))
-        return SessionWire.model_validate(answer).domain()
+        return SessionResponse.model_validate(answer).session
 
     async def sessions_of(
         self, owner: uuid.UUID, limit: int, before: Cursor | None
@@ -229,7 +226,7 @@ class HttpTurnBroker(TurnBroker):
             params["before_updated_at"] = before[0].isoformat()
             params["before_id"] = str(before[1])
         answer = await self._call("GET", _ids("/users/{}/sessions", owner), params=params)
-        return [s.domain() for s in SessionsResponse.model_validate(answer).sessions]
+        return SessionsResponse.model_validate(answer).sessions
 
     async def messages_of(self, owner: uuid.UUID, session: uuid.UUID) -> list[Document]:
         answer = await self._call("GET", _ids("/users/{}/sessions/{}/messages", owner, session))
@@ -265,8 +262,8 @@ class HttpTurnBroker(TurnBroker):
             state=state,
             ended_at=ended_at,
             error=error,
-            answer=None if answer is None else StoredMessageWire.of(answer),
-            events=[StoredEventWire.of(e) for e in events],
+            answer=answer,
+            events=list(events),
             updated_at=updated_at,
         )
         path = _ids("/users/{}/sessions/{}/turns/{}/finish", owner, session, turn)

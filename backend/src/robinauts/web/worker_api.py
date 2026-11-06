@@ -40,12 +40,10 @@ from robinauts.web.worker_wire import (
     MessagesResponse,
     RenewRequest,
     RenewResponse,
+    SessionResponse,
     SessionsResponse,
-    SessionWire,
     TaskResponse,
     TasksResponse,
-    TaskWire,
-    TurnWire,
     WaitRequest,
     WaitResponse,
 )
@@ -164,7 +162,7 @@ def worker_router(broker: TurnBroker, access: WorkerAccess) -> APIRouter:
     @router.post("/tasks/claim")
     async def claim_tasks(body: ClaimRequest) -> TasksResponse:
         tasks = await broker.claim_tasks(body.now, body.until, body.limit)
-        return TasksResponse(tasks=[TaskWire.of(t) for t in tasks])
+        return TasksResponse(tasks=tasks)
 
     @router.post("/tasks/wait")
     async def wait_for_queued(body: WaitRequest) -> WaitResponse:
@@ -178,7 +176,7 @@ def worker_router(broker: TurnBroker, access: WorkerAccess) -> APIRouter:
     @router.get("/tasks/{task_id}")
     async def get_task(task_id: uuid.UUID) -> TaskResponse:
         task = await broker.get_task(task_id)
-        return TaskResponse(task=None if task is None else TaskWire.of(task))
+        return TaskResponse(task=task)
 
     @router.get("/cancels")
     async def cancels(
@@ -194,7 +192,7 @@ def worker_router(broker: TurnBroker, access: WorkerAccess) -> APIRouter:
         if found is None:
             return FoundTurnResponse(owner=None, turn=None)
         owner, turn = found
-        return FoundTurnResponse(owner=owner, turn=TurnWire.of(turn))
+        return FoundTurnResponse(owner=owner, turn=turn)
 
     @router.get("/users/{owner}/sessions")
     async def sessions_of(
@@ -207,11 +205,11 @@ def worker_router(broker: TurnBroker, access: WorkerAccess) -> APIRouter:
         if before_updated_at is not None and before_id is not None:
             before = (before_updated_at, before_id)
         sessions = await broker.sessions_of(owner, limit, before)
-        return SessionsResponse(sessions=[SessionWire.of(s) for s in sessions])
+        return SessionsResponse(sessions=sessions)
 
     @router.get("/users/{owner}/sessions/{session_id}")
-    async def get_session(owner: uuid.UUID, session_id: uuid.UUID) -> SessionWire:
-        return SessionWire.of(await broker.get_session(owner, session_id))
+    async def get_session(owner: uuid.UUID, session_id: uuid.UUID) -> SessionResponse:
+        return SessionResponse(session=await broker.get_session(owner, session_id))
 
     @router.get("/users/{owner}/sessions/{session_id}/messages")
     async def messages_of(owner: uuid.UUID, session_id: uuid.UUID) -> MessagesResponse:
@@ -244,8 +242,8 @@ def worker_router(broker: TurnBroker, access: WorkerAccess) -> APIRouter:
             body.state,
             body.ended_at,
             body.error,
-            None if body.answer is None else body.answer.domain(),
-            [e.domain() for e in body.events],
+            body.answer,
+            body.events,
             body.updated_at,
         )
 
