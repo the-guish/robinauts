@@ -100,39 +100,35 @@ class Lifecycle:
             ACTIVITY_VARIABLE: str(self.activity_file),
             BROKER_URL_VARIABLE: self._broker_url,
         }
+        # The secret, whole, before the worker exists: far shorter than a pipe holds.
+        secret_end, secret_write = os.pipe()
         try:
-            # The secret, whole, before the worker exists: far shorter than a pipe holds.
-            secret_end, secret_write = os.pipe()
-            try:
-                os.write(secret_write, secret.encode())
-            finally:
-                os.close(secret_write)
-            try:
-                read_end, write_end = os.pipe()
-            except BaseException:
-                os.close(secret_end)
-                raise
-            environment[READY_VARIABLE] = str(write_end)
-            environment[SECRET_VARIABLE] = str(secret_end)
-            try:
-                try:
-                    self._process = await asyncio.create_subprocess_exec(
-                        sys.executable,
-                        "-m",
-                        WORKER_MODULE,
-                        env=environment,
-                        pass_fds=(write_end, secret_end),
-                    )
-                    self._worker_running = True
-                finally:
-                    os.close(write_end)
-                    os.close(secret_end)
-                await self._wait_until_ready(self._process, read_end)
-            finally:
-                os.close(read_end)
+            os.write(secret_write, secret.encode())
+        finally:
+            os.close(secret_write)
+        try:
+            read_end, write_end = os.pipe()
         except BaseException:
-            self.access.close()
+            os.close(secret_end)
             raise
+        environment[READY_VARIABLE] = str(write_end)
+        environment[SECRET_VARIABLE] = str(secret_end)
+        try:
+            try:
+                self._process = await asyncio.create_subprocess_exec(
+                    sys.executable,
+                    "-m",
+                    WORKER_MODULE,
+                    env=environment,
+                    pass_fds=(write_end, secret_end),
+                )
+                self._worker_running = True
+            finally:
+                os.close(write_end)
+                os.close(secret_end)
+            await self._wait_until_ready(self._process, read_end)
+        finally:
+            os.close(read_end)
         self._watching = asyncio.create_task(self._watch(self._process), name="worker process")
 
     async def _wait_until_ready(self, process: asyncio.subprocess.Process, ready: int) -> None:

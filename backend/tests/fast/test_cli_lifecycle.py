@@ -2,7 +2,8 @@
 # Copyright The Robinauts Authors
 
 """A lifecycle whose start fails, or is cancelled, part way stops what it had started before
-it raises, and a stop that fails part way is finished by the next one."""
+it raises, and its worker's process before it shuts that process out of the API; and a stop
+that fails part way is finished by the next one."""
 
 from __future__ import annotations
 
@@ -112,8 +113,22 @@ async def test_a_cancelled_start_leaves_no_worker_process(
     monkeypatch.setenv("PYTHONPATH", str(tmp_path))
     composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get)
     lifecycle = Lifecycle(composed, broker_url="http://127.0.0.1:9")
-    starting = asyncio.create_task(lifecycle.start())
     pid_file = Path(f"{worker}.pid")
+    # Whether the worker's process still ran at each close of its access: one that does may
+    # still be ending its turns through the API.
+    still_running: list[bool] = []
+    close = lifecycle.access.close
+
+    def recorded_close() -> None:
+        try:
+            os.kill(int(pid_file.read_text()), 0)
+            still_running.append(True)
+        except (FileNotFoundError, ProcessLookupError):
+            still_running.append(False)
+        close()
+
+    lifecycle.access.close = recorded_close  # type: ignore[method-assign]
+    starting = asyncio.create_task(lifecycle.start())
     for _ in range(200):
         if pid_file.exists() and pid_file.read_text():
             break
@@ -125,6 +140,7 @@ async def test_a_cancelled_start_leaves_no_worker_process(
             await starting
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
+        assert still_running == [False]
     finally:
         try:
             os.kill(pid, signal.SIGKILL)

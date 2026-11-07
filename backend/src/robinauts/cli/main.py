@@ -186,6 +186,8 @@ class Server(uvicorn.Server):
 
     async def startup(self, sockets: list[Any] | None = None) -> None:
         await self._lifecycle.start()
+        # Even when asked to stop meanwhile: uvicorn shuts down, and so stops the lifecycle,
+        # only a server that started.
         await super().startup(sockets=sockets)
 
     async def shutdown(self, sockets: list[Any] | None = None) -> None:
