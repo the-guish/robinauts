@@ -211,6 +211,13 @@ turn_timeout_seconds = 3600
 # Optional: the worker its turns run on, a process of its own. Left out, "default".
 # worker = "special"
 
+# Optional: a worker run elsewhere, which the server lets in and never starts
+# (specs/operations.md, "Workers"). The secret is the value of the variable
+# named, never written here; its agents name it with `worker`.
+# [workers.claude-container]
+# kind = "external"
+# secret_env = "ROBINAUTS_CLAUDE_CONTAINER_SECRET"
+
 # Optional, here with its defaults.
 [work]
 max_turn_seconds = 1200
@@ -287,7 +294,10 @@ Notes on what is and is not there:
   agents without one share the `default` worker, which always runs. The
   server spawns one process per worker named, and hands each the turns of its
   own agents alone. `max_running_tasks_per_worker` counts per worker
-  ([specs/operations.md](specs/operations.md), "Workers").
+  ([specs/operations.md](specs/operations.md), "Workers"). A `[workers.<name>]`
+  table of kind `external` names a worker run elsewhere, let in with the secret
+  its `secret_env` variable holds and never spawned: the first is
+  [extra-workers/claude-container](../extra-workers/claude-container/README.md).
 - A file with no `[agents]` table is a deployment with no agents: it
   starts, the picker is empty, and the log says so.
 
@@ -698,6 +708,7 @@ engine = "pydantic-ai"
 | `unknown key 'sessions_hours'` | a misspelt key | spell it as the example does; unknown keys are never ignored |
 | `providers.<id>: the client secret is read from the environment variable X, which is unset or empty` | the variable is unset, empty, or not in the unit's `EnvironmentFile` | set it; an empty variable counts as unset |
 | `model_providers.<id>: the API key is read from the environment variable X, which is unset or empty` | as above, for a model provider | set it; every *declared* provider needs its key, used or not |
+| `workers.<id>: the secret is read from the environment variable X, which is unset or empty` | an external worker's variable is unset, empty, or not in the unit's `EnvironmentFile` | set it to the value that worker presents; its own documentation says where it reads it |
 | `model_providers.<id>.kind: this build cannot reach '…' providers; it was built with …` | a build whose engines do not offer that kind; this one offers all four, so it is a build of something else | use one of the kinds the message lists |
 | every turn on an `openai-compatible` provider fails, most often with a `404` | `base_url` is missing the API's version: OpenAI's client appends `/chat/completions` alone | end `base_url` where the endpoint's own documentation puts `/chat/completions` after it, usually at `/v1` |
 | every turn on an `openai-compatible` provider fails with a `400` naming `max_tokens` | the endpoint knows only the newer `max_completion_tokens`, and a compatible endpoint is sent the older field every server has known | leave `max_output_tokens` out for that model |

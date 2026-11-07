@@ -95,6 +95,26 @@ DEFAULT_WORKER = "default"
 """The worker an agent's turns run on when its configuration names none."""
 
 
+class WorkerKind(StrEnum):
+    PROCESS = "process"
+    """The server's own: run in its process, or in a process of its own the server spawns."""
+    EXTERNAL = "external"
+    """Run elsewhere, by whoever deploys it: it reaches the server's API with the secret its
+    table names, and the server neither starts it nor waits for it."""
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerConfig:
+    """``[workers.<name>]``: what the server does for a worker the agents name. A worker with
+    no table is a process worker."""
+
+    id: str
+    kind: WorkerKind = WorkerKind.PROCESS
+    # The environment variable that holds the secret an external worker presents; for that
+    # kind alone.
+    secret_env: str = ""
+
+
 @dataclass(frozen=True, slots=True)
 class AgentConfig:
     id: str
@@ -129,6 +149,8 @@ class Config:
     tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
     agents: Mapping[str, AgentConfig] = field(default_factory=dict)
     work: WorkConfig = field(default_factory=WorkConfig)
+    worker_settings: Mapping[str, WorkerConfig] = field(default_factory=dict)
+    """``[workers.*]``, by name: the workers that are not plain processes of the server's."""
 
     def workers(self) -> tuple[str, ...]:
         """Every worker the agents name: the default first, which always runs, then the
@@ -146,7 +168,25 @@ class Config:
         """This configuration with the agents of that worker alone: what it builds engines
         for and runs turns of."""
         agents = {id_: a for id_, a in self.agents.items() if a.worker == worker}
-        return Config(self.providers, self.models, self.tool_servers, agents, self.work)
+        return Config(
+            self.providers, self.models, self.tool_servers, agents, self.work, self.worker_settings
+        )
+
+    def is_external(self, worker: str) -> bool:
+        """Whether that worker runs elsewhere, let in with a secret of the configuration's,
+        rather than started by the server."""
+        found = self.worker_settings.get(worker)
+        return found is not None and found.kind is WorkerKind.EXTERNAL
+
+    def process_workers(self) -> tuple[str, ...]:
+        """The workers the server runs itself, in `workers`' order."""
+        return tuple(name for name in self.workers() if not self.is_external(name))
+
+    def external_workers(self) -> tuple[WorkerConfig, ...]:
+        """The tables of the workers that run elsewhere, in `workers`' order."""
+        return tuple(
+            self.worker_settings[name] for name in self.workers() if self.is_external(name)
+        )
 
 
 class StorageKind(StrEnum):

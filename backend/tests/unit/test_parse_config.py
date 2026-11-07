@@ -9,7 +9,12 @@ import pytest
 
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.controller.core.config import parse_config
-from robinauts.shared_domain.domain import DEFAULT_WORKER, ProviderKind, ToolServerAuth
+from robinauts.shared_domain.domain import (
+    DEFAULT_WORKER,
+    ProviderKind,
+    ToolServerAuth,
+    WorkerKind,
+)
 
 AGENT = {"title": "A", "system_prompt": "", "model": "fast"}
 
@@ -262,3 +267,109 @@ def test_a_tool_server_may_not_take_the_id_of_a_tool_of_this_build() -> None:
         ConfigError, match=re.escape("tool_servers.sessions: the id of a tool of this build")
     ):
         parse_config(raw, tools={"sessions"})
+
+
+MODEL_TABLES = {
+    "model_providers": {"p": {"kind": "anthropic", "api_key_env": "K"}},
+    "models": {"fast": {"provider": "p", "name": "fast-1"}},
+}
+
+
+def test_a_worker_table_declares_an_external_worker() -> None:
+    config = parse_config(
+        {
+            **MODEL_TABLES,
+            "workers": {"claude": {"kind": "external", "secret_env": "CLAUDE_WORKER_SECRET"}},
+            "agents": {
+                "a": {**AGENT, "engine": "claude-code", "worker": "claude"},
+                "b": {**AGENT, "engine": "echo"},
+            },
+        }
+    )
+    claude = config.worker_settings["claude"]
+    assert (claude.kind, claude.secret_env) == (WorkerKind.EXTERNAL, "CLAUDE_WORKER_SECRET")
+    assert config.workers() == (DEFAULT_WORKER, "claude")
+    assert config.process_workers() == (DEFAULT_WORKER,)
+    assert [w.id for w in config.external_workers()] == ["claude"]
+    assert config.is_external("claude")
+    assert not config.is_external(DEFAULT_WORKER)
+    assert config.for_worker("claude").worker_settings == config.worker_settings
+    assert list(config.for_worker("claude").agents) == ["a"]
+
+
+def test_a_worker_with_no_table_or_a_process_table_is_a_process_worker() -> None:
+    agents = {"a": {**AGENT, "engine": "echo", "worker": "special"}}
+    config = parse_config({**MODEL_TABLES, "agents": agents})
+    assert config.process_workers() == (DEFAULT_WORKER, "special")
+    assert config.external_workers() == ()
+    config = parse_config({**MODEL_TABLES, "workers": {"special": {}}, "agents": agents})
+    assert config.worker_settings["special"].kind is WorkerKind.PROCESS
+    assert config.process_workers() == (DEFAULT_WORKER, "special")
+
+
+@pytest.mark.parametrize(
+    ("workers", "worker", "problem"),
+    [
+        (
+            {"claude": {"kind": "external"}},
+            "claude",
+            'workers.claude: kind "external" needs `secret_env`, the name of the environment'
+            " variable that holds the secret the worker presents",
+        ),
+        (
+            {"special": {"secret_env": "S"}},
+            "special",
+            "workers.special: `secret_env` is for kind \"external\" alone, not kind 'process'",
+        ),
+        (
+            {"claude": {"kind": "external", "secret_env": "S"}},
+            None,
+            "workers.claude: no agent names this worker",
+        ),
+        (
+            {"default": {"kind": "external", "secret_env": "S"}},
+            None,
+            "workers.default: the default worker is the server's own, and cannot be external",
+        ),
+        (
+            {"claude": {"kind": "remote", "secret_env": "S"}},
+            "claude",
+            "workers.claude: 'remote' is not a valid WorkerKind",
+        ),
+        (
+            {"Claude": {"kind": "external", "secret_env": "S"}},
+            "claude",
+            "workers.Claude: worker 'Claude' is not a worker name",
+        ),
+        (
+            {"claude": {"kind": "external", "secret_env": "S", "colour": "blue"}},
+            "claude",
+            "workers.claude: unknown key(s) colour",
+        ),
+    ],
+)
+def test_a_worker_table_that_is_wrong_is_refused(
+    workers: dict[str, object], worker: str | None, problem: str
+) -> None:
+    agent = {**AGENT, "engine": "echo"}
+    if worker is not None:
+        agent["worker"] = worker
+    with pytest.raises(ConfigError, match=re.escape(problem)):
+        parse_config({**MODEL_TABLES, "workers": workers, "agents": {"a": agent}})
+
+
+def test_an_engine_this_build_lacks_runs_on_an_external_worker_alone() -> None:
+    problem = re.escape(
+        "agents.a: engine 'claude-code' is not one of ('langchain', 'pydantic-ai', 'echo'); an"
+        " engine this build does not have runs on an external worker alone"
+    )
+    with pytest.raises(ConfigError, match=problem):
+        parse_config({**MODEL_TABLES, "agents": {"a": {**AGENT, "engine": "claude-code"}}})
+    with pytest.raises(ConfigError, match=problem):
+        parse_config(
+            {
+                **MODEL_TABLES,
+                "workers": {"special": {}},
+                "agents": {"a": {**AGENT, "engine": "claude-code", "worker": "special"}},
+            }
+        )

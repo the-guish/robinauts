@@ -45,6 +45,7 @@ from robinauts.cli.composition import (
     SecretLookup,
     compose,
     configure,
+    external_secrets,
     init_database,
     load,
     read_tables,
@@ -121,6 +122,11 @@ def serving(
         config, secret_for = configure(tables, environ)
     except ConfigError as refused:
         problems.append(str(refused))
+    else:
+        try:
+            external_secrets(config, secret_for)
+        except ConfigError as refused:
+            problems.append(str(refused))
     if problems:
         raise ConfigError("\n".join(problems))
     return config, secret_for, sign_in
@@ -215,6 +221,13 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     logging.basicConfig(level=logging.INFO)
     if dev_no_sign_in:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
+    for external in config.external_workers():
+        logging.getLogger(__name__).info(
+            "worker %r is external: let in with the secret %s holds, and neither started nor"
+            " waited for by this server",
+            external.id,
+            external.secret_env,
+        )
     lifecycle = Lifecycle(
         composed,
         # A store in this process is this process's alone: its worker runs here.
