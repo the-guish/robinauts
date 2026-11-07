@@ -3,9 +3,9 @@
 
 """The one module that imports both the controller and the worker; the rest of ``cli`` gets
 them from here. Loads a configuration file, and builds a controller: the store for the storage
-asked, the application over it, what a worker needs of the core over that store, and for each
-worker the configuration names the worker that claims and runs its agents' turns through it,
-with the credentials sign-in keeps on the same storage.
+asked, the application over it, what a worker needs of the core over that store, and the one
+worker of this process that claims and runs every agent's turns through it, with the
+credentials sign-in keeps on the same storage.
 A worker in a process of its own is built with `compose_worker`, over the core it is handed:
 `http_turn_broker`, the server's API.
 The file holds web's tables beside the controller's, so web is handed the tables of one
@@ -35,8 +35,8 @@ from robinauts.controller.adapters.postgres.schema import (
 )
 from robinauts.controller.adapters.postgres.store import PostgresStore
 from robinauts.controller.application.controller import RobinautsController
-from robinauts.controller.application.turn_broker import InProcessTurnBroker
-from robinauts.controller.contract.broker.ports import TurnBroker
+from robinauts.controller.application.turn_broker import InProcessTurnBroker, WorkerTurnBroker
+from robinauts.controller.contract.broker.ports import CoreTurnBroker, TurnBroker
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.controller.contract.ports import Controller, Credentials
 from robinauts.controller.core.config import parse_config
@@ -77,18 +77,21 @@ def storage_from(environ: Mapping[str, str]) -> StorageConfig:
 @dataclass(frozen=True, slots=True)
 class Composed:
     """The controller, the credentials on its storage, what a worker needs of the core, and
-    the workers over it, by name. The credentials and the core open nothing: they
-    use the store, which `controller.open` opens and `close` closes. The workers start after
-    `open` and stop before `close`, by the shell's hand; the agent engines' store is each
-    worker's own, which it opens at its start and closes at its stop."""
+    the worker over it. The credentials and the core open nothing: they use the store, which
+    `controller.open` opens and `close` closes. The worker starts after `open` and stops before
+    `close`, by the shell's hand; the agent engines' store is its own, which it opens at its start
+    and closes at its stop."""
 
     controller: Controller
     credentials: Credentials
-    workers: Mapping[str, Worker]
-    """By name, the default first: those that run in this process."""
-    broker: TurnBroker
-    """Over the controller's store: every worker's in this process, and what the API serves
-    the workers in processes of their own, each claiming by its name."""
+    worker: Worker
+    """The one worker in this process, which runs every agent's turns."""
+    broker: CoreTurnBroker
+    """Over the controller's store: the worker's in this process, and what the API serves the
+    workers in processes of their own, each claiming for the worker its secret names."""
+    workers: tuple[str, ...] = (DEFAULT_WORKER,)
+    """The workers the configuration names, the default first: one process each, when the
+    workers run in processes of their own."""
 
 
 def compose(
@@ -113,18 +116,14 @@ def compose(
         raise NotImplementedError(f"{storage.kind} storage")
     controller = RobinautsController(config, store=store)
     broker = InProcessTurnBroker(store)
-    workers = {
-        name: compose_worker(
-            config,
-            storage=storage,
-            secret_for=secret_for,
-            broker=broker,
-            engines=engines,
-            name=name,
-        )
-        for name in config.workers()
-    }
-    return Composed(controller, credentials, workers, broker)
+    worker = compose_worker(
+        config,
+        storage=storage,
+        secret_for=secret_for,
+        broker=WorkerTurnBroker(broker, DEFAULT_WORKER),
+        engines=engines,
+    )
+    return Composed(controller, credentials, worker, broker, config.workers())
 
 
 def compose_worker(
@@ -134,9 +133,10 @@ def compose_worker(
     secret_for: SecretLookup,
     broker: TurnBroker,
     engines: Mapping[str, EngineFactory] | None = None,
-    name: str = DEFAULT_WORKER,
+    name: str | None = None,
 ) -> Worker:
-    """The worker `name`, which reaches the core through `broker` alone. Its engines keep their
+    """The worker `name`, which reaches the core through `broker` alone: with no name, the
+    one worker of the server's process, which runs every agent. Its engines keep their
     state on `storage`: on PostgreSQL in a pool of the worker's own, which reads and writes the
     engines' tables, never the core's."""
     agent_engine_store = None

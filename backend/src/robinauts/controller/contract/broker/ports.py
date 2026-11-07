@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The turn broker's port: what a worker needs from the core, and all it reaches of it."""
+"""The turn broker's ports: what a worker needs from the core, and all it reaches of it, and
+the core's own broker, which serves every worker."""
 
 from __future__ import annotations
 
@@ -20,36 +21,17 @@ from robinauts.controller.contract.broker.domain import (
 from robinauts.shared_domain.domain import Session, Turn, TurnState
 
 
-class TurnBroker(ABC):
-    """What a worker needs from the core, and all it reaches of it: the tasks it claims, renews
-    and is asked to stop, the turn each names, the session and the messages a turn reads, and
-    the events and the end it writes (``docs/architecture/controller.md``, "Worker").
+class TurnOperations(ABC):
+    """What every turn broker does beside claiming: the leases of the tasks a worker runs and
+    the tasks it is asked to stop, the turn each names, the session and the messages a turn
+    reads, and the events and the end it writes (``docs/architecture/controller.md``,
+    "Worker").
 
     The operations are the store's of the same names, with the same refusals:
     ``SessionNotFoundError`` for a session missing, hidden or another owner's, and
     ``TurnLostError`` for a write on a turn the worker no longer holds. Every time comes from
-    the worker's clock. A worker in this process has it over the controller's store; one in a
-    process of its own, over HTTP, from the server that spawned it (``web/worker_api.py``).
-
-    There is one broker for every worker. Its claims and waits name the worker they are for,
-    and see the tasks of that worker's agents alone (``AgentConfig.worker``). A worker in this
-    process names itself; for one in a process of its own, the server names it, from the
-    secret it presents, whatever the worker sends (``web/worker_api.py``).
+    the worker's clock.
     """
-
-    @abstractmethod
-    async def claim_tasks(
-        self, now: datetime, until: datetime, limit: int, worker: str
-    ) -> list[Task]:
-        """Up to ``limit`` of ``worker``'s queued tasks, made running, with their lease until
-        ``until``. Each task is claimed once, whichever process asks."""
-        raise NotImplementedError
-
-    @abstractmethod
-    async def wait_for_queued(self, now: datetime, timeout: float, worker: str) -> bool:
-        """Wait until a task ``claim_tasks`` would claim for ``worker`` is queued, or
-        ``timeout`` seconds have passed: true in the first case, false in the second."""
-        raise NotImplementedError
 
     @abstractmethod
     async def renew_leases(
@@ -127,4 +109,48 @@ class TurnBroker(ABC):
     @abstractmethod
     async def close(self) -> None:
         """Stop listening for cancels, and release what reaching the core took."""
+        raise NotImplementedError
+
+
+class TurnBroker(TurnOperations):
+    """What a worker needs from the core, and all it reaches of it. A worker in this process
+    has it over the controller's store; one in a process of its own, over HTTP, from the server
+    that spawned it (``web/worker_api.py``).
+
+    A worker never names itself: the tasks it claims and waits for are those it is handed. A
+    worker in a process of its own is known to the server by the secret it presents, and handed
+    the tasks of its own agents alone (``AgentConfig.worker``, ``CoreTurnBroker``).
+    """
+
+    @abstractmethod
+    async def claim_tasks(self, now: datetime, until: datetime, limit: int) -> list[Task]:
+        """Up to ``limit`` queued tasks, made running, with their lease until ``until``. Each
+        task is claimed once, whichever worker asks."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def wait_for_queued(self, now: datetime, timeout: float) -> bool:
+        """Wait until a task ``claim_tasks`` would claim is queued, or ``timeout`` seconds
+        have passed: true in the first case, false in the second."""
+        raise NotImplementedError
+
+
+class CoreTurnBroker(TurnOperations):
+    """The core's own broker, over the controller's store: the one broker that serves every
+    worker. Its claims and waits name the worker they are for, and see the tasks of that
+    worker's agents. The API names the worker of a process of its own from the secret it
+    presents (``web/worker_api.py``); the one worker in the server's process is ``default``."""
+
+    @abstractmethod
+    async def claim_tasks(
+        self, now: datetime, until: datetime, limit: int, worker: str
+    ) -> list[Task]:
+        """Up to ``limit`` queued tasks of ``worker``, made running, with their lease until
+        ``until``. Each task is claimed once, whichever worker asks."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def wait_for_queued(self, now: datetime, timeout: float, worker: str) -> bool:
+        """Wait until a task ``claim_tasks`` would claim for ``worker`` is queued, or
+        ``timeout`` seconds have passed: true in the first case, false in the second."""
         raise NotImplementedError

@@ -67,11 +67,10 @@ class InProcessStore(Store):
             None,
         )
 
-    def _claimable(self, now: datetime, worker: str) -> list[Task]:
+    def _claimable(self, now: datetime) -> list[Task]:
+        # Not by worker: this process's one worker runs every agent's turns.
         queued = [
-            k
-            for k in self._tasks.values()
-            if k.state is TaskState.QUEUED and k.lease_until > now and k.worker == worker
+            k for k in self._tasks.values() if k.state is TaskState.QUEUED and k.lease_until > now
         ]
         return sorted(queued, key=lambda k: (k.created_at, k.id))
 
@@ -277,7 +276,7 @@ class InProcessStore(Store):
         self, now: datetime, until: datetime, limit: int, worker: str
     ) -> list[Task]:
         claimed = []
-        for found in self._claimable(now, worker)[:limit]:
+        for found in self._claimable(now)[:limit]:
             running = dataclasses.replace(
                 found, state=TaskState.RUNNING, lease_until=until, claimed_at=now
             )
@@ -298,7 +297,7 @@ class InProcessStore(Store):
         async with self._changed:
             try:
                 await asyncio.wait_for(
-                    self._changed.wait_for(lambda: bool(self._claimable(now, worker))), timeout
+                    self._changed.wait_for(lambda: bool(self._claimable(now))), timeout
                 )
             except TimeoutError:
                 return False

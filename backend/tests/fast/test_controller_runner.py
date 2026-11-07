@@ -22,7 +22,7 @@ from robinauts.cli.lifecycle import Lifecycle
 from robinauts.controller.adapters.in_process.credentials import InProcessCredentials
 from robinauts.controller.adapters.in_process.store import InProcessStore
 from robinauts.controller.application.controller import RobinautsController
-from robinauts.controller.application.turn_broker import InProcessTurnBroker
+from robinauts.controller.application.turn_broker import InProcessTurnBroker, WorkerTurnBroker
 from robinauts.controller.contract.broker.documents import event_from_document
 from robinauts.controller.contract.domain import ActiveTurn, Identity, NumberedEvent, User
 from robinauts.shared_domain.domain import (
@@ -72,14 +72,14 @@ async def over(
     controller = RobinautsController(CONFIG, store=store, **options)
     broker = InProcessTurnBroker(store)
     worker = Worker(
-        broker,
+        WorkerTurnBroker(broker, DEFAULT_WORKER),
         CONFIG,
         storage=StorageConfig(StorageKind.IN_PROCESS),
         secret_for={}.get,
         engines=engines,
         close_timeout=close_timeout,
     )
-    composed = Composed(controller, InProcessCredentials(store), {DEFAULT_WORKER: worker}, broker)
+    composed = Composed(controller, InProcessCredentials(store), worker, broker)
     lifecycle = Lifecycle(composed)
     await lifecycle.start()
     return lifecycle
@@ -114,9 +114,7 @@ async def test_a_runner_whose_claim_is_refused_runs_no_engine_and_never_finishes
     # A second runner for the same task, as a duplicate dispatch would be.
     turn = await controller._store.get_turn(user.id, sid, started.turn_id)
     assert turn is not None
-    await lifecycle.composed.workers[DEFAULT_WORKER].run_task(
-        await controller._store.get_task(turn.task_id)
-    )
+    await lifecycle.composed.worker.run_task(await controller._store.get_task(turn.task_id))
     assert engine.stream.call_count == 1
     turn = await controller._store.get_turn(user.id, sid, started.turn_id)
     assert turn is not None
@@ -132,7 +130,7 @@ async def test_a_runner_refused_mid_stream_writes_nothing_more() -> None:
     lifecycle, controller, engine, gate, user, started = await gated_turn()
     sid = started.session_id
     turn = await controller._store.get_turn(user.id, sid, started.turn_id)
-    task = lifecycle.composed.workers[DEFAULT_WORKER]._running[turn.task_id]
+    task = lifecycle.composed.worker._running[turn.task_id]
     controller._now = shift_clock(FIVE_MINUTES)
     assert (await controller.open_session(user, sid)).active is None
     gate.set()
@@ -207,7 +205,7 @@ async def test_a_cancel_of_a_turn_another_process_runs_reaches_it() -> None:
 async def test_close_interrupts_a_running_turn_and_keeps_an_answer_being_finished() -> None:
     lifecycle, controller, _, _, user, started = await gated_turn()
     sid = started.session_id
-    lifecycle.composed.workers[DEFAULT_WORKER]._close_timeout = 0.05
+    lifecycle.composed.worker._close_timeout = 0.05
     await lifecycle.stop()
     turn = await controller._store.get_turn(user.id, sid, started.turn_id)
     assert turn is not None

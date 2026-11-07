@@ -3,11 +3,12 @@
 
 """The start and the stop of what the composition built, in order: what ``robinauts start``
 runs around the HTTP server (``cli/main.py``), and what a test runs around an app or in its
-place. There is a worker for each the configuration names (``AgentConfig.worker``), the
-default first. They run in this process, or each in a process of its own (``broker_url``),
-which reaches the core through this server's API alone, with a secret of its own handed to it
-at its start through a pipe, never its environment: the secret says which worker asks, and
-the API hands it the turns of its own agents alone."""
+place. In this process there is one worker, which runs every agent's turns. With
+``broker_url``, there is a process of its own for each worker the configuration names
+(``AgentConfig.worker``), the default first, which reaches the core through this server's API
+alone, with a secret of its own handed to it at its start through a pipe, never its
+environment: the secret says which worker asks, and the API hands it the turns of its own
+agents alone."""
 
 from __future__ import annotations
 
@@ -65,10 +66,10 @@ def activity_file(worker: str) -> Path:
 
 class Lifecycle:
     def __init__(self, composed: Composed, *, broker_url: str | None = None) -> None:
-        """``broker_url`` runs each worker in a process of its own, which reaches the core at
-        that URL: this server's, as the worker's machine reaches it. That suits PostgreSQL
-        alone, where the engines' state is in the database: an engine in this process would
-        hold nothing of a session another process ran."""
+        """``broker_url`` runs each worker the configuration names in a process of its own,
+        which reaches the core at that URL: this server's, as the worker's machine reaches it.
+        That suits PostgreSQL alone, where the engines' state is in the database: an engine in
+        this process would hold nothing of a session another process ran."""
         self.composed = composed
         self._broker_url = broker_url
         self._workers_running = False
@@ -77,7 +78,8 @@ class Lifecycle:
         self._watching: dict[str, asyncio.Task[None]] = {}
         self.access = WorkerAccess()
         """What lets the workers' processes in through the API, while they run."""
-        self.activity_files = {name: activity_file(name) for name in composed.workers}
+        names = (DEFAULT_WORKER,) if broker_url is None else composed.workers
+        self.activity_files = {name: activity_file(name) for name in names}
         """What each of this node's workers touches at every heartbeat, by worker, in this
         process or its own."""
 
@@ -88,16 +90,15 @@ class Lifecycle:
         await self.composed.controller.open()
         self._opened = True
         if self._broker_url is None:
+            self.composed.worker.activity_file = self.activity_files[DEFAULT_WORKER]
+            await self.composed.worker.start()
             self._workers_running = True
-            for name, worker in self.composed.workers.items():
-                worker.activity_file = self.activity_files[name]
-                await worker.start()
             return
         self._workers_running = True
         await self.composed.broker.listen_for_cancels(self.access.stop_requested)
         try:
             # Side by side: a server is up once its slowest worker is.
-            spawning = [self._spawn(name, self._broker_url) for name in self.composed.workers]
+            spawning = [self._spawn(name, self._broker_url) for name in self.activity_files]
             failed = [
                 result
                 for result in await asyncio.gather(*spawning, return_exceptions=True)
@@ -197,7 +198,7 @@ class Lifecycle:
         if self._workers_running:
             self._workers_running = False
             if self._broker_url is None:
-                await asyncio.gather(*(w.stop() for w in self.composed.workers.values()))
+                await self.composed.worker.stop()
             else:
                 await asyncio.gather(*(self._stop_process(n) for n in list(self._processes)))
         self.access.close()

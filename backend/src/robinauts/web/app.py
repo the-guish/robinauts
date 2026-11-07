@@ -42,7 +42,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from robinauts.controller.contract.broker.ports import TurnBroker
+from robinauts.controller.contract.broker.ports import CoreTurnBroker
 from robinauts.controller.contract.domain import (
     ApiToken,
     DeviceDescription,
@@ -594,7 +594,7 @@ def event_stream(
 def create_app(
     controller: Controller,
     credentials: Credentials,
-    broker: TurnBroker,
+    broker: CoreTurnBroker,
     *,
     worker_access: WorkerAccess,
     healthy: Callable[[], bool],

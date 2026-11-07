@@ -100,7 +100,9 @@ class Store(ABC):
     ) -> list[Task]:
         """Up to ``limit`` queued tasks of ``worker`` whose lease has not passed ``now``, oldest
         first, made running, claimed at ``now`` with their lease until ``until``; in one
-        operation. Each task is claimed once, whichever process asks."""
+        operation. Each task is claimed once, whichever process asks. A store whose one worker
+        runs in its own process, as the in-process store's does, may hand that worker every
+        task, whatever worker it is stamped for."""
 
     @abstractmethod
     async def wait_for_queued(self, now: datetime, timeout: float, worker: str) -> bool:

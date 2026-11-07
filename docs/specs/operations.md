@@ -99,6 +99,8 @@ What an internal platform team deploys and controls.
   start and stops at its stop. The server's broker API hands each worker the turns of its
   own agents and no other's: a worker is known by the secret the server gave it, not by
   anything it says. A worker builds the engines of its own agents alone.
+- Without PostgreSQL, in the local development mode, there is one worker, in the server's
+  process, and it runs every agent's turns: `worker` keys change nothing there.
 - `max_running_tasks_per_worker` is per worker: each runs that many turns at once.
 - `/health` answers 503 when any of the server's workers has not been heard from.
 - A turn is bound to its worker when it is queued. A turn queued for a worker the

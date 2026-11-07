@@ -31,7 +31,7 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import AwareDatetime
 
-from robinauts.controller.contract.broker.ports import TurnBroker
+from robinauts.controller.contract.broker.ports import CoreTurnBroker
 from robinauts.shared_domain.domain import DEFAULT_WORKER, SessionNotFoundError, TurnLostError
 from robinauts.web.contract.broker.wire import (
     MAX_WAIT_SECONDS,
@@ -154,7 +154,7 @@ class _Refusing(APIRoute):
         return refusing
 
 
-def worker_router(broker: TurnBroker, access: WorkerAccess) -> APIRouter:
+def worker_router(broker: CoreTurnBroker, access: WorkerAccess) -> APIRouter:
     """The routes of ``PREFIX``, over ``broker``, for the workers ``access`` lets in."""
 
     def worker_only(request: Request) -> str:

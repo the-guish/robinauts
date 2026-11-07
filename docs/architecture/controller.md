@@ -31,22 +31,25 @@ controller. The shell starts it after `open` and stops it before `close`
 (`cli/lifecycle.py`). A server finishes its start-up once its workers have started, and stops
 them before it stops listening.
 
-A server runs one worker per name its agents give (`[agents.*] worker`), and `default`
-for the agents that give none; `default` always runs. When a turn is queued, its task is
-stamped with its agent's worker (`Config.worker_of`), and a worker claims and waits for the
-tasks stamped with its own name alone. Each worker builds the engines of its own agents at
-its start. On PostgreSQL each worker is a process of its own; in the server's process, with
-the store there too, they are workers side by side in that process.
+On PostgreSQL a server runs one worker per name its agents give (`[agents.*] worker`), and
+`default` for the agents that give none; `default` always runs. Each is a process of its
+own. When a turn is queued, its task is stamped with its agent's worker (`Config.worker_of`),
+and a worker is handed the tasks stamped with its own name alone. Each worker builds the
+engines of its own agents at its start. With the store in the server's process, there is one
+worker, `default`, in that process, which runs every agent's turns: the in-process store
+does not filter by worker.
 
 The worker reaches the core through one port, `TurnBroker` (`contract/broker/ports.py`), and
 never through the store. The broker's contract also holds what crosses it: the tasks, the
 messages and events as stored records, and their encoding as documents
 (`contract/broker/documents.py`), which the worker writes and the controller reads. These are its operations, the store's of the same names:
 
-- `claim_tasks`, `wait_for_queued`: the queued tasks of the worker's agents, made the
-  worker's. Both take the worker's name: there is one broker for every worker. A worker in
-  the server's process names itself; for one in a process of its own, the API names it from
-  its secret.
+- `claim_tasks`, `wait_for_queued`: the queued tasks the worker is handed, made the
+  worker's. A worker never names itself. There is one broker, the core's
+  (`CoreTurnBroker`), for every worker: its claims and waits take the worker's name, which
+  the API gives from the secret of the worker that asks. The worker in the server's process
+  reaches it through `WorkerTurnBroker`, as `default`, and the in-process store hands it every
+  task.
 - `renew_leases`, `listen_for_cancels`: the leases of the tasks it runs, and the tasks asked
   to stop.
 - `get_task`, `find_turn`: what a task names.
