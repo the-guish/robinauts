@@ -236,7 +236,7 @@ CREATE INDEX IF NOT EXISTS messages_session_id_parent_id_idx
 -- by a cancel from any process, and read back with each renewal of the lease.
 -- All of them are set by the application's clock.
 --
--- `worker` is the worker that may claim the task: its agent's, named in the
+-- `worker_queue` is the worker that may claim the task: its agent's, named in the
 -- configuration when the task was queued, or `default` (docs/specs/operations.md,
 -- "Workers").
 CREATE TABLE IF NOT EXISTS tasks (
@@ -251,12 +251,12 @@ CREATE TABLE IF NOT EXISTS tasks (
     lease_until timestamptz NOT NULL,
     claimed_at timestamptz,
     cancel_requested_at timestamptz,
-    worker text NOT NULL
+    worker_queue text NOT NULL
 );
 
 -- What a worker claims from: its queued tasks, oldest first.
 CREATE INDEX IF NOT EXISTS tasks_queued_idx
-    ON tasks (worker, created_at, id) WHERE state = 'queued';
+    ON tasks (worker_queue, created_at, id) WHERE state = 'queued';
 
 -- What the sweep reads: the tasks not done whose lease has passed.
 CREATE INDEX IF NOT EXISTS tasks_lease_until_idx
