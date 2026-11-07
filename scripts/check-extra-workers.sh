@@ -28,8 +28,9 @@ for project in "$root"/extra-workers/*/; do
     cd "$project"
     # The backend is installed editable, which builds its metadata: no --no-build.
     uv sync --locked
-    uv run --locked ruff check src tests
-    uv run --locked black --check src tests
+    # The project's own files: its tests, and its package where it has one.
+    uv run --locked ruff check .
+    uv run --locked black --check .
     uv run --locked pytest -q -p no:cacheprovider
     if [ -f "$project/Dockerfile" ]; then
         if docker info >/dev/null 2>&1; then

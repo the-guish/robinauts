@@ -38,6 +38,17 @@ updates:
     commit-message:
       prefix: "frontend"
 
+  # The extra workers, each a uv project of its own (extra-workers/README.md).
+  - package-ecosystem: "uv"
+    directory: "/extra-workers/base-worker"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 10
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "base-worker"
+
   # The actions this repository's workflows run, pinned to commit SHAs.
   - package-ecosystem: "github-actions"
     directory: "/"

@@ -19,10 +19,10 @@ What they have in common, and what a new one keeps:
   variables its `-e` flags name, and a mount of the configuration file. The
   database's URL is not passed on: the worker reaches the core over HTTP alone.
 - **It runs `robinauts.cli.worker_process`**, the backend's own worker module,
-  with its engine installed beside the `robinauts` package and registered under
-  the `robinauts.engines` entry-point group. Leases, heartbeats, cancels,
-  stalls, failed answers and resumes are the worker's and are not written
-  again. The wire it speaks is `web/contract/broker/wire.py`, which has no
+  with any engine of its own installed beside the `robinauts` package and
+  registered under the `robinauts.engines` entry-point group. Leases,
+  heartbeats, cancels, stalls, failed answers and resumes are the worker's and
+  are not written again. The wire it speaks is `web/contract/broker/wire.py`, which has no
   version handshake yet: an extra worker runs the same build of `robinauts` as
   the server it serves.
 - **Nothing in `backend/` names it.** The backend's import-linter cannot see
@@ -36,5 +36,12 @@ What they have in common, and what a new one keeps:
   file, its lock under the licence gate (`scripts/check-licences.sh`), ruff and
   black under the backend's rules, its own tests, and the image built in CI.
 
-The first extra worker, one that runs its turns on Claude Code through the Claude
-Agent SDK in a Docker container, follows in a pull request of its own.
+The workers:
+
+| folder | what it runs | state |
+| --- | --- | --- |
+| [base-worker/](base-worker/README.md) | the backend's worker module and nothing else: any engine the backend ships, for the agents of its worker | in memory, as long as the container |
+
+`base-worker/` is what a new extra worker starts from: copy it, add the package
+that brings the engine, keep the rest. One that runs its turns on Claude Code
+through the Claude Agent SDK follows in a pull request of its own.
