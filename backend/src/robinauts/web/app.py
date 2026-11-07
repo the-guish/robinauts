@@ -42,7 +42,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from robinauts.controller.contract.broker.ports import TurnBroker
+from robinauts.controller.contract.broker.ports import CoreTurnBroker
 from robinauts.controller.contract.domain import (
     ApiToken,
     DeviceDescription,
@@ -594,7 +594,7 @@ def event_stream(
 def create_app(
     controller: Controller,
     credentials: Credentials,
-    broker: TurnBroker,
+    broker: CoreTurnBroker,
     *,
     worker_access: WorkerAccess,
     healthy: Callable[[], bool],
@@ -604,9 +604,10 @@ def create_app(
 ) -> FastAPI:
     """The HTTP server alone. Whoever runs it opens the controller and starts the worker before
     it serves, and stops the worker and closes the controller after (``cli/lifecycle.py``).
-    ``broker`` and ``worker_access`` serve a worker in a process of its own at
-    ``/internal/worker/``; ``healthy`` says whether this node's worker is heard from, for
-    ``/health``. ``sign_in`` is ``None`` in the local development mode."""
+    ``broker`` and ``worker_access`` serve the workers in processes of their own at
+    ``/internal/worker/``, each known by its secret; ``healthy`` says whether this node's
+    workers are heard from, for ``/health``. ``sign_in`` is ``None`` in the local development
+    mode."""
     exchange: Exchange | None = None
     flow: SignIn | None = None
     if sign_in is not None:
@@ -1104,7 +1105,7 @@ def create_app(
 
     @app.get("/health", include_in_schema=False)
     async def health() -> JSONResponse:
-        # This node's worker, heard from within five minutes. Nothing is queried.
+        # This node's workers, each heard from within five minutes. Nothing is queried.
         if healthy():
             return JSONResponse({"status": "ok"})
         return JSONResponse({"status": "the worker is not running"}, status_code=503)

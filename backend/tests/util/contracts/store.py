@@ -11,6 +11,7 @@ a store keeps them whole and never reads inside.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import uuid
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, timedelta
@@ -113,6 +114,18 @@ class StoreContract:
         running, running_task = turn(one.id, asked.id)
         await store.queue_turn(me.id, running, running_task, asked)
         return me, one, asked, running
+
+    async def queue_for(self, store: Store, me: User, worker: str) -> Task:
+        """A session of ``me`` with a question, and its turn queued for ``worker``."""
+        one = session(me.id)
+        await store.add_session(one)
+        asked = question(one.id)
+        queued, running_task = turn(one.id, asked.id)
+        task = dataclasses.replace(
+            running_task, state=TaskState.QUEUED, claimed_at=None, worker=worker
+        )
+        await store.queue_turn(me.id, queued, task, asked)
+        return task
 
     async def append(
         self,

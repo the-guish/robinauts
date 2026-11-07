@@ -68,6 +68,7 @@ class InProcessStore(Store):
         )
 
     def _claimable(self, now: datetime) -> list[Task]:
+        # Not by worker: this process's one worker runs every agent's turns.
         queued = [
             k for k in self._tasks.values() if k.state is TaskState.QUEUED and k.lease_until > now
         ]
@@ -271,7 +272,9 @@ class InProcessStore(Store):
                 renewed.append(task)
         return [k for k in renewed if k in self._cancel_requested]
 
-    async def claim_tasks(self, now: datetime, until: datetime, limit: int) -> list[Task]:
+    async def claim_tasks(
+        self, now: datetime, until: datetime, limit: int, worker: str
+    ) -> list[Task]:
         claimed = []
         for found in self._claimable(now)[:limit]:
             running = dataclasses.replace(
@@ -290,7 +293,7 @@ class InProcessStore(Store):
             return None
         return self._sessions[found.session_id].owner_id, found
 
-    async def wait_for_queued(self, now: datetime, timeout: float) -> bool:
+    async def wait_for_queued(self, now: datetime, timeout: float, worker: str) -> bool:
         async with self._changed:
             try:
                 await asyncio.wait_for(

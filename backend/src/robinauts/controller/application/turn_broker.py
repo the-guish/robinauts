@@ -5,7 +5,9 @@
 own store.
 
 The worker of a server that runs it in this process has it, and so has the API that serves a
-worker in a process of its own (``web/worker_api.py``). The store is the controller's, which
+worker in a process of its own (``web/worker_api.py``): one for every worker, whose claims and
+waits name the worker they are for. The API names the worker its secret says; the worker in this
+process has it through ``WorkerTurnBroker``, as ``default``. The store is the controller's, which
 the controller opens and closes: this opens and closes nothing.
 """
 
@@ -22,20 +24,22 @@ from robinauts.controller.contract.broker.domain import (
     StoredMessage,
     Task,
 )
-from robinauts.controller.contract.broker.ports import TurnBroker
+from robinauts.controller.contract.broker.ports import CoreTurnBroker, TurnBroker
 from robinauts.controller.ports.store import Store
 from robinauts.shared_domain.domain import Session, Turn, TurnState
 
 
-class InProcessTurnBroker(TurnBroker):
+class InProcessTurnBroker(CoreTurnBroker):
     def __init__(self, store: Store) -> None:
         self._store = store
 
-    async def claim_tasks(self, now: datetime, until: datetime, limit: int) -> list[Task]:
-        return await self._store.claim_tasks(now, until, limit)
+    async def claim_tasks(
+        self, now: datetime, until: datetime, limit: int, worker: str
+    ) -> list[Task]:
+        return await self._store.claim_tasks(now, until, limit, worker)
 
-    async def wait_for_queued(self, now: datetime, timeout: float) -> bool:
-        return await self._store.wait_for_queued(now, timeout)
+    async def wait_for_queued(self, now: datetime, timeout: float, worker: str) -> bool:
+        return await self._store.wait_for_queued(now, timeout, worker)
 
     async def renew_leases(
         self, tasks: Sequence[uuid.UUID], now: datetime, until: datetime
@@ -95,3 +99,76 @@ class InProcessTurnBroker(TurnBroker):
     async def close(self) -> None:
         """Nothing to release: the store is the controller's. A stop it listens with stays,
         and ignores the tasks its worker no longer runs."""
+
+
+class WorkerTurnBroker(TurnBroker):
+    """One worker's turn broker over the core's: the core's, with its claims and waits for
+    ``worker``. What the worker in the server's process reaches the core through."""
+
+    def __init__(self, core: CoreTurnBroker, worker: str) -> None:
+        self._core = core
+        self._worker = worker
+
+    async def claim_tasks(self, now: datetime, until: datetime, limit: int) -> list[Task]:
+        return await self._core.claim_tasks(now, until, limit, self._worker)
+
+    async def wait_for_queued(self, now: datetime, timeout: float) -> bool:
+        return await self._core.wait_for_queued(now, timeout, self._worker)
+
+    async def renew_leases(
+        self, tasks: Sequence[uuid.UUID], now: datetime, until: datetime
+    ) -> list[uuid.UUID]:
+        return await self._core.renew_leases(tasks, now, until)
+
+    async def listen_for_cancels(self, stop: Callable[[uuid.UUID], object]) -> None:
+        await self._core.listen_for_cancels(stop)
+
+    async def get_task(self, task: uuid.UUID) -> Task | None:
+        return await self._core.get_task(task)
+
+    async def find_turn(self, turn: uuid.UUID) -> tuple[uuid.UUID, Turn] | None:
+        return await self._core.find_turn(turn)
+
+    async def get_session(self, owner: uuid.UUID, session: uuid.UUID) -> Session:
+        return await self._core.get_session(owner, session)
+
+    async def sessions_of(
+        self, owner: uuid.UUID, limit: int, before: Cursor | None
+    ) -> list[Session]:
+        return await self._core.sessions_of(owner, limit, before)
+
+    async def messages_of(self, owner: uuid.UUID, session: uuid.UUID) -> list[Document]:
+        return await self._core.messages_of(owner, session)
+
+    async def append_event(
+        self,
+        owner: uuid.UUID,
+        session: uuid.UUID,
+        turn: uuid.UUID,
+        position: int,
+        document: Document,
+        written_at: datetime,
+        expires_at: datetime,
+    ) -> None:
+        await self._core.append_event(
+            owner, session, turn, position, document, written_at, expires_at
+        )
+
+    async def finish_turn(
+        self,
+        owner: uuid.UUID,
+        session: uuid.UUID,
+        turn: uuid.UUID,
+        state: TurnState,
+        ended_at: datetime,
+        error: str | None,
+        answer: StoredMessage | None,
+        events: Sequence[StoredEvent],
+        updated_at: datetime,
+    ) -> None:
+        await self._core.finish_turn(
+            owner, session, turn, state, ended_at, error, answer, events, updated_at
+        )
+
+    async def close(self) -> None:
+        await self._core.close()

@@ -3,8 +3,9 @@
 
 """The one module that imports both the controller and the worker; the rest of ``cli`` gets
 them from here. Loads a configuration file, and builds a controller: the store for the storage
-asked, the application over it, what a worker needs of the core over that store, and the worker that
-claims and runs its turns through it, with the credentials sign-in keeps on the same storage.
+asked, the application over it, what a worker needs of the core over that store, and the one
+worker of this process that claims and runs every agent's turns through it, with the
+credentials sign-in keeps on the same storage.
 A worker in a process of its own is built with `compose_worker`, over the core it is handed:
 `http_turn_broker`, the server's API.
 The file holds web's tables beside the controller's, so web is handed the tables of one
@@ -34,13 +35,13 @@ from robinauts.controller.adapters.postgres.schema import (
 )
 from robinauts.controller.adapters.postgres.store import PostgresStore
 from robinauts.controller.application.controller import RobinautsController
-from robinauts.controller.application.turn_broker import InProcessTurnBroker
-from robinauts.controller.contract.broker.ports import TurnBroker
+from robinauts.controller.application.turn_broker import InProcessTurnBroker, WorkerTurnBroker
+from robinauts.controller.contract.broker.ports import CoreTurnBroker, TurnBroker
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.controller.contract.ports import Controller, Credentials
 from robinauts.controller.core.config import parse_config
 from robinauts.controller.ports.store import Store
-from robinauts.shared_domain.domain import Config, StorageConfig, StorageKind
+from robinauts.shared_domain.domain import DEFAULT_WORKER, Config, StorageConfig, StorageKind
 from robinauts.tools import sessions
 from robinauts.tools.contract.ports import ToolProvider
 from robinauts.worker.agent_engine_store import PoolAgentEngineStore
@@ -84,9 +85,13 @@ class Composed:
     controller: Controller
     credentials: Credentials
     worker: Worker
-    broker: TurnBroker
-    """Over the controller's store: the worker's in this process, and what the API serves a
-    worker in a process of its own."""
+    """The one worker in this process, which runs every agent's turns."""
+    broker: CoreTurnBroker
+    """Over the controller's store: the worker's in this process, and what the API serves the
+    workers in processes of their own, each claiming for the worker its secret names."""
+    workers: tuple[str, ...] = (DEFAULT_WORKER,)
+    """The workers the configuration names, the default first: one process each, when the
+    workers run in processes of their own."""
 
 
 def compose(
@@ -112,9 +117,13 @@ def compose(
     controller = RobinautsController(config, store=store)
     broker = InProcessTurnBroker(store)
     worker = compose_worker(
-        config, storage=storage, secret_for=secret_for, broker=broker, engines=engines
+        config,
+        storage=storage,
+        secret_for=secret_for,
+        broker=WorkerTurnBroker(broker, DEFAULT_WORKER),
+        engines=engines,
     )
-    return Composed(controller, credentials, worker, broker)
+    return Composed(controller, credentials, worker, broker, config.workers())
 
 
 def compose_worker(

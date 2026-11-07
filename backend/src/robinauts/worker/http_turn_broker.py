@@ -9,7 +9,8 @@ A worker starts before its server listens, and stops while it still does, so a c
 refused is tried again, for up to ``CONNECT_PATIENCE`` seconds: the request was never sent.
 Nothing else is tried again. The cancels are polled for by a task of their own, from
 ``listen_for_cancels`` until ``close``; one lost while the poll fails is named by the next
-renewal of the leases.
+renewal of the leases. The worker is never named: the server knows which worker asks by its
+secret, and hands it the tasks of that worker's agents alone.
 """
 
 from __future__ import annotations

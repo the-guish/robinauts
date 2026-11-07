@@ -22,10 +22,11 @@ from robinauts.cli.lifecycle import Lifecycle
 from robinauts.controller.adapters.in_process.credentials import InProcessCredentials
 from robinauts.controller.adapters.in_process.store import InProcessStore
 from robinauts.controller.application.controller import RobinautsController
-from robinauts.controller.application.turn_broker import InProcessTurnBroker
+from robinauts.controller.application.turn_broker import InProcessTurnBroker, WorkerTurnBroker
 from robinauts.controller.contract.broker.documents import event_from_document
 from robinauts.controller.contract.domain import ActiveTurn, Identity, NumberedEvent, User
 from robinauts.shared_domain.domain import (
+    DEFAULT_WORKER,
     SessionNotFoundError,
     StorageConfig,
     StorageKind,
@@ -71,7 +72,7 @@ async def over(
     controller = RobinautsController(CONFIG, store=store, **options)
     broker = InProcessTurnBroker(store)
     worker = Worker(
-        broker,
+        WorkerTurnBroker(broker, DEFAULT_WORKER),
         CONFIG,
         storage=StorageConfig(StorageKind.IN_PROCESS),
         secret_for={}.get,

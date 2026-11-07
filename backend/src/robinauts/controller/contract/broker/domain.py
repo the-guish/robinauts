@@ -13,7 +13,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from robinauts.shared_domain.domain import Role
+from robinauts.shared_domain.domain import DEFAULT_WORKER, Role
 
 # --- tasks ----------------------------------------------------------------------
 
@@ -43,6 +43,8 @@ class Task:
     lease_until: datetime
     """While queued, how long the task may wait; once claimed, the worker's lease."""
     claimed_at: datetime | None = None
+    worker: str = DEFAULT_WORKER
+    """The worker that may claim it: its agent's, when it was queued."""
 
 
 # --- records, as a store keeps them and a worker writes them ---------------------

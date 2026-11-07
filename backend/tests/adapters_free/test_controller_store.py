@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The PostgreSQL store keeps the store's contract, and the races the plan names."""
+"""The PostgreSQL store keeps the store's contract, and the races the plan names. Its workers
+run in processes of their own, so it hands each the tasks of its own agents alone."""
 
 from __future__ import annotations
 
@@ -16,9 +17,11 @@ import pytest
 from robinauts.controller.adapters.postgres.pool import codecs, open_pool
 from robinauts.controller.adapters.postgres.schema import create_schema
 from robinauts.controller.adapters.postgres.store import PostgresStore
+from robinauts.controller.contract.broker.domain import TaskState
 from robinauts.controller.contract.domain import TurnActiveError, User
 from robinauts.controller.ports.store import Store, StoredMessage
 from robinauts.shared_domain.domain import (
+    DEFAULT_WORKER,
     Role,
     Session,
     SessionNotFoundError,
@@ -27,7 +30,7 @@ from robinauts.shared_domain.domain import (
     TurnState,
 )
 from util.aio import asyncio_test
-from util.contracts.store import StoreContract, turn
+from util.contracts.store import MINUTE, StoreContract, store_test, turn, user
 from util.controller_db import TemporarySchema, requires_postgres, temporary_schema, url
 
 pytestmark = requires_postgres
@@ -51,6 +54,45 @@ class TestPostgresStore(StoreContract):
         assert isinstance(store, PostgresStore)
         await store.close()
         await self.__dict__["schemas"].pop(id(store)).close()
+
+    # --- tasks, by worker: one process each ----------------------------------
+
+    @store_test
+    async def test_a_queued_task_is_claimed_by_its_worker_alone(self, store: Store) -> None:
+        me = user()
+        await store.add_or_refresh_user(me)
+        tasks = {
+            worker: await self.queue_for(store, me, worker)
+            for worker in (DEFAULT_WORKER, "special")
+        }
+        assert await store.wait_for_queued(NOW, 0.05, "elsewhere") is False
+        assert await store.claim_tasks(NOW, NOW + MINUTE, 10, "elsewhere") == []
+        for worker, task in tasks.items():
+            assert await store.wait_for_queued(NOW, 0.05, worker) is True
+            claimed = await store.claim_tasks(NOW, NOW + MINUTE, 10, worker)
+            assert [(k.id, k.worker, k.state) for k in claimed] == [
+                (task.id, worker, TaskState.RUNNING)
+            ]
+            assert await store.claim_tasks(NOW, NOW + MINUTE, 10, worker) == []
+            found = await store.get_task(task.id)
+            assert found is not None
+            assert found.worker == worker
+
+    @store_test
+    async def test_a_wait_for_queued_ends_on_a_task_of_its_worker_alone(self, store: Store) -> None:
+        me = user()
+        await store.add_or_refresh_user(me)
+
+        async def soon(worker: str) -> None:
+            await asyncio.sleep(0.05)
+            await self.queue_for(store, me, worker)
+
+        queuing = asyncio.create_task(soon(DEFAULT_WORKER))
+        assert await store.wait_for_queued(NOW, 0.5, "special") is False
+        await queuing
+        queuing = asyncio.create_task(soon("special"))
+        assert await store.wait_for_queued(NOW, 5.0, "special") is True
+        await queuing
 
 
 async def seeded(store: Store) -> tuple[User, Session, StoredMessage, Turn]:

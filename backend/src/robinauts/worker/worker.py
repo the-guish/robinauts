@@ -3,9 +3,12 @@
 
 """The worker: everything about the tasks this process runs.
 
-It builds the engines, claims queued tasks and runs each as an asyncio task with
-``run_task``. It renews the leases of the tasks it runs, and stops a task asked to stop, from
-any process. A task is claimed by one worker, whichever process stored it.
+It builds the engines, claims the queued tasks its broker hands it and runs each as an asyncio
+task with ``run_task``. Which tasks those are is the broker's: a worker in a process of its own
+is handed the tasks of the agents whose configuration names it (``AgentConfig.worker``), and
+the one worker in the server's process every agent's. It renews the leases of the tasks it runs,
+and stops a task asked to stop, from any process. A task is claimed by one worker, whichever
+process stored it.
 
 It reaches the core through its ``TurnBroker`` alone, never the core's store: in the server's
 process, or over HTTP from a process of its own. The engines keep their state in its
