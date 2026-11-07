@@ -167,6 +167,10 @@ topic documents listed under [Documents](#documents).
   the platform writes each call and result into the transcript as it
   happens. [agent-engines.md](agent-engines.md),
   [the-path-of-one-message.md](../architecture/the-path-of-one-message.md).
+- **Files.** An agent keeps files for a person in a folder that is theirs
+  with that agent alone, through a small set of file tools whose reach is
+  that folder, on a file system the operator provides: a directory today,
+  a bucket or a drive behind the same port later. [files.md](files.md).
 - **A turn.** The UI posts a message, which queues a **turn**. A worker
   hands the agent port the question and the checkpoint of the nearest
   answer above it, publishes what the adapter streams as AG-UI events,
@@ -213,6 +217,7 @@ hard, the decision is taken with them in mind.
 | [sign-in.md](sign-in.md) | sign-in, users, roles |
 | [privacy.md](privacy.md) | visibility, projects, sharing, admins, retention, leavers, audit |
 | [agent-engines.md](agent-engines.md) | the agent engines: their contract, the turn, the sessions |
+| [files.md](files.md) | the files an agent keeps for a person: the folder, the basic edit tools, the file system port |
 | [wire.md](wire.md) | the UI-to-backend protocol |
 | [frontend.md](frontend.md) | the interface, build, supply chain, packaging |
 | [operations.md](operations.md) | deployment, configuration, limits, usage (planned) |

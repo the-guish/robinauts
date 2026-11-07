@@ -233,6 +233,7 @@ source_modules = ["robinauts.shared_domain"]
 forbidden_modules = [
     "robinauts.agent_engines",
     "robinauts.controller",
+    "robinauts.filesystems",
     "robinauts.tools",
     "robinauts.worker",
     "robinauts.web",
@@ -247,6 +248,7 @@ source_modules = ["robinauts.agent_engines"]
 forbidden_modules = [
     "robinauts.shared_domain",
     "robinauts.controller",
+    "robinauts.filesystems",
     "robinauts.tools",
     "robinauts.worker",
     "robinauts.web",
@@ -280,6 +282,7 @@ allow_indirect_imports = true
 source_modules = ["robinauts.controller"]
 forbidden_modules = [
     "robinauts.agent_engines",
+    "robinauts.filesystems",
     "robinauts.tools",
     "robinauts.worker",
     "robinauts.web",
@@ -298,6 +301,7 @@ forbidden_modules = [
     "robinauts.controller.application",
     "robinauts.cli",
     "robinauts.agent_engines",
+    "robinauts.filesystems",
     "robinauts.tools",
     "robinauts.worker",
 ]
@@ -370,6 +374,7 @@ forbidden_modules = [
     "robinauts.controller.adapters",
     "robinauts.controller.application",
     "robinauts.agent_engines",
+    "robinauts.filesystems",
     "robinauts.tools",
     "robinauts.worker",
 ]
@@ -398,16 +403,18 @@ forbidden_modules = [
     "robinauts.controller.application",
     "robinauts.cli",
     "robinauts.agent_engines",
+    "robinauts.filesystems",
     "robinauts.tools",
     "robinauts.worker",
 ]
 
 # --- worker --------------------------------------------------------------------
 # A sibling of the controller, which it reaches through the turn broker alone:
-# controller.contract.broker, and web.contract.broker over HTTP.
+# controller.contract.broker, and web.contract.broker over HTTP. Of the file
+# systems it sees the contract, which it binds a turn's folder through.
 
 [[tool.importlinter.contracts]]
-name = "worker imports the broker's contracts, shared_domain, and the engines' and tools' contracts"
+name = "worker imports the broker's contracts, shared_domain, and the engines', tools' and file systems' contracts"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts.worker"]
@@ -422,7 +429,9 @@ forbidden_modules = [
     "robinauts.agent_engines.echo_engine",
     "robinauts.agent_engines.langchain_engine",
     "robinauts.agent_engines.pydantic_ai_engine",
+    "robinauts.filesystems.local",
     "robinauts.tools.sessions",
+    "robinauts.tools.basic_edit",
     "robinauts.web",
 ]
 # The one part of web the worker may see: the HTTP its turn broker speaks to the server.
@@ -436,6 +445,7 @@ source_modules = [
     "robinauts.shared_domain",
     "robinauts.agent_engines",
     "robinauts.controller",
+    "robinauts.filesystems",
     "robinauts.tools",
     "robinauts.web",
     "robinauts.cli",
@@ -457,6 +467,7 @@ forbidden_modules = [
     "robinauts.controller.adapters",
     "robinauts.controller.application",
     "robinauts.agent_engines",
+    "robinauts.filesystems",
     "robinauts.tools",
     "robinauts.worker",
 ]
@@ -471,6 +482,7 @@ source_modules = [
     "robinauts.shared_domain",
     "robinauts.agent_engines",
     "robinauts.controller",
+    "robinauts.filesystems",
     "robinauts.tools",
     "robinauts.worker",
     "robinauts.web",
@@ -481,10 +493,10 @@ forbidden_modules = ["robinauts.cli"]
 # Everything about a tool is in its package. A new tool adds its package to the
 # lists below, as a new engine does above: to `forbidden_modules` of the second
 # rule, and to its `source_modules` too, which keeps tools from importing one
-# another.
+# another. Of the file systems a tool sees the contract: the folder it is handed.
 
 [[tool.importlinter.contracts]]
-name = "tools import the tools' contract and the engines' contract"
+name = "tools import the tools' contract, the engines' contract and the file systems' contract"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts.tools"]
@@ -494,6 +506,7 @@ forbidden_modules = [
     "robinauts.agent_engines.echo_engine",
     "robinauts.agent_engines.langchain_engine",
     "robinauts.agent_engines.pydantic_ai_engine",
+    "robinauts.filesystems.local",
     "robinauts.worker",
     "robinauts.web",
 ]
@@ -507,13 +520,64 @@ allow_indirect_imports = true
 source_modules = [
     "robinauts.agent_engines",
     "robinauts.controller",
+    "robinauts.filesystems",
     "robinauts.worker",
     "robinauts.web",
     "robinauts.cli",
     "robinauts.tools.contract",
+    "robinauts.tools.sessions",
+    "robinauts.tools.basic_edit",
 ]
-forbidden_modules = ["robinauts.tools.sessions"]
-ignore_imports = ["robinauts.cli.composition -> robinauts.tools.sessions"]
+forbidden_modules = ["robinauts.tools.sessions", "robinauts.tools.basic_edit"]
+ignore_imports = [
+    "robinauts.cli.composition -> robinauts.tools.sessions",
+    "robinauts.cli.composition -> robinauts.tools.basic_edit",
+]
+
+# --- filesystems ---------------------------------------------------------------
+# The port the tools keep files through, and an adapter per kind of storage. The
+# contract is all the tools and the worker see; an adapter is named by
+# cli.composition alone, as an engine's package is. A new adapter adds its
+# package to the two lists below.
+
+[[tool.importlinter.contracts]]
+name = "filesystems imports nothing from robinauts outside itself"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.filesystems"]
+forbidden_modules = [
+    "robinauts.shared_domain",
+    "robinauts.agent_engines",
+    "robinauts.controller",
+    "robinauts.tools",
+    "robinauts.worker",
+    "robinauts.web",
+    "robinauts.cli",
+]
+
+[[tool.importlinter.contracts]]
+name = "the file systems' contract imports no adapter"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.filesystems.contract"]
+forbidden_modules = ["robinauts.filesystems.local"]
+
+[[tool.importlinter.contracts]]
+name = "a file system adapter is named by cli.composition alone"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = [
+    "robinauts.shared_domain",
+    "robinauts.agent_engines",
+    "robinauts.controller",
+    "robinauts.tools",
+    "robinauts.worker",
+    "robinauts.web",
+    "robinauts.cli",
+    "robinauts.filesystems.contract",
+]
+forbidden_modules = ["robinauts.filesystems.local"]
+ignore_imports = ["robinauts.cli.composition -> robinauts.filesystems.local"]
 
 # --- third-party libraries: where each may be imported ----------------------
 # The source is the whole package, so a module added tomorrow is inside the

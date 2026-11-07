@@ -219,6 +219,15 @@ heartbeat_seconds = 30
 sweep_seconds = 300
 stalled_after_seconds = 900
 max_running_tasks_per_worker = 100
+
+# Optional: where an agent with the `basic_edit` tool keeps the files it
+# writes for a person, as <path>/<user id>/<agent id>. Here with its
+# defaults; `~` is the service user's home. A deployment names a directory of
+# its own, such as "/var/lib/robinauts/files", and backs it up with the
+# database.
+[files]
+kind = "local"
+path = "~/robinauts"
 ```
 
 Notes on what is and is not there:
@@ -288,6 +297,12 @@ Notes on what is and is not there:
   server spawns one process per worker named, and hands each the turns of its
   own agents alone. `max_running_tasks_per_worker` counts per worker
   ([specs/operations.md](specs/operations.md), "Workers").
+- **`[files]`.** An agent with `tools = ["basic_edit"]` keeps text files for
+  each person in a folder of theirs under `path`, and can name nothing
+  outside it ([specs/files.md](specs/files.md)). The root is made at the
+  first start, for the service user alone; one that cannot be made or
+  written refuses the start. Without such an agent nothing is written
+  there, and the table is not needed.
 - A file with no `[agents]` table is a deployment with no agents: it
   starts, the picker is empty, and the log says so.
 

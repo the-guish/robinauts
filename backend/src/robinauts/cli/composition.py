@@ -41,8 +41,17 @@ from robinauts.controller.contract.domain import ConfigError
 from robinauts.controller.contract.ports import Controller, Credentials
 from robinauts.controller.core.config import parse_config
 from robinauts.controller.ports.store import Store
-from robinauts.shared_domain.domain import DEFAULT_WORKER, Config, StorageConfig, StorageKind
-from robinauts.tools import sessions
+from robinauts.filesystems.contract.domain import MAX_SEGMENT_BYTES, plain
+from robinauts.filesystems.contract.ports import FileSystem
+from robinauts.filesystems.local import LocalFileSystem
+from robinauts.shared_domain.domain import (
+    DEFAULT_WORKER,
+    Config,
+    FilesKind,
+    StorageConfig,
+    StorageKind,
+)
+from robinauts.tools import basic_edit, sessions
 from robinauts.tools.contract.ports import ToolProvider
 from robinauts.worker.agent_engine_store import PoolAgentEngineStore
 from robinauts.worker.engine_settings import SecretLookup, engine_settings
@@ -54,11 +63,45 @@ DATABASE_URL_VARIABLE = "ROBINAUTS_DATABASE_URL"
 
 def built_in_tools() -> dict[str, ToolProvider]:
     """This build's tools by id, loaded from a fixed list: the one place that names a tool."""
-    loaded = [sessions.load()]
+    loaded = [sessions.load(), basic_edit.load()]
     return {tool.id: tool for tool in loaded}
 
 
-CONTROLLER_TABLES = frozenset({"model_providers", "models", "tool_servers", "agents", "work"})
+KEEPS_FILES = frozenset({basic_edit.ID})
+"""The tools of this build that keep files in the owner's folder with the agent: an agent
+that names one needs a file system, and an id that can name a folder."""
+
+
+def keeps_files(config: Config) -> bool:
+    """Whether any agent names a tool that keeps files. `ConfigError` for one whose id cannot
+    name a folder, said at start-up rather than at its first turn."""
+    using = [agent for agent in config.agents.values() if KEEPS_FILES & set(agent.tools)]
+    if wrong := [agent.id for agent in using if not plain(agent.id)]:
+        tools = ", ".join(sorted(KEEPS_FILES))
+        raise ConfigError(
+            "\n".join(
+                f"agents.{id_}: an agent with the {tools} tool keeps files in a folder named"
+                f" after it, and {id_!r} cannot name one: no '/' or backslash, not '.' or"
+                f" '..', printable, at most {MAX_SEGMENT_BYTES} bytes"
+                for id_ in wrong
+            )
+        )
+    return bool(using)
+
+
+def file_system_for(config: Config) -> FileSystem | None:
+    """The file system the agents' folders are on, of the kind `[files]` names; none when no
+    agent keeps files."""
+    if not keeps_files(config):
+        return None
+    if config.files.kind is FilesKind.LOCAL:
+        return LocalFileSystem(Path(config.files.path).expanduser())
+    raise NotImplementedError(f"{config.files.kind} files")
+
+
+CONTROLLER_TABLES = frozenset(
+    {"model_providers", "models", "tool_servers", "agents", "work", "files"}
+)
 """The file's tables that are the controller's, the ones `parse_config` reads."""
 
 SCHEMA_READY = "the database is at schema version {version} (schema.sql {digest})"
@@ -153,6 +196,7 @@ def compose_worker(
         agent_engine_store=agent_engine_store,
         engines=engines,
         tools=built_in_tools(),
+        files=file_system_for(config),
         name=name,
     )
 
@@ -176,7 +220,9 @@ def load(path: Path, environ: Mapping[str, str]) -> tuple[Config, SecretLookup]:
 
 
 def configure(tables: Mapping[str, Any], environ: Mapping[str, str]) -> tuple[Config, SecretLookup]:
-    return parse_config(tables, tools=built_in_tools().keys()), environ.get
+    config = parse_config(tables, tools=built_in_tools().keys())
+    keeps_files(config)
+    return config, environ.get
 
 
 async def init_database(url: str, config: Config, secret_for: SecretLookup) -> str:

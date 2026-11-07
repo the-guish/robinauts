@@ -3,8 +3,10 @@
 
 """The tools of a turn: what binds this build's tools to the turn's owner and agent.
 
-The bound reads are the one place a tool's view of the platform's data is limited to one person
-and one agent, so no tool has to, and none can do otherwise.
+The bound reads, and the bound folder, are the one place a tool's view of the platform's data
+and of the file system is limited to one person and one agent, so no tool has to, and none can
+do otherwise. The folder is ``<owner>/<agent>`` on the file system the build keeps files on:
+the owner's id, which names nobody to anyone reading the disk, and the agent's.
 """
 
 from __future__ import annotations
@@ -15,6 +17,8 @@ from collections.abc import Mapping
 from robinauts.agent_engines.contract.domain import FunctionTool
 from robinauts.controller.contract.broker.documents import message_from_document
 from robinauts.controller.contract.broker.ports import TurnBroker
+from robinauts.filesystems.contract.domain import plain
+from robinauts.filesystems.contract.ports import FileSystem
 from robinauts.shared_domain.domain import AgentConfig, Message, Session, SessionNotFoundError
 from robinauts.tools.contract.ports import ScopedData, ToolProvider, TurnScope
 
@@ -54,11 +58,17 @@ def functions_for(
     broker: TurnBroker,
     owner: uuid.UUID,
     session: Session,
+    files: FileSystem | None = None,
 ) -> tuple[FunctionTool, ...]:
     """The function tools of the turn: those of each of this build's tools the agent names,
-    bound to the session's owner and agent."""
+    bound to the session's owner and agent, and to their folder on ``files`` when there is
+    one. An agent whose id cannot name a folder has none, and names no tool that needs one
+    (``cli.composition``)."""
     named = [tools[name] for name in agent.tools if name in tools]
     if not named:
         return ()
-    scope = TurnScope(session.id, session.agent, OwnedData(broker, owner, session.agent))
+    folder = None
+    if files is not None and plain(session.agent):
+        folder = files.folder(str(owner), session.agent)
+    scope = TurnScope(session.id, session.agent, OwnedData(broker, owner, session.agent), folder)
     return tuple(function for tool in named for function in tool.tools_for(scope))

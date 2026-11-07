@@ -6,7 +6,8 @@
 A tool is given a ``TurnScope`` for each turn. The scope holds no user id and no store: what a
 tool may read of the platform's data, it reads through ``ScopedData``, which the worker
 binds to the turn's owner and agent before the tool sees it. A tool cannot name another user,
-nor another agent's sessions.
+nor another agent's sessions. What a tool may keep on a file system, it keeps in the scope's
+``Folder``, bound the same way: the owner's with this agent, and nothing outside it.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from robinauts.agent_engines.contract.domain import FunctionTool
+from robinauts.filesystems.contract.ports import Folder
 from robinauts.shared_domain.domain import Message, Session
 
 
@@ -46,6 +48,9 @@ class TurnScope:
     """The session the turn is in."""
     agent: str
     data: ScopedData
+    folder: Folder | None = None
+    """The owner's folder with this agent, when the build keeps files; a tool that needs one
+    is only ever named beside a build that has one (``cli.composition``)."""
 
 
 class ToolProvider(ABC):

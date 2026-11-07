@@ -15,6 +15,10 @@ robinauts/
       shared_domain/    the records more than one package uses
       agent_engines/    the agent port and its engines: contract/,
                         echo_engine/, langchain_engine/, pydantic_ai_engine/
+      filesystems/      the file system port the tools keep files through, and its
+                        adapters: contract/, local/
+      tools/            the platform's own tools, one package each: contract/,
+                        sessions/, basic_edit/
       controller/       the application: contract/ (and contract/broker/),
                         core/, ports/, application/,
                         adapters/{in_process,postgres}/

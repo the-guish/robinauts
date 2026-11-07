@@ -25,6 +25,10 @@ What an internal platform team deploys and controls.
 - Outbound traffic: the identity providers at sign-in, the model providers
   the operator configured, and the MCP tool servers the operator configured.
   Nothing else.
+- **What is written to disk** beside the database: the files the agents
+  keep for people, under the files root `[files]` names
+  ([files.md](files.md)), when an agent has the `basic_edit` tool. A
+  backup is the database and that root.
 - **What a tool server sees is one identity per deployment.** A server's
   credential is the operator's, read from the environment variable its table
   names, so every user's turns act as that service account and the server's
@@ -72,7 +76,8 @@ What an internal platform team deploys and controls.
   are set, `ROBINAUTS_CONFIG` is what is read and the start-up log says so.
 - What the operator configures: sign-in providers, the allow list and the
   admins ([sign-in.md](sign-in.md)); model providers, models, agents and
-  the MCP tool servers agents may use; limits and retention (below).
+  the MCP tool servers agents may use; where the agents' files are kept,
+  `[files]` ([files.md](files.md)); limits and retention (below).
 - The **local development mode** ([sign-in.md](sign-in.md)) may be given the
   same file and reads only its model tables; a file that also holds sign-in
   tables is a start-up refusal there.

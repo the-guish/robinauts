@@ -6,13 +6,14 @@ runs them.
 
 ## Top level
 
-shared_domain -> nothing from robinauts; any package but agent_engines may import it
+shared_domain -> nothing from robinauts; any package but agent_engines and filesystems may import it
 agent_engines -> nothing from robinauts
-tools -> agent_engines.contract
+filesystems -> nothing from robinauts
+tools -> agent_engines.contract, filesystems.contract
 controller -> shared_domain
-worker -> controller.contract.broker, web.contract.broker, agent_engines.contract, tools.contract
+worker -> controller.contract.broker, web.contract.broker, agent_engines.contract, tools.contract, filesystems.contract
 web -> controller.contract
-cli -> web, controller, worker, tools, agent_engines.contract, all but web and controller.contract by cli.composition alone; imported by nothing
+cli -> web, controller, worker, tools, filesystems, agent_engines.contract, all but web and controller.contract by cli.composition alone; imported by nothing
 
 ```mermaid
 flowchart TD
@@ -20,7 +21,9 @@ flowchart TD
     worker -- "web/direct" --> controller
     worker --> tools
     worker --> agent_engines
+    worker --> filesystems
     tools --> agent_engines
+    tools --> filesystems
 ```
 
 ## Inside agent_engines
@@ -33,9 +36,15 @@ no engine imports another
 
 ## Inside tools
 
-contract -> agent_engines.contract
-each tool (sessions) -> contract, agent_engines.contract
+contract -> agent_engines.contract, filesystems.contract
+each tool (sessions, basic_edit) -> contract, agent_engines.contract, filesystems.contract
 no tool imports another; only cli.composition imports a tool
+
+## Inside filesystems
+
+contract -> nothing from robinauts
+local -> contract
+no adapter imports another; only cli.composition imports an adapter
 
 ## Inside controller
 

@@ -9,7 +9,13 @@ import pytest
 
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.controller.core.config import parse_config
-from robinauts.shared_domain.domain import DEFAULT_WORKER, ProviderKind, ToolServerAuth
+from robinauts.shared_domain.domain import (
+    DEFAULT_WORKER,
+    FilesConfig,
+    FilesKind,
+    ProviderKind,
+    ToolServerAuth,
+)
 
 AGENT = {"title": "A", "system_prompt": "", "model": "fast"}
 
@@ -262,3 +268,27 @@ def test_a_tool_server_may_not_take_the_id_of_a_tool_of_this_build() -> None:
         ConfigError, match=re.escape("tool_servers.sessions: the id of a tool of this build")
     ):
         parse_config(raw, tools={"sessions"})
+
+
+def test_the_files_table_is_optional_and_names_the_kind_and_the_path() -> None:
+    assert parse_config({}).files == FilesConfig(FilesKind.LOCAL, "~/robinauts")
+    parsed = parse_config({"files": {"path": "/var/lib/robinauts/files"}}).files
+    assert parsed == FilesConfig(FilesKind.LOCAL, "/var/lib/robinauts/files")
+    assert parse_config({"files": {"kind": "local", "path": "~/x"}}).files.path == "~/x"
+
+
+@pytest.mark.parametrize(
+    ("files", "problem"),
+    [
+        ({"kind": "s3"}, "files: kind 's3' is not one of: local"),
+        ({"kind": 1}, "files: kind 1 is not one of: local"),
+        ({"path": ""}, "files: path must name a folder"),
+        ({"path": 7}, "files: path must name a folder"),
+        ({"bucket": "b"}, "files: unknown key(s) bucket"),
+    ],
+)
+def test_a_files_table_that_says_what_this_build_cannot_do_is_refused(
+    files: dict[str, object], problem: str
+) -> None:
+    with pytest.raises(ConfigError, match=re.escape(problem)):
+        parse_config({"files": files})

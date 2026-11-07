@@ -12,6 +12,8 @@ from robinauts.controller.contract.domain import ConfigError
 from robinauts.shared_domain.domain import (
     AgentConfig,
     Config,
+    FilesConfig,
+    FilesKind,
     ModelConfig,
     ProviderConfig,
     ProviderKind,
@@ -58,6 +60,25 @@ def _seconds(value: Any) -> float:
     return float(value)
 
 
+def _files(given: Mapping[str, Any], problems: list[str]) -> FilesConfig:
+    """``[files]``, with its defaults for what is left out."""
+    default = FilesConfig()
+    if unknown := sorted(set(given) - {field.name for field in dataclasses.fields(FilesConfig)}):
+        problems.append(f"files: unknown key(s) {', '.join(unknown)}")
+        return default
+    kind = given.get("kind", default.kind.value)
+    path = given.get("path", default.path)
+    wrong = False
+    if not isinstance(kind, str) or kind not in {k.value for k in FilesKind}:
+        kinds = ", ".join(k.value for k in FilesKind)
+        problems.append(f"files: kind {kind!r} is not one of: {kinds}")
+        wrong = True
+    if not isinstance(path, str) or not path.strip():
+        problems.append('files: path must name a folder, such as "~/robinauts"')
+        wrong = True
+    return default if wrong else FilesConfig(FilesKind(kind), path)
+
+
 def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
     """``tools`` are the ids of the tools this build runs in process, which an agent's ``tools``
     may name beside the tool servers."""
@@ -98,6 +119,7 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
         work = WorkConfig(**seconds, max_running_tasks_per_worker=tasks)
         if work.heartbeat_seconds * 2 > work.lease_seconds:
             problems.append("work: heartbeat_seconds must be at most half of lease_seconds")
+    files = _files(dict(raw.get("files", {})), problems)
 
     for server in tool_servers.values():
         if server.auth is ToolServerAuth.HEADER:
@@ -135,4 +157,4 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
             problems.append(f"agents.{agent.id}: engine {agent.engine!r} is not one of {ENGINES}")
     if problems:
         raise ConfigError("\n".join(problems))
-    return Config(providers, models, tool_servers, agents, work)
+    return Config(providers, models, tool_servers, agents, work, files)

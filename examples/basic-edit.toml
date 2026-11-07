@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+
+# An agent that keeps notes: the basic edit tools, in a folder of its own for each
+# person, under the files root (docs/specs/files.md). The echo engine reads no key.
+[model_providers.echo]
+kind = "anthropic"
+api_key_env = "ECHO_API_KEY"
+
+[models.echo]
+provider = "echo"
+name = "echo"
+title = "Echo"
+
+[agents.notes]
+title = "Notes"
+system_prompt = "Keep the person's notes in your folder."
+model = "echo"
+engine = "echo"
+tools = ["basic_edit"]
+
+# Optional, here with its defaults: where every agent's folders are, as
+# <path>/<user id>/<agent id>. `~` is the home of the user the server runs as.
+[files]
+kind = "local"
+path = "~/robinauts"

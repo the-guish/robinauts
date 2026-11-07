@@ -50,6 +50,10 @@ with no licence to renegotiate.
 - AI vendors: Anthropic and OpenAI directly. OpenRouter, which gives access to OpenAI, Google and many others. AWS Bedrock planned.
 - Tools over MCP: assistants can call remote tool servers such as GitHub,
   Atlassian or Microsoft Learn. Each call is shown in the chat.
+- Files: an assistant can keep notes and other text files for a person, in
+  a folder that is that person's with that assistant alone, through a small
+  set of file tools whose reach is that folder. On the server's disk today;
+  S3 and Google Drive are planned behind the same seam.
 - UI for managing conversation history. Message editing and replaying.
 - Two AI agent frameworks built in, LangGraph and Pydantic AI, chosen per
   assistant by configuration. A conversation stays with the framework it

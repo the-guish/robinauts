@@ -27,9 +27,12 @@ from robinauts.agent_engines.contract.domain import AgentDefinition
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineFactory, installed
 from robinauts.controller.contract.broker.domain import RUN_TURN, Task
 from robinauts.controller.contract.broker.ports import TurnBroker
+from robinauts.filesystems.contract.domain import FileSystemError
+from robinauts.filesystems.contract.ports import FileSystem
 from robinauts.shared_domain.domain import (
     DEFAULT_WORKER,
     Config,
+    FilesUnusableError,
     Message,
     StorageConfig,
     StorageKind,
@@ -84,16 +87,19 @@ class Worker:
         agent_engine_store: AgentEngineStore | None = None,
         engines: Mapping[str, EngineFactory] | None = None,
         tools: Mapping[str, ToolProvider] | None = None,
+        files: FileSystem | None = None,
         name: str = DEFAULT_WORKER,
         wait_timeout: float = QUEUE_WAIT_TIMEOUT,
         close_timeout: float = CLOSE_TIMEOUT,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         """``engines`` are the factories by engine name; the installed ones when not given.
-        ``tools`` are this build's tools by id; none when not given. ``agent_engine_store`` is
-        where the engines keep their state; none, an engine's storage takes no handle. ``name``
-        is the worker's: ``start`` builds the engines of its agents alone, and an agent of
-        another's, whose turn its broker handed it all the same, gets its engine on demand."""
+        ``tools`` are this build's tools by id; none when not given. ``files`` is the file system
+        the tools that keep files get the turn's folder on; none when no agent keeps files.
+        ``agent_engine_store`` is where the engines keep their state; none, an engine's storage
+        takes no handle. ``name`` is the worker's: ``start`` builds the engines of its agents
+        alone, and an agent of another's, whose turn its broker handed it all the same, gets
+        its engine on demand."""
         self._broker = broker
         self.name = name
         self._agent_engine_store = agent_engine_store
@@ -103,6 +109,7 @@ class Worker:
         self._secret_for = secret_for
         self._given_engines = engines
         self._tools: Mapping[str, ToolProvider] = dict(tools or {})
+        self._files = files
         self._wait_timeout = wait_timeout
         self._close_timeout = close_timeout
         self._now = now or (lambda: datetime.now(UTC))
@@ -126,8 +133,13 @@ class Worker:
         return self._storage.kind is not StorageKind.POSTGRES
 
     async def start(self) -> None:
-        """Open the agent engines' store, build the engines on it, listen for cancels, then start
-        renewing leases and claiming tasks."""
+        """Make the files' place ready, open the agent engines' store, build the engines on it,
+        listen for cancels, then start renewing leases and claiming tasks."""
+        if self._files is not None:
+            try:
+                await self._files.setup()
+            except FileSystemError as unusable:
+                raise FilesUnusableError(str(unusable)) from unusable
         store = self._agent_engine_store
         self._handle = None if store is None else await store.open()
         self._factories = dict(installed() if self._given_engines is None else self._given_engines)
@@ -295,7 +307,7 @@ class Worker:
         definition = AgentDefinition(
             agent_config.system_prompt,
             tuple(name for name in agent_config.tools if name not in self._tools),
-            functions_for(agent_config, self._tools, self._broker, owner, session),
+            functions_for(agent_config, self._tools, self._broker, owner, session, self._files),
         )
         await run_turn(
             self._broker,

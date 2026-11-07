@@ -41,6 +41,11 @@ class TurnLostError(ControllerError):
     another runner holds the position. The runner writes nothing more."""
 
 
+class FilesUnusableError(ControllerError):
+    """The place the agents' files are kept cannot be used: a worker whose agents keep files
+    does not start."""
+
+
 # --- configuration ------------------------------------------------------------
 
 
@@ -122,6 +127,22 @@ class WorkConfig:
     max_running_tasks_per_worker: int = 100
 
 
+class FilesKind(StrEnum):
+    """Where the agents' files are kept (``docs/specs/files.md``): a directory on the server
+    so far; a bucket or a drive is a kind to come."""
+
+    LOCAL = "local"
+
+
+@dataclass(frozen=True, slots=True)
+class FilesConfig:
+    """``[files]``: the file system the folders of the agents that keep files are on. ``path``
+    is the local kind's directory, ``~`` being the service user's home."""
+
+    kind: FilesKind = FilesKind.LOCAL
+    path: str = "~/robinauts"
+
+
 @dataclass(frozen=True, slots=True)
 class Config:
     providers: Mapping[str, ProviderConfig] = field(default_factory=dict)
@@ -129,6 +150,7 @@ class Config:
     tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
     agents: Mapping[str, AgentConfig] = field(default_factory=dict)
     work: WorkConfig = field(default_factory=WorkConfig)
+    files: FilesConfig = field(default_factory=FilesConfig)
 
     def workers(self) -> tuple[str, ...]:
         """Every worker the agents name: the default first, which always runs, then the
@@ -146,7 +168,7 @@ class Config:
         """This configuration with the agents of that worker alone: what it builds engines
         for and runs turns of."""
         agents = {id_: a for id_, a in self.agents.items() if a.worker == worker}
-        return Config(self.providers, self.models, self.tool_servers, agents, self.work)
+        return Config(self.providers, self.models, self.tool_servers, agents, self.work, self.files)
 
 
 class StorageKind(StrEnum):
