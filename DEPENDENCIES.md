@@ -88,7 +88,7 @@ Three are Python's,
 ["Restricted dependencies in use"](#restricted-dependencies-in-use),
 ["Excepted development-only dependencies"](#excepted-development-only-dependencies)
 and ["Excepted licence texts"](#excepted-licence-texts), and
-`scripts/licence_gate.py` reads them against `backend/uv.lock`. The first two
+`scripts/licence_gate.py` reads them against `backend/uv.lock`, and then against each extra worker's lock (`extra-workers/*/uv.lock`), which adds its engine's dependencies to the same policy. The first two
 are held to that lock: every row names a package it has. The third is not — a
 row there may name a package ahead of its adoption, and the gate notes it as
 not locked rather than failing. The fourth

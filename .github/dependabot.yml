@@ -20,6 +20,18 @@ updates:
     commit-message:
       prefix: "backend"
 
+  # The Claude Code worker (extra-workers/claude-container), a uv project of
+  # its own with its own lock: the Claude Agent SDK, under the same cooldown.
+  - package-ecosystem: "uv"
+    directory: "/extra-workers/claude-container"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 10
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "claude-container"
+
   # The frontend. Exact versions in package.json and a committed
   # package-lock.json, so an update is a diff somebody reads
   # (docs/contributing/js-dependencies.md).
