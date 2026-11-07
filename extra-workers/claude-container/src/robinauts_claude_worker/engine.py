@@ -238,8 +238,17 @@ class ClaudeCodeEngine(AgentEngine):
                 yield item  # type: ignore[misc]
             failure = translation.failure()
             if failure is not None:
+                # The turn's error is the operator's to read on the turn; the log says that
+                # it happened, and why when the credential was refused, never what was said.
                 if translation.credential_refused():
                     failure = refused_text(self._container.auth, provider)
+                    _log.error(failure)
+                else:
+                    result = translation.result
+                    _log.warning(
+                        "Claude Code ended a turn badly: %s",
+                        "no result" if result is None else result.subtype,
+                    )
                 raise EngineError(failure)
             result = translation.result
             assert result is not None
