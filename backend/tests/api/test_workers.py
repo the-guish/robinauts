@@ -66,14 +66,14 @@ def task_of(database_url: str, turn: str) -> tuple[str, str]:
         connection = await asyncpg.connect(database_url)
         try:
             row = await connection.fetchrow(
-                "SELECT k.worker, k.state FROM turns AS t JOIN tasks AS k ON k.id = t.task_id"
+                "SELECT k.worker_queue, k.state FROM turns AS t JOIN tasks AS k ON k.id = t.task_id"
                 " WHERE t.id = $1::uuid",
                 turn,
             )
         finally:
             await connection.close()
         assert row is not None
-        return row["worker"], row["state"]
+        return row["worker_queue"], row["state"]
 
     return asyncio.run(read())
 
@@ -84,10 +84,10 @@ def queued(database_url: str) -> list[str]:
     async def read() -> list[str]:
         connection = await asyncpg.connect(database_url)
         try:
-            rows = await connection.fetch("SELECT worker FROM tasks WHERE state = 'queued'")
+            rows = await connection.fetch("SELECT worker_queue FROM tasks WHERE state = 'queued'")
         finally:
             await connection.close()
-        return [row["worker"] for row in rows]
+        return [row["worker_queue"] for row in rows]
 
     return asyncio.run(read())
 

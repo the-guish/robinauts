@@ -67,7 +67,9 @@ _TURN_COLUMNS = (
     "id, session_id, follows, model, state, started_at, ended_at, error, retries_message_id,"
     " task_id"
 )
-_TASK_COLUMNS = "id, task_name, payload, state, created_at, lease_until, claimed_at, worker"
+_TASK_COLUMNS = (
+    "id, task_name, payload, state, created_at, lease_until, claimed_at, worker_queue"
+)
 
 _VISIBLE = "SELECT 1 FROM sessions WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL"
 
@@ -102,7 +104,7 @@ UPDATE tasks
 SET state = 'running', lease_until = $2, claimed_at = $1
 WHERE state = 'queued' AND id IN (
   SELECT id FROM tasks
-  WHERE state = 'queued' AND worker = $4 AND lease_until > $1
+  WHERE state = 'queued' AND worker_queue = $4 AND lease_until > $1
   ORDER BY created_at, id
   LIMIT $3
   FOR UPDATE SKIP LOCKED
@@ -112,7 +114,7 @@ RETURNING {_TASK_COLUMNS}
 
 _CLAIMABLE = (
     "SELECT EXISTS (SELECT 1 FROM tasks"
-    " WHERE state = 'queued' AND worker = $2 AND lease_until > $1)"
+    " WHERE state = 'queued' AND worker_queue = $2 AND lease_until > $1)"
 )
 
 
@@ -152,7 +154,7 @@ def _task(row: asyncpg.Record) -> Task:
         row["created_at"],
         row["lease_until"],
         row["claimed_at"],
-        row["worker"],
+        row["worker_queue"],
     )
 
 
