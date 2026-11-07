@@ -11,7 +11,8 @@ robinauts/
   demo/             one command to run the whole thing on one machine
   frontend/         the UI (ADR 0006)
   extra-workers/    workers that run beside the server, each a project of its
-                    own composed from backend/ (extra-workers/README.md)
+                    own composed from backend/ (extra-workers/README.md):
+                    claude-container/, a Docker image on Claude Code
   backend/
     src/robinauts/
       shared_domain/    the records more than one package uses
