@@ -23,3 +23,6 @@ frontend/src/api/schema.d.ts
 
 # Scratch space: review findings and other working files.
 tmp/
+
+# The extra workers' environment files: a secret and a credential each, never committed.
+extra-workers/**/*.env

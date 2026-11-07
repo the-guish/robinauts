@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+#
+# A deployment: an instance with sign-in, several people, the operator's API key
+# (CREDENTIALS.md). The server runs as docs/deployment.md installs it, on this machine, and
+# this worker beside it.
+#
+#     cp deployed.env.example /etc/robinauts/claude-container.env   # root, mode 0600; fill it in
+#     docker compose -f extra-workers/claude-container/compose.deployed.yaml up --build -d
+#
+# Run from the repository root, which is the build context.
+
+services:
+  claude-container:
+    build:
+      context: ../..
+      dockerfile: extra-workers/claude-container/Dockerfile
+    image: robinauts-claude-worker:local
+    # The worker's secret and the provider's API key, as the operator wrote them.
+    env_file: ${ROBINAUTS_CLAUDE_ENV_FILE:-/etc/robinauts/claude-container.env}
+    environment:
+      ROBINAUTS_CONFIG: /etc/robinauts/robinauts.toml
+      ROBINAUTS_CLAUDE_AUTH: deployed
+      # The server as this machine reaches it: the address `robinauts start` binds, not the
+      # public name, so that the broker's traffic never leaves the machine.
+      ROBINAUTS_BROKER_URL: http://127.0.0.1:8000
+    network_mode: host
+    volumes:
+      - ${ROBINAUTS_CONFIG_FILE:-/etc/robinauts/robinauts.toml}:/etc/robinauts/robinauts.toml:ro
+      - claude-sessions:/var/lib/claude
+      - claude-workspaces:/workspace
+    restart: unless-stopped
+
+volumes:
+  claude-sessions:
+  claude-workspaces:

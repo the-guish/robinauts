@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+#
+# Personal use: one person, their own machine, their own subscription (CREDENTIALS.md).
+# The server runs on the host, `robinauts start --dev-no-sign-in`, and this worker beside it.
+#
+#     cp personal.env.example personal.env && chmod 600 personal.env   # then fill it in
+#     ROBINAUTS_CONFIG_FILE=/path/to/robinauts.toml \
+#         docker compose -f extra-workers/claude-container/compose.personal.yaml up --build
+#
+# Run from the repository root, which is the build context.
+
+services:
+  claude-container:
+    build:
+      context: ../..
+      dockerfile: extra-workers/claude-container/Dockerfile
+    image: robinauts-claude-worker:local
+    # The two values you made yourself: the worker's secret and your subscription token.
+    env_file: personal.env
+    environment:
+      ROBINAUTS_CONFIG: /etc/robinauts/robinauts.toml
+      ROBINAUTS_CLAUDE_AUTH: personal
+      # The server, on this machine. The local development mode listens on loopback alone,
+      # which the host's network below reaches. On Docker Desktop, where host networking is
+      # not the default, use http://host.docker.internal:8000 and drop `network_mode`.
+      ROBINAUTS_BROKER_URL: http://127.0.0.1:8000
+    network_mode: host
+    volumes:
+      - ${ROBINAUTS_CONFIG_FILE:?set ROBINAUTS_CONFIG_FILE to the server's robinauts.toml}:/etc/robinauts/robinauts.toml:ro
+      # The conversations' state: Claude Code's transcripts, and each conversation's workspace.
+      # They outlive the container, not these volumes.
+      - claude-sessions:/var/lib/claude
+      - claude-workspaces:/workspace
+    restart: unless-stopped
+
+volumes:
+  claude-sessions:
+  claude-workspaces:
