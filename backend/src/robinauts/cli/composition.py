@@ -5,7 +5,8 @@
 them from here. Loads a configuration file, and builds a controller: the store for the storage
 asked, the application over it, and for each worker the configuration names, what it needs of
 the core over that store and the worker that claims and runs its agents' turns through it, with
-the credentials sign-in keeps on the same storage.
+the credentials sign-in keeps on the same storage. An external worker (``WorkerKind.EXTERNAL``)
+runs elsewhere: it gets its broker here, which the API serves it, and no worker.
 A worker in a process of its own is built with `compose_worker`, over the core it is handed:
 `http_turn_broker`, the server's API.
 The file holds web's tables beside the controller's, so web is handed the tables of one
@@ -16,7 +17,7 @@ engines together."""
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -58,7 +59,9 @@ def built_in_tools() -> dict[str, ToolProvider]:
     return {tool.id: tool for tool in loaded}
 
 
-CONTROLLER_TABLES = frozenset({"model_providers", "models", "tool_servers", "agents", "work"})
+CONTROLLER_TABLES = frozenset(
+    {"model_providers", "models", "tool_servers", "agents", "workers", "work"}
+)
 """The file's tables that are the controller's, the ones `parse_config` reads."""
 
 SCHEMA_READY = "the database is at schema version {version} (schema.sql {digest})"
@@ -85,10 +88,13 @@ class Composed:
     controller: Controller
     credentials: Credentials
     workers: Mapping[str, Worker]
-    """By name, the default first: those that run in this process."""
+    """By name, the default first: the process workers, which run in this process or each in a
+    process of its own. An external worker has none."""
     brokers: Mapping[str, TurnBroker]
-    """By worker, over the controller's store: each worker's in this process, and what the API
-    serves the worker of that name in a process of its own."""
+    """By worker, over the controller's store, every worker's: each worker's in this process,
+    and what the API serves the worker of that name in a process of its own, or elsewhere."""
+    external: Mapping[str, str] = field(default_factory=dict)
+    """The secret each external worker presents, by name: what lets it in through the API."""
 
 
 def compose(
@@ -116,6 +122,9 @@ def compose(
     workers: dict[str, Worker] = {}
     for name in config.workers():
         brokers[name] = InProcessTurnBroker(store, name)
+        if config.is_external(name):
+            # Run elsewhere: the API serves it over its broker, and nothing here starts it.
+            continue
         workers[name] = compose_worker(
             config,
             storage=storage,
@@ -124,7 +133,26 @@ def compose(
             engines=engines,
             name=name,
         )
-    return Composed(controller, credentials, workers, brokers)
+    return Composed(controller, credentials, workers, brokers, external_secrets(config, secret_for))
+
+
+def external_secrets(config: Config, secret_for: SecretLookup) -> dict[str, str]:
+    """The secret each external worker presents, by name, read from the variable its table
+    names. ``ConfigError`` naming every variable that is unset or empty."""
+    found: dict[str, str] = {}
+    missing: list[str] = []
+    for worker in config.external_workers():
+        secret = secret_for(worker.secret_env)
+        if secret:
+            found[worker.id] = secret
+        else:
+            missing.append(
+                f"workers.{worker.id}: the secret is read from the environment variable"
+                f" {worker.secret_env}, which is unset or empty"
+            )
+    if missing:
+        raise ConfigError("\n".join(missing))
+    return found
 
 
 def compose_worker(

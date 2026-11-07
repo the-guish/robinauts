@@ -59,6 +59,10 @@ not in the OpenAPI document.
 - The secret says which worker asks, and each is served over a broker of its own: its claims
   and waits see the tasks of its own agents alone, whatever the request says. Cancels are
   every worker's alike; a worker ignores those of tasks it does not run.
+- An external worker (`[workers.<name>] kind = "external"`) is let in the same way, with the
+  secret read from the environment variable its table names rather than one the server made:
+  it runs elsewhere, reaches these routes over the network, and speaks the same wire
+  (`extra-workers/`).
 - The worker reaches the server where it listens, on a loopback address when it listens on
   every address.
 - A turn lost is 409 `turn_lost`, a session not found 404 `session_not_found`: the worker

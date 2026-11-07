@@ -6,7 +6,8 @@ of ``TurnBroker`` (``web/contract/broker/wire.py``), served by the core over the
 controller's store.
 
 There is one such worker per worker the configuration names (``AgentConfig.worker``), each
-with a secret of its own, which the server handed it at its start and ``WorkerAccess`` holds.
+with a secret of its own, which ``WorkerAccess`` holds: handed to a worker process at its
+start, or read from the environment variable an external worker's table names.
 They answer only while a worker runs, and only those secrets: 404 while none runs, 401 for any
 other credential. The secret says which worker asks, and each is served through its own
 broker: a worker claims and waits for the tasks of its own agents, and no other worker's,

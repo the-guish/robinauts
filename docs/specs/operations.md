@@ -104,6 +104,28 @@ What an internal platform team deploys and controls.
 - A turn is bound to its worker when it is queued. A turn queued for a worker the
   configuration no longer names, after a restart, waits until it is ended as queued too
   long.
+- A worker may instead be **external**: run elsewhere, by whoever deploys it, and never
+  started by the server. Its table says so, and names the environment variable that holds
+  the secret it presents to the server's broker API:
+
+  ```toml
+  [workers.claude-container]
+  kind = "external"
+  secret_env = "ROBINAUTS_CLAUDE_CONTAINER_SECRET"
+
+  [agents.claude-container]
+  engine = "claude-code"       # an engine this build does not have: allowed here alone
+  worker = "claude-container"
+  ```
+
+  The server lets it in with that secret from its start, spawns nothing, waits for
+  nothing, and counts it out of `/health`. Its agents' turns wait queued until it claims
+  them, and an agent of an external worker may name an engine this build does not have,
+  since the worker runs it. A table of kind `process`, or none, is the ordinary worker
+  above. Refused at start-up: `default` as external, a table no agent names, an external
+  worker without `secret_env`, `secret_env` on a process worker, and a secret variable
+  that is unset or empty. The first external worker is
+  [extra-workers/claude-container](../../extra-workers/claude-container/README.md).
 
 ## Limits
 

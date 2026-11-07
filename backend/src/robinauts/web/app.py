@@ -16,8 +16,8 @@ must carry ``Origin`` equal to ``public_url``, else 403; a write with a bearer a
 In the local development mode every request must name ``localhost`` or an IP address as its
 ``Host``, and a write that carries ``Origin`` must name that ``Host``, else 403.
 A controller operation that is not implemented answers 501. The ``/internal/worker/`` routes
-answer the server's own worker process alone, by the secret it was handed
-(``web/worker_api.py``).
+answer the workers alone, each by its secret: the server's own processes, handed theirs at
+their start, and an external worker, with the one its table names (``web/worker_api.py``).
 The shapes are the ones the frontend reads (``docs/specs/wire.md``); a turn's stream is
 AG-UI over SSE, its run id is the turn's id, and its thread id the session's.
 """

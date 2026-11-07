@@ -7,7 +7,9 @@ place. There is a worker for each the configuration names (``AgentConfig.worker`
 default first. They run in this process, or each in a process of its own (``broker_url``),
 which reaches the core through this server's API alone, with a secret of its own handed to it
 at its start through a pipe, never its environment: the secret says which worker asks, and
-the API hands it the turns of its own agents alone."""
+the API hands it the turns of its own agents alone. An external worker (``Composed.external``)
+runs elsewhere and is let in with the secret its table names: it is nobody's here to start,
+to wait for, or to count in the health check."""
 
 from __future__ import annotations
 
@@ -76,15 +78,16 @@ class Lifecycle:
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._watching: dict[str, asyncio.Task[None]] = {}
         self.access = WorkerAccess()
-        """What lets the workers' processes in through the API, while they run."""
+        """What lets the workers' processes, and the external workers, in through the API."""
         self.activity_files = {name: activity_file(name) for name in composed.workers}
-        """What each of this node's workers touches at every heartbeat, by worker, in this
-        process or its own."""
+        """What each of this node's process workers touches at every heartbeat, by worker, in
+        this process or its own. An external worker is not this node's to hear from."""
 
     async def start(self) -> None:
         """Open the controller, then start every worker. Return once they all have started, so
         that a server which says it is up runs turns. Each worker process is let in through the
-        API from then on, with the secret it reads from a pipe at its start.
+        API from then on, with the secret it reads from a pipe at its start, and so is each
+        external worker, with the secret of the configuration's.
 
         A start that fails, or is cancelled, part way stops what it had started before it
         raises: the workers, in this process or their own, and the controller."""
@@ -97,19 +100,23 @@ class Lifecycle:
     async def _start(self) -> None:
         await self.composed.controller.open()
         self._opened = True
+        # Before they start: one that fails part way holds what it opened until stopped.
+        self._workers_running = True
+        for name, secret in self.composed.external.items():
+            self.access.open(secret, name)
+        if self.composed.external or self._broker_url is not None:
+            # Somebody is served over the API. Every worker's broker reaches the one store,
+            # which tells each listener every cancel.
+            await self.composed.brokers[next(iter(self.composed.brokers))].listen_for_cancels(
+                self.access.stop_requested
+            )
         if self._broker_url is None:
-            # Before they start: one that fails part way holds what it opened until stopped.
-            self._workers_running = True
             for name, worker in self.composed.workers.items():
                 worker.activity_file = self.activity_files[name]
                 await worker.start()
             return
-        self._workers_running = True
-        # Every worker's broker reaches the one store, which tells each listener every cancel.
-        await self.composed.brokers[next(iter(self.composed.brokers))].listen_for_cancels(
-            self.access.stop_requested
-        )
-        # Side by side: a server is up once its slowest worker is.
+        # Side by side: a server is up once its slowest worker is. One that failed to start
+        # fails the start, and `start` then stops the others.
         spawning = [self._spawn(name, self._broker_url) for name in self.composed.workers]
         failed = [
             result

@@ -38,6 +38,12 @@ tasks stamped with its own name alone. Each worker builds the engines of its own
 its start. On PostgreSQL each worker is a process of its own; in the server's process, with
 the store there too, they are workers side by side in that process.
 
+A worker whose `[workers.<name>]` table is of kind `external` runs elsewhere, by whoever
+deploys it. The server gives it a broker like the others, serves that broker over the API,
+and lets it in with the secret the variable its table names holds (`Composed.external`); it
+spawns no process for it, waits for nothing at its start, and leaves it out of `/health`. An
+agent of such a worker may name an engine this build does not have: the worker builds it.
+
 The worker reaches the core through one port, `TurnBroker` (`contract/broker/ports.py`), and
 never through the store. The broker's contract also holds what crosses it: the tasks, the
 messages and events as stored records, and their encoding as documents

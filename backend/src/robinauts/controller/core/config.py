@@ -10,6 +10,7 @@ from typing import Any
 
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.shared_domain.domain import (
+    DEFAULT_WORKER,
     AgentConfig,
     Config,
     ModelConfig,
@@ -18,6 +19,8 @@ from robinauts.shared_domain.domain import (
     ToolServerAuth,
     ToolServerConfig,
     WorkConfig,
+    WorkerConfig,
+    WorkerKind,
 )
 
 ENGINES = ("langchain", "pydantic-ai", "echo")
@@ -83,6 +86,7 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
     agents = build(
         "agents", AgentConfig, tools=tuple, turn_timeout_seconds=_seconds, worker=_worker
     )
+    workers = build("workers", WorkerConfig, kind=WorkerKind)
 
     work = WorkConfig()
     given = dict(raw.get("work", {}))
@@ -120,6 +124,30 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
     for model in models.values():
         if model.provider not in providers:
             problems.append(f"models.{model.id}: provider {model.provider!r} is not configured")
+    named = {agent.worker for agent in agents.values()}
+    for name, worker in workers.items():
+        try:
+            _worker(name)
+        except ValueError as error:
+            problems.append(f"workers.{name}: {error}")
+        if worker.kind is WorkerKind.EXTERNAL:
+            if name == DEFAULT_WORKER:
+                problems.append(
+                    f"workers.{name}: the default worker is the server's own, and cannot be"
+                    " external"
+                )
+            if not worker.secret_env:
+                problems.append(
+                    f'workers.{name}: kind "external" needs `secret_env`, the name of the'
+                    " environment variable that holds the secret the worker presents"
+                )
+        elif worker.secret_env:
+            problems.append(
+                f'workers.{name}: `secret_env` is for kind "external" alone, not kind'
+                f" {worker.kind.value!r}"
+            )
+        if name != DEFAULT_WORKER and name not in named:
+            problems.append(f"workers.{name}: no agent names this worker")
     for agent in agents.values():
         if agent.model not in models:
             problems.append(f"agents.{agent.id}: model {agent.model!r} is not configured")
@@ -132,7 +160,13 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
         if twice := sorted({tool for tool in agent.tools if agent.tools.count(tool) > 1}):
             problems.append(f"agents.{agent.id}: tool(s) named twice: {', '.join(twice)}")
         if agent.engine not in ENGINES:
-            problems.append(f"agents.{agent.id}: engine {agent.engine!r} is not one of {ENGINES}")
+            # An external worker runs the engines of its own; the server never builds them.
+            table = workers.get(agent.worker)
+            if table is None or table.kind is not WorkerKind.EXTERNAL:
+                problems.append(
+                    f"agents.{agent.id}: engine {agent.engine!r} is not one of {ENGINES}; an"
+                    " engine this build does not have runs on an external worker alone"
+                )
     if problems:
         raise ConfigError("\n".join(problems))
-    return Config(providers, models, tool_servers, agents, work)
+    return Config(providers, models, tool_servers, agents, work, workers)
