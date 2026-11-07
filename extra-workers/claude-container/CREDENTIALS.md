@@ -20,10 +20,23 @@ says which one: `ROBINAUTS_CLAUDE_AUTH=personal` or
 
 ## What Anthropic says
 
-Quoted so that the rule is Anthropic's, not ours. Verify the reading against the
-current [Consumer Terms](https://www.anthropic.com/legal/consumer-terms) and
-[Commercial Terms](https://www.anthropic.com/legal/commercial-terms) before a
-release; this file was last checked against the documentation on 2026-11-07.
+Quoted so that the rule is Anthropic's, not ours. The quotes below, and the
+reading that follows them, were verified on **2026-11-07** against these
+versions of Anthropic's documents:
+
+| document | version verified | where |
+|---|---|---|
+| Consumer Terms of Service | Oct 8, 2025 | [anthropic.com/legal/consumer-terms](https://www.anthropic.com/legal/consumer-terms) |
+| Commercial Terms of Service | Jun 17, 2025 | [anthropic.com/legal/commercial-terms](https://www.anthropic.com/legal/commercial-terms) |
+| Claude Agent SDK overview | as published on 2026-11-07 (the page carries no version) | [code.claude.com/docs/en/agent-sdk/overview](https://code.claude.com/docs/en/agent-sdk/overview) |
+| Claude Agent SDK quickstart and session storage guide | as published on 2026-11-07 (no version) | [quickstart](https://code.claude.com/docs/en/agent-sdk/quickstart), [session storage](https://code.claude.com/docs/en/agent-sdk/session-storage) |
+| Claude Code authentication | as published on 2026-11-07 (no version) | [code.claude.com/docs/en/authentication](https://code.claude.com/docs/en/authentication) |
+
+**Re-validate when Anthropic publishes a new version of any of them.** The two
+Terms pages list their versions by date, with the current one marked, so a date
+newer than the one above is the signal. The documentation pages carry no
+version: compare the sentences quoted below with the pages, and read the
+reading again if one has changed. Then update this table and the date.
 
 - Agent SDK quickstart: *"Unless previously approved, Anthropic does not allow
   third party developers to offer claude.ai login or rate limits for their
