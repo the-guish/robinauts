@@ -22,6 +22,7 @@ path = [
     "backend/uv.lock",
     "backend/openapi.json",
     "scripts/licence-fixtures.json",
+    "extra-workers/README.md",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "The Robinauts Authors"

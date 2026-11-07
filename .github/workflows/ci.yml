@@ -31,9 +31,10 @@ env:
   PYTHON_VERSION: "3.12"
 
 jobs:
-  # Decides whether `test`, `ui`, `frontend` and `android` run. GitHub counts a
-  # skipped job as passed, and all but `android` are required checks, so a job
-  # skips only when every area it depends on is explicitly `false`. If this job
+  # Decides whether `test`, `ui`, `frontend`, `android` and `extra-workers` run.
+  # GitHub counts a skipped job as passed, and all but `android` are required
+  # checks, so a job skips only when every area it depends on is explicitly
+  # `false`. If this job
   # fails, its outputs are empty and the jobs run. A push to main has no outputs
   # either, so it runs them all.
   scope:
@@ -44,6 +45,7 @@ jobs:
       frontend: ${{ steps.scope.outputs.frontend }}
       contract: ${{ steps.scope.outputs.contract }}
       android: ${{ steps.scope.outputs.android }}
+      extra_workers: ${{ steps.scope.outputs.extra_workers }}
       repo: ${{ steps.scope.outputs.repo }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -219,6 +221,26 @@ jobs:
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
             "platforms;android-35" "build-tools;35.0.0" > /dev/null
       - run: scripts/check-android.sh
+
+  extra-workers:
+    name: the extra workers
+    needs: [scope]
+    # On a backend change too: an extra worker is composed from the backend.
+    if: ${{ !cancelled() && (needs.scope.outputs.extra_workers != 'false' || needs.scope.outputs.backend != 'false' || needs.scope.outputs.repo != 'false') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The uv version lives with the other hand-bumped pins, in one file.
+      - run: . ./scripts/tool-versions.sh && echo "UV_VERSION=$UV_VERSION" >>"$GITHUB_ENV"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+      # Each worker's lint, tests and image (extra-workers/README.md).
+      - run: scripts/check-extra-workers.sh
 
   licences:
     name: dependency licences

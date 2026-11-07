@@ -1446,9 +1446,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="do not ask PyPI about packages the environment does not have",
     )
+    parser.add_argument(
+        "--lock",
+        type=Path,
+        default=LOCK,
+        help="the uv.lock to check; the backend's when not given",
+    )
+    parser.add_argument(
+        "--environment",
+        type=Path,
+        default=ENVIRONMENT,
+        help="the synced virtual environment to read metadata from; the backend's when not given",
+    )
     arguments = parser.parse_args(argv)
     try:
-        return run(LOCK, DEPENDENCIES, ENVIRONMENT, arguments.offline)
+        return run(arguments.lock, DEPENDENCIES, arguments.environment, arguments.offline)
     except (ValueError, TypeError, KeyError, AttributeError, OSError) as problem:
         # Nothing was checked, so nothing passed. Exit 2 rather than 1, to
         # separate "this dependency fails the policy" from "the gate could not
