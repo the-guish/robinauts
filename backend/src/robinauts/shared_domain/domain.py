@@ -129,6 +129,11 @@ class Config:
     tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
     agents: Mapping[str, AgentConfig] = field(default_factory=dict)
     work: WorkConfig = field(default_factory=WorkConfig)
+    commands: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    """By worker, the command that starts it in a process of its own, for the workers whose
+    ``[workers.<name>]`` table names one. The others start as ``robinauts.cli.worker_process``.
+    A command differs in nothing else: it is handed the same environment, the same secret and
+    the same turns, say ``docker run -i`` of an image that runs an engine this build lacks."""
 
     def workers(self) -> tuple[str, ...]:
         """Every worker the agents name: the default first, which always runs, then the
@@ -146,7 +151,13 @@ class Config:
         """This configuration with the agents of that worker alone: what it builds engines
         for and runs turns of."""
         agents = {id_: a for id_, a in self.agents.items() if a.worker == worker}
-        return Config(self.providers, self.models, self.tool_servers, agents, self.work)
+        return Config(
+            self.providers, self.models, self.tool_servers, agents, self.work, self.commands
+        )
+
+    def command_of(self, worker: str) -> tuple[str, ...] | None:
+        """The command that starts that worker, or ``None`` for one that starts as the rest."""
+        return self.commands.get(worker)
 
 
 class StorageKind(StrEnum):

@@ -99,8 +99,41 @@ What an internal platform team deploys and controls.
   start and stops at its stop. The server's broker API hands each worker the turns of its
   own agents and no other's: a worker is known by the secret the server gave it, not by
   anything it says. A worker builds the engines of its own agents alone.
+- A worker's optional `[workers.<name>]` table names the **command** that starts it, in
+  place of this build's worker module: a container, a machine away, an engine this build
+  does not ship. Nothing else sets it apart, and it runs in a process of its own even where
+  the rest run in the server's.
+
+  ```toml
+  [workers.claude-container]
+  command = ["docker", "run", "-i", "--rm", "--network", "host",
+             "-e", "ROBINAUTS_CONFIG", "-e", "ROBINAUTS_WORKER_NAME",
+             "-e", "ROBINAUTS_WORKER_BROKER_URL",
+             "-v", "/etc/robinauts/robinauts.toml:/etc/robinauts/robinauts.toml:ro",
+             "robinauts/claude-container"]
+
+  [agents.claude-container]
+  engine = "claude-code"       # an engine this build does not have: allowed here alone
+  worker = "claude-container"
+  ```
+
+  The server does with the command what it does with its own worker module. It runs it with
+  the server's environment and three variables more, `ROBINAUTS_WORKER_NAME`,
+  `ROBINAUTS_WORKER_BROKER_URL` and `ROBINAUTS_WORKER_PARENT`; writes the worker's secret,
+  and nothing else, on its standard input and closes it; waits a minute at most for the line
+  `ready` on its standard output, logging whatever else it says; and sends it SIGTERM at the
+  stop. The command passes on what the worker needs and no more: `docker run -i` carries the
+  standard streams, the signal and the variables its `-e` flags name, and the database's URL
+  is not among them. An agent of such a worker may name an engine this build does not have,
+  since that worker runs it: one a package registers under the `robinauts.engines`
+  entry-point group, beside the `robinauts` package the worker module comes from
+  ([extra-workers/](../../extra-workers/README.md)). Refused at start-up: a table without
+  `command`, one no agent names, and a command that cannot be started or ends without saying
+  `ready`.
 - `max_running_tasks_per_worker` is per worker: each runs that many turns at once.
-- `/health` answers 503 when any of the server's workers has not been heard from.
+- `/health` answers 503 when any of the server's workers has not been heard from: one in the
+  server's process at its heartbeat, one in a process of its own at its requests to the
+  broker API.
 - A turn is bound to its worker when it is queued. A turn queued for a worker the
   configuration no longer names, after a restart, waits until it is ended as queued too
   long.

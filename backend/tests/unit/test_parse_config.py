@@ -262,3 +262,55 @@ def test_a_tool_server_may_not_take_the_id_of_a_tool_of_this_build() -> None:
         ConfigError, match=re.escape("tool_servers.sessions: the id of a tool of this build")
     ):
         parse_config(raw, tools={"sessions"})
+
+
+WORKERS = {
+    "model_providers": {"p": {"kind": "anthropic", "api_key_env": "K"}},
+    "models": {"fast": {"provider": "p", "name": "fast-1"}},
+    "agents": {
+        "a": {**AGENT, "engine": "echo"},
+        "b": {**AGENT, "engine": "echo", "worker": "special"},
+    },
+}
+
+
+def test_a_worker_table_names_the_command_that_starts_the_worker() -> None:
+    command = ["docker", "run", "-i", "--rm", "robinauts/special"]
+    config = parse_config({**WORKERS, "workers": {"special": {"command": command}}})
+    assert config.commands == {"special": tuple(command)}
+    assert config.command_of("special") == tuple(command)
+    assert config.command_of(DEFAULT_WORKER) is None
+    assert config.for_worker("special").commands == config.commands
+    assert parse_config(WORKERS).commands == {}
+
+
+def test_the_default_worker_may_start_with_a_command_too() -> None:
+    config = parse_config({**WORKERS, "workers": {"default": {"command": ["worker"]}}})
+    assert config.command_of(DEFAULT_WORKER) == ("worker",)
+
+
+def test_an_engine_this_build_lacks_runs_on_a_worker_with_a_command_alone() -> None:
+    agents = {"c": {**AGENT, "engine": "claude-code", "worker": "claude"}}
+    raw = {**WORKERS, "agents": {**WORKERS["agents"], **agents}}
+    with pytest.raises(ConfigError, match=re.escape("agents.c: engine 'claude-code' is not")):
+        parse_config(raw)
+    config = parse_config({**raw, "workers": {"claude": {"command": ["docker", "run"]}}})
+    assert config.agents["c"].engine == "claude-code"
+
+
+@pytest.mark.parametrize(
+    ("table", "problem"),
+    [
+        ({"special": {}}, "workers.special: needs `command`"),
+        ({"special": {"command": []}}, "workers.special: command is not a list"),
+        ({"special": {"command": "docker run"}}, "workers.special: command is not a list"),
+        ({"special": {"command": ["docker", 1]}}, "workers.special: command is not a list"),
+        ({"special": {"command": ["docker", ""]}}, "workers.special: command is not a list"),
+        ({"special": {"command": ["x"], "kind": "external"}}, "workers.special: unknown key"),
+        ({"nobody": {"command": ["x"]}}, "workers.nobody: no agent names this worker"),
+        ({"Bad Name": {"command": ["x"]}}, "workers.Bad Name: worker 'Bad Name' is not"),
+    ],
+)
+def test_a_worker_table_that_is_wrong_is_refused(table: dict[str, object], problem: str) -> None:
+    with pytest.raises(ConfigError, match=re.escape(problem)):
+        parse_config({**WORKERS, "workers": table})

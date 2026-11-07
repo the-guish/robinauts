@@ -36,7 +36,9 @@ for the agents that give none; `default` always runs. When a turn is queued, its
 stamped with its agent's worker (`Config.worker_of`), and a worker claims and waits for the
 tasks stamped with its own name alone. Each worker builds the engines of its own agents at
 its start. On PostgreSQL each worker is a process of its own; in the server's process, with
-the store there too, they are workers side by side in that process.
+the store there too, they are workers side by side in that process. A worker whose
+`[workers.<name>]` table names a command (`Config.commands`) is started with it in place of
+the worker module, in a process of its own either way, and differs in nothing else.
 
 The worker reaches the core through one port, `TurnBroker` (`contract/broker/ports.py`), and
 never through the store. The broker's contract also holds what crosses it: the tasks, the
