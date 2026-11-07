@@ -211,6 +211,15 @@ turn_timeout_seconds = 3600
 # Optional: the worker its turns run on, a process of its own. Left out, "default".
 # worker = "special"
 
+# Optional: a worker started with a command of its own in place of this build's
+# worker module, say a container; its agents name it with `worker`.
+# [workers.claude-container]
+# command = ["docker", "run", "-i", "--rm", "--network", "host",
+#            "-e", "ROBINAUTS_CONFIG", "-e", "ROBINAUTS_WORKER_NAME",
+#            "-e", "ROBINAUTS_WORKER_BROKER_URL",
+#            "-v", "/etc/robinauts/robinauts.toml:/etc/robinauts/robinauts.toml:ro",
+#            "robinauts/claude-container"]
+
 # Optional, here with its defaults.
 [work]
 max_turn_seconds = 1200
@@ -287,7 +296,10 @@ Notes on what is and is not there:
   agents without one share the `default` worker, which always runs. The
   server spawns one process per worker named, and hands each the turns of its
   own agents alone. `max_running_tasks_per_worker` counts per worker
-  ([specs/operations.md](specs/operations.md), "Workers").
+  ([specs/operations.md](specs/operations.md), "Workers"). A `[workers.<name>]`
+  table names the command that starts that worker in place of this build's
+  worker module, and that is all that sets it apart: the workers under
+  [extra-workers/](../extra-workers/README.md) start that way, as containers.
 - A file with no `[agents]` table is a deployment with no agents: it
   starts, the picker is empty, and the log says so.
 

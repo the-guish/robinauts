@@ -10,6 +10,7 @@ from typing import Any
 
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.shared_domain.domain import (
+    DEFAULT_WORKER,
     AgentConfig,
     Config,
     ModelConfig,
@@ -42,6 +43,26 @@ def _names(value: Any) -> tuple[str, ...]:
     if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
         raise ValueError(f"exclude is not a list of tool names: {value!r}")
     return tuple(value)
+
+
+def _command(value: Any) -> tuple[str, ...]:
+    if (
+        not isinstance(value, list)
+        or not value
+        or not all(isinstance(word, str) and word for word in value)
+    ):
+        raise ValueError(
+            f"command is not a list of the program and its arguments, each a word: {value!r}"
+        )
+    return tuple(value)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _WorkerTable:
+    """A ``[workers.<name>]`` table: what a worker is beside the agents that name it."""
+
+    id: str
+    command: tuple[str, ...] = ()
 
 
 _MAX_TASKS = "max_running_tasks_per_worker"
@@ -83,6 +104,7 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
     agents = build(
         "agents", AgentConfig, tools=tuple, turn_timeout_seconds=_seconds, worker=_worker
     )
+    workers = build("workers", _WorkerTable, command=_command)
 
     work = WorkConfig()
     given = dict(raw.get("work", {}))
@@ -120,6 +142,16 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
     for model in models.values():
         if model.provider not in providers:
             problems.append(f"models.{model.id}: provider {model.provider!r} is not configured")
+    named = {agent.worker for agent in agents.values()} | {DEFAULT_WORKER}
+    for table in workers.values():
+        try:
+            _worker(table.id)
+        except ValueError as error:
+            problems.append(f"workers.{table.id}: {error}")
+        if not table.command:
+            problems.append(f"workers.{table.id}: needs `command`, the one thing a table says")
+        if table.id not in named:
+            problems.append(f"workers.{table.id}: no agent names this worker")
     for agent in agents.values():
         if agent.model not in models:
             problems.append(f"agents.{agent.id}: model {agent.model!r} is not configured")
@@ -131,8 +163,12 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
                 )
         if twice := sorted({tool for tool in agent.tools if agent.tools.count(tool) > 1}):
             problems.append(f"agents.{agent.id}: tool(s) named twice: {', '.join(twice)}")
-        if agent.engine not in ENGINES:
-            problems.append(f"agents.{agent.id}: engine {agent.engine!r} is not one of {ENGINES}")
+        if agent.engine not in ENGINES and agent.worker not in workers:
+            problems.append(
+                f"agents.{agent.id}: engine {agent.engine!r} is not one of {ENGINES}; an engine"
+                " this build does not have runs on a worker with a command of its own alone"
+            )
     if problems:
         raise ConfigError("\n".join(problems))
-    return Config(providers, models, tool_servers, agents, work)
+    commands = {table.id: table.command for table in workers.values()}
+    return Config(providers, models, tool_servers, agents, work, commands)

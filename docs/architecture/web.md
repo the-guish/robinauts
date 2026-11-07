@@ -53,9 +53,13 @@ not in the OpenAPI document.
 
 - There is one worker process per worker the configuration names (`AgentConfig.worker`,
   `default` for an agent that names none). The server makes a secret for each at its start
-  and writes it to a pipe that worker's process reads at its own; it is in no environment
-  variable and no file. Every route wants one of them as `Authorization: Bearer`: any other
-  credential is 401. With no worker process running, the routes answer 404.
+  and writes it on that worker's process's standard input, which the process reads to its end
+  at its own start; it is in no environment variable and no file. A worker started with its
+  table's command is let in the same way: the command carries the standard input to wherever
+  the worker runs. Every route wants one of them as `Authorization: Bearer`: any other
+  credential is 401. With no worker process running, the routes answer 404. Each admitted
+  request is a sign of life for `/health`, which hears a worker in a process of its own
+  through nothing else.
 - The secret says which worker asks, and each is served over a broker of its own: its claims
   and waits see the tasks of its own agents alone, whatever the request says. Cancels are
   every worker's alike; a worker ignores those of tasks it does not run.

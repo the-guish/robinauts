@@ -63,7 +63,11 @@ class WorkerAccess:
     """What lets the worker processes in: the secret each was handed while it runs, by
     worker, and the cancels they poll for."""
 
-    def __init__(self, keep: int = KEPT_CANCELS) -> None:
+    def __init__(
+        self, keep: int = KEPT_CANCELS, heard: Callable[[str], None] | None = None
+    ) -> None:
+        """``heard`` is told the worker each admitted request comes from, by name."""
+        self._heard = heard
         self._secrets: dict[str, str] = {}
         self._closed = asyncio.Event()
         self._closed.set()
@@ -94,7 +98,11 @@ class WorkerAccess:
         for worker, secret in self._secrets.items():
             if hmac.compare_digest(given.encode(), secret.encode()):
                 found = worker
-        return found if scheme.lower() == "bearer" else None
+        if found is None or scheme.lower() != "bearer":
+            return None
+        if self._heard is not None:
+            self._heard(found)
+        return found
 
     def admits(self, authorization: str | None) -> bool:
         return self.admitted(authorization) is not None

@@ -1,17 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""A worker in a process of its own, which ``Lifecycle`` spawns on PostgreSQL, one for each
-worker the configuration names.
+"""A worker in a process of its own, which ``Lifecycle`` spawns, one for each worker the
+configuration names: with this module, or with the command the worker's table names, which
+runs this module elsewhere, say in a container.
 
 It reads the configuration and the environment ``robinauts start`` read, and runs only the
 worker its environment names, until SIGTERM or SIGINT: the engines of that worker's agents,
 and the turns of those agents, which are all its parent's API hands it. It then stops the
 worker, which waits for its tasks. It reaches the core through its parent's API alone
-(``worker/http_turn_broker.py``), at the URL its environment names, with the secret its parent
-wrote to a pipe, which says to that API which worker this is; the database it opens is for the
-engines' state. It writes a line to its parent once the worker has started. On Linux it
-also ends with its parent, killed or not.
+(``worker/http_turn_broker.py``), at the URL its environment names, with the secret it reads
+from its standard input, which says to that API which worker this is; the database it opens,
+if its environment names one, is for the engines' state. It writes a line on its standard
+output once the worker has started. On Linux it also ends with its parent, killed or not,
+where its parent is the server.
 """
 
 from __future__ import annotations
@@ -34,25 +36,18 @@ from robinauts.shared_domain.domain import DEFAULT_WORKER
 from robinauts.web.contract.broker.wire import PREFIX
 
 PARENT_VARIABLE = "ROBINAUTS_WORKER_PARENT"
-"""The id of the process that spawned this one, which it ends with."""
-
-READY_VARIABLE = "ROBINAUTS_WORKER_READY_FD"
-"""The pipe this process writes ``READY_LINE`` to once its worker has started."""
+"""The id of the process that spawned this one, which it ends with. Unset where a worker's
+command runs this process away from the server, in a container or on another machine, whose
+parent is not the server: there, the command's own end is the process's."""
 
 READY_LINE = b"ready\n"
-
-ACTIVITY_VARIABLE = "ROBINAUTS_WORKER_ACTIVITY_FILE"
-"""The file this process's worker touches at every heartbeat, which its parent's health check
-reads."""
+"""What this process writes on its standard output once its worker has started."""
 
 BROKER_URL_VARIABLE = "ROBINAUTS_WORKER_BROKER_URL"
 """The root of the API this process reaches the core through: its parent's."""
 
 WORKER_NAME_VARIABLE = "ROBINAUTS_WORKER_NAME"
 """The worker this process runs: ``default`` when unset."""
-
-SECRET_VARIABLE = "ROBINAUTS_WORKER_SECRET_FD"
-"""The pipe this process reads the secret it presents to that API from, to its end."""
 
 _PR_SET_PDEATHSIG = 1
 
@@ -72,25 +67,20 @@ class QuietRequests(logging.Filter):
 
 def _end_with_parent() -> None:
     """A SIGTERM when the parent ends, so that no worker outlives its server. Linux alone
-    offers it; elsewhere a killed server leaves its worker running."""
-    if sys.platform != "linux":
+    offers it; elsewhere a killed server leaves its worker running. A process whose parent is
+    not the server, run by a worker's command elsewhere, is left to that command."""
+    if sys.platform != "linux" or PARENT_VARIABLE not in os.environ:
         return
     ctypes.CDLL(None, use_errno=True).prctl(_PR_SET_PDEATHSIG, signal.SIGTERM)
     # The parent may have ended before the request was made.
-    if os.environ.get(PARENT_VARIABLE) != str(os.getppid()):
+    if os.environ[PARENT_VARIABLE] != str(os.getppid()):
         os.kill(os.getpid(), signal.SIGTERM)
 
 
 def _read_secret() -> str:
-    """The secret, read to the pipe's end, which the parent closed before this one began."""
-    pipe = int(os.environ[SECRET_VARIABLE])
-    read = b""
-    try:
-        while chunk := os.read(pipe, 4096):
-            read += chunk
-    finally:
-        os.close(pipe)
-    return read.decode()
+    """The secret, read from the standard input to its end, which the parent closed before this
+    process began."""
+    return sys.stdin.buffer.read().decode()
 
 
 async def _run() -> None:
@@ -102,15 +92,13 @@ async def _run() -> None:
     worker = compose_worker(
         config, storage=storage_from(os.environ), secret_for=secret_for, broker=broker, name=name
     )
-    worker.activity_file = Path(os.environ[ACTIVITY_VARIABLE])
     stopping = asyncio.Event()
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(signum, stopping.set)
     await worker.start()
-    ready = int(os.environ[READY_VARIABLE])
-    os.write(ready, READY_LINE)
-    os.close(ready)
+    sys.stdout.buffer.write(READY_LINE)
+    sys.stdout.buffer.flush()
     try:
         await stopping.wait()
     finally:

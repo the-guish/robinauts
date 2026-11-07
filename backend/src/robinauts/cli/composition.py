@@ -16,7 +16,7 @@ engines together."""
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -58,7 +58,9 @@ def built_in_tools() -> dict[str, ToolProvider]:
     return {tool.id: tool for tool in loaded}
 
 
-CONTROLLER_TABLES = frozenset({"model_providers", "models", "tool_servers", "agents", "work"})
+CONTROLLER_TABLES = frozenset(
+    {"model_providers", "models", "tool_servers", "agents", "workers", "work"}
+)
 """The file's tables that are the controller's, the ones `parse_config` reads."""
 
 SCHEMA_READY = "the database is at schema version {version} (schema.sql {digest})"
@@ -89,6 +91,9 @@ class Composed:
     brokers: Mapping[str, TurnBroker]
     """By worker, over the controller's store: each worker's in this process, and what the API
     serves the worker of that name in a process of its own."""
+    commands: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    """By worker, the command that starts the process of those whose table names one
+    (``Config.commands``)."""
 
 
 def compose(
@@ -124,7 +129,7 @@ def compose(
             engines=engines,
             name=name,
         )
-    return Composed(controller, credentials, workers, brokers)
+    return Composed(controller, credentials, workers, brokers, config.commands)
 
 
 def compose_worker(

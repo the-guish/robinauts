@@ -28,6 +28,7 @@ import asyncio
 import importlib.metadata
 import logging
 import os
+import shlex
 import sys
 import uuid
 from collections.abc import Mapping, Sequence
@@ -215,12 +216,16 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     logging.basicConfig(level=logging.INFO)
     if dev_no_sign_in:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
+    for name, command in config.commands.items():
+        logging.getLogger(__name__).info(
+            "worker %r starts with the command: %s", name, shlex.join(command)
+        )
     lifecycle = Lifecycle(
         composed,
-        # A store in this process is this process's alone: its worker runs here.
-        broker_url=(
-            worker_broker_url(host, port) if storage.kind is StorageKind.POSTGRES else None
-        ),
+        broker_url=worker_broker_url(host, port),
+        # A store in this process is this process's alone: its workers run here, but for one
+        # that starts with a command of its own.
+        in_process=storage.kind is not StorageKind.POSTGRES,
     )
     app = build_app(composed, lifecycle, sign_in=sign_in, secret_for=secret_for, ui_dir=ui_dir)
     config = uvicorn.Config(

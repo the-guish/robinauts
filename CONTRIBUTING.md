@@ -52,7 +52,10 @@ or one at a time:
 
     scripts/check-lint.sh       ruff and black, over backend/, scripts/ and demo/
     scripts/check-tests.sh      pytest, with the architecture contracts
-    scripts/check-licences.sh   the dependency licence gate of DEPENDENCIES.md
+    scripts/check-extra-workers.sh
+                                the extra workers: lint, tests, the image
+    scripts/check-licences.sh   the dependency licence gate of DEPENDENCIES.md,
+                                over the backend's lock and the extra workers'
     scripts/check-audit.sh      pip-audit over the whole locked set
     scripts/check-frontend.sh   the frontend: format, lint, types, tests,
                                 the build with its licence gate, npm audit

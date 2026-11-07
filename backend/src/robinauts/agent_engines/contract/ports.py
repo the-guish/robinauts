@@ -11,6 +11,7 @@ from collections.abc import AsyncGenerator, Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from importlib import import_module
+from importlib.metadata import entry_points
 from typing import Any
 
 from robinauts.agent_engines.contract.domain import (
@@ -120,8 +121,16 @@ _SHIPPED: Mapping[str, tuple[str, str]] = {
 """Every engine the package ships: its name, and where its init function is."""
 
 
+ENTRY_POINTS = "robinauts.engines"
+"""The entry-point group a package installed beside this one registers its engines in: the
+name a configuration uses, and its init function, an ``EngineFactory``. That is how a worker
+under ``extra-workers/`` runs an engine this build does not ship, with this build's worker
+module. A plugged engine adds a name; it does not take a shipped one."""
+
+
 def installed() -> Mapping[str, EngineFactory]:
-    """The engines this build can run, by the name a configuration uses.
+    """The engines this build can run, by the name a configuration uses: the shipped ones, and
+    those plugged in through ``ENTRY_POINTS``.
 
     An engine whose package cannot be imported, because its extra is not installed, is left out.
     """
@@ -129,6 +138,11 @@ def installed() -> Mapping[str, EngineFactory]:
     for name, (module, function) in _SHIPPED.items():
         try:
             found[name] = getattr(import_module(module), function)
+        except ImportError:
+            continue
+    for entry in entry_points(group=ENTRY_POINTS):
+        try:
+            found.setdefault(entry.name, entry.load())
         except ImportError:
             continue
     return found
