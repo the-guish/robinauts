@@ -22,11 +22,12 @@ What they have in common, and what a new one keeps:
 - **No credential is Robinauts' to make.** A worker reads the names of
   variables, checks which are set, and hands the engine what the mode calls
   for. It never creates, requests, stores, prints or shares a key or a token;
-  the person or the operator does, with the vendor's own tools, and the
-  worker's documentation says who makes which credential and where it goes.
+  the person or the operator does, with the vendor's own tools
+  ([claude-container/CREDENTIALS.md](claude-container/CREDENTIALS.md)).
 - **It is checked like the rest of the repository**: SPDX headers on every
   file, its lock under the licence gate (`scripts/check-licences.sh`), ruff and
   black under the backend's rules, its own tests, and the image built in CI.
 
-The first extra worker, one that runs its turns on Claude Code through the Claude
-Agent SDK in a Docker container, follows in a pull request of its own.
+| folder | runs turns on | state |
+|---|---|---|
+| [claude-container](claude-container/README.md) | Claude Code, through the Claude Agent SDK, in a Docker container | Claude Code's transcripts and one workspace per conversation, on the container's volumes |
