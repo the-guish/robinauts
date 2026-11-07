@@ -133,11 +133,9 @@ def compose_worker(
     secret_for: SecretLookup,
     broker: TurnBroker,
     engines: Mapping[str, EngineFactory] | None = None,
-    name: str | None = None,
 ) -> Worker:
-    """The worker `name`, which reaches the core through `broker` alone: with no name, the
-    one worker of the server's process, which runs every agent. Its engines keep their
-    state on `storage`: on PostgreSQL in a pool of the worker's own, which reads and writes the
+    """A worker that reaches the core through `broker` alone. Its engines keep their state on
+    `storage`: on PostgreSQL in a pool of the worker's own, which reads and writes the
     engines' tables, never the core's."""
     agent_engine_store = None
     if storage.kind is StorageKind.POSTGRES:
@@ -153,7 +151,6 @@ def compose_worker(
         agent_engine_store=agent_engine_store,
         engines=engines,
         tools=built_in_tools(),
-        name=name,
     )
 
 

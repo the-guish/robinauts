@@ -209,8 +209,6 @@ def test_an_agent_names_the_worker_its_turns_run_on() -> None:
         "agent5": "gpu-1",
     }
     assert config.workers() == (DEFAULT_WORKER, "gpu-1", "special")
-    assert list(config.for_worker("special").agents) == ["agent1", "agent3"]
-    assert list(config.for_worker(DEFAULT_WORKER).agents) == ["agent2", "agent4"]
     assert config.worker_of("agent3") == "special"
     assert config.worker_of("gone") == DEFAULT_WORKER
 

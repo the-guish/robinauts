@@ -34,8 +34,8 @@ them before it stops listening.
 On PostgreSQL a server runs one worker per name its agents give (`[agents.*] worker`), and
 `default` for the agents that give none; `default` always runs. Each is a process of its
 own. When a turn is queued, its task is stamped with its agent's worker (`Config.worker_of`),
-and a worker is handed the tasks stamped with its own name alone. Each worker builds the
-engines of its own agents at its start. With the store in the server's process, there is one
+and a worker is handed the tasks stamped with its own name alone. Every worker builds the
+engines of every agent at its start. With the store in the server's process, there is one
 worker, `default`, in that process, which runs every agent's turns: the in-process store
 does not filter by worker.
 

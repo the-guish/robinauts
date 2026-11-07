@@ -98,7 +98,7 @@ What an internal platform team deploys and controls.
 - On PostgreSQL each worker is a **process of its own**, which the server spawns at its
   start and stops at its stop. The server's broker API hands each worker the turns of its
   own agents and no other's: a worker is known by the secret the server gave it, not by
-  anything it says. A worker builds the engines of its own agents alone.
+  anything it says.
 - Without PostgreSQL, in the local development mode, there is one worker, in the server's
   process, and it runs every agent's turns: `worker` keys change nothing there.
 - `max_running_tasks_per_worker` is per worker: each runs that many turns at once.

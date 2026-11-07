@@ -3,12 +3,12 @@
 
 """The worker: everything about the tasks this process runs.
 
-It builds the engines of its agents, claims the queued tasks its broker hands it and runs each
-as an asyncio task with ``run_task``. A worker in a process of its own is named: its agents are
-those whose configuration names it (``AgentConfig.worker``), and its server hands it their
-tasks alone. The one worker in the server's process is not: it runs every agent's turns. It
-renews the leases of the tasks it runs, and stops a task asked to stop, from any process. A
-task is claimed by one worker, whichever process stored it.
+It builds the engines, claims the queued tasks its broker hands it and runs each as an asyncio
+task with ``run_task``. Which tasks those are is the broker's: a worker in a process of its own
+is handed the tasks of the agents whose configuration names it (``AgentConfig.worker``), and
+the one worker in the server's process every agent's. It renews the leases of the tasks it runs,
+and stops a task asked to stop, from any process. A task is claimed by one worker, whichever
+process stored it.
 
 It reaches the core through its ``TurnBroker`` alone, never the core's store: in the server's
 process, or over HTTP from a process of its own. The engines keep their state in its
@@ -84,20 +84,14 @@ class Worker:
         agent_engine_store: AgentEngineStore | None = None,
         engines: Mapping[str, EngineFactory] | None = None,
         tools: Mapping[str, ToolProvider] | None = None,
-        name: str | None = None,
         wait_timeout: float = QUEUE_WAIT_TIMEOUT,
         close_timeout: float = CLOSE_TIMEOUT,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         """``engines`` are the factories by engine name; the installed ones when not given.
         ``tools`` are this build's tools by id; none when not given. ``agent_engine_store`` is
-        where the engines keep their state; none, an engine's storage takes no handle. ``name``
-        is the worker's in a process of its own: ``start`` builds the engines of its agents
-        alone, and an agent of another's, whose turn it was handed all the same, gets its
-        engine on demand. With none, it is the one worker of the server's process, and builds
-        the engines of every agent."""
+        where the engines keep their state; none, an engine's storage takes no handle."""
         self._broker = broker
-        self.name = name
         self._agent_engine_store = agent_engine_store
         self._config = config
         self._work = config.work
@@ -134,7 +128,7 @@ class Worker:
         self._handle = None if store is None else await store.open()
         self._factories = dict(installed() if self._given_engines is None else self._given_engines)
         self._engines = await build_engines(
-            self._config if self.name is None else self._config.for_worker(self.name),
+            self._config,
             engine_settings(self._config, self._secret_for),
             engine_storage(self._storage, self._handle),
             self._factories,
