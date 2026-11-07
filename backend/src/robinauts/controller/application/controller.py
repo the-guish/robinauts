@@ -336,6 +336,7 @@ class RobinautsController(Controller):
             TaskState.QUEUED,
             created_at=now,
             lease_until=now + MAX_QUEUED_TIME,
+            worker=self._config.worker_of(session.agent),
         )
         turn = Turn(
             turn_id,

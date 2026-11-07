@@ -79,6 +79,32 @@ What an internal platform team deploys and controls.
 - Unknown keys are errors, and all problems are reported at once, at
   start-up.
 
+## Workers
+
+- A server runs its agents' turns in **workers**. An agent's optional `worker` key names
+  the one its turns run on; an agent without it runs on `default`, which always runs.
+  There may be as many workers as names the agents give: lowercase letters, digits, `-`
+  and `_`, starting with a letter or a digit, at most 63 characters.
+
+  ```toml
+  [agents.agent1]
+  worker = "special"   # runs on the worker "special"
+  [agents.agent2]       # runs on the worker "default"
+  [agents.agent3]
+  worker = "special"   # runs on the worker "special"
+  [agents.agent4]       # runs on the worker "default"
+  ```
+
+- On PostgreSQL each worker is a **process of its own**, which the server spawns at its
+  start and stops at its stop. The server's broker API hands each worker the turns of its
+  own agents and no other's: a worker is known by the secret the server gave it, not by
+  anything it says. A worker builds the engines of its own agents alone.
+- `max_running_tasks_per_worker` is per worker: each runs that many turns at once.
+- `/health` answers 503 when any of the server's workers has not been heard from.
+- A turn is bound to its worker when it is queued. A turn queued for a worker the
+  configuration no longer names, after a restart, waits until it is ended as queued too
+  long.
+
 ## Limits
 
 All optional, all set by the operator:

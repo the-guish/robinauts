@@ -9,7 +9,7 @@ import pytest
 
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.controller.core.config import parse_config
-from robinauts.shared_domain.domain import ProviderKind, ToolServerAuth
+from robinauts.shared_domain.domain import DEFAULT_WORKER, ProviderKind, ToolServerAuth
 
 AGENT = {"title": "A", "system_prompt": "", "model": "fast"}
 
@@ -185,6 +185,58 @@ def test_an_agent_may_set_its_turn_timeout(given: object, parsed: float | str | 
             parse_config(raw)
     else:
         assert parse_config(raw).agents["a"].turn_timeout_seconds == parsed
+
+
+def test_an_agent_names_the_worker_its_turns_run_on() -> None:
+    config = parse_config(
+        {
+            "model_providers": {"p": {"kind": "anthropic", "api_key_env": "K"}},
+            "models": {"fast": {"provider": "p", "name": "fast-1"}},
+            "agents": {
+                "agent1": {**AGENT, "engine": "echo", "worker": "special"},
+                "agent2": {**AGENT, "engine": "echo"},
+                "agent3": {**AGENT, "engine": "echo", "worker": "special"},
+                "agent4": {**AGENT, "engine": "echo"},
+                "agent5": {**AGENT, "engine": "echo", "worker": "gpu-1"},
+            },
+        }
+    )
+    assert {a.id: a.worker for a in config.agents.values()} == {
+        "agent1": "special",
+        "agent2": DEFAULT_WORKER,
+        "agent3": "special",
+        "agent4": DEFAULT_WORKER,
+        "agent5": "gpu-1",
+    }
+    assert config.workers() == (DEFAULT_WORKER, "gpu-1", "special")
+    assert list(config.for_worker("special").agents) == ["agent1", "agent3"]
+    assert list(config.for_worker(DEFAULT_WORKER).agents) == ["agent2", "agent4"]
+    assert config.worker_of("agent3") == "special"
+    assert config.worker_of("gone") == DEFAULT_WORKER
+
+
+def test_the_default_worker_runs_even_when_every_agent_names_another() -> None:
+    config = parse_config(
+        {
+            "model_providers": {"p": {"kind": "anthropic", "api_key_env": "K"}},
+            "models": {"fast": {"provider": "p", "name": "fast-1"}},
+            "agents": {"a": {**AGENT, "engine": "echo", "worker": "special"}},
+        }
+    )
+    assert config.workers() == (DEFAULT_WORKER, "special")
+    assert parse_config({}).workers() == (DEFAULT_WORKER,)
+
+
+@pytest.mark.parametrize("worker", ["", "Special", "-x", "a b", "a/b", "x" * 64, 3, True])
+def test_a_worker_name_that_is_not_one_is_refused(worker: object) -> None:
+    with pytest.raises(ConfigError, match=re.escape("agents.a: worker ")):
+        parse_config(
+            {
+                "model_providers": {"p": {"kind": "anthropic", "api_key_env": "K"}},
+                "models": {"fast": {"provider": "p", "name": "fast-1"}},
+                "agents": {"a": {**AGENT, "engine": "echo", "worker": worker}},
+            }
+        )
 
 
 def test_an_agent_may_name_a_tool_of_this_build_beside_the_tool_servers() -> None:

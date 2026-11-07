@@ -208,6 +208,8 @@ engine = "langgraph"
 system_prompt = "Play fair."
 # Optional: how long one of its turns may run. Left out, max_turn_seconds.
 turn_timeout_seconds = 3600
+# Optional: the worker its turns run on, a process of its own. Left out, "default".
+# worker = "special"
 
 # Optional, here with its defaults.
 [work]
@@ -277,10 +279,15 @@ Notes on what is and is not there:
   `heartbeat_seconds` must be at most half of `lease_seconds`. A turn whose
   agent sends nothing for `stalled_after_seconds` is stopped as failed: no
   text, no tool call and no tool result. A single model call or tool call
-  longer than that needs a larger value. A server runs
+  longer than that needs a larger value. Each of a server's workers runs
   at most `max_running_tasks_per_worker` turns at once, and the others wait
   queued. A turn queued for 48 hours is ended. A turn's time limit counts
   from when a server takes it.
+- **Workers.** An agent's `worker` names the process its turns run in; the
+  agents without one share the `default` worker, which always runs. The
+  server spawns one process per worker named, and hands each the turns of its
+  own agents alone. `max_running_tasks_per_worker` counts per worker
+  ([specs/operations.md](specs/operations.md), "Workers").
 - A file with no `[agents]` table is a deployment with no agents: it
   starts, the picker is empty, and the log says so.
 
@@ -589,8 +596,8 @@ command could not do what it was asked.
 ## 9. Verify
 
 1. `curl -fsS https://robinauts.example.com/health` → `{"status":"ok"}`.
-   It reads no database. It answers 503 when this server's worker has not
-   been heard from for five minutes: recycle that server.
+   It reads no database. It answers 503 when any of this server's workers has
+   not been heard from for five minutes: recycle that server.
 2. Open `https://robinauts.example.com/` in a browser. It redirects to
    `/ui/` and shows the sign-in page with one button per provider.
 3. Sign in as somebody the allow list has, through Google. Then as
