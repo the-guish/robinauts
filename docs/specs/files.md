@@ -94,6 +94,11 @@ The bounds, constants rather than settings:
 | one listing | 500 entries, 5 levels deep |
 | a path | 1024 characters; a name 255 bytes of UTF-8 |
 
+A result that would pass the file bound is refused before it is built: a
+replacement's size is known from the counts, and a text the model sends is
+bounded on its own, so no call can ask the worker for more memory than a
+few files' worth.
+
 Refusals are failed tool results in words the model can act on: the path
 that was wrong and why, the file that is not there, the folder that is not
 empty, the text that is nowhere in the file. None names the root, the owner

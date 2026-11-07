@@ -5,6 +5,11 @@
 
 Each writes one file whole, however it was asked to change it, so a file is never half
 edited. ``replace_in_file`` replaces a literal text, every time it occurs, and never a pattern.
+
+The size a file may have is checked **before** a result is built, wherever the result could be
+larger than what went in: a replacement's size is what the counts say it will be, and a text
+that would pass the bound is refused without the memory for it ever being asked for. What the
+model sends is bounded on its own, so the rest is bounded by what it reads plus what it sent.
 """
 
 from __future__ import annotations
@@ -13,7 +18,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from robinauts.agent_engines.contract.domain import FunctionTool, FunctionToolError
-from robinauts.filesystems.contract.domain import RelativePath, TooLargeError, joined
+from robinauts.filesystems.contract.domain import RelativePath, joined
 from robinauts.filesystems.contract.ports import Folder
 from robinauts.tools.basic_edit import arguments, text
 
@@ -88,11 +93,19 @@ REPLACE_LINES_SCHEMA: Mapping[str, Any] = {
 }
 
 
+def _within_limit(path: RelativePath, size: int) -> None:
+    """Refuse a result of ``size`` bytes of UTF-8, before it exists when it can be known first."""
+    if size > arguments.MAX_FILE_BYTES:
+        raise FunctionToolError(
+            f"That would make {joined(path)!r} {size} bytes, and these tools work on files of at"
+            f" most {arguments.MAX_FILE_BYTES} bytes."
+        )
+
+
 async def _write_text(folder: Folder, path: RelativePath, content: str) -> int:
     """The text written, as UTF-8, within ``MAX_FILE_BYTES``: how many bytes."""
     data = content.encode("utf-8")
-    if len(data) > arguments.MAX_FILE_BYTES:
-        raise TooLargeError(joined(path), len(data), arguments.MAX_FILE_BYTES)
+    _within_limit(path, len(data))
     await folder.write(path, data)
     return len(data)
 
@@ -119,12 +132,17 @@ def replace_in_file_tool(folder: Folder) -> FunctionTool:
         path = arguments.path(given)
         old = arguments.text(given, "old", empty=False)
         new = arguments.text(given, "new")
-        content = await _read_text(folder, path)
+        data = await folder.read(path, arguments.MAX_FILE_BYTES)
+        content = text.decode(data, joined(path))
         count = content.count(old)
         if count == 0:
             raise FunctionToolError(
                 f"`old` is nowhere in {joined(path)!r}. Read the file and copy the text exactly."
             )
+        # Every occurrence of `old` is exactly its own UTF-8 in the file, so the result's size
+        # is known before the result is: refused here, or it could be `count` times `new`.
+        grows_by = len(new.encode("utf-8")) - len(old.encode("utf-8"))
+        _within_limit(path, len(data) + count * grows_by)
         await _write_text(folder, path, content.replace(old, new))
         return {"path": joined(path), "replacements": count}
 

@@ -281,6 +281,22 @@ async def test_a_file_past_the_size_is_refused_read_and_written(
 
 
 @asyncio_test
+async def test_a_replacement_that_would_outgrow_the_file_is_refused_before_it_is_built() -> None:
+    # Built first, the result would be 10 GB: the refusal has to come from the counts alone.
+    folder = with_files(**{"a.md": "a" * 100_000})
+    given = {"path": "a.md", "old": "a", "new": "b" * 100_000}
+    await refused(folder, "replace_in_file", given, "would make 'a.md' 10000000000 bytes")
+    assert folder.files[("a.md",)] == b"a" * 100_000
+    # Counted in bytes of UTF-8, not in characters: three bytes each, three times.
+    folder = with_files(**{"b.md": "x" * 1_048_570 + "aaa"})
+    given = {"path": "b.md", "old": "a", "new": "éé"}
+    await refused(folder, "replace_in_file", given, "would make 'b.md' 1048582 bytes")
+    given["new"] = "é"
+    assert await call(folder, "replace_in_file", given) == {"path": "b.md", "replacements": 3}
+    assert len(folder.files[("b.md",)]) == 1_048_576
+
+
+@asyncio_test
 async def test_replace_in_file_replaces_the_text_every_time_it_occurs() -> None:
     folder = with_files(**{"a.md": "the cat and the dog\nthe end\n"})
     assert await call(folder, "replace_in_file", {"path": "a.md", "old": "the ", "new": "a "}) == {
