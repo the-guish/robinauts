@@ -3,9 +3,11 @@
 
 """The worker: everything about the tasks this process runs.
 
-It builds the engines, claims queued tasks and runs each as an asyncio task with
-``run_task``. It renews the leases of the tasks it runs, and stops a task asked to stop, from
-any process. A task is claimed by one worker, whichever process stored it.
+It builds the engines of its agents, claims their queued tasks and runs each as an asyncio
+task with ``run_task``. A worker is named: its agents are those whose configuration names it
+(``AgentConfig.worker``), and its broker hands it their tasks alone. It renews the leases of
+the tasks it runs, and stops a task asked to stop, from any process. A task is claimed by one
+worker, whichever process stored it.
 
 It reaches the core through its ``TurnBroker`` alone, never the core's store: in the server's
 process, or over HTTP from a process of its own. The engines keep their state in its
@@ -26,6 +28,7 @@ from robinauts.agent_engines.contract.ports import AgentEngine, EngineFactory, i
 from robinauts.controller.contract.broker.domain import RUN_TURN, Task
 from robinauts.controller.contract.broker.ports import TurnBroker
 from robinauts.shared_domain.domain import (
+    DEFAULT_WORKER,
     Config,
     Message,
     StorageConfig,
@@ -81,14 +84,18 @@ class Worker:
         agent_engine_store: AgentEngineStore | None = None,
         engines: Mapping[str, EngineFactory] | None = None,
         tools: Mapping[str, ToolProvider] | None = None,
+        name: str = DEFAULT_WORKER,
         wait_timeout: float = QUEUE_WAIT_TIMEOUT,
         close_timeout: float = CLOSE_TIMEOUT,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         """``engines`` are the factories by engine name; the installed ones when not given.
         ``tools`` are this build's tools by id; none when not given. ``agent_engine_store`` is
-        where the engines keep their state; none, an engine's storage takes no handle."""
+        where the engines keep their state; none, an engine's storage takes no handle. ``name``
+        is the worker's: ``start`` builds the engines of its agents alone, and an agent of
+        another's, whose turn its broker handed it all the same, gets its engine on demand."""
         self._broker = broker
+        self.name = name
         self._agent_engine_store = agent_engine_store
         self._config = config
         self._work = config.work
@@ -125,7 +132,7 @@ class Worker:
         self._handle = None if store is None else await store.open()
         self._factories = dict(installed() if self._given_engines is None else self._given_engines)
         self._engines = await build_engines(
-            self._config,
+            self._config.for_worker(self.name),
             engine_settings(self._config, self._secret_for),
             engine_storage(self._storage, self._handle),
             self._factories,

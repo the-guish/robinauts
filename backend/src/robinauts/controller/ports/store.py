@@ -95,15 +95,17 @@ class Store(ABC):
         process waiting in ``wait_for_queued``."""
 
     @abstractmethod
-    async def claim_tasks(self, now: datetime, until: datetime, limit: int) -> list[Task]:
-        """Up to ``limit`` queued tasks whose lease has not passed ``now``, oldest first, made
-        running, claimed at ``now`` with their lease until ``until``; in one operation. Each
-        task is claimed once, whichever process asks."""
+    async def claim_tasks(
+        self, now: datetime, until: datetime, limit: int, worker: str
+    ) -> list[Task]:
+        """Up to ``limit`` queued tasks of ``worker`` whose lease has not passed ``now``, oldest
+        first, made running, claimed at ``now`` with their lease until ``until``; in one
+        operation. Each task is claimed once, whichever process asks."""
 
     @abstractmethod
-    async def wait_for_queued(self, now: datetime, timeout: float) -> bool:
-        """Wait until a task ``claim_tasks`` would claim is queued, or ``timeout`` seconds
-        have passed: true in the first case, false in the second."""
+    async def wait_for_queued(self, now: datetime, timeout: float, worker: str) -> bool:
+        """Wait until a task ``claim_tasks`` would claim for ``worker`` is queued, or
+        ``timeout`` seconds have passed: true in the first case, false in the second."""
 
     @abstractmethod
     async def get_task(self, task: uuid.UUID) -> Task | None: ...

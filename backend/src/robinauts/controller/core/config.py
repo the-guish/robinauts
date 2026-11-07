@@ -25,6 +25,18 @@ ENGINES = ("langchain", "pydantic-ai", "echo")
 # An HTTP field name is a token (RFC 9110, section 5.1): nothing else can go on the wire.
 HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 
+# A worker's name goes into a log line, a file name and the process's environment.
+WORKER_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
+
+
+def _worker(value: Any) -> str:
+    if not isinstance(value, str) or not WORKER_NAME.fullmatch(value):
+        raise ValueError(
+            f"worker {value!r} is not a worker name: lowercase letters, digits, '-' and '_',"
+            " starting with a letter or a digit, at most 63 characters"
+        )
+    return value
+
 
 def _names(value: Any) -> tuple[str, ...]:
     if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
@@ -68,7 +80,9 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
     providers = build("model_providers", ProviderConfig, kind=ProviderKind)
     models = build("models", ModelConfig)
     tool_servers = build("tool_servers", ToolServerConfig, auth=ToolServerAuth, exclude=_names)
-    agents = build("agents", AgentConfig, tools=tuple, turn_timeout_seconds=_seconds)
+    agents = build(
+        "agents", AgentConfig, tools=tuple, turn_timeout_seconds=_seconds, worker=_worker
+    )
 
     work = WorkConfig()
     given = dict(raw.get("work", {}))

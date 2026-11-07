@@ -5,11 +5,15 @@
 of ``TurnBroker`` (``web/contract/broker/wire.py``), served by the core over the
 controller's store.
 
-They answer only while such a worker runs, and only the secret the server handed it at its
-start, which ``WorkerAccess`` holds: 404 while none runs, 401 for any other credential. The
-cancels a worker hears are numbered here as they come, and it polls past the last it saw; one
-it misses, the next renewal of its leases names. A wait gives up as soon as the worker is
-stopped, so that a server that stops it is not held by its own long polls.
+There is one such worker per worker the configuration names (``AgentConfig.worker``), each
+with a secret of its own, which the server handed it at its start and ``WorkerAccess`` holds.
+They answer only while a worker runs, and only those secrets: 404 while none runs, 401 for any
+other credential. The secret says which worker asks, and each is served through its own
+broker: a worker claims and waits for the tasks of its own agents, and no other worker's,
+whatever it sends. The cancels a worker hears are numbered here as they come, every worker's
+alike, and it polls past the last it saw; one it misses, the next renewal of its leases names.
+A wait gives up as soon as the workers are stopped, so that a server that stops them is not
+held by their own long polls.
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ import asyncio
 import hmac
 import uuid
 from collections import deque
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from typing import Annotated, Any, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
@@ -27,7 +31,7 @@ from fastapi.routing import APIRoute
 from pydantic import AwareDatetime
 
 from robinauts.controller.contract.broker.ports import TurnBroker
-from robinauts.shared_domain.domain import SessionNotFoundError, TurnLostError
+from robinauts.shared_domain.domain import DEFAULT_WORKER, SessionNotFoundError, TurnLostError
 from robinauts.web.contract.broker.wire import (
     MAX_WAIT_SECONDS,
     PREFIX,
@@ -56,11 +60,11 @@ KEPT_CANCELS = 1024
 
 
 class WorkerAccess:
-    """What lets a worker process in: the secret it was handed while it runs, and the cancels
-    it polls for."""
+    """What lets the worker processes in: the secret each was handed while it runs, by
+    worker, and the cancels they poll for."""
 
     def __init__(self, keep: int = KEPT_CANCELS) -> None:
-        self._secret: str | None = None
+        self._secrets: dict[str, str] = {}
         self._closed = asyncio.Event()
         self._closed.set()
         self._last = 0
@@ -69,26 +73,31 @@ class WorkerAccess:
 
     @property
     def is_open(self) -> bool:
-        return self._secret is not None
+        return bool(self._secrets)
 
-    def open(self, secret: str) -> None:
-        """Let in the worker that presents ``secret``."""
-        self._secret = secret
-        self._closed = asyncio.Event()
+    def open(self, secret: str, worker: str = DEFAULT_WORKER) -> None:
+        """Let in, as ``worker``, the process that presents ``secret``."""
+        if not self._secrets:
+            self._closed = asyncio.Event()
+        self._secrets[worker] = secret
 
     def close(self) -> None:
-        """Let no worker in any more, and end the waits of the one that was."""
-        self._secret = None
+        """Let no worker in any more, and end the waits of those that were."""
+        self._secrets = {}
         self._closed.set()
 
-    def admits(self, authorization: str | None) -> bool:
+    def admitted(self, authorization: str | None) -> str | None:
+        """The worker whose secret ``authorization`` presents, or ``None``. Every secret is
+        compared, so that how long a refusal takes says nothing of which came close."""
         scheme, _, given = (authorization or "").partition(" ")
-        secret = self._secret
-        return (
-            secret is not None
-            and scheme.lower() == "bearer"
-            and hmac.compare_digest(given.encode(), secret.encode())
-        )
+        found = None
+        for worker, secret in self._secrets.items():
+            if hmac.compare_digest(given.encode(), secret.encode()):
+                found = worker
+        return found if scheme.lower() == "bearer" else None
+
+    def admits(self, authorization: str | None) -> bool:
+        return self.admitted(authorization) is not None
 
     def stop_requested(self, task: uuid.UUID) -> None:
         """A task asked to stop, from any process: what the core's listener is given."""
@@ -144,14 +153,24 @@ class _Refusing(APIRoute):
         return refusing
 
 
-def worker_router(broker: TurnBroker, access: WorkerAccess) -> APIRouter:
-    """The routes of ``PREFIX``, over ``broker``, for the worker ``access`` lets in."""
+def worker_router(brokers: Mapping[str, TurnBroker], access: WorkerAccess) -> APIRouter:
+    """The routes of ``PREFIX`` for the workers ``access`` lets in, each over its broker in
+    ``brokers``, by the worker's name."""
 
-    def worker_only(request: Request) -> None:
+    def worker_only(request: Request) -> TurnBroker:
+        """The broker of the worker that asks; FastAPI runs it once a request, for the router
+        and for the route that names it."""
         if not access.is_open:
             raise HTTPException(404)
-        if not access.admits(request.headers.get("authorization")):
+        worker = access.admitted(request.headers.get("authorization"))
+        if worker is None:
             raise HTTPException(401, headers={"WWW-Authenticate": "Bearer"})
+        broker = brokers.get(worker)
+        if broker is None:
+            raise HTTPException(404)
+        return broker
+
+    asking = Depends(worker_only)
 
     router = APIRouter(
         prefix=PREFIX,
@@ -161,21 +180,21 @@ def worker_router(broker: TurnBroker, access: WorkerAccess) -> APIRouter:
     )
 
     @router.post("/tasks/claim")
-    async def claim_tasks(body: ClaimRequest) -> TasksResponse:
+    async def claim_tasks(body: ClaimRequest, broker: TurnBroker = asking) -> TasksResponse:
         tasks = await broker.claim_tasks(body.now, body.until, body.limit)
         return TasksResponse(tasks=tasks)
 
     @router.post("/tasks/wait")
-    async def wait_for_queued(body: WaitRequest) -> WaitResponse:
+    async def wait_for_queued(body: WaitRequest, broker: TurnBroker = asking) -> WaitResponse:
         queued = await access.unless_closed(broker.wait_for_queued(body.now, body.timeout), False)
         return WaitResponse(queued=queued)
 
     @router.post("/tasks/renew")
-    async def renew_leases(body: RenewRequest) -> RenewResponse:
+    async def renew_leases(body: RenewRequest, broker: TurnBroker = asking) -> RenewResponse:
         return RenewResponse(stop=await broker.renew_leases(body.tasks, body.now, body.until))
 
     @router.get("/tasks/{task_id}")
-    async def get_task(task_id: uuid.UUID) -> TaskResponse:
+    async def get_task(task_id: uuid.UUID, broker: TurnBroker = asking) -> TaskResponse:
         task = await broker.get_task(task_id)
         return TaskResponse(task=task)
 
@@ -188,7 +207,7 @@ def worker_router(broker: TurnBroker, access: WorkerAccess) -> APIRouter:
         return CancelsResponse(cursor=cursor, tasks=tasks)
 
     @router.get("/turns/{turn_id}")
-    async def find_turn(turn_id: uuid.UUID) -> FoundTurnResponse:
+    async def find_turn(turn_id: uuid.UUID, broker: TurnBroker = asking) -> FoundTurnResponse:
         found = await broker.find_turn(turn_id)
         if found is None:
             return FoundTurnResponse(owner=None, turn=None)
@@ -201,6 +220,7 @@ def worker_router(broker: TurnBroker, access: WorkerAccess) -> APIRouter:
         limit: Annotated[int, Query(ge=1, le=1000)],
         before_updated_at: AwareDatetime | None = None,
         before_id: uuid.UUID | None = None,
+        broker: TurnBroker = asking,
     ) -> SessionsResponse:
         before = None
         if before_updated_at is not None and before_id is not None:
@@ -209,11 +229,15 @@ def worker_router(broker: TurnBroker, access: WorkerAccess) -> APIRouter:
         return SessionsResponse(sessions=sessions)
 
     @router.get("/users/{owner}/sessions/{session_id}")
-    async def get_session(owner: uuid.UUID, session_id: uuid.UUID) -> SessionResponse:
+    async def get_session(
+        owner: uuid.UUID, session_id: uuid.UUID, broker: TurnBroker = asking
+    ) -> SessionResponse:
         return SessionResponse(session=await broker.get_session(owner, session_id))
 
     @router.get("/users/{owner}/sessions/{session_id}/messages")
-    async def messages_of(owner: uuid.UUID, session_id: uuid.UUID) -> MessagesResponse:
+    async def messages_of(
+        owner: uuid.UUID, session_id: uuid.UUID, broker: TurnBroker = asking
+    ) -> MessagesResponse:
         documents = await broker.messages_of(owner, session_id)
         return MessagesResponse(messages=[dict(d) for d in documents])
 
@@ -227,6 +251,7 @@ def worker_router(broker: TurnBroker, access: WorkerAccess) -> APIRouter:
         turn_id: uuid.UUID,
         position: Annotated[int, Path(ge=1)],
         body: AppendRequest,
+        broker: TurnBroker = asking,
     ) -> None:
         await broker.append_event(
             owner, session_id, turn_id, position, body.document, body.written_at, body.expires_at
@@ -234,7 +259,11 @@ def worker_router(broker: TurnBroker, access: WorkerAccess) -> APIRouter:
 
     @router.post("/users/{owner}/sessions/{session_id}/turns/{turn_id}/finish", status_code=204)
     async def finish_turn(
-        owner: uuid.UUID, session_id: uuid.UUID, turn_id: uuid.UUID, body: FinishRequest
+        owner: uuid.UUID,
+        session_id: uuid.UUID,
+        turn_id: uuid.UUID,
+        body: FinishRequest,
+        broker: TurnBroker = asking,
     ) -> None:
         await broker.finish_turn(
             owner,

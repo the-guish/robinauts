@@ -19,6 +19,7 @@ finds at its next wait.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
 import uuid
 from collections.abc import Callable, Sequence
@@ -55,7 +56,7 @@ CANCEL_CHANNEL = "robinauts_cancel"
 """Where a request to stop a task is announced: ``<task>``."""
 
 QUEUED_CHANNEL = "robinauts_queued"
-"""Where a queued task is announced: ``<task>``."""
+"""Where a queued task is announced: ``<task> <worker>``."""
 
 ONE_ACTIVE = "turns_one_active_per_session"
 POSITION_TAKEN = "turn_events_pkey"
@@ -66,7 +67,7 @@ _TURN_COLUMNS = (
     "id, session_id, follows, model, state, started_at, ended_at, error, retries_message_id,"
     " task_id"
 )
-_TASK_COLUMNS = "id, task_name, payload, state, created_at, lease_until, claimed_at"
+_TASK_COLUMNS = "id, task_name, payload, state, created_at, lease_until, claimed_at, worker_queue"
 
 _VISIBLE = "SELECT 1 FROM sessions WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL"
 
@@ -101,7 +102,7 @@ UPDATE tasks
 SET state = 'running', lease_until = $2, claimed_at = $1
 WHERE state = 'queued' AND id IN (
   SELECT id FROM tasks
-  WHERE state = 'queued' AND lease_until > $1
+  WHERE state = 'queued' AND worker_queue = $4 AND lease_until > $1
   ORDER BY created_at, id
   LIMIT $3
   FOR UPDATE SKIP LOCKED
@@ -109,7 +110,10 @@ WHERE state = 'queued' AND id IN (
 RETURNING {_TASK_COLUMNS}
 """
 
-_CLAIMABLE = "SELECT EXISTS (SELECT 1 FROM tasks WHERE state = 'queued' AND lease_until > $1)"
+_CLAIMABLE = (
+    "SELECT EXISTS (SELECT 1 FROM tasks"
+    " WHERE state = 'queued' AND worker_queue = $2 AND lease_until > $1)"
+)
 
 
 def _session(row: asyncpg.Record) -> Session:
@@ -148,6 +152,7 @@ def _task(row: asyncpg.Record) -> Task:
         row["created_at"],
         row["lease_until"],
         row["claimed_at"],
+        row["worker_queue"],
     )
 
 
@@ -183,7 +188,8 @@ class PostgresStore(Store):
         self._dsn = dsn
         self._listener: asyncpg.Connection | None = None
         self._waiters: dict[uuid.UUID, set[asyncio.Future[None]]] = {}
-        self._queued_waiters: set[asyncio.Future[None]] = set()
+        self._queued_waiters: dict[str, set[asyncio.Future[None]]] = {}
+        """By worker: those waiting for a task it may claim."""
         self._stops: list[Callable[[uuid.UUID], object]] = []
         self._opening: asyncio.Lock | None = None
 
@@ -330,7 +336,7 @@ class PostgresStore(Store):
                     await self._insert_message(connection, question)
                 # The task first: the turn refers to it.
                 await connection.execute(
-                    f"INSERT INTO tasks ({_TASK_COLUMNS}) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                    f"INSERT INTO tasks ({_TASK_COLUMNS}) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                     task.id,
                     task.name,
                     task.payload,
@@ -338,6 +344,7 @@ class PostgresStore(Store):
                     task.created_at,
                     task.lease_until,
                     task.claimed_at,
+                    task.worker,
                 )
                 await connection.execute(
                     f"INSERT INTO turns ({_TURN_COLUMNS})"
@@ -355,7 +362,7 @@ class PostgresStore(Store):
                 )
                 if task.state is TaskState.QUEUED:
                     await connection.execute(
-                        "SELECT pg_notify($1, $2)", QUEUED_CHANNEL, str(task.id)
+                        "SELECT pg_notify($1, $2)", QUEUED_CHANNEL, f"{task.id} {task.worker}"
                     )
         except asyncpg.UniqueViolationError as violated:
             if violated.constraint_name == ONE_ACTIVE:
@@ -521,16 +528,19 @@ class PostgresStore(Store):
         )
         return [row["id"] for row in rows if row["cancel_requested_at"] is not None]
 
-    async def claim_tasks(self, now: datetime, until: datetime, limit: int) -> list[Task]:
-        rows = await self._pool.fetch(_CLAIM, now, until, limit)
+    async def claim_tasks(
+        self, now: datetime, until: datetime, limit: int, worker: str
+    ) -> list[Task]:
+        rows = await self._pool.fetch(_CLAIM, now, until, limit, worker)
         return [_task(row) for row in rows]
 
-    async def wait_for_queued(self, now: datetime, timeout: float) -> bool:
+    async def wait_for_queued(self, now: datetime, timeout: float, worker: str) -> bool:
         await self._listen()
         woken: asyncio.Future[None] = asyncio.get_running_loop().create_future()
-        self._queued_waiters.add(woken)
+        waiting = self._queued_waiters.setdefault(worker, set())
+        waiting.add(woken)
         try:
-            if await self._pool.fetchval(_CLAIMABLE, now):
+            if await self._pool.fetchval(_CLAIMABLE, now, worker):
                 return True
             try:
                 await asyncio.wait_for(asyncio.shield(woken), timeout)
@@ -538,7 +548,9 @@ class PostgresStore(Store):
                 return False
             return True
         finally:
-            self._queued_waiters.discard(woken)
+            waiting.discard(woken)
+            if not waiting and self._queued_waiters.get(worker) is waiting:
+                del self._queued_waiters[worker]
 
     async def request_cancel(
         self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, at: datetime
@@ -710,7 +722,11 @@ class PostgresStore(Store):
     def _wake_queued_waiters(
         self, connection: object, pid: int, channel: str, payload: str
     ) -> None:
-        for woken in self._queued_waiters:
+        """Wake the waiters of the worker the task is for; every waiter, on a payload that
+        names none, since a waiter woken for nothing only looks again."""
+        _, _, worker = payload.partition(" ")
+        waiting = [self._queued_waiters.get(worker, set())] if worker else []
+        for woken in itertools.chain.from_iterable(waiting or self._queued_waiters.values()):
             if not woken.done():
                 woken.set_result(None)
 

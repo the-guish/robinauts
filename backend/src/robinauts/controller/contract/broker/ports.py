@@ -30,12 +30,15 @@ class TurnBroker(ABC):
     ``TurnLostError`` for a write on a turn the worker no longer holds. Every time comes from
     the worker's clock. A worker in this process has it over the controller's store; one in a
     process of its own, over HTTP, from the server that spawned it (``web/worker_api.py``).
+
+    A broker is one worker's: the tasks it claims and waits for are those of the agents that
+    worker runs (``AgentConfig.worker``), and no other worker's.
     """
 
     @abstractmethod
     async def claim_tasks(self, now: datetime, until: datetime, limit: int) -> list[Task]:
-        """Up to ``limit`` queued tasks, made running, with their lease until ``until``. Each
-        task is claimed once, whichever worker asks."""
+        """Up to ``limit`` of this worker's queued tasks, made running, with their lease until
+        ``until``. Each task is claimed once, whichever process of the worker asks."""
         raise NotImplementedError
 
     @abstractmethod

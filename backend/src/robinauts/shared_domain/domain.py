@@ -91,6 +91,10 @@ class ToolServerConfig:
     exclude: tuple[str, ...] = ()
 
 
+DEFAULT_WORKER = "default"
+"""The worker an agent's turns run on when its configuration names none."""
+
+
 @dataclass(frozen=True, slots=True)
 class AgentConfig:
     id: str
@@ -101,6 +105,8 @@ class AgentConfig:
     tools: tuple[str, ...] = ()
     # How long one of its turns may run; left out, ``[work]``'s ``max_turn_seconds``.
     turn_timeout_seconds: float | None = None
+    # The worker its turns run on, a process of its own on PostgreSQL; left out, the default.
+    worker: str = DEFAULT_WORKER
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +129,24 @@ class Config:
     tool_servers: Mapping[str, ToolServerConfig] = field(default_factory=dict)
     agents: Mapping[str, AgentConfig] = field(default_factory=dict)
     work: WorkConfig = field(default_factory=WorkConfig)
+
+    def workers(self) -> tuple[str, ...]:
+        """Every worker the agents name: the default first, which always runs, then the
+        others by name."""
+        named = {agent.worker for agent in self.agents.values()} - {DEFAULT_WORKER}
+        return (DEFAULT_WORKER, *sorted(named))
+
+    def worker_of(self, agent: str) -> str:
+        """The worker that runs the turns of that agent: the default for one no longer
+        configured, whose turns fail there rather than wait for a worker nobody runs."""
+        found = self.agents.get(agent)
+        return DEFAULT_WORKER if found is None else found.worker
+
+    def for_worker(self, worker: str) -> Config:
+        """This configuration with the agents of that worker alone: what it builds engines
+        for and runs turns of."""
+        agents = {id_: a for id_, a in self.agents.items() if a.worker == worker}
+        return Config(self.providers, self.models, self.tool_servers, agents, self.work)
 
 
 class StorageKind(StrEnum):

@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The worker in a process of its own, which ``Lifecycle`` spawns on PostgreSQL.
+"""A worker in a process of its own, which ``Lifecycle`` spawns on PostgreSQL, one for each
+worker the configuration names.
 
 It reads the configuration and the environment ``robinauts start`` read, and runs only the
-worker, until SIGTERM or SIGINT. It then stops the worker, which waits for its tasks. It
-reaches the core through its parent's API alone (``worker/http_turn_broker.py``), at the URL its
-environment names, with the secret its parent wrote to a pipe; the database it opens is for
-the engines' state. It writes a line to its parent once the worker has started. On Linux it
+worker its environment names, until SIGTERM or SIGINT: the engines of that worker's agents,
+and the turns of those agents, which are all its parent's API hands it. It then stops the
+worker, which waits for its tasks. It reaches the core through its parent's API alone
+(``worker/http_turn_broker.py``), at the URL its environment names, with the secret its parent
+wrote to a pipe, which says to that API which worker this is; the database it opens is for the
+engines' state. It writes a line to its parent once the worker has started. On Linux it
 also ends with its parent, killed or not.
 """
 
@@ -27,6 +30,7 @@ from robinauts.cli.composition import (
     load,
     storage_from,
 )
+from robinauts.shared_domain.domain import DEFAULT_WORKER
 from robinauts.web.contract.broker.wire import PREFIX
 
 PARENT_VARIABLE = "ROBINAUTS_WORKER_PARENT"
@@ -43,6 +47,9 @@ reads."""
 
 BROKER_URL_VARIABLE = "ROBINAUTS_WORKER_BROKER_URL"
 """The root of the API this process reaches the core through: its parent's."""
+
+WORKER_NAME_VARIABLE = "ROBINAUTS_WORKER_NAME"
+"""The worker this process runs: ``default`` when unset."""
 
 SECRET_VARIABLE = "ROBINAUTS_WORKER_SECRET_FD"
 """The pipe this process reads the secret it presents to that API from, to its end."""
@@ -90,9 +97,10 @@ async def _run() -> None:
     config, secret_for = load(Path(os.environ["ROBINAUTS_CONFIG"]), os.environ)
     url = os.environ[BROKER_URL_VARIABLE]
     logging.getLogger("httpx").addFilter(QuietRequests(url))
+    name = os.environ.get(WORKER_NAME_VARIABLE) or DEFAULT_WORKER
     broker = http_turn_broker(url, _read_secret())
     worker = compose_worker(
-        config, storage=storage_from(os.environ), secret_for=secret_for, broker=broker
+        config, storage=storage_from(os.environ), secret_for=secret_for, broker=broker, name=name
     )
     worker.activity_file = Path(os.environ[ACTIVITY_VARIABLE])
     stopping = asyncio.Event()
@@ -110,7 +118,10 @@ async def _run() -> None:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO)
+    name = os.environ.get(WORKER_NAME_VARIABLE) or DEFAULT_WORKER
+    logging.basicConfig(
+        level=logging.INFO, format=f"%(levelname)s:worker {name}:%(name)s:%(message)s"
+    )
     _end_with_parent()
     asyncio.run(_run())
 

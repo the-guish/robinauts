@@ -82,9 +82,11 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
 - **A question, its task and its turn are stored in one operation**, the task before
   the turn, which refers to it. A question refused a turn is not left behind, and
   neither is its task.
-- **A worker claims a queued task.** A turn is stored `active`, with a `queued` task.
-  A worker's `claim_tasks` makes the task `running`, with a new lease, in one
-  operation. Each task is claimed once, whichever process asks. The worker then
+- **A worker claims a queued task.** A turn is stored `active`, with a `queued` task,
+  whose `worker_queue` is the worker its agent names, or `default`. A worker's
+  `claim_tasks` makes one of its own tasks `running`, with a new lease, in one
+  operation, and never a task of another worker. Each task is claimed once, whichever
+  process asks. The worker then
   dispatches it in its own process. The task's `payload` names its turn.
 - **A turn finishes in one operation:** its answer, its last events, its state, its
   task `done`, and the session's `updated_at`.
