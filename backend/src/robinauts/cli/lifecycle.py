@@ -25,11 +25,11 @@ from robinauts.cli.composition import Composed
 from robinauts.cli.worker_process import (
     ACTIVITY_VARIABLE,
     BROKER_URL_VARIABLE,
-    NAME_VARIABLE,
     PARENT_VARIABLE,
     READY_LINE,
     READY_VARIABLE,
     SECRET_VARIABLE,
+    WORKER_NAME_VARIABLE,
 )
 from robinauts.shared_domain.domain import DEFAULT_WORKER
 from robinauts.web.worker_api import WorkerAccess
@@ -121,7 +121,7 @@ class Lifecycle:
             PARENT_VARIABLE: str(os.getpid()),
             ACTIVITY_VARIABLE: str(self.activity_files[name]),
             BROKER_URL_VARIABLE: broker_url,
-            NAME_VARIABLE: name,
+            WORKER_NAME_VARIABLE: name,
         }
         # The secret, whole, before the worker exists: far shorter than a pipe holds.
         secret_end, secret_write = os.pipe()
