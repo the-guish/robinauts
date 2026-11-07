@@ -47,7 +47,9 @@ worker = "claude-container"
 ```
 
 The server's environment holds `ROBINAUTS_CLAUDE_CONTAINER_SECRET=<a long random
-string>`; the worker is given the same string. The server starts and is healthy
+string>`; the worker is given the same string, and nothing else of the server's:
+it opens no database and reaches the core over HTTP alone, so it refuses to
+start with `ROBINAUTS_DATABASE_URL` in its environment. The server starts and is healthy
 with the container down; the agent's turns wait, queued, until it connects.
 The container mounts the same `robinauts.toml`, read-only: it parses the same
 file the server does, which is why **the image must be the same build of

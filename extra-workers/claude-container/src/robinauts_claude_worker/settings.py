@@ -30,6 +30,10 @@ SECRET_VARIABLE = "ROBINAUTS_WORKER_SECRET"
 SECRET_FILE_VARIABLE = "ROBINAUTS_WORKER_SECRET_FILE"
 """A file that holds the secret instead, such as a Docker secret; one of the two."""
 
+DATABASE_URL_VARIABLE = "ROBINAUTS_DATABASE_URL"
+"""The server's, never this worker's: it opens no database and reaches the core over HTTP
+alone, so a database URL in its environment is a mistake it refuses to start with."""
+
 PREFIX = "ROBINAUTS_CLAUDE_"
 AUTH_VARIABLE = PREFIX + "AUTH"
 WORKSPACES_VARIABLE = PREFIX + "WORKSPACES"
@@ -125,6 +129,12 @@ def settings_from(environ: Mapping[str, str]) -> Settings:
     if parts is None or parts.scheme not in ("http", "https") or not parts.netloc:
         problems.append(
             f"{BROKER_URL_VARIABLE} is not an http or https URL: the server this worker reaches"
+        )
+
+    if given(DATABASE_URL_VARIABLE):
+        problems.append(
+            f"{DATABASE_URL_VARIABLE} is set: this worker opens no database and reaches the"
+            " server over HTTP alone; keep the database's URL out of its environment"
         )
 
     worker = given(WORKER_NAME_VARIABLE, DEFAULT_WORKER_NAME)

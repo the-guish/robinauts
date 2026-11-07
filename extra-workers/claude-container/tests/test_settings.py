@@ -92,6 +92,10 @@ def test_every_knob(tmp_path: Path) -> None:
         ),
         ({"ROBINAUTS_WORKER_SECRET": ""}, "ROBINAUTS_WORKER_SECRET is not set"),
         (
+            {"ROBINAUTS_DATABASE_URL": "postgresql://robinauts@db/robinauts"},
+            "ROBINAUTS_DATABASE_URL is set: this worker opens no database",
+        ),
+        (
             {"ROBINAUTS_WORKER_SECRET_FILE": "/nowhere/secret"},
             "ROBINAUTS_WORKER_SECRET and ROBINAUTS_WORKER_SECRET_FILE are both set",
         ),
