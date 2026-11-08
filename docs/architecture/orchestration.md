@@ -76,19 +76,3 @@ neither neorc nor Robinauts.
 
 - `guess_number`: a guessing game between two conversations with the first
   agent the server offers.
-  - The **game** runs on the first model whose id or title holds `haiku` (the
-    flow's `model` fixed param). It is asked to pick a secret number between 1
-    and 10 and to answer each guess with `HIT`, `TOO LOW` or `TOO HIGH`.
-  - The **guesser** runs on the agent's default model and is asked to guess.
-  - Each round, one neorc task carries the guesser's latest answer to the
-    game, wrapped in `here is the guess: `. A second task carries the game's
-    verdict back to the guesser as it is. The rounds stop at a hit or after ten
-    tries.
-  - The run's output says whether the guesser won, in how many tries, and
-    every round's guess and verdict.
-
-  A round reads each latest answer from its conversation rather than from the
-  round before. Steps of one loop cannot wait on each other's earlier
-  iterations, because neorc refuses that as a cycle. A task waits for a turn by
-  reading its stream to the end. neorc delivers a task at least once, so a
-  task that runs again sends its message again.
