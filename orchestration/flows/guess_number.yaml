@@ -1,13 +1,72 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 #
-# Starts a Robinauts conversation with a fixed prompt. The first step of the
-# guessing workflow (docs/architecture/orchestration.md): the steps that read
-# the answer and play the game come after.
+# A guessing game between two Robinauts conversations (robinauts_tasks.py).
+# A task draws the secret number between 1 and 10. The game, on a Haiku model,
+# is told it and judges each guess; the guesser is asked to guess. Each round
+# carries the guesser's latest answer to the game, wrapped in "here is the
+# guess: ", and the game's verdict back to the guesser as it is, until a hit or
+# ten tries.
+#
+# A round reads each latest answer from its conversation rather than from the
+# round before: steps of one loop cannot wait on each other's earlier
+# iterations, which would be a cycle.
 name: guess_number
-version: 0.1.0
+version: 0.3.0
+
+output: tasks.summarize
 
 steps:
-  start_session:
+  pick_number:
     queue: default
-    handler: robinauts_tasks:start_guessing_session
+    handler: robinauts_tasks:pick_number
+
+  open_game:
+    queue: default
+    handler: robinauts_tasks:open_game
+    params:
+      number: tasks.pick_number
+    fixed_params:
+      model: haiku
+
+  open_guesser:
+    queue: default
+    handler: robinauts_tasks:open_guesser
+
+  rounds:
+    loop:
+      # One guess per round. game_over says true by the tenth at the latest:
+      # a loop that reaches max_cycles still going fails the run.
+      max_cycles: 10
+      exit_condition: game_over
+    steps:
+      judge:
+        queue: default
+        handler: robinauts_tasks:judge_guess
+        params:
+          game: tasks.open_game
+          guesser: tasks.open_guesser
+
+      game_over:
+        queue: default
+        handler: robinauts_tasks:game_over
+        params:
+          judged: tasks.judge
+          loop_count: neorc.loop_count
+        fixed_params:
+          max_tries: 10
+
+      relay:
+        queue: default
+        handler: robinauts_tasks:relay_verdict
+        params:
+          guesser: tasks.open_guesser
+          judged: tasks.judge
+          over: tasks.game_over
+
+  summarize:
+    queue: default
+    handler: robinauts_tasks:summarize
+    params:
+      number: tasks.pick_number
+      judged: tasks.judge

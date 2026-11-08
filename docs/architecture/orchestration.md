@@ -74,8 +74,5 @@ secrets, `ROBINAUTS_DATABASE_URL` and `ROBINAUTS_CONFIG`.
 handlers: plain functions that use the standard library alone and import
 neither neorc nor Robinauts.
 
-- `guess_number`: starts a new conversation with the first agent the server
-  offers and a fixed prompt. It returns the conversation's id and its turn's.
-  The turn runs on the server whether or not anybody watches it. This is the
-  first step of the guessing workflow; the steps that read the answer and play
-  the game come next.
+- `guess_number`: a guessing game between two conversations with the first
+  agent the server offers.
