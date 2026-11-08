@@ -30,7 +30,7 @@ import asyncpg
 from robinauts.controller.adapters.postgres.pool import close_pool, open_pool
 from robinauts.controller.adapters.postgres.schema import check_schema
 from robinauts.controller.contract.broker.domain import Task, TaskState
-from robinauts.controller.contract.domain import TurnActiveError, User
+from robinauts.controller.contract.domain import OneShotKeyTakenError, TurnActiveError, User
 from robinauts.controller.ports.store import (
     Cursor,
     Document,
@@ -39,6 +39,7 @@ from robinauts.controller.ports.store import (
     StoredMessage,
 )
 from robinauts.shared_domain.domain import (
+    OneShot,
     Role,
     Session,
     SessionNotFoundError,
@@ -59,10 +60,14 @@ QUEUED_CHANNEL = "robinauts_queued"
 """Where a queued task is announced: ``<task> <worker>``."""
 
 ONE_ACTIVE = "turns_one_active_per_session"
+ONE_SHOT_KEY_TAKEN = "sessions_one_shot_key_key"
 POSITION_TAKEN = "turn_events_pkey"
 USER_EXISTS = "users_provider_subject_key"
 
-_SESSION_COLUMNS = "id, owner_id, agent, engine, title, created_at, updated_at"
+_SESSION_COLUMNS = (
+    "id, owner_id, agent, engine, title, created_at, updated_at,"
+    " one_shot_key, one_shot_digest, one_shot_labels"
+)
 _TURN_COLUMNS = (
     "id, session_id, follows, model, state, started_at, ended_at, error, retries_message_id,"
     " task_id"
@@ -117,6 +122,10 @@ _CLAIMABLE = (
 
 
 def _session(row: asyncpg.Record) -> Session:
+    one_shot = None
+    if row["one_shot_key"] is not None:
+        labels = tuple(sorted(row["one_shot_labels"].items()))
+        one_shot = OneShot(row["one_shot_key"], row["one_shot_digest"], labels)
     return Session(
         row["id"],
         row["owner_id"],
@@ -125,7 +134,15 @@ def _session(row: asyncpg.Record) -> Session:
         row["created_at"],
         row["updated_at"],
         row["title"],
+        one_shot,
     )
+
+
+def _one_shot_columns(session: Session) -> tuple[str | None, str | None, dict[str, str] | None]:
+    """The ``one_shot_`` columns of a session: all null on a conversation."""
+    if session.one_shot is None:
+        return None, None, None
+    return session.one_shot.key, session.one_shot.digest, dict(session.one_shot.labels)
 
 
 def _turn(row: asyncpg.Record) -> Turn:
@@ -237,8 +254,14 @@ class PostgresStore(Store):
     # --- sessions -----------------------------------------------------------
 
     async def add_session(self, session: Session) -> None:
-        await self._pool.execute(
-            f"INSERT INTO sessions ({_SESSION_COLUMNS}) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        await self._insert_session(self._pool, session)
+
+    async def _insert_session(
+        self, on: asyncpg.Pool | asyncpg.Connection, session: Session
+    ) -> None:
+        await on.execute(
+            f"INSERT INTO sessions ({_SESSION_COLUMNS})"
+            " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
             session.id,
             session.owner_id,
             session.agent,
@@ -246,6 +269,7 @@ class PostgresStore(Store):
             session.title,
             session.created_at,
             session.updated_at,
+            *_one_shot_columns(session),
         )
 
     async def get_session(self, owner: uuid.UUID, session: uuid.UUID) -> Session:
@@ -322,13 +346,29 @@ class PostgresStore(Store):
             )
         return [row["document"] for row in rows]
 
+    async def one_shot_of(self, owner: uuid.UUID, key: str) -> Session | None:
+        row = await self._pool.fetchrow(
+            f"SELECT {_SESSION_COLUMNS} FROM sessions"
+            " WHERE owner_id = $1 AND one_shot_key = $2 AND deleted_at IS NULL",
+            owner,
+            key,
+        )
+        return None if row is None else _session(row)
+
     # --- turns --------------------------------------------------------------
 
     async def queue_turn(
-        self, owner: uuid.UUID, turn: Turn, task: Task, question: StoredMessage | None
+        self,
+        owner: uuid.UUID,
+        turn: Turn,
+        task: Task,
+        question: StoredMessage | None,
+        session: Session | None = None,
     ) -> None:
         try:
             async with self._pool.acquire() as connection, connection.transaction():
+                if session is not None:
+                    await self._insert_session(connection, session)
                 held = await connection.fetchval(_VISIBLE + " FOR SHARE", turn.session_id, owner)
                 if held is None:
                     raise SessionNotFoundError(str(turn.session_id))
@@ -367,6 +407,9 @@ class PostgresStore(Store):
         except asyncpg.UniqueViolationError as violated:
             if violated.constraint_name == ONE_ACTIVE:
                 raise TurnActiveError(str(turn.session_id)) from violated
+            if violated.constraint_name == ONE_SHOT_KEY_TAKEN:
+                key = session.one_shot.key if session and session.one_shot else ""
+                raise OneShotKeyTakenError(key) from violated
             raise
 
     async def append_event(

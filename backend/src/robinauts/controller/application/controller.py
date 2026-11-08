@@ -7,14 +7,16 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import dataclasses
 import logging
 import uuid
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 
 from robinauts.controller.application.intervals import run_at_intervals
 from robinauts.controller.contract.broker.documents import (
+    clean_text,
     event_from_document,
     message_from_document,
     stored_message,
@@ -30,19 +32,26 @@ from robinauts.controller.contract.domain import (
     ModelListing,
     NoActiveTurnError,
     NumberedEvent,
+    OneShotKeyTakenError,
+    OneShotTurnError,
+    OpenedOneShot,
     OpenedSession,
     SessionPage,
+    UnknownAgentError,
     UnknownModelError,
     User,
 )
 from robinauts.controller.contract.ports import Controller
+from robinauts.controller.core.one_shots import request_digest
 from robinauts.controller.core.titles import title_from_text
 from robinauts.controller.ports.store import Cursor, Store
 from robinauts.shared_domain.domain import (
     Config,
     Message,
+    OneShot,
     Role,
     Session,
+    SessionNotFoundError,
     TextPart,
     Turn,
     TurnEnded,
@@ -162,7 +171,20 @@ class RobinautsController(Controller):
         raise NotImplementedError("fork_session")
 
     async def start_session(self, user: User, *, agent: str, model: str, text: str) -> TurnStarted:
-        agent_config = self._config.agents[agent]
+        session, turn, question = await self._new_session(user, agent, model, text)
+        return TurnStarted(session.id, turn.id, question)
+
+    async def _new_session(
+        self, user: User, agent: str, model: str, text: str, one_shot: OneShot | None = None
+    ) -> tuple[Session, Turn, Message]:
+        """A session with its first question and turn, stored in one operation."""
+        agent_config = self._config.agents.get(agent)
+        if agent_config is None:
+            raise UnknownAgentError(agent)
+        if model not in self._config.models:
+            raise UnknownModelError(model)
+        if not text or not text.strip():
+            raise InvalidValueError("a message needs some text")
         now = self._now()
         session = Session(
             uuid.uuid4(),
@@ -172,6 +194,7 @@ class RobinautsController(Controller):
             created_at=now,
             updated_at=now,
             title=title_from_text(text),
+            one_shot=one_shot,
         )
         question = Message(
             uuid.uuid4(),
@@ -184,12 +207,97 @@ class RobinautsController(Controller):
             engine=session.engine,
             model=model,
         )
-        await self._store.add_session(session)
         # The worker creates the engine's session before it runs this first turn.
-        turn = await self._queue_turn(
-            user, session, question, model, new_question=True, create_session=True
-        )
-        return TurnStarted(session.id, turn.id, question)
+        turn, task = self._turn_and_task(session, question, model, create_session=True)
+        await self._store.queue_turn(user.id, turn, task, stored_message(question), session)
+        return session, turn, question
+
+    # --- tasks: one-shot sessions -------------------------------------------------
+
+    async def start_one_shot(
+        self,
+        user: User,
+        *,
+        agent: str,
+        model: str | None,
+        prompt: str,
+        key: str,
+        labels: Mapping[str, str],
+    ) -> tuple[OpenedOneShot, bool]:
+        labels = {name: clean_text(value) for name, value in labels.items()}
+        digest = request_digest(agent, model, prompt, labels)
+        existing = await self._store.one_shot_of(user.id, key)
+        if existing is None:
+            agent_config = self._config.agents.get(agent)
+            if agent_config is None:
+                raise UnknownAgentError(agent)
+            one_shot = OneShot(key, digest, tuple(sorted(labels.items())))
+            try:
+                session, _, _ = await self._new_session(
+                    user, agent, model or agent_config.model, prompt, one_shot
+                )
+                return await self._opened_one_shot(user, session), True
+            except OneShotKeyTakenError:
+                # Another request under that key was stored first: answered as a repeat.
+                existing = await self._store.one_shot_of(user.id, key)
+                if existing is None:
+                    raise
+        assert existing.one_shot is not None
+        if existing.one_shot.digest != digest:
+            raise OneShotKeyTakenError(f"a task of another request holds the key {key!r}")
+        return await self._opened_one_shot(user, existing), False
+
+    async def open_one_shot(
+        self, user: User, session_id: uuid.UUID, *, wait: float = 0.0
+    ) -> OpenedOneShot:
+        session = await self._one_shot_session(user, session_id)
+        opened = await self._opened_one_shot(user, session)
+        if wait <= 0 or opened.turn.state is not TurnState.ACTIVE:
+            return opened
+        # The wake-up a watcher waits on, and the expiry it checks, not a poll of the store.
+        events = self.watch_turn(user, session_id, opened.turn.id)
+        with contextlib.suppress(TimeoutError):
+            async with contextlib.aclosing(events), asyncio.timeout(wait):
+                async for _ in events:
+                    pass
+        return await self._opened_one_shot(user, session)
+
+    async def cancel_one_shot(self, user: User, session_id: uuid.UUID) -> None:
+        session = await self._one_shot_session(user, session_id)
+        await self._end_expired(session)
+        running = await self._store.active_turn(user.id, session_id)
+        if running is not None:
+            await self._cancel(user, running)
+
+    async def _one_shot_session(self, user: User, session_id: uuid.UUID) -> Session:
+        session = await self._store.get_session(user.id, session_id)
+        if session.one_shot is None:
+            raise SessionNotFoundError(f"{session_id} is not a task")
+        return session
+
+    async def _opened_one_shot(self, user: User, session: Session) -> OpenedOneShot:
+        """The task's one turn, its expiry seen to, and the text of its answer once it has
+        finished. A failed or interrupted turn's answer is what it streamed before it ended,
+        which is not an answer."""
+        await self._end_expired(session)
+        turn = await self._store.latest_turn(user.id, session.id)
+        if turn is None:
+            # Stored with its session in one operation: a task without one is not there.
+            raise SessionNotFoundError(str(session.id))
+        answer = None
+        if turn.state is TurnState.FINISHED:
+            messages = await load_messages(self._store, user.id, session.id)
+            found = next((m for m in messages if m.turn_id == turn.id), None)
+            if found is not None:
+                answer = "".join(p.text for p in found.parts if isinstance(p, TextPart))
+        return OpenedOneShot(session, turn, answer)
+
+    async def _turnable(self, user: User, session_id: uuid.UUID) -> Session:
+        """The session a turn is asked of: a task's takes none but its first."""
+        session = await self._store.get_session(user.id, session_id)
+        if session.one_shot is not None:
+            raise OneShotTurnError(f"{session_id} is a task, which takes no other turn")
+        return session
 
     async def send_message(
         self,
@@ -200,7 +308,7 @@ class RobinautsController(Controller):
         model: str,
         text: str,
     ) -> TurnStarted:
-        session = await self._store.get_session(user.id, session_id)
+        session = await self._turnable(user, session_id)
         messages = await load_messages(self._store, user.id, session_id)
         if all(m.id != parent_id for m in messages):
             raise MessageNotFoundError(str(parent_id))
@@ -215,7 +323,7 @@ class RobinautsController(Controller):
         model: str,
         text: str,
     ) -> TurnStarted:
-        session = await self._store.get_session(user.id, session_id)
+        session = await self._turnable(user, session_id)
         messages = await load_messages(self._store, user.id, session_id)
         edited = next((m for m in messages if m.id == message_id), None)
         if edited is None or edited.role is not Role.USER:
@@ -244,7 +352,7 @@ class RobinautsController(Controller):
     async def regenerate_answer(
         self, user: User, session_id: uuid.UUID, *, question_id: uuid.UUID, model: str
     ) -> TurnStarted:
-        session = await self._store.get_session(user.id, session_id)
+        session = await self._turnable(user, session_id)
         question = next(
             (
                 m
@@ -261,7 +369,7 @@ class RobinautsController(Controller):
     async def retry_answer(
         self, user: User, session_id: uuid.UUID, *, answer_id: uuid.UUID, model: str
     ) -> TurnStarted:
-        session = await self._store.get_session(user.id, session_id)
+        session = await self._turnable(user, session_id)
         by_id = {m.id: m for m in await load_messages(self._store, user.id, session_id)}
         failed = by_id.get(answer_id)
         if failed is None or not failed.failed or failed.parent_id is None:
@@ -275,7 +383,7 @@ class RobinautsController(Controller):
     async def resume_answer(
         self, user: User, session_id: uuid.UUID, *, answer_id: uuid.UUID, model: str
     ) -> TurnStarted:
-        session = await self._store.get_session(user.id, session_id)
+        session = await self._turnable(user, session_id)
         await self._end_expired(session)
         by_id = {m.id: m for m in await load_messages(self._store, user.id, session_id)}
         failed = by_id.get(answer_id)
@@ -317,13 +425,35 @@ class RobinautsController(Controller):
         *,
         new_question: bool,
         retries_message_id: uuid.UUID | None = None,
-        create_session: bool = False,
         resume: bool = False,
     ) -> Turn:
         model_config = self._config.models.get(model)
         if model_config is None:
             raise UnknownModelError(model)
         await self._end_expired(session)
+        turn, task = self._turn_and_task(
+            session,
+            question,
+            model,
+            retries_message_id=retries_message_id,
+            resume=resume,
+        )
+        stored = stored_message(question) if new_question else None
+        # A worker claims the task and dispatches it.
+        await self._store.queue_turn(user.id, turn, task, stored)
+        return turn
+
+    def _turn_and_task(
+        self,
+        session: Session,
+        question: Message,
+        model: str,
+        *,
+        retries_message_id: uuid.UUID | None = None,
+        create_session: bool = False,
+        resume: bool = False,
+    ) -> tuple[Turn, Task]:
+        """A turn answering the question, active, and the queued task that runs it."""
         now = self._now()
         turn_id = uuid.uuid4()
         payload: dict[str, object] = {"turn_id": str(turn_id), "create_session": create_session}
@@ -348,10 +478,7 @@ class RobinautsController(Controller):
             task_id=task.id,
             retries_message_id=retries_message_id,
         )
-        stored = stored_message(question) if new_question else None
-        # A worker claims the task and dispatches it.
-        await self._store.queue_turn(user.id, turn, task, stored)
-        return turn
+        return turn, task
 
     async def watch_turn(
         self,

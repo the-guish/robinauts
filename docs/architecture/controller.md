@@ -93,6 +93,19 @@ worker's own, for the engines' tables.
 - `watch_turn`: the events of the turn named, from a position, as they happen, ending with how
   it ended.
 
+## Tasks
+
+The wire's tasks (`docs/specs/wire.md`, "Without streaming"), which the controller calls
+one-shot sessions: its own word task is the worker's record.
+
+- `start_one_shot`: a session for one prompt under an idempotency key, opened as
+  `start_session` opens one; or the owner's session of that key, for the same request.
+- `open_one_shot`: the task's state and, once its turn has finished, its answer, after waiting
+  up to some seconds for the turn to end.
+- `cancel_one_shot`: stop the task's turn, if it has not ended.
+
+A one-shot session takes no turn but its first: every turn operation refuses it.
+
 ## Housekeeping
 
 Run by the process that holds the controller, on a schedule of its own.

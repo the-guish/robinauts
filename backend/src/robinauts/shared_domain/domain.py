@@ -230,6 +230,20 @@ class Message:
 
 
 @dataclass(frozen=True, slots=True)
+class OneShot:
+    """What makes a session one-shot: the wire's task (``docs/specs/wire.md``, "Without
+    streaming"), a session opened for one prompt that takes no turn but its first.
+
+    ``key`` is the idempotency key, one per owner among the visible sessions; ``digest`` the
+    SHA-256 of the request that opened it, which tells a repeat from another request under the
+    same key; ``labels`` the caller's own names for it, sorted by name."""
+
+    key: str
+    digest: str
+    labels: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class Session:
     id: uuid.UUID
     owner_id: uuid.UUID
@@ -240,6 +254,8 @@ class Session:
     created_at: datetime
     updated_at: datetime
     title: str = ""
+    one_shot: OneShot | None = None
+    """Set on a task's session, ``None`` on a conversation."""
 
 
 class TurnState(StrEnum):

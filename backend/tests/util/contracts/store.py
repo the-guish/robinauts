@@ -20,10 +20,11 @@ from typing import Any
 import pytest
 
 from robinauts.controller.contract.broker.domain import RUN_TURN, Task, TaskState
-from robinauts.controller.contract.domain import TurnActiveError, User
+from robinauts.controller.contract.domain import OneShotKeyTakenError, TurnActiveError, User
 from robinauts.controller.ports.store import Store, StoredEvent, StoredMessage
 from robinauts.shared_domain.domain import (
     DEFAULT_WORKER,
+    OneShot,
     Role,
     Session,
     SessionNotFoundError,
@@ -226,6 +227,52 @@ class StoreContract:
         assert not await store.purge_session(me.id, one.id, NOW)
         assert await store.purge_session(me.id, one.id, NOW + 4 * MINUTE)
         assert not await store.purge_session(me.id, one.id, NOW + 4 * MINUTE)
+
+    # --- one-shot sessions ---------------------------------------------------
+
+    @store_test
+    async def test_a_new_session_is_stored_with_its_question_and_turn_in_one_operation(
+        self, store: Store
+    ) -> None:
+        me = await store.add_or_refresh_user(user())
+        labels = (("neorc_run_id", "r"), ("neorc_task_id", "t"))
+        one = dataclasses.replace(session(me.id), one_shot=OneShot("k", "d" * 64, labels))
+        asked = question(one.id)
+        running, running_task = turn(one.id, asked.id)
+        await store.queue_turn(me.id, running, running_task, asked, one)
+        assert await store.get_session(me.id, one.id) == one
+        assert await store.sessions_of(me.id, 10, None) == [one]
+        assert await store.messages_of(me.id, one.id) == [asked.document]
+        assert await store.latest_turn(me.id, one.id) == running
+        assert await store.one_shot_of(me.id, "k") == one
+        assert await store.one_shot_of(me.id, "other") is None
+        you = await store.add_or_refresh_user(user("you"))
+        assert await store.one_shot_of(you.id, "k") is None
+
+    @store_test
+    async def test_a_key_taken_refuses_the_whole_new_session_until_its_holder_is_hidden(
+        self, store: Store
+    ) -> None:
+        me = await store.add_or_refresh_user(user())
+        you = await store.add_or_refresh_user(user("you"))
+
+        async def start(owner: User, key: str) -> Session:
+            one = dataclasses.replace(session(owner.id), one_shot=OneShot(key, "d"))
+            asked = question(one.id)
+            running, running_task = turn(one.id, asked.id)
+            await store.queue_turn(owner.id, running, running_task, asked, one)
+            return one
+
+        first = await start(me, "k")
+        with pytest.raises(OneShotKeyTakenError):
+            await start(me, "k")
+        assert await store.sessions_of(me.id, 10, None) == [first]
+        # Keys are the owner's: another owner's "k" is another key.
+        await start(you, "k")
+        await store.hide_session(me.id, first.id, NOW)
+        assert await store.one_shot_of(me.id, "k") is None
+        second = await start(me, "k")
+        assert await store.one_shot_of(me.id, "k") == second
 
     # --- turns --------------------------------------------------------------
 

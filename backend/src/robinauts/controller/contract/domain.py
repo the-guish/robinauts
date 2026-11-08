@@ -50,6 +50,15 @@ class NoActiveTurnError(ControllerError):
     pass
 
 
+class OneShotKeyTakenError(ControllerError):
+    """An idempotency key the owner has a task of already. The store raises it whatever the
+    request; the controller, for a request other than the one that started that task."""
+
+
+class OneShotTurnError(ControllerError):
+    """A turn asked of a task's session, which takes no turn but its first."""
+
+
 # --- users --------------------------------------------------------------------
 
 
@@ -233,6 +242,16 @@ class OpenedSession:
     active: ActiveTurn | None = None
     ended_badly: Turn | None = None
     """The session's last turn, when it failed, was cancelled or was interrupted."""
+
+
+@dataclass(frozen=True, slots=True)
+class OpenedOneShot:
+    """One moment of a task: its session, its one turn, and, once that turn has finished, the
+    text of its answer."""
+
+    session: Session
+    turn: Turn
+    answer: str | None = None
 
 
 # --- turns --------------------------------------------------------------------

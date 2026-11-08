@@ -37,10 +37,10 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
-from fastapi import Depends, FastAPI, Header, Request, Response
+from fastapi import Depends, FastAPI, Header, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from robinauts.controller.contract.broker.ports import TurnBroker
@@ -53,6 +53,9 @@ from robinauts.controller.contract.domain import (
     MessageNotFoundError,
     NoActiveTurnError,
     NumberedEvent,
+    OneShotKeyTakenError,
+    OneShotTurnError,
+    OpenedOneShot,
     OpenedSession,
     TurnActiveError,
     UnknownAgentError,
@@ -115,7 +118,18 @@ STATUS_OF: dict[type[ControllerError], int] = {
     UnknownModelError: 422,
     TurnActiveError: 409,
     NoActiveTurnError: 404,
+    OneShotKeyTakenError: 409,
+    OneShotTurnError: 409,
 }
+
+MAX_TASK_WAIT_SECONDS = 30.0
+"""The longest ``GET /api/tasks/{id}`` holds its request for the task's turn to end."""
+
+MAX_TASK_LABELS = 16
+IdempotencyKey = Annotated[str, StringConstraints(pattern=r"^[!-~]{1,200}$")]
+"""One to 200 printable ASCII characters, with no space."""
+LabelName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_.:-]{1,64}$")]
+LabelValue = Annotated[str, StringConstraints(max_length=256)]
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 SIGN_IN_PAGE = "/ui/#/sign-in?error="
@@ -500,6 +514,35 @@ class NewChatRequest(BaseModel):
     text: str
 
 
+class NewTaskRequest(BaseModel):
+    """A field the body does not know is refused (422), as a turn's will be."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: str
+    model_id: str | None = None
+    prompt: str
+    idempotency_key: IdempotencyKey
+    labels: dict[LabelName, LabelValue] = Field(default_factory=dict, max_length=MAX_TASK_LABELS)
+
+
+class StartedTaskResponse(BaseModel):
+    task_id: uuid.UUID
+    conversation_id: uuid.UUID
+    run_id: uuid.UUID
+    state: Literal["active", "finished", "failed", "cancelled", "interrupted"]
+
+
+class TaskResponse(StartedTaskResponse):
+    agent: str
+    model: str
+    answer: str | None
+    """The text of the answer once the turn has finished; ``null`` in every other state."""
+    labels: dict[str, str]
+    created_at: datetime
+    ended_at: datetime | None
+
+
 class TurnRequest(BaseModel):
     text: str | None = None
     parent_id: uuid.UUID | None = None
@@ -603,6 +646,24 @@ def opened_view(opened: OpenedSession, default: str) -> OpenedConversationRespon
         run_id=None if active is None else active.turn_id,
         resume=None if active is None else ResumeView(after=0, follows=active.follows),
         ended_badly=ended_badly_view(opened.ended_badly),
+    )
+
+
+def task_view(opened: OpenedOneShot) -> TaskResponse:
+    """A task as the wire shows it: its turn's state, and never its error, which is the
+    operator's."""
+    session, turn = opened.session, opened.turn
+    return TaskResponse(
+        task_id=session.id,
+        conversation_id=session.id,
+        run_id=turn.id,
+        state=turn.state.value,
+        agent=session.agent,
+        model=turn.model,
+        answer=opened.answer,
+        labels=dict(session.one_shot.labels) if session.one_shot else {},
+        created_at=session.created_at,
+        ended_at=turn.ended_at,
     )
 
 
@@ -806,7 +867,10 @@ def create_app(
         return JSONResponse({"error": type(exc).__name__, "detail": str(exc)}, status_code=status)
 
     async def default_model(agent: str) -> str:
-        return next(a.default_model for a in await controller.list_agents() if a.id == agent)
+        found = next((a for a in await controller.list_agents() if a.id == agent), None)
+        if found is None:
+            raise UnknownAgentError(agent)
+        return found.default_model
 
     async def stream_turn(
         user: User, session_id: uuid.UUID, turn_id: uuid.UUID, after: int
@@ -1107,6 +1171,43 @@ def create_app(
     ) -> ConversationSummary:
         forked = await controller.fork_session(user, conversation_id, at_message=body.at_message)
         return summary(forked, await default_model(forked.agent))
+
+    # --- tasks: one turn, read without streaming ---------------------------------
+
+    @app.post(
+        "/api/tasks",
+        status_code=201,
+        responses={200: {"model": StartedTaskResponse, "description": "The task of that key"}},
+    )
+    async def start_task(
+        body: NewTaskRequest, response: Response, user: User = asking
+    ) -> StartedTaskResponse:
+        opened, created = await controller.start_one_shot(
+            user,
+            agent=body.agent_id,
+            model=body.model_id,
+            prompt=body.prompt,
+            key=body.idempotency_key,
+            labels=body.labels,
+        )
+        if not created:
+            response.status_code = 200
+        session, turn = opened.session, opened.turn
+        return StartedTaskResponse(
+            task_id=session.id, conversation_id=session.id, run_id=turn.id, state=turn.state.value
+        )
+
+    @app.get("/api/tasks/{task_id}")
+    async def open_task(
+        task_id: uuid.UUID,
+        wait: Annotated[float, Query(ge=0, le=MAX_TASK_WAIT_SECONDS)] = 0,
+        user: User = asking,
+    ) -> TaskResponse:
+        return task_view(await controller.open_one_shot(user, task_id, wait=wait))
+
+    @app.post("/api/tasks/{task_id}/cancel", status_code=204)
+    async def cancel_task(task_id: uuid.UUID, user: User = asking) -> None:
+        await controller.cancel_one_shot(user, task_id)
 
     # --- turns: AG-UI over SSE, outside the OpenAPI document -------------------
 

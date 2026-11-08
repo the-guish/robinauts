@@ -18,7 +18,7 @@ agent to another engine, and what its sessions then do, is stage two.
 | record | key | holds | document |
 |---|---|---|---|
 | user | `id` | `provider` and `subject` (unique together), `name`, `email`, `created_at`, `hosted_domain`, `groups` | no |
-| session | `id` | `owner_id`, `agent`, `engine`, `title`, `created_at`, `updated_at`, `deleted_at` | no |
+| session | `id` | `owner_id`, `agent`, `engine`, `title`, `created_at`, `updated_at`, `deleted_at`, `one_shot_key`, `one_shot_digest`, `one_shot_labels` | no |
 | message | `id` | `session_id`, `parent_id`, `role`, `created_at` | **yes** |
 | turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `retries_message_id`, `task_id` | no |
 | task | `id` | `task_name`, `payload`, `state`, `created_at`, `lease_until`, `claimed_at`, `cancel_requested_at` | no |
@@ -70,6 +70,15 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   rebuilds it from its events. A cancelled turn stores none.
   Every answer comes from exactly one turn.
 - **A turn has its events**, numbered from 1.
+- **A one-shot session is the wire's task** (`docs/specs/wire.md`, "Without
+  streaming"), a session opened for one prompt. The controller says one-shot,
+  since its own word task is the worker's record above. The three `one_shot_`
+  fields are all set on one and all unset on a conversation: the caller's
+  idempotency key, the SHA-256 of the request that opened it, which tells a
+  repeat from another request under the key, and the caller's labels, a map of
+  strings. They are columns, since a session is found by its key; the labels
+  are one column holding a JSON object, decided by nothing yet. A one-shot
+  session has exactly one turn, its first.
 
 ## Rules every store keeps
 
@@ -81,7 +90,14 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   pointer to the active turn on the session: what is active is looked up.
 - **A question, its task and its turn are stored in one operation**, the task before
   the turn, which refers to it. A question refused a turn is not left behind, and
-  neither is its task.
+  neither is its task. A new session is stored in the same operation as its first
+  question, task and turn, so a session never exists without them.
+- **One key per owner.** No two visible one-shot sessions of one owner hold the same
+  key, held atomically by the operation that stores a new session. PostgreSQL holds
+  it with a partial unique index on `sessions (owner_id, one_shot_key)` where the key
+  is set and the session is not hidden; a store without one holds it with a record
+  keyed by the owner and the key, written with the session on condition that it does
+  not exist, and removed with the hide. A hidden session frees its key.
 - **A worker claims a queued task.** A turn is stored `active`, with a `queued` task,
   whose `worker_queue` is the worker its agent names, or `default`. A worker's
   `claim_tasks` makes one of its own tasks `running`, with a new lease, in one

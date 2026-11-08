@@ -129,6 +129,14 @@ CREATE TABLE IF NOT EXISTS users (
 --
 -- `owner_id` cascades: a user's sessions are private to them, and there is
 -- nobody else for them to belong to once the user is gone.
+--
+-- The three `one_shot_` columns make a session the wire's task
+-- (docs/specs/wire.md, "Without streaming"): a session opened for one prompt,
+-- which takes no turn but its first. They are null on a conversation and all
+-- set on a task. `one_shot_key` is the caller's idempotency key,
+-- `one_shot_digest` the SHA-256 of the request that opened the task, which
+-- tells a repeat from another request under the same key, and
+-- `one_shot_labels` the caller's names for the task, an object of strings.
 CREATE TABLE IF NOT EXISTS sessions (
     id uuid
         CONSTRAINT sessions_pkey PRIMARY KEY,
@@ -139,8 +147,21 @@ CREATE TABLE IF NOT EXISTS sessions (
     title text NOT NULL,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
-    deleted_at timestamptz
+    deleted_at timestamptz,
+    one_shot_key text,
+    one_shot_digest text,
+    one_shot_labels jsonb,
+    CONSTRAINT sessions_one_shot_is_whole CHECK (
+        (one_shot_key IS NULL) = (one_shot_digest IS NULL)
+        AND (one_shot_key IS NULL) = (one_shot_labels IS NULL)
+    )
 );
+
+-- One task per key and owner among the visible sessions: a deleted task frees
+-- its key. A violation is a key taken, by a request that won a race.
+CREATE UNIQUE INDEX IF NOT EXISTS sessions_one_shot_key_key
+    ON sessions (owner_id, one_shot_key)
+    WHERE one_shot_key IS NOT NULL AND deleted_at IS NULL;
 
 -- The listing: one owner's sessions, most recently updated first, ties broken
 -- by id so that the order is total and a keyset page, whose cursor is

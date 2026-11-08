@@ -13,7 +13,7 @@ from collections.abc import Callable, Sequence
 from datetime import datetime
 
 from robinauts.controller.contract.broker.domain import Task, TaskState
-from robinauts.controller.contract.domain import TurnActiveError, User
+from robinauts.controller.contract.domain import OneShotKeyTakenError, TurnActiveError, User
 from robinauts.controller.ports.store import (
     Cursor,
     Document,
@@ -164,11 +164,35 @@ class InProcessStore(Store):
         stored = sorted(self._messages[session], key=lambda m: (m.created_at, m.id))
         return [m.document for m in stored]
 
+    async def one_shot_of(self, owner: uuid.UUID, key: str) -> Session | None:
+        return next(
+            (
+                s
+                for s in self._sessions.values()
+                if s.owner_id == owner
+                and s.id not in self._hidden
+                and s.one_shot is not None
+                and s.one_shot.key == key
+            ),
+            None,
+        )
+
     # --- turns --------------------------------------------------------------
 
     async def queue_turn(
-        self, owner: uuid.UUID, turn: Turn, task: Task, question: StoredMessage | None
+        self,
+        owner: uuid.UUID,
+        turn: Turn,
+        task: Task,
+        question: StoredMessage | None,
+        session: Session | None = None,
     ) -> None:
+        if session is not None:
+            if session.owner_id != owner:
+                raise SessionNotFoundError(str(session.id))
+            if session.one_shot is not None and await self.one_shot_of(owner, session.one_shot.key):
+                raise OneShotKeyTakenError(session.one_shot.key)
+            await self.add_session(session)
         self._visible(owner, turn.session_id)
         if self._active(turn.session_id) is not None:
             raise TurnActiveError(str(turn.session_id))

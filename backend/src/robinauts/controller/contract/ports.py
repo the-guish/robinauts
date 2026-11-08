@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from datetime import datetime
 
 from robinauts.controller.contract.domain import (
@@ -20,6 +20,7 @@ from robinauts.controller.contract.domain import (
     Identity,
     ModelListing,
     NumberedEvent,
+    OpenedOneShot,
     OpenedSession,
     Pairing,
     PairingState,
@@ -32,6 +33,9 @@ from robinauts.shared_domain.domain import Session, TurnStarted
 
 
 class Controller(ABC):
+    """Every operation that starts a turn on a session that exists refuses a task's session
+    with ``OneShotTurnError``: one task, one turn."""
+
     @abstractmethod
     async def open(self) -> None:
         raise NotImplementedError
@@ -84,6 +88,40 @@ class Controller(ABC):
     @abstractmethod
     async def start_session(self, user: User, *, agent: str, model: str, text: str) -> TurnStarted:
         """``UnknownAgentError``, ``UnknownModelError``; ``InvalidValueError`` for empty text."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def start_one_shot(
+        self,
+        user: User,
+        *,
+        agent: str,
+        model: str | None,
+        prompt: str,
+        key: str,
+        labels: Mapping[str, str],
+    ) -> tuple[OpenedOneShot, bool]:
+        """A task: a session opened for one prompt, as ``start_session`` opens one, marked
+        one-shot under the idempotency key, and true; or the task the user already has under
+        that key, opened by the same request, and false. ``model`` ``None`` is the agent's.
+
+        ``OneShotKeyTakenError`` for a key of another request's, ``UnknownAgentError``,
+        ``UnknownModelError``; ``InvalidValueError`` for an empty prompt."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def open_one_shot(
+        self, user: User, session_id: uuid.UUID, *, wait: float = 0.0
+    ) -> OpenedOneShot:
+        """The task as it is, after waiting up to ``wait`` seconds for its turn to end.
+
+        ``SessionNotFoundError`` also for a session that is not a task."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def cancel_one_shot(self, user: User, session_id: uuid.UUID) -> None:
+        """Ask the task's turn to stop, if it has not ended. ``SessionNotFoundError`` also for a
+        session that is not a task."""
         raise NotImplementedError
 
     @abstractmethod

@@ -176,6 +176,11 @@ topic documents listed under [Documents](#documents).
   One active turn per conversation.
   [the-path-of-one-message.md](../architecture/the-path-of-one-message.md),
   [agent-engines.md](agent-engines.md), [wire.md](wire.md).
+- **Tasks.** A program that wants one answer to one prompt, a flow
+  orchestrator's agent step, starts a task: a conversation opened for that
+  prompt alone, under an idempotency key, which takes no other turn, and
+  whose answer it reads without streaming once the turn has ended.
+  [wire.md](wire.md).
 - **Channels.** One API for every delivery channel. The web UI is the
   first client; a mobile application and a Slack bridge are planned, and
   consume the same agents and conversations through the same API.
@@ -195,8 +200,7 @@ hard, the decision is taken with them in mind.
   model's state for one conversation is the framework's and is already
   stored ([agent-engines.md](agent-engines.md)).
 - Usage reporting (goal 7).
-- More delivery channels: a mobile application, a Slack bridge; and a way
-  to consume a run without streaming, for the clients that need it.
+- More delivery channels: a mobile application, a Slack bridge.
 - Agents created by users.
 - A container image.
 

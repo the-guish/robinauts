@@ -84,15 +84,26 @@ class Store(ABC):
     async def messages_of(self, owner: uuid.UUID, session: uuid.UUID) -> list[Document]:
         """Every message of the session, oldest first, ties broken by id."""
 
+    @abstractmethod
+    async def one_shot_of(self, owner: uuid.UUID, key: str) -> Session | None:
+        """The owner's visible session that is one-shot under that idempotency key."""
+
     # --- turns --------------------------------------------------------------
 
     @abstractmethod
     async def queue_turn(
-        self, owner: uuid.UUID, turn: Turn, task: Task, question: StoredMessage | None
+        self,
+        owner: uuid.UUID,
+        turn: Turn,
+        task: Task,
+        question: StoredMessage | None,
+        session: Session | None = None,
     ) -> None:
-        """Store the question, when there is one, the task and the turn, or none of them:
-        ``TurnActiveError`` while the session has an active turn. A queued task wakes every
-        process waiting in ``wait_for_queued``."""
+        """Store the session, when it is new, the question, when there is one, the task and the
+        turn, or none of them: ``TurnActiveError`` while the session has an active turn,
+        ``OneShotKeyTakenError`` for a new one-shot session under a key the owner's visible
+        sessions hold already. A queued task wakes every process waiting in
+        ``wait_for_queued``."""
 
     @abstractmethod
     async def claim_tasks(

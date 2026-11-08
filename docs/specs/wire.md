@@ -159,8 +159,77 @@ and are not enforced yet:
 
 ## Without streaming
 
-- A client that cannot stream starts a turn and obtains the result once the
-  turn has finished. Planned.
+A client that cannot stream, or a program that wants one answer to one
+prompt, runs a **task**: a conversation opened for that prompt alone, whose
+one turn runs as every turn does, and whose answer the client reads once the
+turn has ended. A flow orchestrator running an agent step is the client this
+is for. The routes are plain JSON, in the OpenAPI document.
+
+| method and path | body | answers |
+|---|---|---|
+| `POST /api/tasks` | `{"agent_id": str, "model_id": str\|null, "prompt": str, "idempotency_key": str, "labels": {str: str}}` | 201 `{"task_id", "conversation_id", "run_id", "state"}`; 200 and the same for a repeat |
+| `GET /api/tasks/{id}?wait=<seconds>` | — | the task: `task_id`, `conversation_id`, `run_id`, `agent`, `model`, `state`, `answer`, `labels`, `created_at`, `ended_at` |
+| `POST /api/tasks/{id}/cancel` | — | 204 |
+
+- **A task is a conversation, marked as one.** Its id is the conversation's,
+  and its run id its turn's. Starting one opens the conversation, stores its
+  question and queues its turn in one operation, as `POST /api/turns` does,
+  and the turn runs on a worker, is cancelled and is recorded as every turn
+  is. A task adds what tells a repeat from a new request, and its labels,
+  and nothing that runs: no queue, no record of its own, no second way for
+  a turn to end. The conversation is listed, opened and deleted through the
+  conversation routes like any other.
+- **One task, one turn.** A task's conversation refuses every further turn
+  (409), whatever its shape: a reply, an edit, a regeneration, a retry or a
+  resume. What the agent knows comes in the prompt, never from an earlier
+  exchange.
+- **The idempotency key is the owner's.** The same key from the same owner,
+  with the same body, answers 200 and the task already started, in whatever
+  state it is. The same key with another body is refused (409,
+  `OneShotKeyTakenError`). The body compared is the one sent: the agent,
+  `model_id` (left out and the agent's default named are two bodies), the
+  prompt and the labels, in any order. Two requests under one key at once
+  start one task, and the other answers it. Another owner's key is another
+  key. Deleting a task frees its key. The key is looked up before anything
+  else, so a repeat answers its task even after the agent or the model has
+  left the configuration.
+- **`model_id`** is one of those `GET /api/models` lists. Left out, the task
+  runs on its agent's default. `model` in the answer is the one the turn ran
+  on.
+- **`labels`** are the client's own names for the task, kept on its
+  conversation and answered back: a flow names its run and its step, so
+  that the conversations of a run can be found from the flow. At most 16;
+  a name is 1 to 64 letters, digits, `_`, `.`, `:` or `-`; a value at most
+  256 characters.
+- **`idempotency_key`** is 1 to 200 printable ASCII characters, with no
+  space. A flow's step uses its own id, so a step delivered twice finds the
+  same task instead of a second answer.
+- **The state is the turn's**: `active` until it ends, then `finished`,
+  `failed`, `cancelled` or `interrupted`. `answer` is the text of the
+  answer of a `finished` turn, its text parts joined in order, and `null` in
+  every other state: what a failed or interrupted turn streamed before it
+  ended stays in the conversation, marked failed, and is not an answer. Why
+  a turn failed is for the operator and is never in an answer. `ended_at` is
+  `null` while the turn is active.
+- **`wait`** holds the request until the turn ends or that many seconds
+  pass, from 0, the default, to 30, and answers the task as it is then. It
+  waits on what a re-attached stream waits on, the store's wake-up when the
+  turn writes or ends (`NOTIFY` on PostgreSQL), and not on a poll. A client
+  that gets `active` asks again.
+- **A cancel** asks the turn to stop, as the cancel of a run does, and the
+  turn ends as `cancelled` at once or soon after. A task that has ended is
+  left as it ended, and the answer is 204 still, so a client cancels when
+  its caller gives up without asking first.
+- **Refusals** are statuses, before anything is stored. An agent the
+  deployment has not got is 404; a model it does not offer, an empty
+  prompt, a field the body does not know, and a key, a label or a `wait` out
+  of bounds are 422. A task that is not there, one of somebody else's, and a
+  conversation that is not a task answer the same 404.
+- **Why a conversation.** The turn, its queue, its events, its cancel, its
+  expiry and its record are what a task needs, and a conversation has them
+  all. A record of its own would hold the same turn under a second id. The
+  conversation also leaves the session readable by a person, through the
+  interface, as any other.
 
 ## Everything else
 
