@@ -1,0 +1,154 @@
+# Credentials: who makes them, where they go, and what Robinauts never does
+
+The worker runs Claude Code, which authenticates to Anthropic with a credential.
+**Robinauts does not make that credential, ask for it, refresh it, store it,
+show it, copy it, or share it.** The person or the operator makes it with
+Anthropic's own tools and puts it in the environment the worker's command
+passes on. Robinauts' configuration holds variable *names*; its database holds
+nothing of it; its logs print nothing of it; and nothing of it crosses the
+broker API to the server.
+
+The same sentence governs a future Robinauts desktop: it may explain the steps
+below and point at the file; it may not run `claude setup-token`, open or embed
+the browser authorization, read `~/.claude/.credentials.json` or the macOS
+keychain, mount a person's `~/.claude` into the container, copy a credential
+anywhere, or use one person's credential for another person's turns.
+
+There are two modes, and the worker refuses to start until its command says
+which one: `-e ROBINAUTS_CLAUDE_AUTH=personal` or
+`-e ROBINAUTS_CLAUDE_AUTH=deployed`.
+
+## What Anthropic says
+
+Quoted so that the rule is Anthropic's, not ours. The quotes below, and the
+reading that follows them, were verified on **2026-11-07** against these
+versions of Anthropic's documents:
+
+| document | version verified | where |
+|---|---|---|
+| Consumer Terms of Service | Oct 8, 2025 | [anthropic.com/legal/consumer-terms](https://www.anthropic.com/legal/consumer-terms) |
+| Commercial Terms of Service | Jun 17, 2025 | [anthropic.com/legal/commercial-terms](https://www.anthropic.com/legal/commercial-terms) |
+| Claude Agent SDK overview | as published on 2026-11-07 (the page carries no version) | [code.claude.com/docs/en/agent-sdk/overview](https://code.claude.com/docs/en/agent-sdk/overview) |
+| Claude Agent SDK quickstart and session storage guide | as published on 2026-11-07 (no version) | [quickstart](https://code.claude.com/docs/en/agent-sdk/quickstart), [session storage](https://code.claude.com/docs/en/agent-sdk/session-storage) |
+| Claude Code authentication | as published on 2026-11-07 (no version) | [code.claude.com/docs/en/authentication](https://code.claude.com/docs/en/authentication) |
+
+**Re-validate when Anthropic publishes a new version of any of them.** The two
+Terms pages list their versions by date, with the current one marked, so a date
+newer than the one above is the signal. The documentation pages carry no
+version: compare the sentences quoted below with the pages, and read the
+reading again if one has changed. Then update this table and the date.
+
+- Agent SDK quickstart: *"Unless previously approved, Anthropic does not allow
+  third party developers to offer claude.ai login or rate limits for their
+  products, including agents built on the Claude Agent SDK. Use the API key
+  authentication methods described in this document instead."*
+- Agent SDK, session storage: *"if you run the agent yourself under your own
+  Claude subscription, set `CLAUDE_CODE_OAUTH_TOKEN` in `env` to a token from
+  `claude setup-token`."*
+- Claude Code, authentication: `claude setup-token` *"opens the same browser
+  authorization flow as `/login`, and the token prints to the terminal after
+  you approve access in the browser. It does not save the token anywhere"*; the
+  token is a one-year token that *"authenticates with your Claude subscription
+  and requires a Pro, Max, Ultra, Team, or Enterprise plan"* and *"can only
+  make model requests"*. When several credentials are present, Claude Code
+  picks `ANTHROPIC_AUTH_TOKEN`, then `ANTHROPIC_API_KEY`, then an
+  `apiKeyHelper`, then `CLAUDE_CODE_OAUTH_TOKEN`.
+
+Our reading: a person who runs their own Robinauts, for themselves, under their
+own subscription, is the second quote. A Robinauts that offers a "sign in with
+Claude" button, pools a token, or runs one person's token for other people's
+turns is the first. The two modes keep the product on the right side of that
+line. **You are responsible for your own plan's terms**, in either mode.
+
+## The two modes
+
+| | `personal` | `deployed` |
+|---|---|---|
+| Who | One person, on their own machine ("Robinauts desktop") | An instance with sign-in, several people |
+| Server | `robinauts start --dev-no-sign-in`, on the same machine | A deployment ([docs/deployment.md](../../docs/deployment.md)) |
+| Credential | A subscription token the person made with `claude setup-token` | A Claude Platform API key the operator made in the [Claude Console](https://platform.claude.com/) |
+| Variable | `CLAUDE_CODE_OAUTH_TOKEN` | The one the provider's `api_key_env` names, usually `ANTHROPIC_API_KEY` |
+| Where it lives | Exported in the shell that starts the server, or a file of the person's, mode `0600`, that the command's `--env-file` names | `/etc/robinauts/environment`, root's, mode `0600`, as the server's own keys; or a file the command's `--env-file` names; or an orchestrator secret |
+| How it reaches the worker | `-e CLAUDE_CODE_OAUTH_TOKEN` in the command | `-e ANTHROPIC_API_KEY` in the command, by the name `api_key_env` gives |
+| Whose spend | The person's plan, with its rate limits | The deployment's key |
+| Model providers | Kind `anthropic`, no `base_url` | Kind `anthropic`, or `anthropic-compatible` with a gateway's `base_url` |
+| Refused | Any API key beside the token; a server that is not on this machine; any endpoint but Anthropic's | A subscription token in the environment; the cloud-provider variables (not in this version) |
+
+### Personal
+
+1. Have a Claude Pro, Max, Ultra, Team or Enterprise subscription, and
+   [Claude Code installed](https://code.claude.com/docs/en/setup) on your
+   machine, logged in as yourself.
+2. In **your own terminal**, run
+
+       claude setup-token
+
+   approve access in the browser, and copy the token it prints. Robinauts
+   never runs this command for you, and the token is saved nowhere by it.
+3. Export it as `CLAUDE_CODE_OAUTH_TOKEN` in the shell that starts the server,
+   with `"-e", "CLAUDE_CODE_OAUTH_TOKEN"` in the worker's command; or put the
+   line `CLAUDE_CODE_OAUTH_TOKEN=...` in a file of yours, mode `0600`, and
+   name the file with `"--env-file", "<path>"` in the command.
+4. Set nothing else that authenticates: no `ANTHROPIC_API_KEY`, no
+   `ANTHROPIC_AUTH_TOKEN`, no `ANTHROPIC_BASE_URL`, none of the provider keys
+   your `robinauts.toml` names. Each would outrank the token, so the worker
+   refuses to start while one is set in its environment.
+5. The worker also refuses a server that is not on this machine: the broker
+   URL the server hands it is on loopback, which is; `host.docker.internal`, a
+   private address or a unix socket are too, a public name is not. A personal
+   token serves the person's own instance alone.
+
+The token lasts a year. When Anthropic refuses it, a turn fails with an error
+the server's operator (you) reads, which names `CLAUDE_CODE_OAUTH_TOKEN` and
+never its value: run `claude setup-token` again and replace the value. Revoke
+it in your claude.ai account whenever you like; Robinauts cannot.
+
+### Deployed
+
+1. The operator creates an API key in the
+   [Claude Console](https://platform.claude.com/), as they would for the
+   server's own agents.
+2. They put it where the server's own keys are, `/etc/robinauts/environment`,
+   owned by root, mode `0600`, under the variable name the provider's
+   `api_key_env` gives in `robinauts.toml`, and the worker's command passes it
+   on with `"-e", "<that name>"`; or in a file of the worker's own that
+   `--env-file` names.
+3. No `CLAUDE_CODE_OAUTH_TOKEN` anywhere near it: a subscription token is one
+   person's, and Anthropic does not allow a product to serve others on it. The
+   worker refuses to start with one.
+
+One identity per deployment, as for the server's tool servers
+([docs/specs/operations.md](../../docs/specs/operations.md)): every person's
+turns spend from that key, and Anthropic's logs name the deployment, not the
+person. Bedrock, Vertex and Foundry through Claude Code's own variables are the
+same principle, the operator's cloud credentials, and not in this version: the
+worker refuses `CLAUDE_CODE_USE_*` so that nothing runs on a credential it did
+not check.
+
+## What the worker checks, and what it never does
+
+At its start, before it reads its secret or claims a turn, the worker reads
+which of the variables above are **set**, never their values beyond presence,
+and refuses to start with every problem named at once (exit code 2), on the
+server's standard error; the server then does not start. While it runs, the
+Claude Code subprocess inherits the environment; in deployed mode the worker
+adds the provider's key to that subprocess's environment and nothing else; in
+personal mode it adds nothing. The credential appears in no log line, no turn
+event, no error text and no request to the server.
+
+## Troubleshooting
+
+What you see is in the server's log, at its start for the refusals and on the
+turn for the rest.
+
+| what you see | why | what to do |
+|---|---|---|
+| `ROBINAUTS_CLAUDE_AUTH must be 'personal' or 'deployed'` | the mode is not chosen | add `-e ROBINAUTS_CLAUDE_AUTH=...` to the command; there is no default on purpose |
+| `personal mode needs CLAUDE_CODE_OAUTH_TOKEN` | the token is not in the worker's environment | run `claude setup-token` yourself, export the token where the server starts, and pass it on with `-e` |
+| `personal mode refuses ANTHROPIC_API_KEY` (or another key) | a key beside the token would outrank it | take the key out of the worker's environment: out of the command's `-e` flags, or of the server's shell |
+| `personal mode refuses provider '…'` | the provider is not plain Anthropic | a subscription token goes to Anthropic alone: kind `anthropic`, no `base_url` |
+| `personal mode serves the person's own instance alone, and … is not on this machine` | the broker URL is a public name | run the server on this machine, or use deployed mode with an API key |
+| `deployed mode refuses CLAUDE_CODE_OAUTH_TOKEN` | a personal token in a deployment's environment | remove it; create an API key in the Console |
+| `deployed mode reads the API key of provider '…' from X, which is unset or empty` | the key variable is not in the worker's environment | set it where the server's keys are, under the name `api_key_env` gives, and pass it on with `-e` |
+| a turn fails with `Anthropic refused the subscription token …` | the token expired (a year) or was revoked | `claude setup-token` again; replace the value |
+| a turn fails with `Anthropic refused the API key in X` | the key was revoked, or is another organization's | check it in the Console; replace the value |

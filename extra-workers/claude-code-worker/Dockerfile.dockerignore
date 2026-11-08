@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+#
+# The build context is the repository root; the image copies what it names and nothing else,
+# so this keeps the context small and keeps every local environment and secret out of it.
+**/.git
+**/.venv
+**/__pycache__
+**/node_modules
+**/*.env
+frontend/dist
+backend/dist
+clients
+docs
+tmp
