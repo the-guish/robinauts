@@ -8,8 +8,7 @@ them from the start.
 
 ## Done
 
-- [x] Repository in a GitHub organisation (`open-shipyard/robinauts`), not
-      a personal account.
+- [x] Repository in a GitHub organisation (`open-shipyard/robinauts`).
 - [x] `LICENSE`: the unmodified Apache-2.0 text.
 - [x] SPDX and copyright header on every source file so far.
 - [x] Architecture contracts enforced in the test suite.

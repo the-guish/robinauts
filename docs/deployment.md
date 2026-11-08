@@ -9,7 +9,7 @@ configuration file. Nothing else
 Read it once through before starting. The order below is the order that
 works: the database before the schema, the configuration before the first
 start, the reverse proxy before signing anyone in — the session cookie is
-`__Host-`-prefixed, so **https is not optional**.
+`__Host-`-prefixed, so **https is mandatory**.
 
 ## Prerequisites
 
@@ -18,12 +18,12 @@ start, the reverse proxy before signing anyone in — the session cookie is
   would need is neither locked nor checked
   ([DEPENDENCIES.md](../DEPENDENCIES.md)).
 - **Python 3.12 or later.** The wheel is `py3-none-any` and its lock
-  resolves for 3.12; the deployment machine needs the interpreter and
-  `venv`, nothing more. No Node — the interface is built into the wheel —
+  resolves for 3.12; the deployment machine needs only the interpreter
+  and `venv`. No Node — the interface is built into the wheel —
   and no compiler where every dependency has a wheel of its own, which on
   an ordinary Linux they do.
-- **PostgreSQL 16**, reachable from the machine. It is always required and
-  there is no mode without it. The platform sets no session time zone and
+- **PostgreSQL 16**, reachable from the machine. It is always required. The platform
+  sets no session time zone and
   stores every time as `timestamptz`, so the server's time zone is its own business.
 - **A reverse proxy that terminates TLS**, on this machine or in front of
   it. Which one is the platform team's choice; nginx and Caddy are shown
@@ -96,7 +96,7 @@ One database and one role. From a shell that may administer PostgreSQL:
 The url is given to the process in `ROBINAUTS_DATABASE_URL` and **never on
 a command line**: a url holds a password and a command line is a shell
 history. So the schema is created in step 6, once that variable has a file
-to live in, and not here.
+to live in.
 
 The server never creates or changes the schema itself. It refuses to start
 against a database that is not the one the build was written against, and
@@ -253,7 +253,7 @@ Notes on what is and is not there:
   `https://openrouter.ai/api`) and `/chat/completions` alone for OpenAI's
   (so OpenRouter is `https://openrouter.ai/api/v1`, and a vLLM server on
   this machine `http://127.0.0.1:8000/v1`). The OpenAI kinds speak Chat
-  Completions, never the Responses API, and the key is sent as
+  Completions, and the key is sent as
   `Authorization: Bearer`. `max_output_tokens` left out means 8192 over
   Anthropic's protocol, which requires a ceiling, and no ceiling at all over
   OpenAI's; one that is set is sent to `openai` as `max_completion_tokens`
@@ -359,7 +359,7 @@ Four kinds of variable, and three of them are secrets. Put them in
 read, with a warning at start-up; if both are set the new one wins and the
 log says so. Rename it.
 
-Now create the schema, with that file and not with a flag:
+Now create the schema, with that file:
 
     sudo systemd-run --pipe --wait --uid=robinauts \
         --property=EnvironmentFile=/etc/robinauts/environment \
@@ -431,7 +431,7 @@ another host is named here.
     ExecStart=/var/lib/robinauts/venv/bin/robinauts start \
         --uds /run/robinauts/robinauts.sock
 
-`RuntimeDirectory=` is not optional here: `ProtectSystem=strict` leaves
+`RuntimeDirectory=` is required here: `ProtectSystem=strict` leaves
 `/run` read-only, and systemd makes and cleans up that one directory for
 the service. The command binds the socket itself at mode `0600` before it
 listens, and removes it when it stops. `--uds` cannot be given with
@@ -619,7 +619,7 @@ command could not do what it was asked.
    authenticates them; the platform sends them back to the sign-in page
    with `?error=not_allowed`, which reads: "The provider knows who you
    are, but this deployment does not let that account in. Ask whoever runs
-   it." The provider's own words go to the log and never to the browser.
+   it." The provider's own words go to the log.
 5. Hold a conversation. Ask the first person for the id in their address
    bar and fetch it as the second: `GET /api/conversations/<id>` answers
    `404`. A conversation is private to its author and there is no other

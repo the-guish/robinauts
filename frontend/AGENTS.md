@@ -22,7 +22,7 @@ Do not:
 - run `npm install`. Installs are `npm ci`; `save-exact` and `ignore-scripts`
   stay on in `.npmrc`.
 - commit `dist/`, `src/api/schema.d.ts` or `node_modules/`. The assets are
-  built by CI and by the wheel build, never committed.
+  built by CI and by the wheel build.
 - edit `bundled-packages.txt` by hand. The build writes it; a change in it is
   what a reviewer looks at.
 - import anything under `src/chat/` from outside that directory but
@@ -70,8 +70,8 @@ Do not:
   tokens of `src/tokens.css` (`var(--panel)`), one stylesheet per area,
   imported by the component that uses it, with class names prefixed by the
   area (`shell-`, `panel-`, `history-`, `signin-`, `chat-`, `md-`, `icon`).
-  Dark mode is the tokens' job. A `style` attribute is for a value that is
-  genuinely dynamic and nothing else. Keep animations off under
+  Dark mode is the tokens' job. A `style` attribute is only for a value
+  that is genuinely dynamic. Keep animations off under
   `prefers-reduced-motion: reduce`, and leave the global `:focus-visible`
   outline in `src/styles.css` alone.
 

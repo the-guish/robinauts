@@ -22,8 +22,8 @@ address into a phone.
 ## A device
 
 - A device holds a **device session**: a random 256-bit secret, sent as
-  `Authorization: Bearer`. The database holds its SHA-256, never the
-  secret, as it does for a browser session and an API token.
+  `Authorization: Bearer`. The database holds its SHA-256, as it does
+  for a browser session and an API token.
 - A device session belongs to one user. It records the name the device
   gave itself ("Pixel 8"), its platform, the application's version, when
   it was linked, when it was last used, and when it expires.
@@ -401,8 +401,8 @@ refuses it, like the other sign-in keys, and runs on the default.
   platform, linked on, last used, expires. An admin ends one device, every
   device of one person, or every device of the instance, with one action
   each. An ended device gets 401 on its next request, and the phone
-  returns to its pairing screen. The admin sees names and dates, never a
-  secret and never a conversation (`docs/specs/privacy.md`). Each action
+  returns to its pairing screen. The admin sees names and dates
+  (`docs/specs/privacy.md`). Each action
   is logged.
 - **`#/link`** explains and does nothing: "This code is for the Robinauts
   app on a phone. Open the app and scan it there." It reads no parameter.
@@ -419,7 +419,7 @@ The app is a repository of its own. This is what it does against the API.
 - **One origin, from the code.** The app has no server address until it
   scans one. It shows that origin and asks before it sends a byte, as
   step 3 says. The secret is stored with the origin it came from, and is
-  sent to that origin and no other. A later code that names another
+  sent only to that origin. A later code that names another
   origin does not move the secret. It starts a new pairing, and the app
   says it is leaving the first server. Release builds speak `https` only,
   and carry no exception.
@@ -475,8 +475,7 @@ The app is a repository of its own. This is what it does against the API.
   appearing and names itself anything plausible. The browser then asks
   for a number. The person's phone failed to claim, so it shows none.
   There is nothing to type, so there is nothing to approve. The name the
-  script chose is never what the person decides by, and is not shown at
-  that step.
+  script chose is not shown at that step.
 - **A stranger's code shown to the person.** The person scans a code from
   the stranger's browser, and the person's phone is then linked to the
   stranger's account: what the person types goes into the stranger's
@@ -498,10 +497,10 @@ The app is a repository of its own. This is what it does against the API.
 - **The device's name.** Text the phone chose, bounded, shown as data in
   the list, and never part of the decision.
 - **A stolen device secret.** It is the device, until the device is
-  removed: it reads and writes what the person owns. It mints nothing,
-  not a token and not a pairing, and removes nothing. So it cannot outlive
+  removed: it reads and writes what the person owns. It mints nothing
+  and removes nothing. So it cannot outlive
   its removal, and the list is the whole of the person's control. The
-  secret lives in the Keystore, out of backups, and never in a log, which
+  secret lives in the Keystore, out of backups, which
   is what makes stealing it hard in the first place.
 - **A copied cookie.** It is a session for up to twelve hours. It mints
   no device and no token once it is ten minutes old: minting wants a
@@ -511,7 +510,7 @@ The app is a repository of its own. This is what it does against the API.
   would make that host the account. The app shows the origin, in
   punycode, and asks before it sends anything. A company that configures
   the app's server has every other origin refused outright. The secret,
-  once held, goes to the origin it came from and nowhere else.
+  once held, goes only to the origin it came from.
 - **A person who has left.** Taken out of the allow list, they lose every
   credential within a minute. Refused at their next sign-in, they lose every
   credential at once. Known to an admin or an operator, they lose it on

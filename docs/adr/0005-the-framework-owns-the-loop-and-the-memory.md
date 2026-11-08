@@ -15,8 +15,8 @@
 
 We brought the two agent frameworks in for three things: the vendors' model
 clients, context window management (trimming, pruning, summarising), and the
-techniques that make a prompt cache pay. Robinauts was to carry messages
-between the interface and an agent, and nothing more.
+techniques that make a prompt cache pay. Robinauts was only to carry
+messages between the interface and an agent.
 
 ADR 0002 and ADR 0004 paid the frameworks' cost and took none of that.
 

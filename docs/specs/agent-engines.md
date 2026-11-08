@@ -73,7 +73,7 @@ contract.
   checkpoint to continue from at every turn.
 - Choosing the model or the agent. The caller passes both at every turn.
 - Reading or changing the caller's database, tables or schema.
-- Counting usage or cost. Planned, not part of the contract yet.
+- Counting usage or cost. Planned.
 
 ## What an engine may depend on
 

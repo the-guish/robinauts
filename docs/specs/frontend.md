@@ -18,7 +18,7 @@
   browser, as the agent is.
 - An open conversation names the agent it is with, under its title: once
   the conversation exists the agent is a fact about it and not a choice,
-  so it is shown as a line, not a control. The
+  so it is shown as a line. The
   model stays a choice, so the model picker sits on that line, showing the
   conversation's model; changing it applies from the next turn, a run in
   flight included. A model the deployment no longer offers is shown as
@@ -146,8 +146,8 @@ neorc's rules (`neorc/contributing/js-dependencies.md`):
   styling is plain CSS over the tokens: a base reset, the body and the focus
   outline in `src/styles.css`, and one stylesheet per area, with class names
   prefixed by the area. No utility classes.
-- The runtime dependencies are `react` and `react-dom`, and nothing else
-  (2026-11-04). The icons are 22 inline SVG components in `src/icons/`, over
+- The only runtime dependencies are `react` and `react-dom` (2026-11-04).
+  The icons are 22 inline SVG components in `src/icons/`, over
   path data copied from `lucide-react` 1.61.0 (ISC, and MIT for the icons
   lucide derives from Feather), recorded in
   [legal/ip-clearance.md](../legal/ip-clearance.md). No package is reached

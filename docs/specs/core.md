@@ -23,7 +23,7 @@ topic documents listed under [Documents](#documents).
 
 ### 2. Secure and corporate-ready
 
-- Security is a primary design constraint, not a later hardening pass.
+- Security is a primary design constraint.
 - Sign-in is through the company's identity provider (Okta, Google).
 - The platform fits how a company operates software: access control, supply
   chain hygiene, and a deployment an internal platform team can own.

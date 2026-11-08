@@ -5,7 +5,7 @@ the table, and why the decision went the way it did. An ADR is history. The
 [specs](../specs/core.md) describe the system. Most of the system needed no
 ADR.
 
-Each decision has one file, numbered once and never renumbered. A changed
+Each decision has one file, numbered once. A changed
 decision gets a new ADR, which supersedes the old one. A superseded ADR is
 history only. Skip it unless you need that history.
 

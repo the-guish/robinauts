@@ -7,7 +7,7 @@ operation below is asked for a user, and answers only what that user owns.
 
 A session is one conversation of a user with an agent. To the controller it is the record,
 its messages and its turns, owned by one user. To an engine it is the state it keeps under
-the session's id, and nothing more. To web it is what the wire calls a conversation; who is
+the session's id. To web it is what the wire calls a conversation; who is
 signed in is web's own concern, the user session.
 
 ## Lifecycle
@@ -19,7 +19,7 @@ signed in is web's own concern, the user session.
 ## Worker
 
 The worker handles the tasks its process runs, each running one turn. It is a package of its
-own, `robinauts/worker/`, beside the controller rather than inside it: of the controller it
+own, `robinauts/worker/`, beside the controller: of the controller it
 sees the turn broker's contract, `controller.contract.broker`, alone
 (`docs/architecture/rules.md`). It builds the engines
 the configuration names, and runs their setup, when it starts. It claims queued tasks and
@@ -40,8 +40,8 @@ the store there too, they are workers side by side in that process. A worker who
 `[workers.<name>]` table names a command (`Config.commands`) is started with it in place of
 the worker module, in a process of its own either way, and differs in nothing else.
 
-The worker reaches the core through one port, `TurnBroker` (`contract/broker/ports.py`), and
-never through the store. The broker's contract also holds what crosses it: the tasks, the
+The worker reaches the core through one port, `TurnBroker`
+(`contract/broker/ports.py`). The broker's contract also holds what crosses it: the tasks, the
 messages and events as stored records, and their encoding as documents
 (`contract/broker/documents.py`), which the worker writes and the controller reads. These are its operations, the store's of the same names:
 
@@ -59,7 +59,7 @@ PostgreSQL spawns, has it over HTTP: the same operations as the API's `/internal
 routes (`docs/architecture/web.md`), with the secret its server handed it at its start, which
 tells the server which worker it is. The
 engines keep their state apart, in the worker's `AgentEngineStore`: on PostgreSQL a pool of the
-worker's own, for the engines' tables, never the core's.
+worker's own, for the engines' tables.
 
 ## Users
 
@@ -95,6 +95,6 @@ worker's own, for the engines' tables, never the core's.
 
 ## Housekeeping
 
-Run by the process that holds the controller, on a schedule of its own, never by a shell.
+Run by the process that holds the controller, on a schedule of its own.
 
 - `sweep`: end the turns whose lease has passed.

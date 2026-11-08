@@ -32,8 +32,8 @@ agent to another engine, and what its sessions then do, is stage two.
 Also in the PostgreSQL schema: `schema_version`, one row with the version and the
 hash of the file. The last five records are sign-in's, kept through the
 `Credentials` port and not the store, in `user_sessions`, `pending_logins`,
-`api_tokens`, `device_sessions` and `pairings`. Each holds the SHA-256 of a secret,
-never the secret, and is found by it (`docs/specs/sign-in.md`,
+`api_tokens`, `device_sessions` and `pairings`. Each holds the SHA-256 of a
+secret, and is found by it (`docs/specs/sign-in.md`,
 `docs/architecture/device-pairing.md`). A user's `name`, `email`, `hosted_domain`
 and `groups` are what their last sign-in said, refreshed by each one, and are what
 the allow list is checked against again when a credential of theirs is used.
@@ -85,7 +85,7 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
 - **A worker claims a queued task.** A turn is stored `active`, with a `queued` task,
   whose `worker_queue` is the worker its agent names, or `default`. A worker's
   `claim_tasks` makes one of its own tasks `running`, with a new lease, in one
-  operation, and never a task of another worker. Each task is claimed once, whichever
+  operation. Each task is claimed once, whichever
   process asks. The worker then
   dispatches it in its own process. The task's `payload` names its turn.
 - **A turn finishes in one operation:** its answer, its last events, its state, its
@@ -136,7 +136,7 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   names the owner, the session and the turn. A store that keeps a session's records in
   one partition (DynamoDB, Cosmos DB, Firestore) finds the partition from those ids,
   with no index on a turn's id alone. PostgreSQL needs only the innermost id, and
-  checks the rest. A session that is not its caller's owner's is not found.
+  checks the rest. A session owned by someone other than the caller is not found.
 
 ## Documents
 
@@ -281,7 +281,7 @@ written for one would make nonsense of the other.
   at a time, and refuses a version above its own.
 - **A writer** always writes the current version. Nothing is rewritten in place.
 - **Everything is checked on the way in.** A key nobody wrote, a time without its
-  zone or an id spelt another way is an error, never ignored and never guessed at.
+  zone or an id spelt another way is an error.
 
 There is no reserved key for vendors' data. The signed thinking blocks a vendor needs
 back are in the engine's state (ADR 0005), so nothing in a message needs one.

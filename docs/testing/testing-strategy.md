@@ -42,7 +42,7 @@ They focus on a single adapter, run against the real dependency (such as Postgre
 
 ## Adapters Metered
 
-Same as above, but they call paid providers and cost money. They run only ad hoc, by hand, and never in a build. They assert the shape of an answer, not its content, because model output varies.
+Same as above, but they call paid providers and cost money. They run only by hand. They assert the shape of an answer, not its content, because model output varies.
 
 ## Fast
 

@@ -66,8 +66,8 @@ mode 0600, since it holds a key:
 **The key is never printed, never written into a file, and reaches nothing but
 the server.** `demo/.env` is read rather than sourced — a `.env` that could run
 commands would be the demo executing whatever was pasted into it — and the
-configuration the demo generates holds the *name* of the variable and nothing
-else, which is the rule the platform keeps everywhere
+configuration the demo generates holds only the *name* of the variable,
+which is the rule the platform keeps everywhere
 ([../docs/deployment.md](../docs/deployment.md)). `start.sh` also takes all
 three variables **out of its own environment** as the first thing it does,
 before it runs anything, and puts the one that is used back on the server's
@@ -209,7 +209,7 @@ The token is handled like the model key: taken **out of the script's
 environment** as the first thing it does, so nvm, node, uv, PostgreSQL and
 npm never see it, and put back on the server's invocation alone, as
 `ROBINAUTS_GITHUB_TOKEN`, the variable `[tool_servers.github]` names. The
-configuration holds that name and nothing else. **The agents act as the
+configuration holds only that name. **The agents act as the
 token's owner** on `api.githubcopilot.com`, with whatever the token may do,
 so a token with no more than read access to public repositories is the one to
 give a demo.

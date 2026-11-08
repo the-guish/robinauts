@@ -41,7 +41,9 @@ The workers:
 | folder | what it runs | state |
 | --- | --- | --- |
 | [base-worker/](base-worker/README.md) | the backend's worker module and nothing else: any engine the backend ships, for the agents of its worker | in memory, as long as the container |
+| [claude-code-worker/](claude-code-worker/README.md) | the same, with the engine `claude-code` plugged in: each turn a query of the Claude Agent SDK, which drives the Claude Code binary it bundles, in a directory of the conversation's own | Claude Code's transcripts and the conversations' workspaces, in two volumes |
 
 `base-worker/` is what a new extra worker starts from: copy it, add the package
-that brings the engine, keep the rest. One that runs its turns on Claude Code
-through the Claude Agent SDK follows in a pull request of its own.
+that brings the engine, keep the rest. `claude-code-worker/` is one made that
+way; its [CREDENTIALS.md](claude-code-worker/CREDENTIALS.md) is the rule above
+on credentials, spelled out for Claude Code's two.

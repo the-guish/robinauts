@@ -26,8 +26,8 @@ its own.
     scripts/     the checks, one script per gate, which CI runs as they are
 
 The backend is split into layers with enforced dependency rules. Read
-[docs/architecture/rules.md](docs/architecture/rules.md) before adding a module: where code goes is
-not a matter of taste here, and the test suite fails on an import that
+[docs/architecture/rules.md](docs/architecture/rules.md) before adding a
+module. The test suite fails on an import that
 crosses a layer the wrong way.
 
 ## Development setup
@@ -38,8 +38,8 @@ The backend uses [uv](https://docs.astral.sh/uv/). From `backend/`:
 
 ## Checks
 
-Every check is a script in [scripts/](scripts/), and CI runs those same
-scripts, one per job and nothing else, so a check can be run and debugged
+Every check is a script in [scripts/](scripts/), and CI runs only those
+scripts, one per job, so a check can be run and debugged
 where it fails. CI is not your machine, though: it installs the pinned uv
 from [scripts/tool-versions.sh](scripts/tool-versions.sh) and runs on Python
 3.12, so a failure that depends on a version may show up in one place and not
@@ -70,8 +70,8 @@ or one at a time:
     scripts/check-reuse.sh      reuse lint: every file states its licence
     scripts/check-dco.sh        sign-off on every commit of the branch
 
-Every one of them runs on every pull request, and a failure is a failure:
-none of this is advisory. Making them *required* — so that GitHub refuses the
+Every one of them runs on every pull request, and a failure is a failure.
+Making them *required* — so that GitHub refuses the
 merge button rather than showing a red cross — is branch protection, which
 the project owner still has to switch on
 ([docs/oss-checklist.md](docs/oss-checklist.md)).

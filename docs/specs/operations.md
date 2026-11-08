@@ -37,8 +37,8 @@ What an internal platform team deploys and controls.
   "none"` — a public one, such as Microsoft Learn's — is sent no credential
   at all: what it sees is the deployment's address and the arguments the
   model wrote for the call, and nothing that names anyone. The client that
-  connects is the agent framework's own MCP client, built from the server's
-  table and nothing else.
+  connects is the agent framework's own MCP client, built only from the
+  server's table.
 - **How a tool server's credential is sent** is its table's `auth`, and the
   secret itself is always the value of the variable `secret_env` names, read
   when a turn connects and never written in the file:
@@ -96,8 +96,8 @@ What an internal platform team deploys and controls.
   ```
 
 - On PostgreSQL each worker is a **process of its own**, which the server spawns at its
-  start and stops at its stop. The server's broker API hands each worker the turns of its
-  own agents and no other's: a worker is known by the secret the server gave it, not by
+  start and stops at its stop. The server's broker API hands each worker the turns of
+  its own agents: a worker is known by the secret the server gave it, not by
   anything it says. A worker builds the engines of its own agents alone.
 - A worker's optional `[workers.<name>]` table names the **command** that starts it, in
   place of this build's worker module: a container, a machine away, an engine this build
@@ -105,16 +105,16 @@ What an internal platform team deploys and controls.
   the rest run in the server's.
 
   ```toml
-  [workers.claude-container]
+  [workers.claude]
   command = ["docker", "run", "-i", "--rm", "--network", "host",
              "-e", "ROBINAUTS_CONFIG", "-e", "ROBINAUTS_WORKER_NAME",
              "-e", "ROBINAUTS_WORKER_BROKER_URL",
              "-v", "/etc/robinauts/robinauts.toml:/etc/robinauts/robinauts.toml:ro",
-             "robinauts/claude-container"]
+             "robinauts-claude-code-worker"]
 
-  [agents.claude-container]
+  [agents.coder]
   engine = "claude-code"       # an engine this build does not have: allowed here alone
-  worker = "claude-container"
+  worker = "claude"
   ```
 
   The server does with the command what it does with its own worker module. It runs it with
@@ -122,7 +122,7 @@ What an internal platform team deploys and controls.
   `ROBINAUTS_WORKER_BROKER_URL` and `ROBINAUTS_WORKER_PARENT`; writes the worker's secret,
   and nothing else, on its standard input and closes it; waits a minute at most for the line
   `ready` on its standard output, logging whatever else it says; and sends it SIGTERM at the
-  stop. The command passes on what the worker needs and no more: `docker run -i` carries the
+  stop. The command passes on only what the worker needs: `docker run -i` carries the
   standard streams, the signal and the variables its `-e` flags name, and the database's URL
   is not among them. An agent of such a worker may name an engine this build does not have,
   since that worker runs it: one a package registers under the `robinauts.engines`

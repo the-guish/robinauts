@@ -47,8 +47,8 @@ action bars and the disclosures. That is the part alternative B writes.
 
 ## Decision
 
-**The chat window is this project's own code, on React alone. The runtime
-dependencies are `react` and `react-dom`, and nothing else.**
+**The chat window is this project's own code, on React alone. The only
+runtime dependencies are `react` and `react-dom`.**
 
 - **The window.** `src/chat/thread/` holds the thread, the composer, the
   messages, the action bars and the disclosures for tool calls and

@@ -1,7 +1,7 @@
 # The base worker
 
-The backend's own worker, `robinauts.cli.worker_process`, in a container and
-nothing else: an image the server starts with `docker run -i`, which runs the
+The backend's own worker, `robinauts.cli.worker_process`, in a container: an
+image the server starts with `docker run -i`, which runs the
 turns of the agents on its worker with any engine the backend ships, LangChain,
 Pydantic AI or the echo engine. It is the base of every other extra worker: copy
 the folder, add the package that brings your engine, keep the rest.
@@ -56,9 +56,8 @@ What each part of the command is for:
   agents use, by the name the provider's `api_key_env` gives: the worker reads
   it from its own environment, as the server would. A `--env-file` does the
   same for several.
-- Not passed, and not to be: `ROBINAUTS_DATABASE_URL`. The worker has no
-  database and needs none; a worker handed the URL would open the engines'
-  tables in it, which is the server's ground.
+- Not passed: `ROBINAUTS_DATABASE_URL`. A worker handed the URL would open
+  the engines' tables in it, and those tables belong to the server.
 - Not passed either: `ROBINAUTS_WORKER_PARENT`, which a worker on the same
   machine uses to end with a server that was killed. Here the server's SIGTERM
   reaches the container through `docker run`; a server killed outright leaves

@@ -14,7 +14,7 @@ until the frontend is revisited.
 - Streamed as [AG-UI](https://docs.ag-ui.com) events over **server-sent
   events**, on the same origin. The UI starts a turn with a POST; the
   response is the event stream of the turn it began.
-- **The stream is a view of the turn, not the turn.** Closing it changes
+- **The stream is a view of the turn.** Closing it changes
   nothing. **The run id on the wire is the turn's id.** A conversation has at
   most one turn going, but each turn is a run of its own: the UI re-attaches
   to a turn by the conversation's id and the turn's, giving the last event it
@@ -66,9 +66,8 @@ until the frontend is revisited.
   as `metadata: {"isError": true}` on its `TOOL_CALL_RESULT` — AG-UI 1.0
   has no field for it there, and this flag, a boolean of ours, is the one
   thing this wire ever puts in `metadata`; a plain result carries none.
-  **Arguments and results are rendered as data** by the client — text,
-  never Markdown-with-HTML, never a URL turned into a link without the CSP
-  in mind — because both are attacker-influenced text.
+  **Arguments and results are rendered as data** by the client, as text,
+  because both are attacker-influenced text.
 
 ## The endpoints
 
@@ -151,8 +150,8 @@ and are not enforced yet:
   that nothing in front of the deployment closes a quiet stream.
 - **Every stream ends with an event saying the turn is over.** Re-attaching
   at or past the last position of a turn that has ended is answered with
-  **how that turn really ended**, read from its record. A position a turn
-  that is still going has not reached is refused (422).
+  **how that turn really ended**, read from its record. A position past
+  the end of a running turn is refused (422).
 - A reload after a turn that failed or was cancelled says so
   (`ended_badly` on the opened conversation).
 - A body is bounded at one mebibyte, refused with 413 on the declared length

@@ -7,8 +7,8 @@ Copyright The Robinauts Authors
 
 Native Android client for Robinauts, built with Kotlin and Jetpack Compose.
 
-This is a minimal scaffold: a single activity that shows `hello agent` and
-nothing else. No navigation, no UI component library, no networking yet.
+This is a minimal scaffold: a single activity that shows only `hello
+agent`. No navigation, no UI component library, no networking yet.
 
 ## Requirements
 

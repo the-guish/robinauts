@@ -9,7 +9,7 @@ WIP. Follow the current implementation.
 When anything in the processing of a message fails in the backend, the user should receive an error response that will be displayed, bellow their last message, in the place where the normal agent would be, but with a different style, still indicating there was a failure.
 
 
-Style should be just enough to clearly tell it was not a normal response, it should not be a flashing vibrant red or something like that. Use discretion to follow the general palette of the UI and do not be disruptive of the visuals.
+Style should be just enough to clearly tell it was not a normal response, it should not be a flashing vibrant red or something like that. Use discretion to follow the general palette of the UI.
 
 That same error notice will include a retry icon button.
 

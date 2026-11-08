@@ -47,9 +47,8 @@ this file says how it is applied to npm.
 
 - Maintained: recent releases, issues answered, and **more than one
   maintainer — or a single maintainer with years of settled releases and wide
-  adoption**. The second half is not a loophole; it is the truth about a
-  handful of packages everything depends on. What makes it
-  a rule rather than a shrug is that the judgement is **written down** where
+  adoption**. The second half is the truth about a handful of packages
+  everything depends on. The judgement is **written down** where
   the package is adopted: which of the two it is, and why.
 - Small: `npm view <pkg> dependencies` is short, and the size fits the budget.
 - Licensed on the list below.
@@ -69,17 +68,16 @@ this file says how it is applied to npm.
 A bundled package carries a licence on the **allowed list of
 [../../DEPENDENCIES.md](../../DEPENDENCIES.md)**, and that document is where
 the list is — `frontend/scripts/check-licences.mjs` reads it out of the two
-Categories paragraphs, and `frontend/vite.config.ts` imports it from there, so
-the list is written once and restated nowhere. The build fails on anything
+Categories paragraphs, and `frontend/vite.config.ts` imports it from there,
+so the list is written once. The build fails on anything
 else, and on a licence it cannot recognise. The wheel is Apache-2.0; a
 copyleft library in the bundle would put that in question. Extending the list
 is a reviewed change to `DEPENDENCIES.md`, with a stated reason.
 
 ### Build tooling
 
-Build tooling is not distributed: it is not in the bundle, not in the wheel,
-not linked into anything, and it is not what the build-time gate looks at —
-that gate reads what rollup put in the bundle, which is the code that ships.
+Build tooling is not distributed. The build-time gate reads what rollup put
+in the bundle, which is the code that ships.
 It is still held to the same policy, because `DEPENDENCIES.md` asks the same
 questions of a development dependency as of any other. What is not plainly on
 the allowed list is excepted by name and version in the **"JavaScript build
@@ -93,7 +91,7 @@ what is forbidden is shared with the Python gate through
 `scripts/licence-fixtures.json`, which both test suites read.
 
 Each row also states a **scope**, `development` or `runtime`, which is
-checked against the lockfile rather than believed: npm marks a package `dev`
+checked against the lockfile: npm marks a package `dev`
 only when every path to it is a development dependency. A restricted licence
 — the MPL-2.0 family — may only be carried by a `development` row. The scope
 is about dependency edges, not about the module graph, so it says nothing

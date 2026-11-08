@@ -66,7 +66,7 @@ under.
 sign-in page reads it for itself, and the router neither claims nor rewrites
 it. `#/link?v=1&c=<code>` is the URL inside a pairing QR
 ([../docs/architecture/device-pairing.md](../docs/architecture/device-pairing.md));
-the query is cut off and never read, since the code is for the app.
+the query is cut off, since the code is for the app.
 
 ## Running it
 
@@ -95,7 +95,7 @@ interface shows its permanent banner. From `../backend/`:
 agents and models it defines are the ones the pickers offer.
 
 Signing in for real needs a `public_url`, a provider registration and the
-redirect URI — that is a deployment, not a laptop. To see the sign-in page
+redirect URI — that needs a deployment. To see the sign-in page
 itself, use the fixture server below.
 
 ### Looking at the shell without a backend
@@ -167,7 +167,7 @@ Two of these are generated and thrown away; one is generated and committed.
   by `npm run generate` from `../backend/openapi.json`, the snapshot the
   backend commits. `dev`, `build`, `typecheck`, `lint` and `test` all run
   `generate` first, so a route that changed without the snapshot being
-  refreshed is a failing check here rather than a surprise in a browser.
+  refreshed is a failing check here.
 - `dist/` — **not committed.** The built assets; CI builds them, and a bundle
   built on a laptop is never released. It is also **what goes into the
   wheel**: `scripts/build-wheel.sh` runs `npm run build` here and hatchling
@@ -181,7 +181,7 @@ Two of these are generated and thrown away; one is generated and committed.
   how a new package in the bundle becomes a line in a diff. Never edit it by
   hand. `scripts/check-frontend.sh` and CI set `CHECK_BUNDLED=1`, which makes
   the build compare the file instead of rewriting it, so a package that entered
-  the bundle is a red build rather than a quiet amendment.
+  the bundle is a red build.
 
 ## The rules
 
@@ -201,8 +201,8 @@ Two of these are generated and thrown away; one is generated and committed.
   CSS custom properties and is the source of truth for every colour, radius
   and font: a rule writes `var(--panel)`, never a literal colour, and dark
   mode is the tokens' job, so no stylesheet has a `prefers-color-scheme` rule
-  of its own. `src/styles.css` holds the base reset, the body and the global
-  `:focus-visible` outline, and no more. Each area has **one stylesheet**,
+  of its own. `src/styles.css` holds only the base reset, the body and the
+  global `:focus-visible` outline. Each area has **one stylesheet**,
   imported by the component that uses it (`import "./thread.css"`), and its
   class names are plain and carry the area's prefix: `shell-`, `panel-`,
   `history-`, `signin-`, `chat-`, `md-`, and `icon`. A prefix says which

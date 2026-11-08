@@ -10,8 +10,8 @@ The list of things to do is [oss-checklist.md](../oss-checklist.md).
 
 ## Identity
 
-- The name is Robinauts. The repository is `open-shipyard/robinauts`, in an
-  organisation, not a personal account.
+- The name is Robinauts. The repository is `open-shipyard/robinauts`, in
+  an organisation.
 
 ## Licence
 

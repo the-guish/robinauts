@@ -1,8 +1,6 @@
 # Robinauts
 
-[![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=open-shipyard_robinauts&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=open-shipyard_robinauts)
-[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=open-shipyard_robinauts&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=open-shipyard_robinauts)
-[![Security issues](https://sonarcloud.io/api/project_badges/measure?project=open-shipyard_robinauts&metric=software_quality_security_issues)](https://sonarcloud.io/summary/new_code?id=open-shipyard_robinauts)
+[SonarQube](https://sonarcloud.io/project/overview?id=open-shipyard_robinauts)
 
 An open source AI assistant platform that a company runs on its own
 servers, leveraging the best capabilities from any vendor, on its own terms.
@@ -10,22 +8,18 @@ servers, leveraging the best capabilities from any vendor, on its own terms.
 ## Why Robinauts
 
 AI assistants are becoming part of how work gets done. Robinauts lets a team
-of any size adopt them without handing its long-term strategy to a single
-vendor.
+of any size adopt them and adapt its strategy whenever the field moves.
 
-**Switch AI vendors at no cost, at any time.** Conversations are stored in
+**Pick the best from each vendor.** Conversations are stored in
 a vendor-agnostic format, so switching vendors takes one click, even in
-the middle of a conversation. A company keeps its leverage in
-contract talks, and can move all its work quickly for price, tax reasons
-or an outage.
+the middle of a conversation. Combine agents, LLMs and tools at will.
 
 **Your knowledge stays yours.** Instructions, tools and conversations live
 in the company's own configuration and database. Nothing is sent anywhere
-except to the AI vendors and tools the company chose, on its own contracts.
+except to the AI vendors and tools the company chose, under its own contracts.
 
-**Little to run.** One application and one PostgreSQL database. No extra
-services, no hosted dependencies. A platform team can own it without a new
-team to look after it.
+**Small footprint.** One application and one PostgreSQL database. No extra
+services, no hosted dependencies. An existing platform team can run it.
 
 **Open standards.** Tools connect through MCP, and the interface talks to
 the server through AG-UI, both open protocols. Tools built for other AI
@@ -97,8 +91,7 @@ servers the company configured are reachable, over HTTPS.
 
 **Fails early and clearly.** The configuration is checked when the server
 starts: a misspelt setting, a missing key or a database that does not
-match the application stops it with a message saying what to fix, instead
-of running half-configured.
+match the application stops it with a message saying what to fix.
 
 **Built to be changed.** Each outside component sits behind a boundary
 that tests enforce, so replacing one breaks one known place and nothing
