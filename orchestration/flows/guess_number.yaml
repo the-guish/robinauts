@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+#
+# Starts a Robinauts conversation with a fixed prompt. The first step of the
+# guessing workflow (docs/architecture/orchestration.md): the steps that read
+# the answer and play the game come after.
+name: guess_number
+version: 0.1.0
+
+steps:
+  start_session:
+    queue: default
+    handler: robinauts_tasks:start_guessing_session
