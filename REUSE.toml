@@ -27,6 +27,7 @@ path = [
     "extra-workers/*/CREDENTIALS.md",
     "extra-workers/*/uv.lock",
     "mcp/README.md",
+    "orchestration/README.md",
     "mcp/*/README.md",
     "mcp/*/uv.lock",
 ]

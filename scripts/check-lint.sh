@@ -19,5 +19,5 @@ cd "$root/backend"
 # than discovered, and they are checked under the same rules as the backend.
 # demo/ is here for the same reason: demo/pg.py is Python of ours, and a demo
 # nobody lints is a demo that rots.
-uv run --locked --no-build ruff check --config pyproject.toml . ../scripts ../demo
-uv run --locked --no-build black --check --config pyproject.toml . ../scripts ../demo
+uv run --locked --no-build ruff check --config pyproject.toml . ../scripts ../demo ../orchestration
+uv run --locked --no-build black --check --config pyproject.toml . ../scripts ../demo ../orchestration

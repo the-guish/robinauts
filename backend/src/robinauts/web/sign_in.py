@@ -54,6 +54,9 @@ PROVIDER_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]*")
 """How a provider's id is spelt. The local development mode's ``!local`` is not spelt so, and
 no configuration can name it."""
 LOCAL_PROVIDER = "!local"
+SYSTEM_PROVIDER = "!system"
+"""The provider of the users the server itself stands for, such as the orchestrator's: not
+spelt as a provider's id either, so no identity a provider vouches for can carry it."""
 
 PENDING_LOGIN_LIFE = timedelta(minutes=10)
 ALLOW_CHECK_LIFE = timedelta(seconds=60)
@@ -79,6 +82,9 @@ class SecretKind(StrEnum):
 
     DEVICE = "rbd_"
     TOKEN = "rbt_"
+    ORCHESTRATOR = "rbo_"
+    """The secret the server mints at each start for the orchestrator it starts beside itself
+    (``docs/architecture/orchestration.md``): never stored, gone with the process."""
 
 
 class SignInErrorCode(StrEnum):
@@ -250,9 +256,12 @@ def secret_of_kind(kind: SecretKind) -> str:
 
 
 def kind_of(secret: str) -> SecretKind:
-    """A device's secret by its prefix; anything else is an API token, with ``rbt_`` or, minted
-    before there were prefixes, with none."""
-    return SecretKind.DEVICE if secret.startswith(SecretKind.DEVICE) else SecretKind.TOKEN
+    """A device's or the orchestrator's secret by its prefix; anything else is an API token,
+    with ``rbt_`` or, minted before there were prefixes, with none."""
+    for kind in (SecretKind.DEVICE, SecretKind.ORCHESTRATOR):
+        if secret.startswith(kind):
+            return kind
+    return SecretKind.TOKEN
 
 
 def safe_return_to(target: str | None) -> str:
