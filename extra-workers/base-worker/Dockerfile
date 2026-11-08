@@ -30,7 +30,12 @@ COPY backend/pyproject.toml backend/uv.lock backend/hatch_build.py backend/
 COPY backend/src backend/src
 COPY extra-workers/base-worker/pyproject.toml extra-workers/base-worker/uv.lock \
     extra-workers/base-worker/
-RUN cd extra-workers/base-worker && uv sync --locked --no-dev
+# Third-party packages are installed from their wheels (`--no-build`): a source
+# distribution's build backend would run here, as root, into the image. The
+# backend is the exception, this checkout installed editable, with no wheel of
+# its own (`backend/hatch_build.py`), so `--no-binary-package robinauts` lets
+# that one package build.
+RUN cd extra-workers/base-worker && uv sync --locked --no-dev --no-build --no-binary-package robinauts
 
 # Nothing runs as root, and nothing is written: the engines keep their state in memory.
 RUN useradd --system --create-home --home-dir /var/lib/robinauts --shell /usr/sbin/nologin \

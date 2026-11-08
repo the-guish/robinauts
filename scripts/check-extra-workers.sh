@@ -26,12 +26,18 @@ for project in "$root"/extra-workers/*/; do
     name=$(basename "$project")
     printf '\n== %s ==\n' "$name"
     cd "$project"
-    # The backend is installed editable, which builds its metadata: no --no-build.
-    uv sync --locked
+    # A dependency is installed from its wheel. `--no-build` refuses a source
+    # distribution, and a source distribution's build backend would run. The
+    # backend beside this folder is the exception: it is installed editable
+    # and has no wheel (`backend/hatch_build.py` builds one only for a
+    # release), so `--no-binary-package robinauts` is what lets that one
+    # package build. `uv run` syncs too, and refuses the same package without
+    # the same two flags.
+    uv sync --locked --no-build --no-binary-package robinauts
     # The project's own files: its tests, and its package where it has one.
-    uv run --locked ruff check .
-    uv run --locked black --check .
-    uv run --locked pytest -q -p no:cacheprovider
+    uv run --locked --no-build --no-binary-package robinauts ruff check .
+    uv run --locked --no-build --no-binary-package robinauts black --check .
+    uv run --locked --no-build --no-binary-package robinauts pytest -q -p no:cacheprovider
     if [ -f "$project/Dockerfile" ]; then
         if docker info >/dev/null 2>&1; then
             printf '\n-- the image --\n'
