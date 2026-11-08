@@ -152,9 +152,11 @@ def build_app(
     sign_in: SignInConfig | None,
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
+    flows_url: str | None = None,
 ) -> FastAPI:
     """The HTTP server over what the composition built, with the lifecycle's gate for a worker
-    in a process of its own and its health. The app starts and stops nothing: ``serve`` does."""
+    in a process of its own and its health, and ``flows_url``, neorc's UI when the orchestrator
+    serves one. The app starts and stops nothing: ``serve`` does."""
     return create_app(
         composed.controller,
         composed.credentials,
@@ -165,6 +167,7 @@ def build_app(
         secret_for=secret_for,
         config=composed.config,
         ui_dir=ui_dir,
+        flows_url=flows_url,
     )
 
 
@@ -231,10 +234,11 @@ def orchestration_of(
     *,
     config_path: Path,
     api_url: str,
+    frame_ancestors: tuple[str, ...] = (),
 ) -> Orchestration | None:
-    """neorc as the ``[orchestration]`` table describes it, and where its worker reaches this
-    server's API; ``None`` without the table. ``ConfigError`` names what stops it from
-    starting."""
+    """neorc as the ``[orchestration]`` table describes it, where its worker reaches this
+    server's API, and the origins that may frame its UI; ``None`` without the table.
+    ``ConfigError`` names what stops it from starting."""
     table = tables.get(orchestration.TABLE)
     if table is None:
         return None
@@ -246,7 +250,11 @@ def orchestration_of(
     if problems := orchestration.check_ready(described, environ):
         raise ConfigError("\n".join(problems))
     return Orchestration(
-        described, environ, hidden=orchestration.hidden_variables(config), api_url=api_url
+        described,
+        environ,
+        hidden=orchestration.hidden_variables(config),
+        api_url=api_url,
+        frame_ancestors=frame_ancestors,
     )
 
 
@@ -264,6 +272,7 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
             config,
             config_path=config_path,
             api_url=worker_broker_url(host, port),
+            frame_ancestors=orchestration.server_origins(host, port),
         )
     except ConfigError as refused:
         print(refused, file=sys.stderr)
@@ -284,7 +293,14 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         # that starts with a command of its own.
         in_process=storage.kind is not StorageKind.POSTGRES,
     )
-    app = build_app(composed, lifecycle, sign_in=sign_in, secret_for=secret_for, ui_dir=ui_dir)
+    app = build_app(
+        composed,
+        lifecycle,
+        sign_in=sign_in,
+        secret_for=secret_for,
+        ui_dir=ui_dir,
+        flows_url=None if orchestrator is None else orchestrator.orchestration.ui_url,
+    )
     config = uvicorn.Config(
         app,
         host=host,

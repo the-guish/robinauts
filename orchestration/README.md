@@ -34,6 +34,35 @@ command = ["uv", "run", "--project", "../neorc", "neorc"]
 ui = false
 ```
 
+### The Flows page
+
+With `ui = true`, the panel's **Flows** item frames neorc's UI, on neorc's
+own origin, embedded (`docs/architecture/orchestration.md`). That needs a
+neorc whose manager takes `--frame-ancestors`, which is on the branch
+`feature/flows-cross-origin-iframe` of the fork until it is released, and
+its UI built:
+
+```bash
+git clone -b feature/flows-cross-origin-iframe https://github.com/the-guish/neorc ../neorc
+```
+
+```bash
+(cd ../neorc && uv sync --all-packages)
+```
+
+```bash
+(cd ../neorc/ts/neorc-ui && npm ci && npm run build && cp -r dist/. ../../python/neorc-ui/src/neorc_ui/static/)
+```
+
+```toml
+[orchestration]
+command = ["uv", "run", "--project", "../neorc", "neorc"]
+ui = true
+```
+
+Then open the interface at `http://127.0.0.1:8000/ui/` (or `localhost`, which
+neorc lets frame it too) and choose **Flows**.
+
 Start the server with neorc's database:
 
 ```bash

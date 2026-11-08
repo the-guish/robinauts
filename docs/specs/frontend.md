@@ -8,7 +8,10 @@
 - **The panel is ours**, and not part of the chat window
   ([ADR 0006](../adr/0006-chat-ui-on-react-alone.md)). Top to
   bottom: the collapse button and the brand; "new chat"; the conversation
-  history; projects, once they exist; and, pinned to the bottom, the
+  history; "Flows", when an orchestrator runs beside the server, a page
+  that frames neorc's UI on neorc's own origin
+  ([architecture/orchestration.md](../architecture/orchestration.md));
+  projects, once they exist; and, pinned to the bottom, the
   profile block with sign-out. Collapsed, it becomes an icon rail. The state is remembered
   per browser.
 - The application opens on an empty chat, ready for a first message, with
@@ -126,7 +129,9 @@ neorc's rules (`neorc/contributing/js-dependencies.md`):
   `connect-src` `'self'`; `style-src 'self' 'unsafe-inline'`;
   `img-src 'self' data:`; `frame-src 'self'`, so that the side panel can
   frame an MCP app's view, which this server serves under a policy of its
-  own ([ADR 0007](../adr/0007-mcp-apps-in-the-side-panel.md));
+  own ([ADR 0007](../adr/0007-mcp-apps-in-the-side-panel.md)), and, only
+  when an orchestrator serves its UI, neorc's origin beside it, for the
+  Flows page ([architecture/orchestration.md](../architecture/orchestration.md));
   `frame-ancestors 'none'`; plus `base-uri 'none'`
   and `form-action 'none'`, which `default-src` does not cover — the page's
   script and stylesheet are named relatively, so an injected `<base>` would

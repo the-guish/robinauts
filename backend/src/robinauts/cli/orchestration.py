@@ -18,7 +18,12 @@ the browser's is. The stop goes the other way round.
 None of neorc's processes is handed what the configuration keeps secret from everything but
 the server: the model providers' keys, the tool servers' secrets, the database's URL. neorc's
 own database is the PostgreSQL the variable ``database_url_env`` names, handed to it as
-``NEORC_DATABASE_URL``."""
+``NEORC_DATABASE_URL``.
+
+The manager serves neorc's UI, unless ``ui`` is off, on its own origin, which the interface's
+Flows page frames. neorc's UI refuses to be framed but by the origins its manager is started
+with, in ``--frame-ancestors``: this server's, as a browser reaches it (``server_origins``).
+Two origins, two ports: neorc's page reaches neither this server's cookies nor its API."""
 
 from __future__ import annotations
 
@@ -89,6 +94,24 @@ class OrchestrationConfig:
     @property
     def manager_address(self) -> str:
         return f"http://{HOST}:{self.port}"
+
+    @property
+    def ui_url(self) -> str | None:
+        """Where a browser on this machine finds neorc's UI; ``None`` when it is not served."""
+        return f"{self.manager_address}/ui/" if self.ui else None
+
+
+def server_origins(host: str, port: int) -> tuple[str, ...]:
+    """The origins a browser on this machine reaches a server listening on ``host`` at: both
+    spellings of the loopback interface for a server that listens on it or on every address,
+    else that host."""
+    if host in ("", "0.0.0.0", "127.0.0.1", "localhost"):
+        return (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
+    if host in ("::", "::1"):
+        return (f"http://[::1]:{port}", f"http://localhost:{port}")
+    if ":" in host:
+        host = f"[{host}]"
+    return (f"http://{host}:{port}",)
 
 
 def parse_orchestration(
@@ -181,14 +204,20 @@ def neorc_environment(
     return environment
 
 
-def neorc_commands(orchestration: OrchestrationConfig) -> dict[str, tuple[str, ...]]:
-    """The command of each step, by name, in the order they run."""
+def neorc_commands(
+    orchestration: OrchestrationConfig, *, frame_ancestors: tuple[str, ...] = ()
+) -> dict[str, tuple[str, ...]]:
+    """The command of each step, by name, in the order they run. ``frame_ancestors`` are the
+    origins that may frame neorc's UI, when it is served."""
     neorc = orchestration.command
     address = ("--manager-address", orchestration.manager_address)
     manager = (*neorc, "manager", "start", "--host", HOST, "--port", str(orchestration.port))
     manager += ("--no-auth", "--create-schema")
     if not orchestration.ui:
         manager += ("--no-ui",)
+    else:
+        for origin in frame_ancestors:
+            manager += ("--frame-ancestors", origin)
     return {
         "manager": manager,
         "upload": (*neorc, "flows", "upload", str(orchestration.flows), *address),
@@ -208,7 +237,8 @@ def neorc_commands(orchestration: OrchestrationConfig) -> dict[str, tuple[str, .
 
 class Orchestration:
     """neorc's manager, scheduler and worker, started in that order and stopped the other way
-    round. ``api_url`` is where the worker reaches this server."""
+    round. ``api_url`` is where the worker reaches this server; ``frame_ancestors``, the origins
+    a browser reaches it at, which may frame neorc's UI."""
 
     def __init__(
         self,
@@ -217,9 +247,10 @@ class Orchestration:
         *,
         hidden: frozenset[str],
         api_url: str,
+        frame_ancestors: tuple[str, ...] = (),
     ) -> None:
         self.orchestration = orchestration
-        self.commands = neorc_commands(orchestration)
+        self.commands = neorc_commands(orchestration, frame_ancestors=frame_ancestors)
         self._environment = neorc_environment(environ, orchestration, hidden=hidden)
         self._worker_environment = neorc_environment(
             environ, orchestration, hidden=hidden, api_url=api_url

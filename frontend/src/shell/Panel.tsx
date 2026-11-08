@@ -3,8 +3,9 @@
 
 /**
  * The left panel: the collapse button and the brand, "new chat", the
- * history, and the profile block pinned to the bottom
- * (`docs/specs/frontend.md`).
+ * history, "Flows" when the orchestrator is on, and the profile block pinned
+ * to the bottom (`docs/specs/frontend.md`,
+ * `docs/architecture/orchestration.md`).
  *
  * **The panel is ours** (ADR 0001, kept by ADR 0006): it reads the API
  * directly and knows nothing of what draws the chat, and nothing here ever
@@ -28,9 +29,10 @@ import {
   MonitorIcon,
   PanelLeftIcon,
   PlusIcon,
+  WorkflowIcon,
   XIcon,
 } from "../icons";
-import { DEVICES, formatRoute } from "../router";
+import { DEVICES, FLOWS, formatRoute } from "../router";
 import type { User } from "../session/session";
 import { useWide } from "./breakpoint";
 import { useLockedScroll, useTrappedFocus } from "./drawer";
@@ -48,6 +50,10 @@ export interface PanelProps {
   current: ConversationId | null;
   /** Whether the page is "Linked devices", so its link can say so. */
   onDevices?: boolean;
+  /** Whether there are flows to show: an orchestrator runs beside the server. */
+  flows?: boolean;
+  /** Whether the page is "Flows", so its link can say so. */
+  onFlows?: boolean;
   /** Collapsed to a rail of icons. Only on a screen wide enough for one. */
   collapsed: boolean;
   onCollapse: (collapsed: boolean) => void;
@@ -67,6 +73,8 @@ export function Panel({
   history,
   current,
   onDevices = false,
+  flows = false,
+  onFlows = false,
   collapsed,
   onCollapse,
   drawer,
@@ -148,6 +156,23 @@ export function Panel({
           onOpened={onCloseDrawer}
         />
       </nav>
+
+      {/* Below the history, and kept in the rail as its icon: a page of the
+          shell, like "Linked devices", that frames neorc's UI. Only when the
+          server runs an orchestrator whose UI it can show. */}
+      {flows && (
+        <a
+          href={formatRoute(FLOWS)}
+          title="Flows"
+          aria-label="Flows"
+          aria-current={onFlows ? "page" : undefined}
+          onClick={onCloseDrawer}
+          className="panel-flows"
+        >
+          <WorkflowIcon className="panel-icon" />
+          <span className="panel-wide">Flows</span>
+        </a>
+      )}
 
       {/* Everything that is not the history sits at the foot of the panel,
           because `docs/specs/frontend.md` leaves no top bar to put it in.

@@ -108,6 +108,23 @@
   text-transform: uppercase;
 }
 
+/* "Flows", under the history. */
+.panel-flows {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: var(--radius);
+  padding: 0.375rem 0.5rem;
+  font-size: 0.875rem;
+  line-height: calc(1.25 / 0.875);
+  color: var(--muted);
+}
+
+.panel-flows[aria-current="page"] {
+  background-color: var(--tint);
+  color: var(--ink);
+}
+
 .panel-foot {
   margin-top: auto;
   display: flex;
@@ -218,6 +235,7 @@
 
 @media (hover: hover) {
   .panel-tool:hover,
+  .panel-flows:hover,
   .panel-devices:hover,
   .panel-signout:hover {
     background-color: var(--hover);

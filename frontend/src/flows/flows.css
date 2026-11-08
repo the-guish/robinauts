@@ -1,0 +1,36 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright The Robinauts Authors */
+
+/*
+ * "Flows" (`./FlowsPage.tsx`): a title, and neorc's UI framed under it,
+ * filling the column the chat would otherwise fill. The frame scrolls on its
+ * own, so the page does not.
+ */
+
+.flows {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.flows-title {
+  padding: 1rem 1.5rem 0.5rem;
+  font-size: 1.25rem;
+  line-height: calc(1.75 / 1.25);
+  font-weight: 600;
+}
+
+.flows-frame {
+  min-height: 0;
+  width: 100%;
+  flex: 1;
+  border-top-width: 1px;
+  border-color: var(--line);
+  background-color: var(--paper);
+}
+
+.flows-none {
+  padding-inline: 1.5rem;
+  color: var(--muted);
+}

@@ -6,7 +6,8 @@
 the upload of the flows, its scheduler and its worker are started in that order before the
 server listens, and stopped the other way round with it. The worker's task reaches the API with
 no credential, as everything does in that mode, and starts a conversation with the guessing
-prompt, which the browser then sees as its own. neorc is a stand-in here
+prompt, which the browser then sees as its own. neorc's UI may be framed by this server's origins
+alone, and this server's page frames neorc's origin and no other. neorc is a stand-in here
 (``util/fake_neorc.py``) that runs that task as neorc's worker would: the real one needs its own
 PostgreSQL."""
 
@@ -90,7 +91,8 @@ def test_neorc_starts_with_the_server_and_its_task_opens_a_conversation(tmp_path
     config, log = tmp_path / "robinauts.toml", tmp_path / "neorc.jsonl"
     command = json.dumps([sys.executable, str(FAKE_NEORC)])
     code = REPO / "orchestration"
-    config.write_text(CONFIG.format(command=command, code=code, port=stack.free_port()))
+    neorc_port = stack.free_port()
+    config.write_text(CONFIG.format(command=command, code=code, port=neorc_port))
     port = stack.free_port()
     start = [str(stack.ROBINAUTS), "start", "--dev-no-sign-in", "--port", str(port)]
     environment = environment_for(config, log)
@@ -98,6 +100,13 @@ def test_neorc_starts_with_the_server_and_its_task_opens_a_conversation(tmp_path
         try:
             url = f"http://127.0.0.1:{port}"
             stack.wait_until_up(url, running)
+            neorc = f"http://127.0.0.1:{neorc_port}"
+            with httpx.Client(base_url=url, timeout=30.0) as api:
+                session = api.get("/auth/session").json()
+                policy = api.get("/ui/").headers["content-security-policy"]
+            assert session["flows_url"] == f"{neorc}/ui/"
+            assert f"frame-src 'self' {neorc};" in policy
+            assert "frame-ancestors 'none'" in policy
             deadline = time.monotonic() + 30
             while not (done := [e for e in entries(log) if "result" in e]):
                 assert time.monotonic() < deadline, entries(log)
@@ -117,6 +126,11 @@ def test_neorc_starts_with_the_server_and_its_task_opens_a_conversation(tmp_path
     assert task["api_url"] == url
     assert task["visible"] == []
     log_entries = entries(log)
+    [manager] = [
+        e["arguments"] for e in log_entries if e.get("step") == "manager" and "arguments" in e
+    ]
+    framed_by = [manager[at + 1] for at, a in enumerate(manager) if a == "--frame-ancestors"]
+    assert framed_by == [url, f"http://localhost:{port}"]
     started = [e["step"] for e in log_entries if "arguments" in e]
     # The scheduler and the worker are started one after the other without waiting for either,
     # so which one writes first is theirs to race.

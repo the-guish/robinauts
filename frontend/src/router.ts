@@ -10,7 +10,7 @@
  * prefix to build for, and nothing here depends on where the application is
  * mounted.
  *
- * No router library. Four routes, one event, and a store the size of this
+ * No router library. Six routes, one event, and a store the size of this
  * file; a library would be a dependency to vet, to keep pinned and to carry
  * in the bundle for something React already provides through
  * `useSyncExternalStore` (`docs/contributing/js-dependencies.md`).
@@ -19,6 +19,8 @@
  *     #/c/<id>      that conversation
  *     #/devices     "Linked devices": the phones and the API tokens
  *     #/link        what a phone's camera app opens a pairing code at
+ *     #/flows       "Flows": neorc's UI, framed, when the orchestrator is on
+ *     #/flows/runs/<id>  that run of a flow, in the same frame
  *
  * `#/link?v=1&c=…` is the URL inside a pairing QR
  * (`docs/architecture/device-pairing.md`). Its query is cut off like any
@@ -40,7 +42,9 @@ export type Route =
   | { readonly kind: "new" }
   | { readonly kind: "conversation"; readonly id: ConversationId }
   | { readonly kind: "devices" }
-  | { readonly kind: "link" };
+  | { readonly kind: "link" }
+  /** neorc's UI; `run` is the run it opens at, else its list of runs. */
+  | { readonly kind: "flows"; readonly run: string | null };
 
 /** The empty chat: the route of a page that has been told nothing else. */
 export const NEW_CHAT: Route = { kind: "new" };
@@ -50,6 +54,9 @@ export const DEVICES: Route = { kind: "devices" };
 
 /** The page a pairing code opens in a browser. */
 export const LINK: Route = { kind: "link" };
+
+/** "Flows", on neorc's list of runs. */
+export const FLOWS: Route = { kind: "flows", run: null };
 
 /**
  * The shape of every id the backend gives a conversation.
@@ -91,7 +98,21 @@ export function parseRoute(hash: string): Route {
     (hash.startsWith("#") ? hash.slice(1) : hash).split("?")[0] ?? "";
   if (path === "/devices") return DEVICES;
   if (path === "/link") return LINK;
+  if (path === "/flows") return FLOWS;
   const parts = path.split("/");
+  // A run's id is a UUID, as neorc gives it, and goes into another page's
+  // hash: one shape, judged here, so nothing else can be smuggled in there.
+  const run = parts[3];
+  if (
+    parts.length === 4 &&
+    parts[0] === "" &&
+    parts[1] === "flows" &&
+    parts[2] === "runs" &&
+    run !== undefined &&
+    isUuid(run)
+  ) {
+    return { kind: "flows", run };
+  }
   const id = parts[2];
   if (
     parts.length === 3 &&
@@ -119,6 +140,10 @@ export function formatRoute(route: Route): string {
       return "#/devices";
     case "link":
       return "#/link";
+    case "flows":
+      return route.run !== null && isUuid(route.run)
+        ? `#/flows/runs/${route.run}`
+        : "#/flows";
     case "conversation":
       return isConversationId(route.id) ? `#/c/${route.id}` : "#/";
     default:

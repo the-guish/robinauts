@@ -20,6 +20,7 @@ from robinauts.cli.orchestration import (
     neorc_commands,
     neorc_environment,
     parse_orchestration,
+    server_origins,
 )
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.shared_domain.domain import Config, ProviderConfig, ProviderKind, ToolServerConfig
@@ -97,6 +98,44 @@ def test_the_commands_run_the_manager_on_loopback_with_no_authentication() -> No
             *("--code-location", str(CODE), "--queue", "default"),
         ),
     }
+
+
+def test_neorc_ui_may_be_framed_by_the_origins_handed_to_it_when_it_is_served() -> None:
+    served = OrchestrationConfig(code_location=CODE, flows=CODE / "flows", port=9000)
+    origins = ("http://127.0.0.1:8000", "http://localhost:8000")
+    manager = neorc_commands(served, frame_ancestors=origins)["manager"]
+    assert manager[-4:] == (
+        *("--frame-ancestors", "http://127.0.0.1:8000"),
+        *("--frame-ancestors", "http://localhost:8000"),
+    )
+    assert served.ui_url == "http://127.0.0.1:9000/ui/"
+
+
+def test_no_ui_is_framed_when_none_is_served() -> None:
+    unserved = OrchestrationConfig(code_location=CODE, flows=CODE / "flows", ui=False)
+    manager = neorc_commands(unserved, frame_ancestors=("http://127.0.0.1:8000",))["manager"]
+    assert "--frame-ancestors" not in manager
+    assert manager[-1] == "--no-ui"
+    assert unserved.ui_url is None
+
+
+@pytest.mark.parametrize(
+    ("host", "origins"),
+    [
+        ("127.0.0.1", ("http://127.0.0.1:8000", "http://localhost:8000")),
+        ("localhost", ("http://127.0.0.1:8000", "http://localhost:8000")),
+        ("0.0.0.0", ("http://127.0.0.1:8000", "http://localhost:8000")),
+        ("", ("http://127.0.0.1:8000", "http://localhost:8000")),
+        ("::", ("http://[::1]:8000", "http://localhost:8000")),
+        ("::1", ("http://[::1]:8000", "http://localhost:8000")),
+        ("192.168.1.10", ("http://192.168.1.10:8000",)),
+        ("fe80::1", ("http://[fe80::1]:8000",)),
+    ],
+)
+def test_the_server_origins_are_where_a_browser_on_this_machine_reaches_it(
+    host: str, origins: tuple[str, ...]
+) -> None:
+    assert server_origins(host, 8000) == origins
 
 
 CONFIG = Config(

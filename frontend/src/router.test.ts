@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 
 import {
   DEVICES,
+  FLOWS,
   formatRoute,
   isConversationId,
   LINK,
@@ -140,4 +141,28 @@ test("reading the same hash twice gives the same object", () => {
   const first = result.current;
   rerender();
   expect(result.current).toBe(first);
+});
+
+test("the Flows page and a run on it are read out of the hash, and written back", () => {
+  expect(parseRoute("#/flows")).toEqual(FLOWS);
+  expect(parseRoute(`#/flows/runs/${ID}`)).toEqual({ kind: "flows", run: ID });
+  expect(formatRoute(FLOWS)).toBe("#/flows");
+  expect(formatRoute({ kind: "flows", run: ID })).toBe(`#/flows/runs/${ID}`);
+  expect(parseRoute(formatRoute({ kind: "flows", run: ID }))).toEqual({
+    kind: "flows",
+    run: ID,
+  });
+});
+
+test("a run that is not a UUID is not a route, and is never written into one", () => {
+  for (const hash of [
+    "#/flows/runs/",
+    "#/flows/runs/abc",
+    `#/flows/runs/${ID}/x`,
+    "#/flows/runs/..%2F..",
+    "#/flows/x",
+  ]) {
+    expect(parseRoute(hash)).toEqual(NEW_CHAT);
+  }
+  expect(formatRoute({ kind: "flows", run: "x?embed=0#/y" })).toBe("#/flows");
 });

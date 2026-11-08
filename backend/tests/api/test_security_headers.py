@@ -41,3 +41,7 @@ def test_every_answer_carries_the_security_headers(api: httpx.Client) -> None:
         " img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'self';"
         " base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     )
+
+
+def test_a_server_with_no_orchestrator_names_no_flows_page(api: httpx.Client) -> None:
+    assert api.get("/auth/session").json()["flows_url"] is None

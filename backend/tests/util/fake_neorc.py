@@ -5,7 +5,9 @@
 beside itself: it answers the four commands the server runs as neorc would, as far as the
 server can tell, and writes what each did to the JSON-lines file ``FAKE_NEORC_LOG`` names.
 
-- ``manager start --port P``: answers ``GET /health`` on ``127.0.0.1:P`` until SIGTERM;
+- ``manager start --port P``: answers ``GET /health`` on ``127.0.0.1:P`` until SIGTERM, and
+  ``GET /ui/`` with a page that says the query and the hash it was opened at, framed by the
+  origins of its ``--frame-ancestors`` alone, as neorc's UI is (``'none'`` without one);
 - ``flows upload DIR``: says it stored each flow file in ``DIR`` and exits;
 - ``scheduler start``: waits for SIGTERM;
 - ``worker start --code-location DIR``: opens the guessing flow's guesser conversation with
@@ -37,8 +39,40 @@ def option(arguments: list[str], name: str) -> str:
     return arguments[arguments.index(name) + 1]
 
 
+UI_PAGE = b"""<!doctype html>
+<html><head><meta charset="utf-8"><title>neorc stand-in</title></head>
+<body><p id="where">neorc stand-in</p>
+<script>
+function say() {
+  document.getElementById("where").textContent = "neorc at " + location.search + location.hash;
+}
+say();
+addEventListener("hashchange", say);
+</script></body></html>
+"""
+
+
+def frame_ancestors(arguments: list[str]) -> str:
+    """The policy's ``frame-ancestors`` the manager was started with, as neorc's would be."""
+    origins = [arguments[at + 1] for at, a in enumerate(arguments) if a == "--frame-ancestors"]
+    return " ".join(origins) or "'none'"
+
+
 class Health(BaseHTTPRequestHandler):
+    framed_by = "'none'"
+
     def do_GET(self) -> None:
+        if self.path.split("?")[0] == "/ui/":
+            self.send_response(200)
+            self.send_header("content-type", "text/html; charset=utf-8")
+            self.send_header(
+                "content-security-policy",
+                "default-src 'none'; script-src 'unsafe-inline';"
+                f" frame-ancestors {self.framed_by}",
+            )
+            self.end_headers()
+            self.wfile.write(UI_PAGE)
+            return
         self.send_response(200 if self.path == "/health" else 404)
         self.end_headers()
 
@@ -56,6 +90,7 @@ def main(arguments: list[str]) -> int:
     step = arguments[0]
     record(step=step, arguments=arguments)
     if step == "manager":
+        Health.framed_by = frame_ancestors(arguments)
         server = ThreadingHTTPServer(("127.0.0.1", int(option(arguments, "--port"))), Health)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         until_stopped(step)

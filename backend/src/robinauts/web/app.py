@@ -76,7 +76,7 @@ from robinauts.shared_domain.domain import (
 from robinauts.web import agui
 from robinauts.web.apps import Apps, NoSuchAppError, ToolResult, UnansweredCallError
 from robinauts.web.cookies import Cookies
-from robinauts.web.headers import VIEW_HEADERS, SecurityHeaders
+from robinauts.web.headers import VIEW_HEADERS, SecurityHeaders, security_headers
 from robinauts.web.logs import loggable
 from robinauts.web.oidc import Exchange, SecretLookup, claims_from
 from robinauts.web.pairing import (
@@ -146,6 +146,14 @@ LOCAL_IDENTITY = Identity(provider=LOCAL_PROVIDER, subject="developer", name="Lo
 (``sign_in.PROVIDER_ID_PATTERN``), so that no identity a provider vouches for can carry it."""
 
 log = logging.getLogger(__name__)
+
+
+def origin_of_url(url: str) -> str:
+    """The origin of an absolute ``http`` or ``https`` URL: its scheme, host and port."""
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.netloc or "@" in parts.netloc:
+        raise ValueError(f"not an http or https URL with a host: {url!r}")
+    return f"{parts.scheme}://{parts.netloc.lower()}"
 
 
 def local_host(values: list[str]) -> str | None:
@@ -285,6 +293,9 @@ class UserSessionResponse(BaseModel):
     """The token a token bearer is."""
     pairing: PairingStateView | None = None
     """The pairing the bearer of a claim waits on, before it is approved."""
+    flows_url: str | None = None
+    """Where neorc's UI is, for the Flows page to frame, to whoever is signed in; absent when
+    the server runs no orchestrator, or runs it without its UI."""
 
 
 class MintedPairingResponse(BaseModel):
@@ -639,13 +650,17 @@ def create_app(
     secret_for: SecretLookup,
     config: Config,
     ui_dir: Path | None = None,
+    flows_url: str | None = None,
 ) -> FastAPI:
     """The HTTP server alone. Whoever runs it opens the controller and starts the worker before
     it serves, and stops the worker and closes the controller after (``cli/lifecycle.py``).
     ``brokers``, one per worker by name, and ``worker_access`` serve the workers in processes
     of their own at ``/internal/worker/``; ``healthy`` says whether this node's workers are
     heard from, for ``/health``. ``sign_in`` is ``None`` in the local development mode.
-    ``config`` names the agents' tool servers, whose secrets ``secret_for`` reads too."""
+    ``config`` names the agents' tool servers, whose secrets ``secret_for`` reads too.
+    ``flows_url`` is neorc's UI, which the Flows page frames on an origin of its own: the page's
+    policy lets that origin, and no other, be framed (``docs/architecture/orchestration.md``)."""
+    framed = () if flows_url is None else (origin_of_url(flows_url),)
     exchange: Exchange | None = None
     flow: SignIn | None = None
     if sign_in is not None:
@@ -777,7 +792,7 @@ def create_app(
         responses={"default": {"model": ErrorResponse, "description": "A refusal"}},
     )
     app.add_middleware(Guard, check=same_origin)
-    app.add_middleware(SecurityHeaders)
+    app.add_middleware(SecurityHeaders, headers=security_headers(framed))
 
     @app.exception_handler(Refused)
     async def not_let_in(request: Request, exc: Refused) -> JSONResponse:
@@ -839,7 +854,10 @@ def create_app(
     async def current_user_session(request: Request) -> UserSessionResponse:
         if sign_in is None:
             return UserSessionResponse(
-                sign_in=False, local_development=True, user=user_summary(local_user)
+                sign_in=False,
+                local_development=True,
+                user=user_summary(local_user),
+                flows_url=flows_url,
             )
         now = datetime.now(UTC)
         answer = UserSessionResponse(
@@ -857,6 +875,7 @@ def create_app(
                     answer.pairing = PairingStateView(state=state.value)
             return answer
         answer.user = user_summary(asker.user)
+        answer.flows_url = flows_url
         if asker.device is not None:
             answer.device = device_summary(asker.device)
         elif asker.via is Via.TOKEN:

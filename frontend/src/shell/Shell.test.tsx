@@ -63,9 +63,10 @@ function otherwise(call: Call): Response {
 async function shell(
   signOut = () => Promise.resolve(),
   answer?: (call: Call) => Response | undefined,
+  session: Session = SESSION,
 ) {
   const fetch = answering(answer);
-  const drawn = render(<Shell session={SESSION} signOut={signOut} />);
+  const drawn = render(<Shell session={session} signOut={signOut} />);
   await waitFor(() => {
     expect(screen.queryByText("Loading the conversations…")).toBeNull();
   });
@@ -1267,4 +1268,71 @@ test("the side panel is about a conversation, so not on a page that is not one",
   expect(
     screen.queryByRole("button", { name: "Open the side panel" }),
   ).toBeNull();
+});
+
+/** A server with an orchestrator beside it, whose UI the Flows page frames. */
+const WITH_FLOWS: Session = {
+  ...SESSION,
+  flows_url: "http://127.0.0.1:8420/ui/",
+};
+
+test("Flows is in the panel, below the history, only with an orchestrator", async () => {
+  const { unmount } = await shell();
+  expect(within(panel()).queryByRole("link", { name: "Flows" })).toBeNull();
+  unmount();
+
+  await shell(undefined, undefined, WITH_FLOWS);
+  const flows = within(panel()).getByRole("link", { name: "Flows" });
+  expect(flows).toHaveAttribute("href", "#/flows");
+  expect(flows).not.toHaveAttribute("aria-current");
+  const history = within(panel()).getByRole("navigation", { name: "History" });
+  expect(
+    history.compareDocumentPosition(flows) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
+test("#/flows frames neorc's runs, embedded and sandboxed, beside the panel", async () => {
+  location.hash = "#/flows";
+  await shell(undefined, undefined, WITH_FLOWS);
+  expect(panel()).toBeVisible();
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Flows" }),
+  ).toBeVisible();
+  expect(screen.queryByRole("heading", { name: "New chat" })).toBeNull();
+  expect(screen.getByRole("link", { name: "Flows" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  const frame = screen.getByTitle("Flows in neorc");
+  expect(frame.tagName).toBe("IFRAME");
+  expect(frame).toHaveAttribute(
+    "src",
+    "http://127.0.0.1:8420/ui/?embed=1#/runs",
+  );
+  expect(frame).toHaveAttribute(
+    "sandbox",
+    "allow-scripts allow-same-origin allow-forms",
+  );
+  expect(frame).toHaveAttribute("referrerpolicy", "no-referrer");
+  expect(
+    screen.queryByRole("complementary", { name: "Side panel" }),
+  ).toBeNull();
+});
+
+test("#/flows/runs/<id> opens the frame at neorc's page of that run", async () => {
+  location.hash = `#/flows/runs/${RUN}`;
+  await shell(undefined, undefined, WITH_FLOWS);
+  expect(screen.getByTitle("Flows in neorc")).toHaveAttribute(
+    "src",
+    `http://127.0.0.1:8420/ui/?embed=1#/runs/${RUN}`,
+  );
+});
+
+test("#/flows on a server with no orchestrator says so, and frames nothing", async () => {
+  location.hash = "#/flows";
+  await shell();
+  expect(
+    screen.getByText(/No orchestrator runs beside this server/),
+  ).toBeVisible();
+  expect(screen.queryByTitle("Flows in neorc")).toBeNull();
 });
