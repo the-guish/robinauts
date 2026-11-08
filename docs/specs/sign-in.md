@@ -167,9 +167,6 @@ roles come, they work as follows.
   a session naming that user, it signs nobody in where sign-in is on.
 - Not there yet: tokens minted by an operator for somebody else, and scopes.
   A token reaches all that its owner can.
-- The orchestrator the server starts beside itself has a bearer of its own,
-  `rbo_`, minted at each start and never stored
-  ([orchestration.md](../architecture/orchestration.md#the-orchestrators-secret)).
 
 Linking a phone, its device sessions, and the allow-list check on every
 use are in [device-pairing.md](../architecture/device-pairing.md).

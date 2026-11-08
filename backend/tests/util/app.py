@@ -20,20 +20,10 @@ from robinauts.web.sign_in import SignInConfig
 
 @asynccontextmanager
 async def running(
-    composed: Composed,
-    *,
-    sign_in: SignInConfig | None,
-    secret_for: SecretLookup,
-    orchestrator_secret: str | None = None,
+    composed: Composed, *, sign_in: SignInConfig | None, secret_for: SecretLookup
 ) -> AsyncIterator[FastAPI]:
     lifecycle = Lifecycle(composed)
-    app = build_app(
-        composed,
-        lifecycle,
-        sign_in=sign_in,
-        secret_for=secret_for,
-        orchestrator_secret=orchestrator_secret,
-    )
+    app = build_app(composed, lifecycle, sign_in=sign_in, secret_for=secret_for)
     await lifecycle.start()
     try:
         async with app.router.lifespan_context(app):

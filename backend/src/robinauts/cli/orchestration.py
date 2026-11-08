@@ -10,9 +10,10 @@ installed on its own.
 The order is neorc's: the manager first, on the loopback interface and with no authentication,
 as the local development mode is; once it answers ``/health``, the flows are uploaded to it; then
 the scheduler, and the worker, which runs the flows' tasks with the handlers at
-``code_location``. The worker alone is handed this server's URL and the ``rbo_`` secret it
-minted at its start, in ``ROBINAUTS_API_URL`` and ``ROBINAUTS_API_TOKEN``: that is how a task
-reaches this server's API. The stop goes the other way round.
+``code_location``. The worker alone is handed this server's URL, in ``ROBINAUTS_API_URL``: that
+is how a task reaches this server's API. It is handed no credential: the local development mode
+has no sign-in, every request is its one user's, and what a flow starts is the developer's, as
+the browser's is. The stop goes the other way round.
 
 None of neorc's processes is handed what the configuration keeps secret from everything but
 the server: the model providers' keys, the tool servers' secrets, the database's URL. neorc's
@@ -43,7 +44,11 @@ TABLE = "orchestration"
 KEYS = frozenset({"command", "port", "database_url_env", "code_location", "flows", "ui"})
 
 API_URL_VARIABLE = "ROBINAUTS_API_URL"
+"""Where the handlers reach this server, handed to the worker."""
 API_TOKEN_VARIABLE = "ROBINAUTS_API_TOKEN"
+"""The API token the handlers send as a bearer when they have one: what a neorc started on its
+own, against a server with sign-in on, is given (``docs/specs/sign-in.md``, "API tokens"). The
+worker started here is handed none, whatever the shell had: this server takes none."""
 NEORC_DATABASE_URL_VARIABLE = "NEORC_DATABASE_URL"
 SERVER_SECRETS = frozenset({"ROBINAUTS_DATABASE_URL", "ROBINAUTS_CONFIG"})
 """What the server's own environment holds that no neorc process is handed, beside the
@@ -162,17 +167,17 @@ def neorc_environment(
     orchestration: OrchestrationConfig,
     *,
     hidden: frozenset[str],
-    api: tuple[str, str] | None = None,
+    api_url: str | None = None,
 ) -> dict[str, str]:
-    """The environment a neorc process starts with: the server's, without ``hidden``, with
-    neorc's database in ``NEORC_DATABASE_URL``; and for the worker, ``api``, this server's URL
-    and the orchestrator's secret."""
+    """The environment a neorc process starts with: the server's, without ``hidden`` and
+    without an API token, with neorc's database in ``NEORC_DATABASE_URL``; and for the worker,
+    this server's URL in ``ROBINAUTS_API_URL``."""
     environment = {k: v for k, v in environ.items() if k not in hidden}
     environment.pop(API_URL_VARIABLE, None)
     environment.pop(API_TOKEN_VARIABLE, None)
     environment[NEORC_DATABASE_URL_VARIABLE] = environ[orchestration.database_url_env]
-    if api is not None:
-        environment[API_URL_VARIABLE], environment[API_TOKEN_VARIABLE] = api
+    if api_url is not None:
+        environment[API_URL_VARIABLE] = api_url
     return environment
 
 
@@ -203,8 +208,7 @@ def neorc_commands(orchestration: OrchestrationConfig) -> dict[str, tuple[str, .
 
 class Orchestration:
     """neorc's manager, scheduler and worker, started in that order and stopped the other way
-    round. ``api_url`` is where the worker reaches this server, and ``secret`` the bearer it
-    reaches it with."""
+    round. ``api_url`` is where the worker reaches this server."""
 
     def __init__(
         self,
@@ -213,13 +217,12 @@ class Orchestration:
         *,
         hidden: frozenset[str],
         api_url: str,
-        secret: str,
     ) -> None:
         self.orchestration = orchestration
         self.commands = neorc_commands(orchestration)
         self._environment = neorc_environment(environ, orchestration, hidden=hidden)
         self._worker_environment = neorc_environment(
-            environ, orchestration, hidden=hidden, api=(api_url, secret)
+            environ, orchestration, hidden=hidden, api_url=api_url
         )
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._watching: dict[str, asyncio.Task[None]] = {}

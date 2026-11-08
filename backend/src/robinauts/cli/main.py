@@ -61,14 +61,7 @@ from robinauts.controller.contract.ports import Credentials
 from robinauts.shared_domain.domain import Config, ControllerError, StorageConfig, StorageKind
 from robinauts.web.app import create_app
 from robinauts.web.contract.broker.wire import SERVER_KEEP_ALIVE_SECONDS
-from robinauts.web.sign_in import (
-    SIGN_IN_KEYS,
-    SecretKind,
-    SignInConfig,
-    is_loopback,
-    parse_sign_in,
-    secret_of_kind,
-)
+from robinauts.web.sign_in import SIGN_IN_KEYS, SignInConfig, is_loopback, parse_sign_in
 
 REPO = Path(__file__).resolve().parents[4]
 
@@ -159,11 +152,9 @@ def build_app(
     sign_in: SignInConfig | None,
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
-    orchestrator_secret: str | None = None,
 ) -> FastAPI:
     """The HTTP server over what the composition built, with the lifecycle's gate for a worker
-    in a process of its own and its health, and the bearer of the orchestrator started beside
-    it, if any. The app starts and stops nothing: ``serve`` does."""
+    in a process of its own and its health. The app starts and stops nothing: ``serve`` does."""
     return create_app(
         composed.controller,
         composed.credentials,
@@ -174,7 +165,6 @@ def build_app(
         secret_for=secret_for,
         config=composed.config,
         ui_dir=ui_dir,
-        orchestrator_secret=orchestrator_secret,
     )
 
 
@@ -241,10 +231,10 @@ def orchestration_of(
     *,
     config_path: Path,
     api_url: str,
-) -> tuple[Orchestration, str] | None:
-    """neorc as the ``[orchestration]`` table describes it, with the secret it reaches this
-    server's API with, minted now; ``None`` without the table. ``ConfigError`` names what
-    stops it from starting."""
+) -> Orchestration | None:
+    """neorc as the ``[orchestration]`` table describes it, and where its worker reaches this
+    server's API; ``None`` without the table. ``ConfigError`` names what stops it from
+    starting."""
     table = tables.get(orchestration.TABLE)
     if table is None:
         return None
@@ -255,15 +245,9 @@ def orchestration_of(
     )
     if problems := orchestration.check_ready(described, environ):
         raise ConfigError("\n".join(problems))
-    secret = secret_of_kind(SecretKind.ORCHESTRATOR)
-    running = Orchestration(
-        described,
-        environ,
-        hidden=orchestration.hidden_variables(config),
-        api_url=api_url,
-        secret=secret,
+    return Orchestration(
+        described, environ, hidden=orchestration.hidden_variables(config), api_url=api_url
     )
-    return running, secret
 
 
 def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
@@ -274,7 +258,7 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         config, secret_for, sign_in = serving(
             tables, os.environ, host=host, dev_no_sign_in=dev_no_sign_in
         )
-        orchestrated = orchestration_of(
+        orchestrator = orchestration_of(
             tables,
             os.environ,
             config,
@@ -300,15 +284,7 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         # that starts with a command of its own.
         in_process=storage.kind is not StorageKind.POSTGRES,
     )
-    orchestrator, orchestrator_secret = orchestrated or (None, None)
-    app = build_app(
-        composed,
-        lifecycle,
-        sign_in=sign_in,
-        secret_for=secret_for,
-        ui_dir=ui_dir,
-        orchestrator_secret=orchestrator_secret,
-    )
+    app = build_app(composed, lifecycle, sign_in=sign_in, secret_for=secret_for, ui_dir=ui_dir)
     config = uvicorn.Config(
         app,
         host=host,

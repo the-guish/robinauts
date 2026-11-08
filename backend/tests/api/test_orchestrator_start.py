@@ -5,9 +5,10 @@
 (``docs/architecture/orchestration.md``): with an ``[orchestration]`` table, neorc's manager,
 the upload of the flows, its scheduler and its worker are started in that order before the
 server listens, and stopped the other way round with it. The worker's task reaches the API with
-the secret the server minted at its start, and starts a conversation with the guessing
-prompt. neorc is a stand-in here (``util/fake_neorc.py``) that runs that task as neorc's
-worker would: the real one needs its own PostgreSQL."""
+no credential, as everything does in that mode, and starts a conversation with the guessing
+prompt, which the browser then sees as its own. neorc is a stand-in here
+(``util/fake_neorc.py``) that runs that task as neorc's worker would: the real one needs its own
+PostgreSQL."""
 
 from __future__ import annotations
 
@@ -108,14 +109,12 @@ def test_neorc_starts_with_the_server_and_its_task_opens_a_conversation(tmp_path
                 first = opened.json()["messages"][0]
                 assert first["role"] == "user"
                 assert first["parts"][0]["text"] == guessing_prompt()
-                wrong = api.get("/api/agents", headers={"authorization": "Bearer rbo_guessed"})
-                assert wrong.status_code == 401
             running.send_signal(signal.SIGTERM)
             _, said = running.communicate(timeout=60)
         finally:
             if running.poll() is None:
                 running.kill()
-    assert task["token_kind"] == "rbo_"
+    assert task["api_url"] == url
     assert task["visible"] == []
     log_entries = entries(log)
     started = [e["step"] for e in log_entries if "arguments" in e]

@@ -25,7 +25,6 @@ routes reach the agents' tool servers for the side panel's MCP apps (``web/apps.
 
 from __future__ import annotations
 
-import hmac
 import ipaddress
 import logging
 import uuid
@@ -93,7 +92,6 @@ from robinauts.web.sign_in import (
     LOCAL_PROVIDER,
     PENDING_LOGIN_LIFE,
     PROVIDER_ID_PATTERN,
-    SYSTEM_PROVIDER,
     RecentChecks,
     SecretKind,
     SignIn,
@@ -128,7 +126,6 @@ NOT_LOCAL_HOST = "the local development mode answers a Host of localhost or an I
 NOT_LOCAL_ORIGIN = "a write in the local development mode must carry Origin equal to its Host"
 UNKNOWN_TOKEN = "the API token is unknown, revoked or expired"
 UNKNOWN_DEVICE = "the device is unknown, removed or expired: pair it again"
-UNKNOWN_ORCHESTRATOR = "the orchestrator's secret is not the one this server handed out"
 NO_SUCH_TOKEN = "you have no API token of that id"
 NO_SUCH_DEVICE = "you have no device of that id"
 BEARER_MAY_NOT = "a bearer never mints or removes a credential: do it in the browser, signed in"
@@ -147,13 +144,6 @@ PAIRING_REFUSALS: dict[PairingErrorCode, tuple[int, str]] = {
 LOCAL_IDENTITY = Identity(provider=LOCAL_PROVIDER, subject="developer", name="Local development")
 """The one user of the local development mode, under a provider no configuration can name
 (``sign_in.PROVIDER_ID_PATTERN``), so that no identity a provider vouches for can carry it."""
-
-ORCHESTRATOR_IDENTITY = Identity(
-    provider=SYSTEM_PROVIDER, subject="orchestrator", name="Orchestration"
-)
-"""Whom the orchestrator's requests stand for where sign-in is on: a user of the server's own,
-under a provider no configuration can name. In the local development mode they stand for its
-one user, whose workflows they are (``docs/architecture/orchestration.md``)."""
 
 log = logging.getLogger(__name__)
 
@@ -192,8 +182,6 @@ class Via(StrEnum):
     TOKEN = "token"
     LOCAL = "local"
     """The local development mode's one user, who counts as the browser's."""
-    ORCHESTRATOR = "orchestrator"
-    """The orchestrator this server started, by the secret it was handed."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -651,18 +639,13 @@ def create_app(
     secret_for: SecretLookup,
     config: Config,
     ui_dir: Path | None = None,
-    orchestrator_secret: str | None = None,
 ) -> FastAPI:
     """The HTTP server alone. Whoever runs it opens the controller and starts the worker before
     it serves, and stops the worker and closes the controller after (``cli/lifecycle.py``).
     ``brokers``, one per worker by name, and ``worker_access`` serve the workers in processes
     of their own at ``/internal/worker/``; ``healthy`` says whether this node's workers are
     heard from, for ``/health``. ``sign_in`` is ``None`` in the local development mode.
-    ``config`` names the agents' tool servers, whose secrets ``secret_for`` reads too.
-    ``orchestrator_secret``, an ``rbo_`` secret, is the bearer of the orchestrator the shell
-    started beside this server, if any: it reaches every route under ``/api/``, as the local
-    development mode's user or, where sign-in is on, as the orchestrator's own user, and never
-    mints or removes a credential. Any other ``rbo_`` bearer is 401."""
+    ``config`` names the agents' tool servers, whose secrets ``secret_for`` reads too."""
     exchange: Exchange | None = None
     flow: SignIn | None = None
     if sign_in is not None:
@@ -675,16 +658,12 @@ def create_app(
     recent = RecentChecks()
     apps = Apps(config, secret_for)
     local_user: User | None = None
-    orchestrator_user: User | None = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        nonlocal local_user, orchestrator_user
+        nonlocal local_user
         if sign_in is None:
             local_user = await controller.ensure_user(LOCAL_IDENTITY)
-            orchestrator_user = local_user
-        elif orchestrator_secret is not None:
-            orchestrator_user = await controller.ensure_user(ORCHESTRATOR_IDENTITY)
         yield
         if exchange is not None:
             await exchange.aclose()
@@ -755,18 +734,7 @@ def create_app(
             return None
         return asker if await still_allowed(asker, now) else None
 
-    def orchestrator_of(secret: str) -> Asker:
-        """The orchestrator, when ``secret`` is the one it was handed; else 401."""
-        if orchestrator_secret is None or not hmac.compare_digest(
-            secret.encode(), orchestrator_secret.encode()
-        ):
-            raise Refused(401, "Unauthorized", UNKNOWN_ORCHESTRATOR)
-        return Asker(orchestrator_user, Via.ORCHESTRATOR)
-
     async def current_asker(request: Request) -> Asker:
-        secret = bearer_of(request)
-        if secret is not None and kind_of(secret) is SecretKind.ORCHESTRATOR:
-            return orchestrator_of(secret)
         if flow is None:
             return Asker(local_user, Via.LOCAL)
         asker = await resolve(request, datetime.now(UTC))
@@ -785,7 +753,7 @@ def create_app(
 
     async def browsing_user(asker: Asker = asked) -> User:
         """The browser's session alone: a bearer never mints or removes a credential."""
-        if asker.via in (Via.DEVICE, Via.TOKEN, Via.ORCHESTRATOR):
+        if asker.via in (Via.DEVICE, Via.TOKEN):
             raise Refused(403, "Forbidden", BEARER_MAY_NOT)
         return asker.user
 

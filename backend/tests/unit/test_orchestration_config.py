@@ -23,7 +23,6 @@ from robinauts.cli.orchestration import (
 )
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.shared_domain.domain import Config, ProviderConfig, ProviderKind, ToolServerConfig
-from robinauts.web.sign_in import SecretKind, kind_of, secret_of_kind
 
 BASE = Path("/etc/robinauts")
 CODE = Path("/opt/robinauts/orchestration")
@@ -114,7 +113,7 @@ ENVIRON = {
     "ROBINAUTS_DATABASE_URL": "postgresql://u:p@h/robinauts",
     "ROBINAUTS_CONFIG": "/etc/robinauts/robinauts.toml",
     "MY_NEORC_DB": "postgresql://u:p@h/neorc",
-    API_TOKEN_VARIABLE: "rbo_left-over",
+    API_TOKEN_VARIABLE: "rbt_left-over-in-the-shell",
 }
 DESCRIBED = OrchestrationConfig(
     code_location=CODE, flows=CODE / "flows", database_url_env="MY_NEORC_DB"
@@ -122,7 +121,7 @@ DESCRIBED = OrchestrationConfig(
 
 
 @pytest.mark.parametrize(
-    ("api", "expected"),
+    ("api_url", "expected"),
     [
         (
             None,
@@ -133,22 +132,22 @@ DESCRIBED = OrchestrationConfig(
             },
         ),
         (
-            ("http://127.0.0.1:8000", "rbo_minted"),
+            "http://127.0.0.1:8000",
             {
                 "PATH": "/usr/bin",
                 "MY_NEORC_DB": "postgresql://u:p@h/neorc",
                 "NEORC_DATABASE_URL": "postgresql://u:p@h/neorc",
                 API_URL_VARIABLE: "http://127.0.0.1:8000",
-                API_TOKEN_VARIABLE: "rbo_minted",
             },
         ),
     ],
 )
-def test_neorc_is_handed_no_secret_of_the_server_and_the_worker_alone_the_api(
-    api: tuple[str, str] | None, expected: dict[str, str]
+def test_neorc_is_handed_no_secret_of_the_server_and_the_worker_alone_the_api_url(
+    api_url: str | None, expected: dict[str, str]
 ) -> None:
+    """The shell's own API token, if any, is not handed on either: this server takes none."""
     hidden = hidden_variables(CONFIG)
-    assert neorc_environment(ENVIRON, DESCRIBED, hidden=hidden, api=api) == expected
+    assert neorc_environment(ENVIRON, DESCRIBED, hidden=hidden, api_url=api_url) == expected
 
 
 def test_a_machine_without_neorc_s_database_or_its_flows_is_refused(tmp_path: Path) -> None:
@@ -159,18 +158,3 @@ def test_a_machine_without_neorc_s_database_or_its_flows_is_refused(tmp_path: Pa
     assert "flows: no directory" in problems[1]
     (tmp_path / "flows").mkdir()
     assert check_ready(described, {"NEORC_DATABASE_URL": "postgresql://h/neorc"}) == []
-
-
-@pytest.mark.parametrize(
-    ("secret", "kind"),
-    [
-        (secret_of_kind(SecretKind.ORCHESTRATOR), SecretKind.ORCHESTRATOR),
-        (secret_of_kind(SecretKind.DEVICE), SecretKind.DEVICE),
-        (secret_of_kind(SecretKind.TOKEN), SecretKind.TOKEN),
-        ("no-prefix", SecretKind.TOKEN),
-    ],
-)
-def test_the_orchestrator_s_secret_is_told_apart_by_its_prefix(
-    secret: str, kind: SecretKind
-) -> None:
-    assert kind_of(secret) is kind

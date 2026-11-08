@@ -7,8 +7,11 @@ configuration has an `[orchestration]` table
 
 - `flows/`: the flow files, uploaded to neorc's manager at every start.
 - `robinauts_tasks.py`: the handlers. They reach the Robinauts API at
-  `ROBINAUTS_API_URL` with the secret in `ROBINAUTS_API_TOKEN`, which the
-  server hands to neorc's worker. They use the standard library alone.
+  `ROBINAUTS_API_URL`, which the server hands to neorc's worker, with no
+  credential: the local development mode has none, and every request there is
+  the developer's. Given an API token in `ROBINAUTS_API_TOKEN`, as a neorc
+  started against a server with sign-in on would be, they send it as a
+  bearer. They use the standard library alone.
 
 ## Trying it
 

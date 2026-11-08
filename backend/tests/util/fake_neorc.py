@@ -68,11 +68,12 @@ def main(arguments: list[str]) -> int:
         sys.path.insert(0, option(arguments, "--code-location"))
         import robinauts_tasks
 
+        checked = ("ECHO_API_KEY", "ROBINAUTS_CONFIG", "ROBINAUTS_API_TOKEN")
         record(
             step=step,
             result=robinauts_tasks.start_guessing_session(),
-            token_kind=os.environ["ROBINAUTS_API_TOKEN"][:4],
-            visible=sorted(k for k in ("ECHO_API_KEY", "ROBINAUTS_CONFIG") if k in os.environ),
+            api_url=os.environ["ROBINAUTS_API_URL"],
+            visible=sorted(k for k in checked if k in os.environ),
         )
         until_stopped(step)
     else:

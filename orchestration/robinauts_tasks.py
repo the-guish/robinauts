@@ -3,11 +3,16 @@
 
 """neorc's handlers for the flows in ``flows/``: plain functions that reach the Robinauts API.
 
-They run in the neorc worker ``robinauts start`` starts beside itself
-(``docs/architecture/orchestration.md``), which hands it the server's URL in
-``ROBINAUTS_API_URL`` and the secret it minted for the orchestrator in
-``ROBINAUTS_API_TOKEN``. They import neither neorc nor Robinauts, and nothing but the standard
-library, so that the worker needs nothing installed beside neorc itself.
+They run in a neorc worker, which is handed the server's URL in ``ROBINAUTS_API_URL``. The
+worker ``robinauts start`` starts beside itself in the local development mode
+(``docs/architecture/orchestration.md``) is handed nothing else: that mode has no sign-in, and
+every request is its one user's, so what a flow starts is the developer's. A worker started on
+its own, against a server with sign-in on, is given an API token a signed-in person minted
+(``docs/specs/sign-in.md``, "API tokens") in ``ROBINAUTS_API_TOKEN``, and the handlers send it
+as a bearer: what they start is then that person's.
+
+They import neither neorc nor Robinauts, and nothing but the standard library, so that the
+worker needs nothing installed beside neorc itself.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.request
+from collections.abc import Mapping
 from typing import Any
 
 API_URL_VARIABLE = "ROBINAUTS_API_URL"
@@ -26,9 +32,16 @@ GUESSING_PROMPT = "guess wich number I'm thinking  between 1 and 10 inclusive"
 TIMEOUT_SECONDS = 30.0
 
 
+def api_headers(environ: Mapping[str, str]) -> dict[str, str]:
+    """What every request carries: the API token in ``ROBINAUTS_API_TOKEN`` as a bearer when the
+    worker was given one, and nothing when it was not, as in the local development mode."""
+    token = environ.get(API_TOKEN_VARIABLE)
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 def _request(path: str, body: dict[str, Any] | None = None) -> urllib.request.Request:
     url = os.environ[API_URL_VARIABLE].rstrip("/") + path
-    headers = {"Authorization": f"Bearer {os.environ[API_TOKEN_VARIABLE]}"}
+    headers = api_headers(os.environ)
     data = None
     if body is not None:
         data = json.dumps(body).encode()
