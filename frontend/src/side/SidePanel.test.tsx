@@ -26,6 +26,7 @@ const B = "00000000-0000-4000-8000-000000000002";
 const RENDERERS: TabRenderers = {
   "context-window": () => <p>What the window holds</p>,
   usage: () => <p>What was used</p>,
+  app: (offer) => <p>The view of {offer.title}</p>,
 };
 
 function side(conversation = A) {

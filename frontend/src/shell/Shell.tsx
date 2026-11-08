@@ -33,12 +33,13 @@ import {
   shownModel,
   UsageTab,
 } from "../side/BuiltInTabs";
+import { AppTab } from "../side/AppTab";
+import { appOf, appOffers, useApps } from "../side/apps";
 import { SIDE_ID, SidePanel } from "../side/SidePanel";
 import {
   BUILT_IN_TABS,
   carryOpenTabs,
   NEW_CHAT_TABS,
-  type TabOffer,
   type TabRenderers,
 } from "../side/tabs";
 import { transcriptStore } from "../side/transcript";
@@ -61,14 +62,6 @@ import { remember, remembered } from "./storage";
 import "./shell.css";
 
 export const PANEL_KEY = "panel";
-
-/**
- * The agent's MCP apps, as tabs of the side panel: none yet.
- *
- * Each would be an offer of kind `"app"`, keyed `appTabKey(server, tool)`,
- * listed after the built-ins (`../side/tabs.ts`).
- */
-const NO_APPS: readonly TabOffer[] = [];
 
 /**
  * What to call the agent a conversation is with (`docs/specs/agents.md`).
@@ -358,6 +351,10 @@ export function Shell({
   // so a streaming answer redraws the tabs that count it and not the shell.
   const [transcript] = useState(transcriptStore);
   const sideModelId = current === null ? modelId : conversationModel;
+  // The agent's MCP apps, offered after the built-ins: the conversation's
+  // agent, or on the empty chat the one picked for it.
+  const sideAgent = current === null ? agentId : conversationAgent;
+  const apps = useApps(sideAgent);
   const renderers: TabRenderers = {
     "context-window": () => (
       <ContextWindowTab
@@ -367,8 +364,14 @@ export function Shell({
       />
     ),
     usage: () => <UsageTab transcript={transcript} />,
+    app: (offer) => {
+      const app = appOf(apps, offer);
+      if (sideAgent === null || app === undefined) return null;
+      // Keyed by the agent: the same app of another agent is another view.
+      return <AppTab key={sideAgent} agent={sideAgent} app={app} />;
+    },
   };
-  const offers = useMemo(() => [...BUILT_IN_TABS, ...NO_APPS], []);
+  const offers = useMemo(() => [...BUILT_IN_TABS, ...appOffers(apps)], [apps]);
 
   return (
     <div className="shell">

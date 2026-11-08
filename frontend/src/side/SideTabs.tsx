@@ -16,8 +16,8 @@
  *   or a click anywhere else, closes it too.
  *
  * **The panels stay mounted.** Every open tab's panel is in the page, and
- * those not on top are `hidden`: what a tab holds -- an app's frame, one day
- * -- is not thrown away when another is looked at.
+ * those not on top are `hidden`: what a tab holds -- an app's frame and
+ * what its view shows -- is not thrown away when another is looked at.
  */
 import {
   type KeyboardEvent,
@@ -193,6 +193,7 @@ export function SideTabs({
             id={panelId(offer.key)}
             aria-labelledby={tabId(offer.key)}
             hidden={offer.key !== selected?.key}
+            data-kind={offer.kind}
             // A stop of its own, so a keyboard reaches what it says even
             // when nothing in it can be focused.
             tabIndex={0}

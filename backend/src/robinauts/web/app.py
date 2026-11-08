@@ -372,9 +372,8 @@ class AgentListResponse(BaseModel):
 class ModelSummary(BaseModel):
     id: str
     title: str
-    context_window: int | None = None
-    """In tokens, as the operator configured it; ``None`` when not configured. Always sent;
-    optional in the schema only so that a client's own model records need not carry it."""
+    context_window: int | None
+    """In tokens, as the operator configured it; ``None`` when not configured."""
 
 
 class ModelListResponse(BaseModel):

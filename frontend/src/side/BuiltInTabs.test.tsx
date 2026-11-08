@@ -33,7 +33,7 @@ const THREAD: Transcript = [
 
 const MODELS: Models = {
   status: "ready",
-  items: [{ id: "sonnet", title: "Sonnet" }],
+  items: [{ id: "sonnet", title: "Sonnet", context_window: null }],
 };
 
 function value(term: string): string | null | undefined {
@@ -111,20 +111,17 @@ test("with a window, the estimate is a meter against it", () => {
   );
 });
 
-test("the window is read off the model list only when it is there", () => {
-  const listing = (extra: object): Models => ({
+test("the window is read off the model list when it states one", () => {
+  const listing = (window: number | null): Models => ({
     status: "ready",
-    items: [{ id: "sonnet", title: "Sonnet", ...extra }],
+    items: [{ id: "sonnet", title: "Sonnet", context_window: window }],
   });
-  expect(contextWindowOf(listing({ context_window: 200_000 }), "sonnet")).toBe(
-    200_000,
-  );
-  expect(contextWindowOf(listing({ context_window: "big" }), "sonnet")).toBe(
-    null,
-  );
-  expect(contextWindowOf(listing({ context_window: 0 }), "sonnet")).toBe(null);
-  expect(contextWindowOf(listing({}), "sonnet")).toBe(null);
-  expect(contextWindowOf(listing({}), null)).toBe(null);
+  expect(contextWindowOf(listing(200_000), "sonnet")).toBe(200_000);
+  expect(contextWindowOf(listing(2.5), "sonnet")).toBe(null);
+  expect(contextWindowOf(listing(0), "sonnet")).toBe(null);
+  expect(contextWindowOf(listing(null), "sonnet")).toBe(null);
+  expect(contextWindowOf(listing(200_000), "opus")).toBe(null);
+  expect(contextWindowOf(listing(200_000), null)).toBe(null);
   expect(contextWindowOf({ status: "loading" }, "sonnet")).toBe(null);
   // A model the list has not got is named by its id.
   expect(shownModel({ status: "loading" }, "opus")).toEqual({

@@ -3,8 +3,8 @@
 
 /*
  * The right side panel: its edge, its head, the tab strip and the [+] menu,
- * and the two built-in tabs (`./SidePanel.tsx`, `./SideTabs.tsx`,
- * `./BuiltInTabs.tsx`).
+ * the two built-in tabs and an MCP app's (`./SidePanel.tsx`,
+ * `./SideTabs.tsx`, `./BuiltInTabs.tsx`, `./AppTab.tsx`).
  *
  * **Two shapes, by the breakpoint of `../shell/breakpoint.ts`** (48rem), as
  * the left panel has (`../shell/panel.css`). Below it the panel is a drawer
@@ -112,9 +112,14 @@
   padding: 0.25rem;
 }
 
+/*
+ * At the strip's right end, whatever is open, so that the menu, which opens
+ * leftwards from it, stays inside the panel.
+ */
 .side-add {
   position: relative;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .side-menu {
@@ -163,6 +168,61 @@
   font-size: 0.875rem;
   line-height: calc(1.25 / 0.875);
   color: var(--muted);
+}
+
+/*
+ * An MCP app's tab: its view's frame fills the panel, edge to edge. The
+ * frame is hidden until the app has answered, and a message stands in its
+ * place while it loads or when it did not open (`./AppTab.tsx`).
+ */
+.side-panel[data-kind="app"] {
+  height: 100%;
+  padding: 0;
+}
+
+.side-app {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+}
+
+.side-app-frame {
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  background-color: var(--paper);
+}
+
+.side-app[data-state="loading"] .side-app-frame {
+  visibility: hidden;
+}
+
+.side-app[data-state="failed"] .side-app-frame {
+  display: none;
+}
+
+.side-app-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 1rem;
+  font-size: 0.875rem;
+  line-height: calc(1.25 / 0.875);
+  color: var(--muted);
+}
+
+.side-app-detail {
+  font-size: 0.75rem;
+  line-height: calc(1 / 0.75);
+}
+
+.side-app-retry {
+  border-width: 1px;
+  border-color: var(--edge);
+  border-radius: var(--radius);
+  padding: 0.25rem 0.75rem;
+  color: var(--ink);
 }
 
 /* The two built-in tabs. */
@@ -214,6 +274,11 @@
   background-color: var(--accent);
 }
 
+/* Something in the thread is something on the meter, however small. */
+.side-meter-fill[data-some="true"] {
+  min-width: 0.25rem;
+}
+
 .side-note {
   font-size: 0.75rem;
   line-height: calc(1 / 0.75);
@@ -242,7 +307,8 @@
 @media (hover: hover) {
   .side-tool:hover:not(:disabled),
   .side-tab-close:hover,
-  .side-menu-item:hover {
+  .side-menu-item:hover,
+  .side-app-retry:hover {
     background-color: var(--hover);
     color: var(--ink);
   }

@@ -48,10 +48,13 @@ function otherwise(call: Call): Response {
   if (call.url.startsWith("/api/models")) {
     return json({
       items: [
-        { id: "sonnet", title: "Sonnet" },
-        { id: "opus", title: "Opus" },
+        { id: "sonnet", title: "Sonnet", context_window: 200_000 },
+        { id: "opus", title: "Opus", context_window: null },
       ],
     });
+  }
+  if (call.url.startsWith("/api/apps")) {
+    return json({ apps: [] });
   }
   return json(page([]));
 }
@@ -969,7 +972,9 @@ test("a first message refused for the agent's default asks for the models again"
       lists += 1;
       return lists === 1
         ? undefined
-        : json({ items: [{ id: "opus", title: "Opus" }] });
+        : json({
+            items: [{ id: "opus", title: "Opus", context_window: null }],
+          });
     }
     if (call.url === "/api/turns") {
       const asked = (call.body as { model_id: string }).model_id;
@@ -1158,7 +1163,7 @@ test("the side panel's Usage tab counts the conversation on the screen", async (
     usage.getByText("Tokens (estimate)", { selector: "dt" }).nextElementSibling,
   ).toHaveTextContent("about 8");
 
-  // The context window of a model the deployment does not describe.
+  // The context window of the conversation's model, as the list states it.
   fireEvent.click(screen.getByRole("button", { name: "Add a tab" }));
   fireEvent.click(screen.getByRole("menuitem", { name: "Context window" }));
   const contextWindow = within(
@@ -1169,7 +1174,50 @@ test("the side panel's Usage tab counts the conversation on the screen", async (
   ).toHaveTextContent("Sonnet");
   expect(
     contextWindow.getByText("Window", { selector: "dt" }).nextElementSibling,
-  ).toHaveTextContent("unknown");
+  ).toHaveTextContent("200,000 tokens");
+  expect(
+    contextWindow.getByRole("meter", { name: "Context used" }),
+  ).toHaveAttribute("aria-valuenow", "8");
+});
+
+test("the agent's apps are offered after the built-ins, and open as a sandboxed frame", async () => {
+  location.hash = `#/c/${id(1)}`;
+  await shell(undefined, (call) => {
+    if (call.url === `/api/conversations/${id(1)}`) {
+      return json(opened(conversation(1, "Robins"), []));
+    }
+    if (call.url === "/api/apps?agent=helper") {
+      return json({
+        apps: [
+          {
+            id: "todo/show_todos",
+            server: "todo",
+            tool: "show_todos",
+            title: "To-do list",
+            description: "The list.",
+          },
+        ],
+      });
+    }
+    return withConversation(call);
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Expand the side panel" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add a tab" }));
+  await waitFor(() => {
+    expect(
+      screen.getAllByRole("menuitem").map((item) => item.textContent),
+    ).toEqual(["Context window", "Usage", "To-do list"]);
+  });
+  fireEvent.click(screen.getByRole("menuitem", { name: "To-do list" }));
+  const app = within(screen.getByRole("tabpanel", { name: "To-do list" }));
+  const frame = app.getByTitle("To-do list");
+  expect(frame).toHaveAttribute(
+    "src",
+    "/api/apps/todo/show_todos/view?agent=helper",
+  );
+  expect(frame).toHaveAttribute("sandbox", "allow-scripts");
 });
 
 test("on a small screen the side panel is a drawer, opened from the right", async () => {

@@ -644,7 +644,8 @@
         },
         "required": [
           "id",
-          "title"
+          "title",
+          "context_window"
         ],
         "title": "ModelSummary",
         "type": "object"

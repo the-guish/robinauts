@@ -40,20 +40,16 @@ export function shownModel(
 /**
  * How many tokens the model's context window holds, if the deployment says.
  *
- * `GET /api/models` does not say it today: the operator's
- * `context_window` is read by the engines and stops there. The field is
- * looked for rather than assumed, so the meter appears the day the answer
- * carries a positive whole number under that name, and until then the tab
- * says "unknown".
+ * `GET /api/models` states each model's `context_window` as the operator
+ * configured it, and `null` for one that was not. Anything but a positive
+ * whole number is taken for not stated, and the tab says "unknown".
  */
 export function contextWindowOf(
   models: Models,
   id: string | null,
 ): number | null {
   if (id === null || models.status !== "ready") return null;
-  const model = models.items.find((one) => one.id === id);
-  if (model === undefined || !("context_window" in model)) return null;
-  const window: unknown = model.context_window;
+  const window = models.items.find((one) => one.id === id)?.context_window;
   return typeof window === "number" && Number.isInteger(window) && window > 0
     ? window
     : null;
@@ -108,6 +104,7 @@ export function ContextWindowTab({
         >
           <div
             className="side-meter-fill"
+            data-some={estimatedTokens > 0}
             // The one value here that is genuinely dynamic.
             style={{ width: `${String(share)}%` }}
           />

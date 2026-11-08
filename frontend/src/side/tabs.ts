@@ -13,8 +13,8 @@
  * **The extension point is `TabKind` and `TabRenderers`.** A new kind of
  * tab is a new member of `TabKind`; `TabRenderers` is a record over it, so
  * the shell does not compile until it says how that kind is drawn. An MCP
- * app's tab is meant to be kind `"app"`, keyed `app:<server>/<tool>`
- * (`appTabKey`), one offer per app the agent has.
+ * app's tab is kind `"app"`, keyed `app:<server>/<tool>` (`appTabKey`), one
+ * offer per app the agent has (`./apps.ts`).
  *
  * Nothing here draws anything and nothing here asks the network: the
  * functions below are pure, and storage is read and written through
@@ -27,10 +27,10 @@ import { forget, remember, remembered } from "../shell/storage";
 /**
  * The kinds of tab the panel can draw, one renderer each.
  *
- * The two built-ins are a kind each. An MCP app is the next kind: one kind,
- * `"app"`, for every app, told apart by the offer's key.
+ * The two built-ins are a kind each. MCP apps are one kind, `"app"`, for
+ * every app, told apart by the offer's key.
  */
-export type TabKind = "context-window" | "usage";
+export type TabKind = "context-window" | "usage" | "app";
 
 /** One tab that can be opened: an entry of the [+] menu. */
 export interface TabOffer {
