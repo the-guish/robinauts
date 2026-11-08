@@ -13,25 +13,32 @@ import {
   STEP,
 } from "./SidePanel";
 import {
-  BUILT_IN_TABS,
+  appTabKey,
   carryOpenTabs,
   NEW_CHAT_TABS,
   rememberedTabs,
+  type TabOffer,
   type TabRenderers,
 } from "./tabs";
 
 const A = "00000000-0000-4000-8000-000000000001";
 const B = "00000000-0000-4000-8000-000000000002";
 
+// Two apps an agent might have, in the order the menu lists them.
+const TO_DO = appTabKey("planner", "to_do_list");
+const NOTES = appTabKey("planner", "notes");
+const OFFERS: readonly TabOffer[] = [
+  { key: TO_DO, title: "To-do list", kind: "app" },
+  { key: NOTES, title: "Notes", kind: "app" },
+];
+
 const RENDERERS: TabRenderers = {
-  "context-window": () => <p>What the window holds</p>,
-  usage: () => <p>What was used</p>,
   app: (offer) => <p>The view of {offer.title}</p>,
 };
 
-function side(conversation = A) {
+function side(conversation = A, offers = OFFERS) {
   const props = {
-    offers: BUILT_IN_TABS,
+    offers,
     renderers: RENDERERS,
     drawer: false,
     onCloseDrawer: () => undefined,
@@ -47,9 +54,9 @@ function side(conversation = A) {
 }
 
 /** Draw it already open, as a browser that left it open would. */
-function opened(conversation = A) {
+function opened(conversation = A, offers = OFFERS) {
   localStorage.setItem(`robinauts.${SIDE_KEY}`, "open");
-  return side(conversation);
+  return side(conversation, offers);
 }
 
 const panel = () => screen.getByRole("complementary", { name: "Side panel" });
@@ -91,97 +98,113 @@ test("a browser that left it open opens it open, with nothing in it", () => {
   opened();
   expect(panel()).toHaveAttribute("data-collapsed", "false");
   expect(screen.queryByRole("tablist")).toBeNull();
-  expect(screen.getByText(/No tab is open in this conversation/)).toBeVisible();
+  expect(
+    screen.getByText(
+      "No tab is open in this conversation. “Add a tab” opens one.",
+    ),
+  ).toBeVisible();
+  expect(add()).toBeEnabled();
+});
+
+test("an agent with no apps has nothing to add, and the panel says so", () => {
+  opened(A, []);
+  expect(add()).toBeDisabled();
+  expect(add()).toHaveAttribute("title", "No tab to add");
+  expect(
+    screen.getByText(
+      "No tab is open in this conversation, and there is none to add: its agent has no apps.",
+    ),
+  ).toBeVisible();
 });
 
 test("[+] lists what is not open; opening one takes it off, closing puts it back", () => {
   opened();
   fireEvent.click(add());
   expect(add()).toHaveAttribute("aria-expanded", "true");
-  expect(menuItems()).toEqual(["Context window", "Usage"]);
+  expect(menuItems()).toEqual(["To-do list", "Notes"]);
 
-  fireEvent.click(screen.getByRole("menuitem", { name: "Usage" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Notes" }));
   expect(screen.queryByRole("menu")).toBeNull();
-  expect(tabNames()).toEqual(["Usage"]);
-  const usage = screen.getByRole("tab", { name: "Usage" });
-  expect(usage).toHaveAttribute("aria-selected", "true");
+  expect(tabNames()).toEqual(["Notes"]);
+  const notes = screen.getByRole("tab", { name: "Notes" });
+  expect(notes).toHaveAttribute("aria-selected", "true");
   // The new tab has the focus, and its panel is the one shown.
-  expect(usage).toHaveFocus();
-  expect(screen.getByRole("tabpanel", { name: "Usage" })).toHaveTextContent(
-    "What was used",
+  expect(notes).toHaveFocus();
+  expect(screen.getByRole("tabpanel", { name: "Notes" })).toHaveTextContent(
+    "The view of Notes",
   );
 
   fireEvent.click(add());
-  expect(menuItems()).toEqual(["Context window"]);
-  fireEvent.click(screen.getByRole("menuitem", { name: "Context window" }));
-  expect(tabNames()).toEqual(["Usage", "Context window"]);
+  expect(menuItems()).toEqual(["To-do list"]);
+  fireEvent.click(screen.getByRole("menuitem", { name: "To-do list" }));
+  expect(tabNames()).toEqual(["Notes", "To-do list"]);
   // Everything is open: nothing left to add, and the button says so.
   expect(add()).toBeDisabled();
   expect(add()).toHaveAttribute("title", "Every tab is open");
 
-  fireEvent.click(screen.getByRole("button", { name: "Close Usage" }));
-  expect(tabNames()).toEqual(["Context window"]);
+  fireEvent.click(screen.getByRole("button", { name: "Close Notes" }));
+  expect(tabNames()).toEqual(["To-do list"]);
   expect(add()).toBeEnabled();
   fireEvent.click(add());
-  expect(menuItems()).toEqual(["Usage"]);
+  expect(menuItems()).toEqual(["Notes"]);
 });
 
 test("closing the tab on top brings up its neighbour; closing the last leaves the focus on [+]", () => {
   opened();
-  pick("Context window");
-  pick("Usage");
-  fireEvent.click(screen.getByRole("tab", { name: "Context window" }));
-  fireEvent.click(screen.getByRole("button", { name: "Close Context window" }));
-  const usage = screen.getByRole("tab", { name: "Usage" });
-  expect(usage).toHaveAttribute("aria-selected", "true");
-  expect(usage).toHaveFocus();
-  fireEvent.click(screen.getByRole("button", { name: "Close Usage" }));
+  pick("To-do list");
+  pick("Notes");
+  fireEvent.click(screen.getByRole("tab", { name: "To-do list" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close To-do list" }));
+  const notes = screen.getByRole("tab", { name: "Notes" });
+  expect(notes).toHaveAttribute("aria-selected", "true");
+  expect(notes).toHaveFocus();
+  fireEvent.click(screen.getByRole("button", { name: "Close Notes" }));
   expect(screen.queryByRole("tablist")).toBeNull();
   expect(add()).toHaveFocus();
 });
 
 test("the panels not on top stay in the page, hidden", () => {
   opened();
-  pick("Context window");
-  pick("Usage");
-  expect(screen.getByText("What the window holds")).not.toBeVisible();
-  expect(screen.getByText("What was used")).toBeVisible();
-  fireEvent.click(screen.getByRole("tab", { name: "Context window" }));
-  expect(screen.getByText("What the window holds")).toBeVisible();
-  expect(screen.getByText("What was used")).not.toBeVisible();
+  pick("To-do list");
+  pick("Notes");
+  expect(screen.getByText("The view of To-do list")).not.toBeVisible();
+  expect(screen.getByText("The view of Notes")).toBeVisible();
+  fireEvent.click(screen.getByRole("tab", { name: "To-do list" }));
+  expect(screen.getByText("The view of To-do list")).toBeVisible();
+  expect(screen.getByText("The view of Notes")).not.toBeVisible();
 });
 
 test("open tabs are remembered per conversation", () => {
   const { to, unmount } = opened(A);
-  pick("Usage");
-  expect(rememberedTabs(A)).toEqual({ open: ["usage"], selected: "usage" });
+  pick("Notes");
+  expect(rememberedTabs(A)).toEqual({ open: [NOTES], selected: NOTES });
 
   to(B);
   expect(screen.queryByRole("tablist")).toBeNull();
-  pick("Context window");
+  pick("To-do list");
 
   to(A);
-  expect(tabNames()).toEqual(["Usage"]);
+  expect(tabNames()).toEqual(["Notes"]);
   unmount();
 
   // And across a reload.
   side(B);
-  expect(tabNames()).toEqual(["Context window"]);
+  expect(tabNames()).toEqual(["To-do list"]);
 });
 
 test("closing every tab forgets the conversation's entry", () => {
   opened(A);
-  pick("Usage");
-  fireEvent.click(screen.getByRole("button", { name: "Close Usage" }));
+  pick("Notes");
+  fireEvent.click(screen.getByRole("button", { name: "Close Notes" }));
   expect(localStorage.getItem(`robinauts.side.tabs.${A}`)).toBeNull();
 });
 
 test("a new chat's tabs move to the conversation it becomes", () => {
   const { to } = opened(NEW_CHAT_TABS);
-  pick("Usage");
+  pick("Notes");
   carryOpenTabs(NEW_CHAT_TABS, A);
   to(A);
-  expect(tabNames()).toEqual(["Usage"]);
+  expect(tabNames()).toEqual(["Notes"]);
   // The next new chat starts with nothing open.
   to(NEW_CHAT_TABS);
   expect(screen.queryByRole("tablist")).toBeNull();
@@ -192,40 +215,40 @@ test("what is remembered is read with care", () => {
   expect(rememberedTabs(A)).toEqual({ open: [], selected: null });
   localStorage.setItem(
     `robinauts.side.tabs.${A}`,
-    JSON.stringify({ open: ["usage", 3, "usage", "gone"], selected: "nope" }),
+    JSON.stringify({ open: [NOTES, 3, NOTES, "gone"], selected: "nope" }),
   );
   expect(rememberedTabs(A)).toEqual({
-    open: ["usage", "gone"],
-    selected: "usage",
+    open: [NOTES, "gone"],
+    selected: NOTES,
   });
   // A tab nobody offers any more is not drawn, and is kept for when it is.
   opened(A);
-  expect(tabNames()).toEqual(["Usage"]);
+  expect(tabNames()).toEqual(["Notes"]);
 });
 
 test("the tabs answer the arrow keys, Home, End and Delete", () => {
   opened();
-  pick("Context window");
-  pick("Usage");
-  const usage = screen.getByRole("tab", { name: "Usage" });
-  const contextWindow = screen.getByRole("tab", { name: "Context window" });
+  pick("To-do list");
+  pick("Notes");
+  const notes = screen.getByRole("tab", { name: "Notes" });
+  const toDo = screen.getByRole("tab", { name: "To-do list" });
   // One Tab stop in the strip: the tab on top.
-  expect(usage).toHaveAttribute("tabindex", "0");
-  expect(contextWindow).toHaveAttribute("tabindex", "-1");
+  expect(notes).toHaveAttribute("tabindex", "0");
+  expect(toDo).toHaveAttribute("tabindex", "-1");
 
-  fireEvent.keyDown(usage, { key: "ArrowRight" });
-  expect(contextWindow).toHaveFocus();
-  expect(contextWindow).toHaveAttribute("aria-selected", "true");
-  fireEvent.keyDown(contextWindow, { key: "ArrowLeft" });
-  expect(usage).toHaveFocus();
-  fireEvent.keyDown(usage, { key: "Home" });
-  expect(contextWindow).toHaveFocus();
-  fireEvent.keyDown(contextWindow, { key: "End" });
-  expect(usage).toHaveFocus();
+  fireEvent.keyDown(notes, { key: "ArrowRight" });
+  expect(toDo).toHaveFocus();
+  expect(toDo).toHaveAttribute("aria-selected", "true");
+  fireEvent.keyDown(toDo, { key: "ArrowLeft" });
+  expect(notes).toHaveFocus();
+  fireEvent.keyDown(notes, { key: "Home" });
+  expect(toDo).toHaveFocus();
+  fireEvent.keyDown(toDo, { key: "End" });
+  expect(notes).toHaveFocus();
 
-  fireEvent.keyDown(usage, { key: "Delete" });
-  expect(tabNames()).toEqual(["Context window"]);
-  expect(screen.getByRole("tab", { name: "Context window" })).toHaveFocus();
+  fireEvent.keyDown(notes, { key: "Delete" });
+  expect(tabNames()).toEqual(["To-do list"]);
+  expect(screen.getByRole("tab", { name: "To-do list" })).toHaveFocus();
 });
 
 test("the menu answers the keyboard, and Escape puts the focus back", () => {
@@ -249,7 +272,7 @@ test("the menu answers the keyboard, and Escape puts the focus back", () => {
 
   // Up opens it at the end.
   fireEvent.keyDown(add(), { key: "ArrowUp" });
-  expect(screen.getByRole("menuitem", { name: "Usage" })).toHaveFocus();
+  expect(screen.getByRole("menuitem", { name: "Notes" })).toHaveFocus();
 });
 
 test("a click elsewhere closes the menu", () => {

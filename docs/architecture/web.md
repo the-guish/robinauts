@@ -25,7 +25,7 @@ How a phone is linked and ended (`docs/architecture/device-pairing.md`). Minting
 ## Catalogue
 
 - `list_agents`
-- `list_models`: each with its `context_window` in tokens, `null` when the configuration gives none.
+- `list_models`
 
 ## Apps
 

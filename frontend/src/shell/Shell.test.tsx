@@ -48,8 +48,8 @@ function otherwise(call: Call): Response {
   if (call.url.startsWith("/api/models")) {
     return json({
       items: [
-        { id: "sonnet", title: "Sonnet", context_window: 200_000 },
-        { id: "opus", title: "Opus", context_window: null },
+        { id: "sonnet", title: "Sonnet" },
+        { id: "opus", title: "Opus" },
       ],
     });
   }
@@ -972,9 +972,7 @@ test("a first message refused for the agent's default asks for the models again"
       lists += 1;
       return lists === 1
         ? undefined
-        : json({
-            items: [{ id: "opus", title: "Opus", context_window: null }],
-          });
+        : json({ items: [{ id: "opus", title: "Opus" }] });
     }
     if (call.url === "/api/turns") {
       const asked = (call.body as { model_id: string }).model_id;
@@ -1135,71 +1133,29 @@ test("#/devices is a page of the shell: the panel stays, the chat goes", async (
 const sidePanel = () =>
   screen.getByRole("complementary", { name: "Side panel" });
 
-test("the side panel's Usage tab counts the conversation on the screen", async () => {
-  location.hash = `#/c/${id(1)}`;
-  await shell(undefined, (call) => {
-    if (call.url === `/api/conversations/${id(1)}`) {
-      return json(
-        opened(conversation(1, "Robins"), [
-          message("m1", "user", "Why do robins sing?"),
-          message("m2", "assistant", "To be heard."),
-        ]),
-      );
-    }
-    return withConversation(call);
-  });
-  await screen.findByText("To be heard.");
-  fireEvent.click(
-    screen.getByRole("button", { name: "Expand the side panel" }),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Add a tab" }));
-  fireEvent.click(screen.getByRole("menuitem", { name: "Usage" }));
-  const usage = within(screen.getByRole("tabpanel", { name: "Usage" }));
-  expect(
-    usage.getByText("Messages", { selector: "dt" }).nextElementSibling,
-  ).toHaveTextContent("2");
-  // 19 + 12 characters, a quarter of that rounded up.
-  expect(
-    usage.getByText("Tokens (estimate)", { selector: "dt" }).nextElementSibling,
-  ).toHaveTextContent("about 8");
+/** The helper agent's one app, as `GET /api/apps` lists it. */
+const TO_DO_APP = {
+  id: "todo/show_todos",
+  server: "todo",
+  tool: "show_todos",
+  title: "To-do list",
+  description: "The list.",
+};
 
-  // The context window of the conversation's model, as the list states it.
-  fireEvent.click(screen.getByRole("button", { name: "Add a tab" }));
-  fireEvent.click(screen.getByRole("menuitem", { name: "Context window" }));
-  const contextWindow = within(
-    screen.getByRole("tabpanel", { name: "Context window" }),
-  );
-  expect(
-    contextWindow.getByText("Model", { selector: "dt" }).nextElementSibling,
-  ).toHaveTextContent("Sonnet");
-  expect(
-    contextWindow.getByText("Window", { selector: "dt" }).nextElementSibling,
-  ).toHaveTextContent("200,000 tokens");
-  expect(
-    contextWindow.getByRole("meter", { name: "Context used" }),
-  ).toHaveAttribute("aria-valuenow", "8");
-});
+/** The helper agent has the to-do list app; the rest as `otherwise`. */
+function withApp(call: Call): Response | undefined {
+  return call.url === "/api/apps?agent=helper"
+    ? json({ apps: [TO_DO_APP] })
+    : undefined;
+}
 
-test("the agent's apps are offered after the built-ins, and open as a sandboxed frame", async () => {
+test("the agent's apps are offered, and open as a sandboxed frame", async () => {
   location.hash = `#/c/${id(1)}`;
   await shell(undefined, (call) => {
     if (call.url === `/api/conversations/${id(1)}`) {
       return json(opened(conversation(1, "Robins"), []));
     }
-    if (call.url === "/api/apps?agent=helper") {
-      return json({
-        apps: [
-          {
-            id: "todo/show_todos",
-            server: "todo",
-            tool: "show_todos",
-            title: "To-do list",
-            description: "The list.",
-          },
-        ],
-      });
-    }
-    return withConversation(call);
+    return withApp(call) ?? withConversation(call);
   });
   fireEvent.click(
     screen.getByRole("button", { name: "Expand the side panel" }),
@@ -1208,7 +1164,7 @@ test("the agent's apps are offered after the built-ins, and open as a sandboxed 
   await waitFor(() => {
     expect(
       screen.getAllByRole("menuitem").map((item) => item.textContent),
-    ).toEqual(["Context window", "Usage", "To-do list"]);
+    ).toEqual(["To-do list"]);
   });
   fireEvent.click(screen.getByRole("menuitem", { name: "To-do list" }));
   const app = within(screen.getByRole("tabpanel", { name: "To-do list" }));
@@ -1252,10 +1208,14 @@ test("on a small screen the side panel is a drawer, opened from the right", asyn
 
 test("Escape in the side panel's menu closes the menu, not the drawer", async () => {
   narrow();
-  await shell();
+  await shell(undefined, withApp);
   const aside = sidePanel();
   fireEvent.click(screen.getByRole("button", { name: "Open the side panel" }));
-  fireEvent.click(screen.getByRole("button", { name: "Add a tab" }));
+  const add = screen.getByRole("button", { name: "Add a tab" });
+  await waitFor(() => {
+    expect(add).toBeEnabled();
+  });
+  fireEvent.click(add);
   fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
   expect(screen.queryByRole("menu")).toBeNull();
   expect(aside).toHaveAttribute("data-drawer", "open");
@@ -1274,10 +1234,14 @@ test("tabs opened on the empty chat go with the conversation it starts", async (
     if (call.url === `/api/conversations/${created}`) {
       return json(opened(conversation(9, "Robins"), []));
     }
-    return undefined;
+    return withApp(call);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add a tab" }));
-  fireEvent.click(screen.getByRole("menuitem", { name: "Usage" }));
+  const add = screen.getByRole("button", { name: "Add a tab" });
+  await waitFor(() => {
+    expect(add).toBeEnabled();
+  });
+  fireEvent.click(add);
+  fireEvent.click(screen.getByRole("menuitem", { name: "To-do list" }));
   const box = screen.getByRole("textbox", { name: "Message input" });
   fireEvent.change(box, { target: { value: "Why do robins sing?" } });
   await act(async () => {
@@ -1285,7 +1249,7 @@ test("tabs opened on the empty chat go with the conversation it starts", async (
     await settled();
   });
   expect(location.hash).toBe(`#/c/${created}`);
-  expect(screen.getByRole("tab", { name: "Usage" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "To-do list" })).toBeInTheDocument();
   // And a new chat starts with nothing open.
   fireEvent.click(screen.getByRole("button", { name: "New chat" }));
   await act(async () => {

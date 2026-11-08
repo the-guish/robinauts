@@ -173,6 +173,7 @@ export function SideTabs({
         )}
         <AddTab
           offers={addable}
+          anyOffered={offers.length > 0}
           buttonRef={addRef}
           onPick={(key) => {
             change(withOpened(tabs, key), { tab: key });
@@ -182,8 +183,9 @@ export function SideTabs({
       <div className="side-body" hidden={hidden}>
         {open.length === 0 && (
           <p className="side-empty">
-            No tab is open in this conversation. &ldquo;Add a tab&rdquo; opens
-            one.
+            {offers.length > 0
+              ? "No tab is open in this conversation. “Add a tab” opens one."
+              : "No tab is open in this conversation, and there is none to add: its agent has no apps."}
           </p>
         )}
         {open.map((offer) => (
@@ -210,14 +212,17 @@ export function SideTabs({
 /**
  * The [+] button and its menu: every tab that can be opened and is not.
  *
- * With nothing left to open the button is disabled, and says why.
+ * With nothing left to open the button is disabled, and says why: every
+ * tab offered is open, or none is offered at all.
  */
 function AddTab({
   offers,
+  anyOffered,
   buttonRef,
   onPick,
 }: Readonly<{
   offers: readonly TabOffer[];
+  anyOffered: boolean;
   buttonRef: RefObject<HTMLButtonElement | null>;
   onPick: (key: string) => void;
 }>) {
@@ -279,7 +284,11 @@ function AddTab({
   };
 
   const nothingLeft = offers.length === 0;
-  const label = nothingLeft ? "Every tab is open" : "Add a tab";
+  const label = !nothingLeft
+    ? "Add a tab"
+    : anyOffered
+      ? "Every tab is open"
+      : "No tab to add";
   return (
     <div ref={self} className="side-add">
       <button

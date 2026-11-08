@@ -4,8 +4,8 @@
 """The right side panel, and an MCP app in it: the to-do list of ``mcp/to-do-list/``, run as
 its own command beside the platform, as an operator would run it.
 
-The [+] menu offers the built-in tabs and the agent's apps. The app's view opens in a sandboxed
-frame, talks to the panel, and through it to the server, which keeps what was done in its file.
+The [+] menu offers the agent's apps. The app's view opens in a sandboxed frame, talks to the
+panel, and through it to the server, which keeps what was done in its file.
 """
 
 from __future__ import annotations
@@ -109,12 +109,12 @@ def show_todos(page: Page) -> Any:
 
 def test_side_panel_and_an_app(server: str, page: Page) -> None:
     # 1. "New chat", pick the agent with the to-do list, expand the side panel: "Add a tab"
-    #    offers the built-ins, then the agent's app.
+    #    offers the agent's app.
     page.goto(server)
     page.get_by_role("button", name="New chat").click()
     page.get_by_label("Agent").select_option(AGENT)
     page.get_by_role("button", name="Expand the side panel").click()
-    assert menu(page) == ["Context window", "Usage", "To-do list"]
+    assert menu(page) == ["To-do list"]
     page.keyboard.press("Escape")
 
     # 2. Open the app: its view is in a sandboxed frame, and shows the server's (empty) list.
@@ -148,16 +148,19 @@ def test_side_panel_and_an_app(server: str, page: Page) -> None:
     # 5. Close the tab: it is offered again. Open it again: the list is the server's.
     page.get_by_role("button", name="Close To-do list").click()
     expect(frame_element).to_have_count(0)
-    assert menu(page) == ["Context window", "Usage", "To-do list"]
+    assert menu(page) == ["To-do list"]
     page.get_by_role("menuitem", name="To-do list").click()
     expect(view(page).get_by_text("2 to-dos, 1 done")).to_be_visible()
     expect(view(page).get_by_role("checkbox", name="milk")).to_be_checked()
 
-    # 6. The built-ins open beside it, and the menu has nothing left to offer.
-    pick(page, "Usage")
-    pick(page, "Context window")
-    expect(page.get_by_role("tab")).to_have_text(["To-do list", "Usage", "Context window"])
+    # 6. With the app open the menu has nothing left to offer.
+    expect(page.get_by_role("tab")).to_have_text(["To-do list"])
     expect(page.get_by_role("button", name="Add a tab")).to_be_disabled()
-    # The view kept what it showed while another tab was on top.
-    page.get_by_role("tab", name="To-do list").click()
+    # Folded to the rail and opened again, the view is the one it was: it kept even what was
+    # typed in it and not sent.
+    view(page).get_by_label("New to-do").fill("bread")
+    page.get_by_role("button", name="Collapse the side panel").click()
+    expect(frame_element).to_be_hidden()
+    page.get_by_role("button", name="Expand the side panel").click()
+    expect(view(page).get_by_label("New to-do")).to_have_value("bread")
     expect(view(page).get_by_text("2 to-dos, 1 done")).to_be_visible()

@@ -6,15 +6,16 @@
  * how this browser remembers it (`docs/specs/frontend.md`).
  *
  * **A tab is an offer the person took.** The panel is handed the list of
- * tabs that can be opened, in the order the [+] menu shows them -- the
- * built-ins first, then the agent's MCP apps -- and a renderer for each
- * kind. What is open is a list of the offers' keys, per conversation.
+ * tabs that can be opened, in the order the [+] menu shows them -- today the
+ * agent's MCP apps -- and a renderer for each kind. What is open is a list
+ * of the offers' keys, per conversation.
  *
  * **The extension point is `TabKind` and `TabRenderers`.** A new kind of
- * tab is a new member of `TabKind`; `TabRenderers` is a record over it, so
- * the shell does not compile until it says how that kind is drawn. An MCP
- * app's tab is kind `"app"`, keyed `app:<server>/<tool>` (`appTabKey`), one
- * offer per app the agent has (`./apps.ts`).
+ * tab -- a built-in every conversation can open, say -- is a new member of
+ * `TabKind`; `TabRenderers` is a record over it, so the shell does not
+ * compile until it says how that kind is drawn. An MCP app's tab is kind
+ * `"app"`, keyed `app:<server>/<tool>` (`appTabKey`), one offer per app the
+ * agent has (`./apps.ts`).
  *
  * Nothing here draws anything and nothing here asks the network: the
  * functions below are pure, and storage is read and written through
@@ -27,16 +28,16 @@ import { forget, remember, remembered } from "../shell/storage";
 /**
  * The kinds of tab the panel can draw, one renderer each.
  *
- * The two built-ins are a kind each. MCP apps are one kind, `"app"`, for
- * every app, told apart by the offer's key.
+ * MCP apps are one kind, `"app"`, for every app, told apart by the offer's
+ * key. A tab of another sort is a kind of its own, added here.
  */
-export type TabKind = "context-window" | "usage" | "app";
+export type TabKind = "app";
 
 /** One tab that can be opened: an entry of the [+] menu. */
 export interface TabOffer {
   /**
    * Unique among the offers, stable across reloads: it is what is
-   * remembered. A built-in's is its kind; an app's is `appTabKey`.
+   * remembered. An app's is `appTabKey`.
    */
   readonly key: string;
   /** What the tab and the menu entry say. */
@@ -49,12 +50,6 @@ export type TabRenderer = (offer: TabOffer) => ReactNode;
 
 /** A renderer for every kind: the record the compiler holds complete. */
 export type TabRenderers = Readonly<Record<TabKind, TabRenderer>>;
-
-/** The tabs every conversation can open, in the order the menu lists them. */
-export const BUILT_IN_TABS: readonly TabOffer[] = [
-  { key: "context-window", title: "Context window", kind: "context-window" },
-  { key: "usage", title: "Usage", kind: "usage" },
-];
 
 /** The key an MCP app's tab is remembered by. */
 export function appTabKey(server: string, tool: string): string {

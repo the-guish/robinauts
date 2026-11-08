@@ -111,10 +111,7 @@ class RobinautsController(Controller):
         )
 
     async def list_models(self) -> tuple[ModelListing, ...]:
-        return tuple(
-            ModelListing(m.id, m.title or m.id, m.context_window)
-            for m in self._config.models.values()
-        )
+        return tuple(ModelListing(m.id, m.title or m.id) for m in self._config.models.values())
 
     async def list_sessions(
         self, user: User, *, limit: int, cursor: str | None = None

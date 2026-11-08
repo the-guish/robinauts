@@ -3,8 +3,8 @@
 
 /*
  * The right side panel: its edge, its head, the tab strip and the [+] menu,
- * the two built-in tabs and an MCP app's (`./SidePanel.tsx`,
- * `./SideTabs.tsx`, `./BuiltInTabs.tsx`, `./AppTab.tsx`).
+ * and an MCP app's tab (`./SidePanel.tsx`, `./SideTabs.tsx`,
+ * `./AppTab.tsx`).
  *
  * **Two shapes, by the breakpoint of `../shell/breakpoint.ts`** (48rem), as
  * the left panel has (`../shell/panel.css`). Below it the panel is a drawer
@@ -223,66 +223,6 @@
   border-radius: var(--radius);
   padding: 0.25rem 0.75rem;
   color: var(--ink);
-}
-
-/* The two built-in tabs. */
-.side-builtin {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.side-facts {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.875rem;
-  line-height: calc(1.25 / 0.875);
-}
-
-.side-fact {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.side-fact dt {
-  color: var(--muted);
-}
-
-.side-fact dd {
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.side-fact-part {
-  padding-left: 1rem;
-  font-size: 0.8125rem;
-}
-
-.side-meter {
-  height: 0.5rem;
-  overflow: hidden;
-  border-width: 1px;
-  border-color: var(--edge);
-  border-radius: var(--radius-pill);
-  background-color: var(--paper);
-}
-
-.side-meter-fill {
-  height: 100%;
-  background-color: var(--accent);
-}
-
-/* Something in the thread is something on the meter, however small. */
-.side-meter-fill[data-some="true"] {
-  min-width: 0.25rem;
-}
-
-.side-note {
-  font-size: 0.75rem;
-  line-height: calc(1 / 0.75);
-  color: var(--muted);
 }
 
 /*

@@ -22,9 +22,9 @@ import {
 } from "./ModelPicker";
 
 const MODELS: Model[] = [
-  { id: "sonnet", title: "Claude Sonnet", context_window: 200_000 },
-  { id: "gpt", title: "GPT 5.5", context_window: null },
-  { id: "gemini", title: "Gemini 2.5 Pro", context_window: null },
+  { id: "sonnet", title: "Claude Sonnet" },
+  { id: "gpt", title: "GPT 5.5" },
+  { id: "gemini", title: "Gemini 2.5 Pro" },
 ];
 
 const ready = (items: Model[]): Models => ({ status: "ready", items });

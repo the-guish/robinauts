@@ -54,7 +54,6 @@ title = "Local GPT"
 provider = "local_gpt"
 name = "fake-gpt-2"
 title = "Local GPT 2"
-context_window = 200000
 
 [agents.langchain]
 title = "LangChain"

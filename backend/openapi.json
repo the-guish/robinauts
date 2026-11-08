@@ -622,17 +622,6 @@
       },
       "ModelSummary": {
         "properties": {
-          "context_window": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Context Window"
-          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -644,8 +633,7 @@
         },
         "required": [
           "id",
-          "title",
-          "context_window"
+          "title"
         ],
         "title": "ModelSummary",
         "type": "object"

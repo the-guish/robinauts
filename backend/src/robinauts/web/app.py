@@ -372,8 +372,6 @@ class AgentListResponse(BaseModel):
 class ModelSummary(BaseModel):
     id: str
     title: str
-    context_window: int | None
-    """In tokens, as the operator configured it; ``None`` when not configured."""
 
 
 class ModelListResponse(BaseModel):
@@ -1033,12 +1031,7 @@ def create_app(
     @app.get("/api/models", dependencies=[asking])
     async def list_models() -> ModelListResponse:
         models = await controller.list_models()
-        return ModelListResponse(
-            items=[
-                ModelSummary(id=m.id, title=m.title, context_window=m.context_window)
-                for m in models
-            ]
-        )
+        return ModelListResponse(items=[ModelSummary(id=m.id, title=m.title) for m in models])
 
     # --- MCP apps, for the side panel: web/apps.py -------------------------------
 

@@ -204,8 +204,6 @@ class AgentListing:
 class ModelListing:
     id: str
     title: str
-    context_window: int | None = None
-    """In tokens, as configured; ``None`` when it is not."""
 
 
 # --- sessions -----------------------------------------------------------------

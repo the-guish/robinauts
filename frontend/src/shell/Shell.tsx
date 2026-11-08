@@ -27,22 +27,10 @@ import { navigate, NEW_CHAT, useRoute } from "../router";
 import type { Session } from "../session/session";
 import { signOut as endSession } from "../session/session";
 import { shownTitle } from "../conversation/conversation";
-import {
-  ContextWindowTab,
-  contextWindowOf,
-  shownModel,
-  UsageTab,
-} from "../side/BuiltInTabs";
 import { AppTab } from "../side/AppTab";
 import { appOf, appOffers, useApps } from "../side/apps";
 import { SIDE_ID, SidePanel } from "../side/SidePanel";
-import {
-  BUILT_IN_TABS,
-  carryOpenTabs,
-  NEW_CHAT_TABS,
-  type TabRenderers,
-} from "../side/tabs";
-import { transcriptStore } from "../side/transcript";
+import { carryOpenTabs, NEW_CHAT_TABS, type TabRenderers } from "../side/tabs";
 import type { Conversation } from "../conversation/conversation";
 import {
   AgentPicker,
@@ -347,23 +335,11 @@ export function Shell({
     [history, agentId, modelId],
   );
 
-  // The side panel (`../side/`). The thread is held in a store of its own,
-  // so a streaming answer redraws the tabs that count it and not the shell.
-  const [transcript] = useState(transcriptStore);
-  const sideModelId = current === null ? modelId : conversationModel;
-  // The agent's MCP apps, offered after the built-ins: the conversation's
-  // agent, or on the empty chat the one picked for it.
+  // The side panel (`../side/`) offers the agent's MCP apps: the
+  // conversation's agent, or on the empty chat the one picked for it.
   const sideAgent = current === null ? agentId : conversationAgent;
   const apps = useApps(sideAgent);
   const renderers: TabRenderers = {
-    "context-window": () => (
-      <ContextWindowTab
-        transcript={transcript}
-        model={shownModel(models, sideModelId)}
-        contextWindow={contextWindowOf(models, sideModelId)}
-      />
-    ),
-    usage: () => <UsageTab transcript={transcript} />,
     app: (offer) => {
       const app = appOf(apps, offer);
       if (sideAgent === null || app === undefined) return null;
@@ -371,7 +347,7 @@ export function Shell({
       return <AppTab key={sideAgent} agent={sideAgent} app={app} />;
     },
   };
-  const offers = useMemo(() => [...BUILT_IN_TABS, ...appOffers(apps)], [apps]);
+  const offers = useMemo(() => appOffers(apps), [apps]);
 
   return (
     <div className="shell">
@@ -505,7 +481,6 @@ export function Shell({
                 onConversationStarted={startedConversation}
                 onConversationOpened={conversationOpened}
                 onTurnEnded={history.refresh}
-                onTranscript={transcript.publish}
                 welcome={welcome}
               />
             </>

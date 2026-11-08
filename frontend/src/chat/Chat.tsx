@@ -26,9 +26,7 @@
  * is where a choice of who you are about to talk to belongs
  * (`docs/specs/agents.md`).
  */
-import { useEffect } from "react";
-
-import type { ChatProps, Transcript } from "./index";
+import type { ChatProps } from "./index";
 import { ChatContext, useChat } from "./runtime";
 import { Thread } from "./thread/Thread";
 import "./thread/thread.css";
@@ -39,14 +37,6 @@ export function Chat(props: Readonly<ChatProps>) {
   // Only on the empty chat: a conversation with nothing in it yet is still a
   // conversation, and its agent is no longer a choice (`./index.ts`).
   const welcome = props.conversationId === null ? props.welcome : undefined;
-  // The thread as the seam shows it (`./index.ts`). The chat's own message
-  // is a superset of the seam's, so it is handed over as it is rather than
-  // copied at every token of a stream.
-  const { onTranscript } = props;
-  const transcript: Transcript = state.messages;
-  useEffect(() => {
-    onTranscript?.(transcript);
-  }, [onTranscript, transcript]);
 
   if (state.failure !== null) {
     return (

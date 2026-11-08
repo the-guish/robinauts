@@ -7,8 +7,8 @@
  *
  * The list is the backend's (`GET /api/apps?agent=`): the apps of the tool
  * servers the agent names. It is asked for again when the agent changes,
- * and a list that does not come is no apps: the built-in tabs are offered
- * all the same.
+ * and a list that does not come is no apps: nothing to offer, and no
+ * failure of the panel's.
  */
 import { useEffect, useState } from "react";
 
