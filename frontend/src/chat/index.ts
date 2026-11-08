@@ -53,6 +53,37 @@ export type AgentId = string;
 export type ModelId = string;
 
 /**
+ * A piece of a message, as far as anything outside the chat may read it:
+ * what it said, what it thought, or a call it made and what came back.
+ *
+ * All of it is text a person, a model or a tool wrote, and is data: it is
+ * counted, never drawn as markup.
+ */
+export type TranscriptPart =
+  | { readonly kind: "text" | "reasoning"; readonly text: string }
+  | {
+      readonly kind: "tool-call";
+      /** The tool's full name, `<server>__<tool>`. */
+      readonly name: string;
+      /** The arguments as the model wrote them, JSON text. */
+      readonly argsText: string;
+      /** What the tool answered, once it has. */
+      readonly result?: string;
+    };
+
+/** One message of the thread on the screen. */
+export interface TranscriptMessage {
+  readonly role: "user" | "assistant";
+  readonly parts: readonly TranscriptPart[];
+}
+
+/**
+ * The thread on the screen, oldest first, as the chat holds it: the
+ * conversation as it was last read, and the answer still arriving at its end.
+ */
+export type Transcript = readonly TranscriptMessage[];
+
+/**
  * What the chat is given, and the one thing it says back.
  *
  * `conversationId` is `null` on the empty chat -- the application opens on
@@ -115,4 +146,13 @@ export interface ChatProps {
    * to cross this seam twice.
    */
   welcome?: ReactNode;
+  /**
+   * The thread on the screen, each time it changes: when a conversation is
+   * read, as an answer streams in, and empty on an empty chat.
+   *
+   * The right side panel counts it (`src/side/`): messages, tool calls,
+   * characters and an estimate of the tokens. It is called at every token
+   * of a stream, so what it is handed to has to be cheap.
+   */
+  onTranscript?: (transcript: Transcript) => void;
 }

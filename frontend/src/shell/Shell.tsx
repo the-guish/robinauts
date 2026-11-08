@@ -22,11 +22,26 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chat } from "../chat";
 import { DevicesPage } from "../devices/DevicesPage";
 import { conversationIn, useHistory } from "../history/history";
-import { MenuIcon } from "../icons";
+import { MenuIcon, PanelRightIcon } from "../icons";
 import { navigate, NEW_CHAT, useRoute } from "../router";
 import type { Session } from "../session/session";
 import { signOut as endSession } from "../session/session";
 import { shownTitle } from "../conversation/conversation";
+import {
+  ContextWindowTab,
+  contextWindowOf,
+  shownModel,
+  UsageTab,
+} from "../side/BuiltInTabs";
+import { SIDE_ID, SidePanel } from "../side/SidePanel";
+import {
+  BUILT_IN_TABS,
+  carryOpenTabs,
+  NEW_CHAT_TABS,
+  type TabOffer,
+  type TabRenderers,
+} from "../side/tabs";
+import { transcriptStore } from "../side/transcript";
 import type { Conversation } from "../conversation/conversation";
 import {
   AgentPicker,
@@ -46,6 +61,14 @@ import { remember, remembered } from "./storage";
 import "./shell.css";
 
 export const PANEL_KEY = "panel";
+
+/**
+ * The agent's MCP apps, as tabs of the side panel: none yet.
+ *
+ * Each would be an offer of kind `"app"`, keyed `appTabKey(server, tool)`,
+ * listed after the built-ins (`../side/tabs.ts`).
+ */
+const NO_APPS: readonly TabOffer[] = [];
 
 /**
  * What to call the agent a conversation is with (`docs/specs/agents.md`).
@@ -204,6 +227,11 @@ export function Shell({
   );
   const opener = useRef<HTMLButtonElement>(null);
   const closer = useRef<HTMLButtonElement>(null);
+  // The side panel's drawer, on the right: the same as the left one, and
+  // never open at the same time as it.
+  const [sideDrawer, setSideDrawer] = useState(false);
+  const sideOpener = useRef<HTMLButtonElement>(null);
+  const sideCloser = useRef<HTMLButtonElement>(null);
 
   // Closing puts the focus back on the button that opened it, so a keyboard
   // is never left on an element that has slid off the screen -- or, worse,
@@ -212,25 +240,34 @@ export function Shell({
     if (drawer) opener.current?.focus();
     setDrawer(false);
   }, [drawer]);
+  const closeSide = useCallback(() => {
+    if (sideDrawer) sideOpener.current?.focus();
+    setSideDrawer(false);
+  }, [sideDrawer]);
 
   // Escape closes the drawer, wherever the focus is inside it, and it is a
   // close like any other: the same `close`, so the focus comes back.
   useEffect(() => {
-    if (!drawer) return;
+    if (!drawer && !sideDrawer) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
+      if (event.key !== "Escape") return;
+      if (drawer) close();
+      if (sideDrawer) closeSide();
     };
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
     };
-  }, [drawer, close]);
+  }, [drawer, close, sideDrawer, closeSide]);
 
   // The focus follows the drawer into it when it opens, so a keyboard
   // carries on where the eye is rather than behind the overlay.
   useEffect(() => {
     if (drawer) closer.current?.focus();
   }, [drawer]);
+  useEffect(() => {
+    if (sideDrawer) sideCloser.current?.focus();
+  }, [sideDrawer]);
 
   const current = route.kind === "conversation" ? route.id : null;
   const listed = conversationIn(history.items, current);
@@ -296,6 +333,8 @@ export function Shell({
   );
   const startedConversation = useCallback(
     (id: string) => {
+      // The tabs opened on the empty chat are this conversation's now.
+      carryOpenTabs(NEW_CHAT_TABS, id);
       navigate({ kind: "conversation", id });
       // A conversation that has just been created is not in the panel's
       // list, and its title is the beginning of the message that created it
@@ -314,6 +353,22 @@ export function Shell({
     },
     [history, agentId, modelId],
   );
+
+  // The side panel (`../side/`). The thread is held in a store of its own,
+  // so a streaming answer redraws the tabs that count it and not the shell.
+  const [transcript] = useState(transcriptStore);
+  const sideModelId = current === null ? modelId : conversationModel;
+  const renderers: TabRenderers = {
+    "context-window": () => (
+      <ContextWindowTab
+        transcript={transcript}
+        model={shownModel(models, sideModelId)}
+        contextWindow={contextWindowOf(models, sideModelId)}
+      />
+    ),
+    usage: () => <UsageTab transcript={transcript} />,
+  };
+  const offers = useMemo(() => [...BUILT_IN_TABS, ...NO_APPS], []);
 
   return (
     <div className="shell">
@@ -335,11 +390,14 @@ export function Shell({
         signInConfigured={session.sign_in}
         closeRef={closer}
       />
-      {drawer && (
+      {(drawer || sideDrawer) && (
         <div
           data-backdrop=""
           aria-hidden="true"
-          onClick={close}
+          onClick={() => {
+            close();
+            closeSide();
+          }}
           className="shell-backdrop"
         />
       )}
@@ -348,20 +406,40 @@ export function Shell({
         {/* The one thing above the chat, and only where the panel is a
             drawer: `docs/specs/frontend.md` says there is no top bar, so
             above the breakpoint this is gone and nothing replaces it. */}
-        <button
-          type="button"
-          ref={opener}
-          title="Open the panel"
-          aria-label="Open the panel"
-          aria-controls={PANEL_ID}
-          aria-expanded={drawer}
-          onClick={() => {
-            setDrawer(true);
-          }}
-          className="shell-opener"
-        >
-          <MenuIcon className="shell-icon" />
-        </button>
+        <div className="shell-openers">
+          <button
+            type="button"
+            ref={opener}
+            title="Open the panel"
+            aria-label="Open the panel"
+            aria-controls={PANEL_ID}
+            aria-expanded={drawer}
+            onClick={() => {
+              setSideDrawer(false);
+              setDrawer(true);
+            }}
+            className="shell-opener"
+          >
+            <MenuIcon className="shell-icon" />
+          </button>
+          {route.kind !== "devices" && (
+            <button
+              type="button"
+              ref={sideOpener}
+              title="Open the side panel"
+              aria-label="Open the side panel"
+              aria-controls={SIDE_ID}
+              aria-expanded={sideDrawer}
+              onClick={() => {
+                setDrawer(false);
+                setSideDrawer(true);
+              }}
+              className="shell-opener"
+            >
+              <PanelRightIcon className="shell-icon" />
+            </button>
+          )}
+        </div>
         {/* The heading is the first line of the page, because
             `docs/specs/frontend.md` leaves no top bar to put it in. It is the
             shell's and not the chat's: the title comes from the panel's list,
@@ -424,12 +502,24 @@ export function Shell({
                 onConversationStarted={startedConversation}
                 onConversationOpened={conversationOpened}
                 onTurnEnded={history.refresh}
+                onTranscript={transcript.publish}
                 welcome={welcome}
               />
             </>
           )}
         </main>
       </div>
+      {/* About the conversation, so not on a page that is not one. */}
+      {route.kind !== "devices" && (
+        <SidePanel
+          conversation={current ?? NEW_CHAT_TABS}
+          offers={offers}
+          renderers={renderers}
+          drawer={sideDrawer}
+          onCloseDrawer={closeSide}
+          closeRef={sideCloser}
+        />
+      )}
     </div>
   );
 }

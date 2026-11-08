@@ -132,4 +132,8 @@ export const LUCIDE: Readonly<Record<string, IconNode>> = {
     ["path", { d: "M18 6 6 18" }],
     ["path", { d: "m6 6 12 12" }],
   ],
+  "panel-right": [
+    ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2" }],
+    ["path", { d: "M15 3v18" }],
+  ],
 };

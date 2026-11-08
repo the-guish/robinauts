@@ -351,5 +351,31 @@ Entries are never edited after the fact; a correction is a new entry.
   directory. `LICENSES/MIT.txt` stays, because the icon data of the entry
   above is in part MIT.
 
+### 2026-11-08, lucide's `panel-right` icon, copied
+
+- Source: the npm package `lucide-react` at version 1.61.0, the version of
+  the entry "lucide's icon path data, copied" (2026-11-04), out of
+  https://github.com/lucide-icons/lucide. The package was fetched with
+  `npm pack lucide-react@1.61.0` into a scratch directory outside the tree
+  and unpacked there; nothing was installed. The icon's node was read from
+  `dist/esm/icons/panel-right.mjs`.
+- What was copied: the path data of one icon, `panel-right`: a rounded
+  rectangle and one line. It is the toggle of the right side panel, the
+  mirror of `panel-left` on the left one.
+- Its licence: ISC, Copyright (c) 2026 Lucide Icons and Contributors. It is
+  not in the package `LICENSE`'s list of icons derived from Feather, so it is
+  ISC alone. The `LICENSE` of that tarball is identical to
+  `frontend/src/icons/LICENSE.lucide`, which was checked with `diff`.
+- Landed as: one entry appended at the end of `frontend/src/icons/lucide.ts`,
+  and a `PanelRightIcon` component in `frontend/src/icons/index.tsx`, which
+  is this project's code.
+- Modifications: the React `key` attribute of each element was dropped, as
+  for the other icons. Nothing else.
+- Attribution added to: this entry, and the count of icons in
+  `docs/legal/third-party.md` and `frontend/src/icons/README.md`. The
+  annotation in `REUSE.toml` already covers the file, as `ISC AND MIT`. The
+  copy was made by The Robinauts Authors via Claude Code, reviewed by the
+  maintainers.
+
 <!-- Entries go above this line. -->
 <!-- REUSE-IgnoreEnd -->

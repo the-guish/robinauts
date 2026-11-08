@@ -1126,3 +1126,133 @@ test("#/devices is a page of the shell: the panel stays, the chat goes", async (
     "page",
   );
 });
+
+const sidePanel = () =>
+  screen.getByRole("complementary", { name: "Side panel" });
+
+test("the side panel's Usage tab counts the conversation on the screen", async () => {
+  location.hash = `#/c/${id(1)}`;
+  await shell(undefined, (call) => {
+    if (call.url === `/api/conversations/${id(1)}`) {
+      return json(
+        opened(conversation(1, "Robins"), [
+          message("m1", "user", "Why do robins sing?"),
+          message("m2", "assistant", "To be heard."),
+        ]),
+      );
+    }
+    return withConversation(call);
+  });
+  await screen.findByText("To be heard.");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Expand the side panel" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add a tab" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Usage" }));
+  const usage = within(screen.getByRole("tabpanel", { name: "Usage" }));
+  expect(
+    usage.getByText("Messages", { selector: "dt" }).nextElementSibling,
+  ).toHaveTextContent("2");
+  // 19 + 12 characters, a quarter of that rounded up.
+  expect(
+    usage.getByText("Tokens (estimate)", { selector: "dt" }).nextElementSibling,
+  ).toHaveTextContent("about 8");
+
+  // The context window of a model the deployment does not describe.
+  fireEvent.click(screen.getByRole("button", { name: "Add a tab" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Context window" }));
+  const contextWindow = within(
+    screen.getByRole("tabpanel", { name: "Context window" }),
+  );
+  expect(
+    contextWindow.getByText("Model", { selector: "dt" }).nextElementSibling,
+  ).toHaveTextContent("Sonnet");
+  expect(
+    contextWindow.getByText("Window", { selector: "dt" }).nextElementSibling,
+  ).toHaveTextContent("unknown");
+});
+
+test("on a small screen the side panel is a drawer, opened from the right", async () => {
+  narrow();
+  const { container } = await shell();
+  const aside = sidePanel();
+  expect(aside).toHaveAttribute("inert");
+  const open = screen.getByRole("button", { name: "Open the side panel" });
+  fireEvent.click(open);
+  expect(aside).toHaveAttribute("data-drawer", "open");
+  expect(aside).toHaveAttribute("role", "dialog");
+  // Drawn whole, whatever this browser left the rail as.
+  expect(screen.getByRole("button", { name: "Add a tab" })).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Close the side panel" }),
+  ).toHaveFocus();
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(aside).toHaveAttribute("data-drawer", "closed");
+  expect(open).toHaveFocus();
+
+  // The two drawers are never open together. Held on to, as above: open,
+  // a panel is a dialog and no longer a landmark.
+  const left = panel();
+  fireEvent.click(open);
+  fireEvent.click(screen.getByRole("button", { name: "Open the panel" }));
+  expect(aside).toHaveAttribute("data-drawer", "closed");
+  expect(left).toHaveAttribute("data-drawer", "open");
+  const backdrop = container.querySelector("[data-backdrop]");
+  fireEvent.click(backdrop as Element);
+  expect(left).toHaveAttribute("data-drawer", "closed");
+});
+
+test("Escape in the side panel's menu closes the menu, not the drawer", async () => {
+  narrow();
+  await shell();
+  const aside = sidePanel();
+  fireEvent.click(screen.getByRole("button", { name: "Open the side panel" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add a tab" }));
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(aside).toHaveAttribute("data-drawer", "open");
+});
+
+test("tabs opened on the empty chat go with the conversation it starts", async () => {
+  localStorage.setItem("robinauts.side", "open");
+  const created = id(9);
+  await shell(undefined, (call) => {
+    if (call.url === "/api/turns") {
+      return streamed(
+        [event("RUN_FINISHED", { threadId: created, runId: RUN }, 2)],
+        { headers: streamHeaders(RUN, created) },
+      );
+    }
+    if (call.url === `/api/conversations/${created}`) {
+      return json(opened(conversation(9, "Robins"), []));
+    }
+    return undefined;
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add a tab" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Usage" }));
+  const box = screen.getByRole("textbox", { name: "Message input" });
+  fireEvent.change(box, { target: { value: "Why do robins sing?" } });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await settled();
+  });
+  expect(location.hash).toBe(`#/c/${created}`);
+  expect(screen.getByRole("tab", { name: "Usage" })).toBeInTheDocument();
+  // And a new chat starts with nothing open.
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await act(async () => {
+    await settled();
+  });
+  expect(screen.queryByRole("tab")).toBeNull();
+});
+
+test("the side panel is about a conversation, so not on a page that is not one", async () => {
+  location.hash = "#/devices";
+  await shell();
+  expect(
+    screen.queryByRole("complementary", { name: "Side panel" }),
+  ).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Open the side panel" }),
+  ).toBeNull();
+});

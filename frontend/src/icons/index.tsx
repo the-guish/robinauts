@@ -75,6 +75,7 @@ export const MenuIcon = icon("menu");
 export const MonitorIcon = icon("monitor");
 export const MoonIcon = icon("moon");
 export const PanelLeftIcon = icon("panel-left");
+export const PanelRightIcon = icon("panel-right");
 export const PencilIcon = icon("pencil");
 export const PlayIcon = icon("play");
 export const PlusIcon = icon("plus");

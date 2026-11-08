@@ -2,8 +2,9 @@
 
 ## The interface
 
-- The layout is neorc's: a collapsible left navigation panel, and the chat
-  in the middle. There is no top bar.
+- The layout is neorc's: a collapsible left navigation panel, the chat
+  in the middle, and a collapsible side panel on the right. There is no
+  top bar.
 - **The panel is ours**, and not part of the chat window
   ([ADR 0006](../adr/0006-chat-ui-on-react-alone.md)). Top to
   bottom: the collapse button and the brand; "new chat"; the conversation
@@ -27,6 +28,27 @@
   model is forgotten by the browser.
 - On a small screen the panel becomes an overlay drawer opened from a
   button, and the chat is usable on a phone.
+- **The right side panel** is ours too (`src/side/`). It holds tabs about
+  the conversation on the screen:
+  - It collapses to a thin rail, and starts as one. Its left edge is a
+    separator that a pointer drags and the arrow keys move, from 260px to
+    60% of the window. The rail and the width are remembered per browser.
+  - On a small screen it is an overlay drawer from the right edge, opened
+    from a button, like the left panel. The two are never open together.
+  - A tab strip, each tab with a close button. "Add a tab" opens a menu of
+    every tab not open in this conversation: the built-ins first, then the
+    agent's MCP apps once the backend offers them. Picking one opens it on
+    top.
+  - Open tabs are remembered per conversation, per browser. Tabs opened on
+    the empty chat move to the conversation its first message creates.
+  - "Usage" counts the transcript on the screen: messages by role, tool
+    calls, characters, and tokens estimated as characters ÷ 4, labelled as
+    an estimate. Usage recording is planned ([core.md](core.md), goal 7).
+  - "Context window" shows that estimate against the model's window as a
+    meter when `GET /api/models` states the window, and "unknown" until it
+    does. Today it does not.
+  - The keyboard: Left and Right move between tabs, Delete closes one;
+    the menu takes the arrow keys and closes on Escape.
 - The theme follows the operating system by default. A light / dark /
   system toggle is remembered per browser.
 - Until someone is signed in, the sign-in page stands in place of every

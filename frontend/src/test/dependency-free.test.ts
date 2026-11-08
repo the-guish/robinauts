@@ -24,7 +24,7 @@ import { describe, expect, test } from "vitest";
 const src = resolve(import.meta.dirname, "..");
 
 /** The shell's own sources: these directories, and these files. */
-const SHELL_DIRECTORIES = ["shell", "history", "session"];
+const SHELL_DIRECTORIES = ["shell", "history", "session", "side"];
 const SHELL_FILES = ["App.tsx", "ErrorBoundary.tsx", "main.tsx"];
 
 function filesUnder(directory: string): string[] {

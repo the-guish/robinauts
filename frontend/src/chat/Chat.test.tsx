@@ -28,6 +28,7 @@ import {
   type ChatProps,
   type ConversationId,
   type ModelId,
+  type Transcript,
 } from "./index";
 
 const RUN = "11111111-2222-4333-8444-555555555555";
@@ -144,6 +145,25 @@ test("a conversation that is loaded is drawn as a thread", async () => {
   expect(screen.getByText("Because it is quiet then.")).toBeInTheDocument();
   // The box is there, which is the whole of what the stand-in could not do.
   expect(screen.getByRole("textbox", { name: "Message input" })).toBeVisible();
+});
+
+test("the chat says what its thread is: empty, then as it was read", async () => {
+  stub(() => json(opened(conversation(1), TREE)));
+  const transcript = vi.fn<(transcript: Transcript) => void>();
+  draw({ conversationId: CONVERSATION, onTranscript: transcript });
+  expect(transcript).toHaveBeenCalledWith([]);
+  await waitFor(() => {
+    expect(transcript.mock.lastCall?.[0]).toHaveLength(2);
+  });
+  const [question, answer] = transcript.mock.lastCall?.[0] ?? [];
+  expect(question).toMatchObject({
+    role: "user",
+    parts: [{ kind: "text", text: "Why do robins sing before dawn?" }],
+  });
+  expect(answer).toMatchObject({
+    role: "assistant",
+    parts: [{ kind: "text", text: "Because it is quiet then." }],
+  });
 });
 
 test("the empty chat shows what it is given above the box", async () => {
@@ -469,10 +489,10 @@ test("a conversation that is not here has no thread to draw", async () => {
   expect(screen.queryByRole("textbox", { name: "Message input" })).toBeNull();
 });
 
-test("the seam is a component and eight names, and nothing of a library", () => {
+test("the seam is a component and nine names, and nothing of a library", () => {
   // **A claim about the types, checked by the type checker.** `tsc -b` reads
-  // this file, so the four assertions below fail the build rather than a
-  // run: the seam is exactly these eight names, they are exactly these types,
+  // this file, so the assertions below fail the build rather than a
+  // run: the seam is exactly these nine names, they are exactly these types,
   // and none of them comes from a chat library (ADR 0001, the discard test).
   expectTypeOf<ChatProps>().toEqualTypeOf<{
     conversationId: ConversationId | null;
@@ -483,8 +503,24 @@ test("the seam is a component and eight names, and nothing of a library", () => 
     onTurnEnded?: () => void;
     onModelRefused?: (modelId: ModelId) => void;
     welcome?: ReactNode;
+    onTranscript?: (transcript: Transcript) => void;
   }>();
-  // A ninth name does not belong to it, whatever it is called.
+  // The thread the side panel reads is plain data: who said it, and text.
+  expectTypeOf<Transcript>().toEqualTypeOf<
+    readonly {
+      readonly role: "user" | "assistant";
+      readonly parts: readonly (
+        | { readonly kind: "text" | "reasoning"; readonly text: string }
+        | {
+            readonly kind: "tool-call";
+            readonly name: string;
+            readonly argsText: string;
+            readonly result?: string;
+          }
+      )[];
+    }[]
+  >();
+  // A tenth name does not belong to it, whatever it is called.
   const extra = {
     conversationId: null,
     agentId: null,

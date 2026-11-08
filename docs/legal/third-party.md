@@ -10,7 +10,7 @@ governed by [DEPENDENCIES.md](../../DEPENDENCIES.md).
 
 | what | where | source | licence |
 |---|---|---|---|
-| lucide's icon path data: the SVG elements of 22 icons, as data, with no code of lucide's | `frontend/src/icons/lucide.ts` | [lucide](https://github.com/lucide-icons/lucide), the npm package `lucide-react` 1.61.0 | ISC, Copyright (c) 2026 Lucide Icons and Contributors; the icons lucide derives from Feather are MIT, Copyright (c) 2013-present Cole Bemis ([text](../../frontend/src/icons/LICENSE.lucide)) |
+| lucide's icon path data: the SVG elements of 23 icons, as data, with no code of lucide's | `frontend/src/icons/lucide.ts` | [lucide](https://github.com/lucide-icons/lucide), the npm package `lucide-react` 1.61.0 | ISC, Copyright (c) 2026 Lucide Icons and Contributors; the icons lucide derives from Feather are MIT, Copyright (c) 2013-present Cole Bemis ([text](../../frontend/src/icons/LICENSE.lucide)) |
 
 The data was copied on 2026-11-04 under
 [ADR 0006](../adr/0006-chat-ui-on-react-alone.md), and the copy is an entry in
