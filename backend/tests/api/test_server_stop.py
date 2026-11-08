@@ -25,9 +25,13 @@ pytestmark = pytest.mark.io
 CLOSED = b"the controller is closed"
 
 
-@pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGINT], ids=["SIGTERM", "SIGINT"])
+@pytest.mark.parametrize(
+    ("signum", "status"),
+    [(signal.SIGTERM, -signal.SIGTERM), (signal.SIGINT, 130)],
+    ids=["SIGTERM", "SIGINT"],
+)
 def test_a_signal_closes_the_controller_before_the_process_ends(
-    signum: signal.Signals, tmp_path: Path
+    signum: signal.Signals, status: int, tmp_path: Path
 ) -> None:
     config = tmp_path / "robinauts.toml"
     config.write_text("")
@@ -42,6 +46,8 @@ def test_a_signal_closes_the_controller_before_the_process_ends(
         running.send_signal(signum)
         _, said = running.communicate(timeout=30)
     assert CLOSED in said, said.decode(errors="replace")
+    assert b"Traceback" not in said, said.decode(errors="replace")
+    assert running.returncode == status
     assert not activity.exists()
 
 
@@ -90,4 +96,5 @@ def test_a_signal_during_the_start_waits_for_it_then_stops_cleanly(
         said, _ = running.communicate(timeout=30)
     assert b"Application shutdown complete" in said, said.decode(errors="replace")
     assert CLOSED in said, said.decode(errors="replace")
+    assert b"Traceback" not in said, said.decode(errors="replace")
     assert not activity.exists()

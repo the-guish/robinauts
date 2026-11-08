@@ -244,6 +244,9 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         # secret missing, a worker process that did not start: said before anything listens.
         print(refused, file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        # uvicorn raises Ctrl-C again once it has shut down: the stop is already done.
+        return 130
     return 0
 
 

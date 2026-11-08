@@ -14,7 +14,7 @@ import pytest
 
 from to_do_list.server import VIEW_MIME_TYPE, VIEW_URI, main, view_html
 
-TOOLS = {"show_todos", "add_todo", "toggle_todo", "remove_todo"}
+TOOLS = {"show_todos", "add_todo", "edit_todo", "toggle_todo", "remove_todo"}
 
 
 def _free_port() -> int:
@@ -97,7 +97,7 @@ def client(tmp_path_factory):
         process.stderr.close()
 
 
-def test_tools_list_names_the_four_tools_and_the_view_on_show_todos(client):
+def test_tools_list_names_the_tools_and_the_view_on_show_todos(client):
     tools = {tool["name"]: tool for tool in client.request("tools/list")["result"]["tools"]}
     assert set(tools) == TOOLS
     assert tools["show_todos"]["_meta"]["ui"]["resourceUri"] == VIEW_URI
@@ -107,6 +107,7 @@ def test_tools_list_names_the_four_tools_and_the_view_on_show_todos(client):
         assert tool["_meta"]["ui"]["visibility"] == ["model", "app"]
         assert set(tool["outputSchema"]["properties"]) == {"items"}
     assert tools["add_todo"]["inputSchema"]["required"] == ["text"]
+    assert tools["edit_todo"]["inputSchema"]["required"] == ["id", "text"]
     assert tools["toggle_todo"]["inputSchema"]["required"] == ["id"]
     assert tools["remove_todo"]["inputSchema"]["required"] == ["id"]
 
@@ -120,7 +121,7 @@ def test_the_view_is_listed_and_read_as_an_mcp_app(client):
     assert contents[0]["text"] == view_html()
 
 
-def test_add_toggle_remove_and_show_answer_with_the_whole_list(client):
+def test_add_edit_toggle_remove_and_show_answer_with_the_whole_list(client):
     assert client.call("show_todos")["structuredContent"] == {"items": []}
     assert client.call("show_todos")["content"][0]["text"] == "The to-do list is empty."
     client.call("add_todo", {"text": "milk"})
@@ -132,10 +133,17 @@ def test_add_toggle_remove_and_show_answer_with_the_whole_list(client):
             {"id": "2", "text": "bread", "done": False},
         ]
     }
+    edited = client.call("edit_todo", {"id": "1", "text": "oat milk"})
+    assert edited["isError"] is False
+    assert edited["structuredContent"]["items"][0] == {
+        "id": "1",
+        "text": "oat milk",
+        "done": False,
+    }
     toggled = client.call("toggle_todo", {"id": "1"})
     assert toggled["structuredContent"]["items"][0]["done"] is True
     assert toggled["content"][0]["text"] == (
-        "2 to-do(s), 1 done:\n- [x] milk (id 1)\n- [ ] bread (id 2)"
+        "2 to-do(s), 1 done:\n- [x] oat milk (id 1)\n- [ ] bread (id 2)"
     )
     removed = client.call("remove_todo", {"id": "1"})
     assert removed["structuredContent"] == {"items": [{"id": "2", "text": "bread", "done": False}]}
@@ -148,6 +156,8 @@ def test_add_toggle_remove_and_show_answer_with_the_whole_list(client):
         ("toggle_todo", {"id": "404"}, "no to-do with id '404'"),
         ("remove_todo", {"id": "404"}, "no to-do with id '404'"),
         ("add_todo", {"text": "   "}, "needs some text"),
+        ("edit_todo", {"id": "404", "text": "eggs"}, "no to-do with id '404'"),
+        ("edit_todo", {"id": "2", "text": "   "}, "needs some text"),
     ],
 )
 def test_a_refused_change_is_a_tool_error_that_says_why(client, name, arguments, why):

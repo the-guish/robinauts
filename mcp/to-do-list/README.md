@@ -1,7 +1,7 @@
 # The to-do list
 
-A to-do list as an MCP server. A model can show the list, add to it, tick items
-off and remove them. A host that shows MCP Apps, such as the Robinauts side
+A to-do list as an MCP server. A model can show the list, add to it, edit items,
+tick them off and remove them. A host that shows MCP Apps, such as the Robinauts side
 panel, also gets a view of the list that a person can use directly.
 
 It is a small server to try the platform with. It keeps one list, for everyone
@@ -56,7 +56,7 @@ tools = ["todo"]
 
 ## What it offers
 
-Four tools. Each answers with the whole list, twice: as text for the model,
+Five tools. Each answers with the whole list, twice: as text for the model,
 and as structured content, `{"items": [{"id": "1", "text": "milk", "done": false}]}`,
 for the view.
 
@@ -64,6 +64,7 @@ for the view.
 | --- | --- | --- |
 | `show_todos` | none | shows the list |
 | `add_todo` | `text` | adds a to-do at the end |
+| `edit_todo` | `id`, `text` | replaces its text, and keeps its id and whether it is done |
 | `toggle_todo` | `id` | marks it done, or not done if it was |
 | `remove_todo` | `id` | removes it |
 

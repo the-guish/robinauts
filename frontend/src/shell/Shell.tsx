@@ -340,13 +340,25 @@ export function Shell({
   const sideAgent = current === null ? agentId : conversationAgent;
   const apps = useApps(sideAgent);
   const [results] = useState(toolResults);
+  // A turn can change what an open app shows, so its tab reads it again.
+  const [turnsEnded, setTurnsEnded] = useState(0);
+  const turnEnded = () => {
+    history.refresh();
+    setTurnsEnded((count) => count + 1);
+  };
   const renderers: TabRenderers = {
     app: (offer) => {
       const app = appOf(apps, offer);
       if (sideAgent === null || app === undefined) return null;
       // Keyed by the agent: the same app of another agent is another view.
       return (
-        <AppTab key={sideAgent} agent={sideAgent} app={app} results={results} />
+        <AppTab
+          key={sideAgent}
+          agent={sideAgent}
+          app={app}
+          turnsEnded={turnsEnded}
+          results={results}
+        />
       );
     },
   };
@@ -483,7 +495,7 @@ export function Shell({
                 onModelRefused={forgetModel}
                 onConversationStarted={startedConversation}
                 onConversationOpened={conversationOpened}
-                onTurnEnded={history.refresh}
+                onTurnEnded={turnEnded}
                 onToolResult={results.publish}
                 welcome={welcome}
               />

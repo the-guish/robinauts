@@ -8,7 +8,8 @@
  *
  * JSON-RPC 2.0 over `postMessage`. The view asks `ui/initialize` and is told
  * the theme; it says `ui/notifications/initialized`, and the host then calls
- * the app's own tool once and hands the view its input and its result. The
+ * the app's own tool once and hands the view its input and its result. Each
+ * turn that ends has the tool called again and the new result handed over. The
  * view may ask `tools/call`, which the backend relays to its server, and
  * `ping`. Anything else it asks is answered "method not found": a view
  * cannot open a page, write in the chat or reach the model.

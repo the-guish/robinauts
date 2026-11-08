@@ -269,18 +269,20 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
     return element && element.getAttribute ? element.getAttribute("data-key") : null;
   }
 
-  /* One call at a time: the controls are disabled while it runs, and the one that had the
-     focus gets it back once the list is drawn again. */
+  /* One call at a time: a click during a call is ignored, and the redraw that ends the call
+     puts back a box it flipped. The controls stay enabled, because a disabled box is drawn
+     grey and every call would flash the whole list. The control that had the focus gets it
+     back once the list is drawn again. */
   function callTool(name, args) {
     if (busy || items === null) {
       return Promise.resolve(false);
     }
     var key = focusedKey();
-    setBusy(true);
+    busy = true;
     say("", true);
     return request("tools/call", { name: name, arguments: args }).then(
       function (result) {
-        setBusy(false);
+        busy = false;
         var ok = showResult(result, key);
         if (!ok) {
           render(key);
@@ -288,7 +290,7 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
         return ok;
       },
       function (error) {
-        setBusy(false);
+        busy = false;
         say(error.message);
         render(key);
         return false;
@@ -296,20 +298,12 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
     );
   }
 
-  function setBusy(value) {
-    busy = value;
-    var controls = document.querySelectorAll("input, button");
-    for (var i = 0; i < controls.length; i++) {
-      controls[i].disabled = value || items === null;
-    }
-  }
-
   /* Drawing: built from elements and text nodes, never from markup, so a to-do's text is
      only ever text. The control named by `key` is given the focus again after a redraw. */
   function render(key) {
     key = key || focusedKey();
-    input.disabled = items === null || busy;
-    addButton.disabled = items === null || busy;
+    input.disabled = items === null;
+    addButton.disabled = items === null;
     if (items === null) {
       return;
     }
@@ -326,7 +320,6 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
       box.type = "checkbox";
       box.id = "todo-" + item.id;
       box.checked = item.done;
-      box.disabled = busy;
       box.setAttribute("data-key", "toggle-" + item.id);
       box.addEventListener("change", function () {
         callTool("toggle_todo", { id: item.id });
@@ -340,7 +333,6 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
       remove.type = "button";
       remove.className = "delete";
       remove.textContent = "×";
-      remove.disabled = busy;
       remove.setAttribute("aria-label", "Delete: " + item.text);
       remove.setAttribute("title", "Delete");
       remove.setAttribute("data-key", "delete-" + item.id);

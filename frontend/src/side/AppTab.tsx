@@ -18,13 +18,15 @@
  * server answered. Tool calls go to the backend, which relays them to the
  * server with its credential (`POST /api/apps/<server>/tools/<tool>`).
  *
- * **Changes.** When a tool of the app's server answers in the chat, the
- * app's own tool is called again and the view is handed its answer, so what
- * the agent changed shows at once.
- *
  * **Loading.** The view is hidden until the app's own tool has answered,
  * and a view that never starts, or a first call that fails, is said so in
  * its place, with a way to try again.
+ *
+ * **After a turn.** A turn may change what the app shows, so each one that
+ * ends has the app's own tool called again and its result handed to the view.
+ * A call that fails leaves the view as it is. A tool of the app's server
+ * that answers in the chat does the same, so what the agent changes shows
+ * while the turn goes on; only the newest of these reads reaches the view.
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
@@ -88,11 +90,31 @@ export function useHostTheme(): HostTheme {
   );
 }
 
+function callTool(
+  agent: string,
+  server: string,
+  tool: string,
+  args: Readonly<Record<string, unknown>>,
+  signal: AbortSignal,
+) {
+  return request("post", "/api/apps/{server}/tools/{tool}", {
+    path: { server, tool },
+    body: { agent, arguments: { ...args } },
+    signal,
+  });
+}
+
 export function AppTab({
   agent,
   app,
+  turnsEnded,
   results,
-}: Readonly<{ agent: string; app: App; results?: ToolResults | undefined }>) {
+}: Readonly<{
+  agent: string;
+  app: App;
+  turnsEnded: number;
+  results?: ToolResults | undefined;
+}>) {
   // "Try again" is a new frame, and a new handshake with it.
   const [attempt, setAttempt] = useState(0);
   return (
@@ -100,6 +122,7 @@ export function AppTab({
       key={attempt}
       agent={agent}
       app={app}
+      turnsEnded={turnsEnded}
       results={results}
       onRetry={() => {
         setAttempt((count) => count + 1);
@@ -116,11 +139,13 @@ type FrameState =
 function AppFrame({
   agent,
   app,
+  turnsEnded,
   results,
   onRetry,
 }: Readonly<{
   agent: string;
   app: App;
+  turnsEnded: number;
   results?: ToolResults | undefined;
   onRetry: () => void;
 }>) {
@@ -133,6 +158,9 @@ function AppFrame({
   const phase = useRef<Phase>("waiting");
   // The theme the view was last told, once it has been told one.
   const told = useRef<HostTheme | null>(null);
+  // Reads of the app's tool after a change, numbered: a tool's answer and a
+  // turn's end may both ask, and only the newest answer is handed over.
+  const asked = useRef(0);
 
   useEffect(() => {
     shownTheme.current = theme;
@@ -145,11 +173,7 @@ function AppFrame({
     const target = frame.current;
     const dropped = new AbortController();
     const call = (tool: string, args: Readonly<Record<string, unknown>>) =>
-      request("post", "/api/apps/{server}/tools/{tool}", {
-        path: { server: app.server, tool },
-        body: { agent, arguments: { ...args } },
-        signal: dropped.signal,
-      });
+      callTool(agent, app.server, tool, args, dropped.signal);
 
     const onMessage = (event: MessageEvent) => {
       if (
@@ -202,9 +226,10 @@ function AppFrame({
     const deaf = results?.subscribe((name) => {
       if (phase.current !== "running" || !name.startsWith(`${app.server}__`))
         return;
+      const mine = ++asked.current;
       call(app.tool, {}).then(
         (answer) => {
-          post(target, toolResult(answer));
+          if (mine === asked.current) post(target, toolResult(answer));
         },
         () => {
           // The view keeps what it shows; the next change asks again.
@@ -217,6 +242,27 @@ function AppFrame({
       dropped.abort();
     };
   }, [agent, app.server, app.tool, results]);
+
+  // The next turn's read cancels this one, so the newest result is the last
+  // one the view is handed. A view still starting reads the list then.
+  const seenTurns = useRef(turnsEnded);
+  useEffect(() => {
+    if (seenTurns.current === turnsEnded) return undefined;
+    seenTurns.current = turnsEnded;
+    if (phase.current !== "running") return undefined;
+    const dropped = new AbortController();
+    const mine = ++asked.current;
+    callTool(agent, app.server, app.tool, {}, dropped.signal).then(
+      (answer) => {
+        if (!dropped.signal.aborted && mine === asked.current)
+          post(frame.current, toolResult(answer));
+      },
+      () => undefined,
+    );
+    return () => {
+      dropped.abort();
+    };
+  }, [turnsEnded, agent, app.server, app.tool]);
 
   // A view that loaded and never asked to start: an error page, say, which
   // the frame holds and nobody should see.

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
-"""The MCP server: four tools over the list, and the view a host shows beside them.
+"""The MCP server: five tools over the list, and the view a host shows beside them.
 
 `show_todos` names the view in `_meta.ui.resourceUri`, as the MCP Apps extension
 (io.modelcontextprotocol/ui) has it, so a host that shows apps can open it. Every tool may be
@@ -113,6 +113,17 @@ def build_server(store: TodoStore, host: str = DEFAULT_HOST, port: int = DEFAULT
     )
     def add_todo(text: str) -> Annotated[CallToolResult, TodoList]:
         return _change(lambda: store.add(text))
+
+    @server.tool(
+        title="Edit a to-do",
+        description="Replace the text of the to-do with this id. Returns the whole list.",
+        annotations=ToolAnnotations(
+            readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
+        ),
+        meta=_ui(),
+    )
+    def edit_todo(id: str, text: str) -> Annotated[CallToolResult, TodoList]:
+        return _change(lambda: store.edit(id, text))
 
     @server.tool(
         title="Tick or untick a to-do",

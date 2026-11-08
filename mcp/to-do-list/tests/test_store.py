@@ -47,12 +47,38 @@ def test_remove_takes_the_item_out_and_its_id_is_not_reused(store):
     assert store.add("eggs")[-1] == Item("3", "eggs", False)
 
 
-@pytest.mark.parametrize("operation", ["toggle", "remove"])
-def test_an_unknown_id_is_refused_and_nothing_changes(store, operation):
+def test_edit_changes_the_text_and_keeps_the_id_the_order_and_done(store):
+    store.add("milk")
+    store.add("bread")
+    store.toggle("1")
+    assert store.edit("1", "  oat   milk ") == [
+        Item("1", "oat milk", True),
+        Item("2", "bread", False),
+    ]
+    assert TodoStore(store.path).items()[0] == Item("1", "oat milk", True)
+
+
+@pytest.mark.parametrize(
+    ("operation", "arguments"),
+    [("toggle", ("9",)), ("remove", ("9",)), ("edit", ("9", "eggs"))],
+)
+def test_an_unknown_id_is_refused_and_nothing_changes(store, operation, arguments):
     store.add("milk")
     before = store.path.read_bytes()
     with pytest.raises(StoreError, match="no to-do with id '9'"):
-        getattr(store, operation)("9")
+        getattr(store, operation)(*arguments)
+    assert store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("text", "why"),
+    [("  \t\n", "needs some text"), ("x" * (MAX_TEXT + 1), f"at most {MAX_TEXT} characters")],
+)
+def test_an_edit_to_a_bad_text_is_refused_and_nothing_changes(store, text, why):
+    store.add("milk")
+    before = store.path.read_bytes()
+    with pytest.raises(StoreError, match=why):
+        store.edit("1", text)
     assert store.path.read_bytes() == before
 
 

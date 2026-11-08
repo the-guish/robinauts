@@ -50,12 +50,14 @@
     app's own tool once the view says it is ready and hands it the result,
     relays the view's `tools/call` to the backend, answers `ping`, and
     refuses anything else. It reads only messages from that frame, and
-    tells the view when the theme changes. The view is hidden until the
-    first call has answered; a view that does not start, or a first call
-    that fails, is said so in its place, with "Try again". When a tool of
-    the app's server answers in the chat (`onToolResult`, `<server>__<tool>`),
-    the panel calls the app's own tool again and hands the view the result,
-    so what the agent changed shows at once.
+    tells the view when the theme changes. Each turn that ends has the
+    app's own tool called again and the new result handed to the view, and
+    so does each tool of the app's server that answers in the chat
+    (`onToolResult`, `<server>__<tool>`), so what the agent changes shows
+    while the turn goes on. Only the newest of these reads reaches the
+    view, and a call that fails leaves the view as it is. The view is
+    hidden until the first call has answered; a view that does not start,
+    or a first call that fails, is said so in its place, with "Try again".
   - The keyboard: Left and Right move between tabs, Delete closes one;
     the menu takes the arrow keys and closes on Escape.
 - The theme follows the operating system by default. A light / dark /

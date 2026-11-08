@@ -55,17 +55,23 @@ class TodoStore:
             return self._read()[1]
 
     def add(self, text: str) -> list[Item]:
-        text = " ".join(str(text).split())
-        if not text:
-            raise StoreError("a to-do needs some text")
-        if len(text) > MAX_TEXT:
-            raise StoreError(f"a to-do is at most {MAX_TEXT} characters")
+        text = self._cleaned(text)
         with self._lock:
             next_id, items = self._read()
             if len(items) >= MAX_ITEMS:
                 raise StoreError(f"the list is full: it holds at most {MAX_ITEMS} to-dos")
             items.append(Item(str(next_id), text, False))
             self._write(next_id + 1, items)
+            return items
+
+    def edit(self, item_id: str, text: str) -> list[Item]:
+        text = self._cleaned(text)
+        with self._lock:
+            next_id, items = self._read()
+            index = self._find(items, item_id)
+            item = items[index]
+            items[index] = Item(item.id, text, item.done)
+            self._write(next_id, items)
             return items
 
     def toggle(self, item_id: str) -> list[Item]:
@@ -83,6 +89,16 @@ class TodoStore:
             del items[self._find(items, item_id)]
             self._write(next_id, items)
             return items
+
+    @staticmethod
+    def _cleaned(text: str) -> str:
+        """The text with its spaces squeezed, or `StoreError` for one a to-do may not have."""
+        cleaned = " ".join(str(text).split())
+        if not cleaned:
+            raise StoreError("a to-do needs some text")
+        if len(cleaned) > MAX_TEXT:
+            raise StoreError(f"a to-do is at most {MAX_TEXT} characters")
+        return cleaned
 
     @staticmethod
     def _find(items: list[Item], item_id: str) -> int:

@@ -20,8 +20,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from playwright.sync_api import FrameLocator, Page, expect
+from playwright.sync_api import FrameLocator, Page, Route, expect
 
+from util.browser import send
+from util.fake_openai import FakeModel, ToolEchoModel
 from util.stack import ROOT, free_port
 
 pytestmark = [pytest.mark.io, pytest.mark.database]
@@ -62,6 +64,11 @@ def to_do_list(data: Path) -> Iterator[str]:
         finally:
             running.terminate()
             running.wait(timeout=10)
+
+
+@pytest.fixture
+def fake_model() -> FakeModel:
+    return ToolEchoModel("add_todo")
 
 
 @pytest.fixture
@@ -138,6 +145,18 @@ def test_side_panel_and_an_app(server: str, page: Page) -> None:
             {"id": "2", "text": "eggs", "done": False},
         ]
     }
+    # While a tick is on its way, the other to-dos stay as they are drawn. Disabled, a whole
+    # list of boxes greys out and comes back.
+    held: list[Route] = []
+    page.route("**/tools/toggle_todo", lambda route: held.append(route))
+    with page.expect_request("**/tools/toggle_todo"):
+        frame.get_by_role("checkbox", name="eggs").click()
+    expect(frame.get_by_role("checkbox", name="milk")).to_be_enabled()
+    held[0].continue_()
+    page.unroute("**/tools/toggle_todo")
+    expect(frame.get_by_text("2 to-dos, 2 done")).to_be_visible()
+    frame.get_by_role("checkbox", name="eggs").uncheck()
+    expect(frame.get_by_text("2 to-dos, 1 done")).to_be_visible()
 
     # 4. The view follows the theme on the screen.
     page.get_by_role("button", name="Dark").click()
@@ -164,3 +183,17 @@ def test_side_panel_and_an_app(server: str, page: Page) -> None:
     page.get_by_role("button", name="Expand the side panel").click()
     expect(view(page).get_by_label("New to-do")).to_have_value("bread")
     expect(view(page).get_by_text("2 to-dos, 1 done")).to_be_visible()
+
+    # 7. The agent adds to the list: the open view shows it when the turn ends, and keeps what
+    #    is typed in it. The first message moves the tab to the new conversation, so the second
+    #    is the one that reaches a view already on the screen.
+    agent_answers = page.locator('[data-role="assistant"]')
+    send(page, "butter")
+    expect(agent_answers.first).to_contain_text("butter")
+    expect(view(page).get_by_label("New to-do")).to_be_visible()
+    view(page).get_by_label("New to-do").fill("cake")
+    send(page, "jam")
+    expect(agent_answers.nth(1)).to_contain_text("jam")
+    expect(view(page).get_by_text("4 to-dos, 1 done")).to_be_visible()
+    expect(view(page).get_by_role("checkbox", name="jam")).not_to_be_checked()
+    expect(view(page).get_by_label("New to-do")).to_have_value("cake")
