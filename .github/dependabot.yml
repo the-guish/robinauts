@@ -48,6 +48,15 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "base-worker"
+  - package-ecosystem: "uv"
+    directory: "/extra-workers/claude-code-worker"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 10
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "claude-code-worker"
 
   # The actions this repository's workflows run, pinned to commit SHAs.
   - package-ecosystem: "github-actions"

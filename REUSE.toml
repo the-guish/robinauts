@@ -24,6 +24,7 @@ path = [
     "scripts/licence-fixtures.json",
     "extra-workers/README.md",
     "extra-workers/*/README.md",
+    "extra-workers/*/CREDENTIALS.md",
     "extra-workers/*/uv.lock",
 ]
 precedence = "aggregate"

@@ -105,16 +105,16 @@ What an internal platform team deploys and controls.
   the rest run in the server's.
 
   ```toml
-  [workers.claude-container]
+  [workers.claude]
   command = ["docker", "run", "-i", "--rm", "--network", "host",
              "-e", "ROBINAUTS_CONFIG", "-e", "ROBINAUTS_WORKER_NAME",
              "-e", "ROBINAUTS_WORKER_BROKER_URL",
              "-v", "/etc/robinauts/robinauts.toml:/etc/robinauts/robinauts.toml:ro",
-             "robinauts/claude-container"]
+             "robinauts-claude-code-worker"]
 
-  [agents.claude-container]
+  [agents.coder]
   engine = "claude-code"       # an engine this build does not have: allowed here alone
-  worker = "claude-container"
+  worker = "claude"
   ```
 
   The server does with the command what it does with its own worker module. It runs it with
