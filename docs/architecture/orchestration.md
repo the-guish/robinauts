@@ -48,26 +48,21 @@ run, for instance `["uv", "run", "--project", "/path/to/neorc", "neorc"]`.
 With sign-in on, the table is refused for now: neorc's manager would run with
 no authentication. On a cluster neorc is started on its own.
 
-### How a task reaches Robinauts
+### The orchestrator's secret
 
-neorc is a client of the API like any other, and signs in as any other does
-([sign-in.md](../specs/sign-in.md)): it has no credential of its own.
+At each start the server mints a secret for the orchestrator, `rbo_` and 32
+random bytes. It is never stored and dies with the process. The neorc worker
+alone is handed it, in `ROBINAUTS_API_TOKEN`, with the server's URL in
+`ROBINAUTS_API_URL`. Sent as `Authorization: Bearer`, it reaches every route
+under `/api/`:
 
-The worker alone is handed the server's URL, in `ROBINAUTS_API_URL`. In the
-local development mode it is handed nothing else. The mode has no sign-in:
-every request is its one user's, whoever sends it, and the loopback bind is
-what guards the server. The flows are the developer's, so a task's requests
-are the developer's too, and what a flow starts shows up in the UI as the
-browser's own.
+- in the local development mode, as its one user, whose workflows they are,
+  so what a flow starts shows up in the UI;
+- with sign-in on, as a user of the server's own (provider `!system`, subject
+  `orchestrator`), which no identity provider can name.
 
-Where sign-in is on, a request with no credential is 401. A neorc started
-there is given, in `ROBINAUTS_API_TOKEN`, an API token a signed-in person
-minted for themselves, and the handlers send it as a bearer: what they start
-is that person's, and the token is checked against the allow list on every
-use, as every token is. That is the cluster's case, where neorc is started on
-its own. A token minted by an operator for a user of the platform's own is
-listed in sign-in.md as not there yet, and is decided when that case is
-built. The worker started here is handed no token, whatever the shell had.
+It never mints or removes a credential (403), and any other `rbo_` bearer is
+401.
 
 None of neorc's processes is handed what the configuration keeps from
 everything but the server: the model providers' keys, the tool servers'
