@@ -40,7 +40,8 @@ Start the server with neorc's database:
 NEORC_DATABASE_URL=postgresql://localhost/neorc robinauts start --dev-no-sign-in
 ```
 
-Then start a run, which opens a conversation in the UI:
+Then start a run. It plays the guessing game between two conversations,
+which show up in the UI, and needs a model whose id or title holds `haiku`:
 
 ```bash
 curl -X POST http://127.0.0.1:8420/flows/guess_number/runs -H 'content-type: application/json' -d '{"inputs": {}}'

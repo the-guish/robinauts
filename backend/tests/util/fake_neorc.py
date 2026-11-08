@@ -8,8 +8,9 @@ server can tell, and writes what each did to the JSON-lines file ``FAKE_NEORC_LO
 - ``manager start --port P``: answers ``GET /health`` on ``127.0.0.1:P`` until SIGTERM;
 - ``flows upload DIR``: says it stored each flow file in ``DIR`` and exits;
 - ``scheduler start``: waits for SIGTERM;
-- ``worker start --code-location DIR``: runs the guessing flow's one task with the handlers in
-  ``DIR``, as neorc's worker would once a run is started, then waits for SIGTERM.
+- ``worker start --code-location DIR``: opens the guessing flow's guesser conversation with
+  the handlers in ``DIR``, as neorc's worker would once a run is started, then waits for
+  SIGTERM.
 
 Run as ``python fake_neorc.py <command> ...``; it imports nothing of Robinauts."""
 
@@ -71,7 +72,7 @@ def main(arguments: list[str]) -> int:
         checked = ("ECHO_API_KEY", "ROBINAUTS_CONFIG", "ROBINAUTS_API_TOKEN")
         record(
             step=step,
-            result=robinauts_tasks.start_guessing_session(),
+            result=robinauts_tasks.open_guesser(),
             api_url=os.environ["ROBINAUTS_API_URL"],
             visible=sorted(k for k in checked if k in os.environ),
         )
