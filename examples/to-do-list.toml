@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+
+# An agent with a to-do list: the MCP server in mcp/to-do-list/, started beside the
+# platform with its defaults (mcp/to-do-list/README.md). The list's view opens in the
+# side panel.
+
+[model_providers.anthropic]
+kind = "anthropic"
+api_key_env = "ANTHROPIC_API_KEY"
+
+[models.haiku]
+provider = "anthropic"
+name = "claude-haiku-4-5"
+title = "Claude Haiku 4.5"
+max_output_tokens = 1024
+
+# The server asks for no credential, so none is sent. It listens on the loopback address.
+[tool_servers.todo]
+url = "http://127.0.0.1:8765/mcp"
+auth = "none"
+
+[agents.planner]
+title = "Planner"
+system_prompt = "You keep the user's to-do list. Show it, add to it and tick items off when asked."
+model = "haiku"
+engine = "pydantic-ai"
+tools = ["todo"]

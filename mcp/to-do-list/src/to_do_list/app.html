@@ -1,0 +1,424 @@
+<!doctype html>
+<!--
+SPDX-License-Identifier: Apache-2.0
+Copyright The Robinauts Authors
+
+The to-do list's view, for hosts that show MCP Apps (io.modelcontextprotocol/ui).
+One document: its style and its script are inline, and it names no other file, no
+address and no font, so it runs under a policy of default-src 'none' in a sandbox
+that allows scripts alone. It talks to the host and to nothing else, by postMessage,
+in JSON-RPC 2.0. It keeps nothing: the list is the server's, and every change goes
+through the host to the server and is drawn again from the server's answer.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>To-do list</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #59636e;
+  --line: #d1d9e0;
+  --field: #ffffff;
+  --accent: #0b6bcb;
+  --accent-fg: #ffffff;
+  --danger: #c4314b;
+  --focus: #0b6bcb;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #16181d;
+  --fg: #e6e8eb;
+  --muted: #9aa4af;
+  --line: #3a4049;
+  --field: #1f232a;
+  --accent: #4c9ef0;
+  --accent-fg: #0d1117;
+  --danger: #ff7b8b;
+  --focus: #4c9ef0;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --bg: #16181d;
+    --fg: #e6e8eb;
+    --muted: #9aa4af;
+    --line: #3a4049;
+    --field: #1f232a;
+    --accent: #4c9ef0;
+    --accent-fg: #0d1117;
+    --danger: #ff7b8b;
+    --focus: #4c9ef0;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); }
+body {
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  padding: 12px;
+}
+h1 { font-size: 15px; margin: 0 0 10px; }
+.add label { display: block; font-weight: 600; margin-bottom: 4px; }
+.row { display: flex; gap: 6px; }
+input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--fg);
+  font: inherit;
+}
+button {
+  font: inherit;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.add button {
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+button:disabled, input:disabled { opacity: 0.6; cursor: default; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.summary { color: var(--muted); margin: 10px 0 4px; }
+.status { min-height: 1.45em; margin: 0; color: var(--danger); }
+.status.ok { color: var(--muted); }
+ul { list-style: none; margin: 0; padding: 0; }
+li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+li label { flex: 1; overflow-wrap: anywhere; cursor: pointer; }
+li.done label { color: var(--muted); text-decoration: line-through; }
+input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.delete {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  width: 28px;
+  height: 28px;
+  font-size: 18px;
+  line-height: 1;
+}
+.delete:hover { color: var(--danger); border-color: var(--line); }
+.empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>To-do list</h1>
+  <form class="add" id="add" aria-label="Add a to-do">
+    <label for="new-text">New to-do</label>
+    <div class="row">
+      <input id="new-text" type="text" maxlength="500" autocomplete="off" disabled>
+      <button id="add-button" type="button" disabled>Add</button>
+    </div>
+  </form>
+  <p class="summary" id="summary">Loading&hellip;</p>
+  <p class="status" id="status" role="status" aria-live="polite"></p>
+  <ul id="list" aria-labelledby="summary"></ul>
+</main>
+<script>
+(function () {
+  "use strict";
+
+  var PROTOCOL_VERSION = "2025-06-18";
+  var TIMEOUT_MS = 30000;
+  var pending = new Map();
+  var nextId = 1;
+  var items = null;
+  var busy = false;
+
+  var form = document.getElementById("add");
+  var input = document.getElementById("new-text");
+  var addButton = document.getElementById("add-button");
+  var summary = document.getElementById("summary");
+  var status = document.getElementById("status");
+  var list = document.getElementById("list");
+
+  /* The wire: JSON-RPC 2.0 over postMessage, with the host alone. A sandboxed view has an
+     opaque origin and does not know the host's, so it posts to any origin and reads only
+     what comes from its own parent window. */
+  function send(message) {
+    window.parent.postMessage(message, "*");
+  }
+
+  function request(method, params) {
+    var id = nextId++;
+    return new Promise(function (resolve, reject) {
+      var timer = setTimeout(function () {
+        pending.delete(id);
+        reject(new Error("the host did not answer " + method));
+      }, TIMEOUT_MS);
+      pending.set(id, { resolve: resolve, reject: reject, timer: timer });
+      send({ jsonrpc: "2.0", id: id, method: method, params: params });
+    });
+  }
+
+  function notify(method, params) {
+    send({ jsonrpc: "2.0", method: method, params: params || {} });
+  }
+
+  function answer(id, result) {
+    send({ jsonrpc: "2.0", id: id, result: result });
+  }
+
+  function refuse(id, method) {
+    send({ jsonrpc: "2.0", id: id, error: { code: -32601, message: "Method not found: " + method } });
+  }
+
+  window.addEventListener("message", function (event) {
+    if (event.source !== window.parent) {
+      return;
+    }
+    var message = event.data;
+    if (!message || typeof message !== "object" || message.jsonrpc !== "2.0") {
+      return;
+    }
+    if (typeof message.method === "string") {
+      if (message.id !== undefined && message.id !== null) {
+        onRequest(message);
+      } else {
+        onNotification(message.method, message.params || {});
+      }
+      return;
+    }
+    var call = pending.get(message.id);
+    if (!call) {
+      return;
+    }
+    pending.delete(message.id);
+    clearTimeout(call.timer);
+    if (message.error) {
+      call.reject(new Error(message.error.message || "the host refused the request"));
+    } else {
+      call.resolve(message.result);
+    }
+  });
+
+  function onRequest(message) {
+    if (message.method === "ui/resource-teardown" || message.method === "ping") {
+      answer(message.id, {});
+    } else {
+      refuse(message.id, message.method);
+    }
+  }
+
+  function onNotification(method, params) {
+    if (method === "ui/notifications/tool-result") {
+      if (!showResult(params) && items === null) {
+        summary.textContent = "";
+      }
+    } else if (method === "ui/notifications/host-context-changed") {
+      applyContext(params);
+    }
+  }
+
+  /* The host's context: the theme is all this view reads of it. */
+  function applyContext(context) {
+    if (context && (context.theme === "light" || context.theme === "dark")) {
+      document.documentElement.setAttribute("data-theme", context.theme);
+    }
+  }
+
+  function say(text, ok) {
+    status.textContent = text;
+    status.className = ok ? "status ok" : "status";
+  }
+
+  /* A tool's result, from the host's notification or from a call of the view's own. */
+  function showResult(result, key) {
+    if (!result || result.isError) {
+      say(errorText(result));
+      return false;
+    }
+    var structured = result.structuredContent;
+    if (!structured || !Array.isArray(structured.items)) {
+      say("The server answered without a list.");
+      return false;
+    }
+    items = structured.items.map(function (item) {
+      return { id: String(item.id), text: String(item.text), done: Boolean(item.done) };
+    });
+    render(key);
+    return true;
+  }
+
+  function errorText(result) {
+    var blocks = (result && result.content) || [];
+    for (var i = 0; i < blocks.length; i++) {
+      if (blocks[i] && blocks[i].type === "text" && blocks[i].text) {
+        return blocks[i].text;
+      }
+    }
+    return "The to-do list could not be changed.";
+  }
+
+  function focusedKey() {
+    var element = document.activeElement;
+    return element && element.getAttribute ? element.getAttribute("data-key") : null;
+  }
+
+  /* One call at a time: the controls are disabled while it runs, and the one that had the
+     focus gets it back once the list is drawn again. */
+  function callTool(name, args) {
+    if (busy || items === null) {
+      return Promise.resolve(false);
+    }
+    var key = focusedKey();
+    setBusy(true);
+    say("", true);
+    return request("tools/call", { name: name, arguments: args }).then(
+      function (result) {
+        setBusy(false);
+        var ok = showResult(result, key);
+        if (!ok) {
+          render(key);
+        }
+        return ok;
+      },
+      function (error) {
+        setBusy(false);
+        say(error.message);
+        render(key);
+        return false;
+      }
+    );
+  }
+
+  function setBusy(value) {
+    busy = value;
+    var controls = document.querySelectorAll("input, button");
+    for (var i = 0; i < controls.length; i++) {
+      controls[i].disabled = value || items === null;
+    }
+  }
+
+  /* Drawing: built from elements and text nodes, never from markup, so a to-do's text is
+     only ever text. The control named by `key` is given the focus again after a redraw. */
+  function render(key) {
+    key = key || focusedKey();
+    input.disabled = items === null || busy;
+    addButton.disabled = items === null || busy;
+    if (items === null) {
+      return;
+    }
+    var done = items.filter(function (item) { return item.done; }).length;
+    summary.textContent = items.length === 0
+      ? "Nothing to do."
+      : items.length + (items.length === 1 ? " to-do, " : " to-dos, ") + done + " done";
+    list.textContent = "";
+    items.forEach(function (item) {
+      var row = document.createElement("li");
+      row.className = item.done ? "done" : "";
+
+      var box = document.createElement("input");
+      box.type = "checkbox";
+      box.id = "todo-" + item.id;
+      box.checked = item.done;
+      box.disabled = busy;
+      box.setAttribute("data-key", "toggle-" + item.id);
+      box.addEventListener("change", function () {
+        callTool("toggle_todo", { id: item.id });
+      });
+
+      var label = document.createElement("label");
+      label.htmlFor = box.id;
+      label.textContent = item.text;
+
+      var remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "delete";
+      remove.textContent = "×";
+      remove.disabled = busy;
+      remove.setAttribute("aria-label", "Delete: " + item.text);
+      remove.setAttribute("title", "Delete");
+      remove.setAttribute("data-key", "delete-" + item.id);
+      remove.addEventListener("click", function () {
+        var index = items.indexOf(item);
+        callTool("remove_todo", { id: item.id }).then(function (ok) {
+          if (ok) {
+            say("Removed “" + item.text + "”.", true);
+            focusAfterRemoval(index);
+          }
+        });
+      });
+
+      row.appendChild(box);
+      row.appendChild(label);
+      row.appendChild(remove);
+      list.appendChild(row);
+    });
+    if (key) {
+      var again = document.querySelector('[data-key="' + key + '"]');
+      if (again && !again.disabled) {
+        again.focus();
+      }
+    }
+  }
+
+  function focusAfterRemoval(index) {
+    var rows = list.querySelectorAll(".delete");
+    var next = rows[Math.min(index, rows.length - 1)];
+    (next || input).focus();
+  }
+
+  function add() {
+    var text = input.value.trim();
+    if (!text) {
+      say("Write the to-do first.");
+      input.focus();
+      return;
+    }
+    callTool("add_todo", { text: text }).then(function (ok) {
+      if (ok) {
+        input.value = "";
+        say("Added “" + text + "”.", true);
+      }
+      input.focus();
+    });
+  }
+
+  /* The sandbox has no allow-forms, so a form is never submitted and fires no submit event:
+     the button and the Enter key call add() themselves. */
+  addButton.addEventListener("click", add);
+  input.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      add();
+    }
+  });
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+  });
+
+  /* The handshake: ui/initialize, then ui/notifications/initialized. The host then sends the
+     list as ui/notifications/tool-result. */
+  request("ui/initialize", {
+    protocolVersion: PROTOCOL_VERSION,
+    appInfo: { name: "to-do-list", version: "0.1.0" },
+    appCapabilities: {}
+  }).then(
+    function (result) {
+      applyContext(result && result.hostContext);
+      notify("ui/notifications/initialized", {});
+    },
+    function (error) {
+      summary.textContent = "";
+      say("The host did not start this view: " + error.message);
+    }
+  );
+})();
+</script>
+</body>
+</html>
