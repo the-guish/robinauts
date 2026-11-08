@@ -2,23 +2,30 @@
 # Copyright The Robinauts Authors
 #
 # A guessing game between two Robinauts conversations (robinauts_tasks.py).
-# The game, on a Haiku model, picks a secret number between 1 and 10 and judges
-# each guess; the guesser is asked to guess. Each round carries the guesser's
-# latest answer to the game, wrapped in "here is the guess: ", and the game's
-# verdict back to the guesser as it is, until a hit or ten tries.
+# A task draws the secret number between 1 and 10. The game, on a Haiku model,
+# is told it and judges each guess; the guesser is asked to guess. Each round
+# carries the guesser's latest answer to the game, wrapped in "here is the
+# guess: ", and the game's verdict back to the guesser as it is, until a hit or
+# ten tries.
 #
 # A round reads each latest answer from its conversation rather than from the
 # round before: steps of one loop cannot wait on each other's earlier
 # iterations, which would be a cycle.
 name: guess_number
-version: 0.2.0
+version: 0.3.0
 
 output: tasks.summarize
 
 steps:
+  pick_number:
+    queue: default
+    handler: robinauts_tasks:pick_number
+
   open_game:
     queue: default
     handler: robinauts_tasks:open_game
+    params:
+      number: tasks.pick_number
     fixed_params:
       model: haiku
 
@@ -61,4 +68,5 @@ steps:
     queue: default
     handler: robinauts_tasks:summarize
     params:
+      number: tasks.pick_number
       judged: tasks.judge

@@ -16,8 +16,11 @@ worker needs nothing installed beside neorc itself.
 
 The guessing game (``flows/guess_number.yaml``) is played between two conversations:
 
-- the **game**, on a Haiku model, which picks a secret number and judges every guess;
+- the **game**, on a Haiku model, which is told the secret number and judges every guess;
 - the **guesser**, which is asked to guess, and is told each verdict.
+
+``pick_number`` draws the secret number before either conversation opens. neorc keeps it as
+that task's output, so the number exists outside the model.
 
 The handlers carry each answer from one conversation to the other as it is. The one thing
 they add is ``"here is the guess: "`` before a guess they hand the game. A turn is waited for
@@ -30,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 import urllib.request
 from collections.abc import Mapping
@@ -39,12 +43,12 @@ API_URL_VARIABLE = "ROBINAUTS_API_URL"
 API_TOKEN_VARIABLE = "ROBINAUTS_API_TOKEN"
 
 GAME_PROMPT = (
-    "Let's play a guessing game. Pick a random whole number between 1 and 10 inclusive and"
-    " keep it secret: do not write it until the game is over. Another player will try to guess"
+    "Let's play a guessing game. Your secret number is {number}. Keep it secret: do not write"
+    " it until the game is over. Another player will try to guess"
     ' it. Each of my next messages carries their reply, after "here is the guess:". Answer'
     " each one with the verdict alone: HIT if the guess is your number, TOO LOW if it is lower"
     " than your number, TOO HIGH if it is higher. Once they hit it, the game is over. Reply"
-    " READY once you have picked your number."
+    " READY when you are set."
 )
 """What opens the game's conversation: the secret number, and how to judge the guesses."""
 
@@ -150,10 +154,20 @@ def _open(text: str, *, model: str | None = None) -> dict[str, str]:
     }
 
 
-def open_game(model: str) -> dict[str, str]:
-    """The game's conversation, on the first model whose id or title holds ``model``: asked
-    to pick a secret number, and told how to judge the guesses."""
-    return _open(GAME_PROMPT, model=model_named(_get("/api/models")["items"], model))
+def pick_number() -> int:
+    """The secret number of one game, between 1 and 10 inclusive."""
+    return random.randint(1, 10)
+
+
+def game_prompt(number: int) -> str:
+    """What opens the game's conversation, with its secret number."""
+    return GAME_PROMPT.format(number=number)
+
+
+def open_game(model: str, number: int) -> dict[str, str]:
+    """The game's conversation, on the first model whose id or title holds ``model``: told
+    the secret number, and how to judge the guesses."""
+    return _open(game_prompt(number), model=model_named(_get("/api/models")["items"], model))
 
 
 def open_guesser() -> dict[str, str]:
@@ -189,6 +203,12 @@ def relay_verdict(
     return _say(guesser["conversation_id"], judged[-1]["verdict"])
 
 
-def summarize(judged: list[dict[str, Any]]) -> dict[str, Any]:
-    """What the run returns: whether the guesser won, in how many tries, and every round."""
-    return {"won": bool(judged[-1]["hit"]), "tries": len(judged), "rounds": judged}
+def summarize(number: int, judged: list[dict[str, Any]]) -> dict[str, Any]:
+    """What the run returns: the secret number, whether the guesser won, in how many tries,
+    and every round."""
+    return {
+        "number": number,
+        "won": bool(judged[-1]["hit"]),
+        "tries": len(judged),
+        "rounds": judged,
+    }

@@ -143,4 +143,15 @@ def test_the_run_says_whether_the_guesser_won_and_in_how_many_tries(tasks: Modul
         {"guess": "5", "verdict": "TOO LOW", "hit": False},
         {"guess": "8", "verdict": "HIT", "hit": True},
     ]
-    assert tasks.summarize(judged) == {"won": True, "tries": 2, "rounds": judged}
+    assert tasks.summarize(9, judged) == {"number": 9, "won": True, "tries": 2, "rounds": judged}
+
+
+def test_the_number_is_a_whole_number_between_1_and_10(tasks: ModuleType) -> None:
+    assert {tasks.pick_number() for _ in range(1000)} == set(range(1, 11))
+
+
+@pytest.mark.parametrize(("number", "told"), [(1, "number is 1."), (10, "number is 10.")])
+def test_the_game_is_told_the_number_it_keeps_secret(
+    tasks: ModuleType, number: int, told: str
+) -> None:
+    assert told in tasks.game_prompt(number)
