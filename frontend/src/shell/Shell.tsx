@@ -28,7 +28,7 @@ import type { Session } from "../session/session";
 import { signOut as endSession } from "../session/session";
 import { shownTitle } from "../conversation/conversation";
 import { AppTab } from "../side/AppTab";
-import { appOf, appOffers, useApps } from "../side/apps";
+import { appOf, appOffers, toolResults, useApps } from "../side/apps";
 import { SIDE_ID, SidePanel } from "../side/SidePanel";
 import { carryOpenTabs, NEW_CHAT_TABS, type TabRenderers } from "../side/tabs";
 import type { Conversation } from "../conversation/conversation";
@@ -339,12 +339,15 @@ export function Shell({
   // conversation's agent, or on the empty chat the one picked for it.
   const sideAgent = current === null ? agentId : conversationAgent;
   const apps = useApps(sideAgent);
+  const [results] = useState(toolResults);
   const renderers: TabRenderers = {
     app: (offer) => {
       const app = appOf(apps, offer);
       if (sideAgent === null || app === undefined) return null;
       // Keyed by the agent: the same app of another agent is another view.
-      return <AppTab key={sideAgent} agent={sideAgent} app={app} />;
+      return (
+        <AppTab key={sideAgent} agent={sideAgent} app={app} results={results} />
+      );
     },
   };
   const offers = useMemo(() => appOffers(apps), [apps]);
@@ -481,6 +484,7 @@ export function Shell({
                 onConversationStarted={startedConversation}
                 onConversationOpened={conversationOpened}
                 onTurnEnded={history.refresh}
+                onToolResult={results.publish}
                 welcome={welcome}
               />
             </>

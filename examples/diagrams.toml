@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+
+# An agent that draws diagrams: the MCP server in mcp/diagrams/, started beside the
+# platform with its defaults (mcp/diagrams/README.md). The diagram's view opens in the
+# side panel, and redraws, animated, each time the agent changes the diagram.
+
+[model_providers.anthropic]
+kind = "anthropic"
+api_key_env = "ANTHROPIC_API_KEY"
+
+[models.haiku]
+provider = "anthropic"
+name = "claude-haiku-4-5"
+title = "Claude Haiku 4.5"
+max_output_tokens = 2048
+
+# The server asks for no credential, so none is sent. It listens on the loopback address.
+[tool_servers.diagrams]
+url = "http://127.0.0.1:8766/mcp"
+auth = "none"
+
+[agents.drawer]
+title = "Drawer"
+system_prompt = "You draw diagrams in the side panel: rectangles joined by arrows. Move or pin a node only when the user asks."
+model = "haiku"
+engine = "pydantic-ai"
+tools = ["diagrams"]

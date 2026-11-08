@@ -469,10 +469,10 @@ test("a conversation that is not here has no thread to draw", async () => {
   expect(screen.queryByRole("textbox", { name: "Message input" })).toBeNull();
 });
 
-test("the seam is a component and eight names, and nothing of a library", () => {
+test("the seam is a component and nine names, and nothing of a library", () => {
   // **A claim about the types, checked by the type checker.** `tsc -b` reads
   // this file, so the four assertions below fail the build rather than a
-  // run: the seam is exactly these eight names, they are exactly these types,
+  // run: the seam is exactly these nine names, they are exactly these types,
   // and none of them comes from a chat library (ADR 0001, the discard test).
   expectTypeOf<ChatProps>().toEqualTypeOf<{
     conversationId: ConversationId | null;
@@ -482,9 +482,10 @@ test("the seam is a component and eight names, and nothing of a library", () => 
     onConversationOpened?: (conversation: Conversation) => void;
     onTurnEnded?: () => void;
     onModelRefused?: (modelId: ModelId) => void;
+    onToolResult?: (name: string) => void;
     welcome?: ReactNode;
   }>();
-  // A ninth name does not belong to it, whatever it is called.
+  // A tenth name does not belong to it, whatever it is called.
   const extra = {
     conversationId: null,
     agentId: null,

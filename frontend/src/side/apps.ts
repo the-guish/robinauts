@@ -86,3 +86,28 @@ export function viewUrl(agent: string, app: App): string {
   const tool = encodeURIComponent(app.tool);
   return `/api/apps/${server}/${tool}/view?agent=${encodeURIComponent(agent)}`;
 }
+
+/**
+ * The tools that answered in the chat, by full name (`<server>__<tool>`),
+ * heard by the open app tabs: one per shell, handed to the chat's
+ * `onToolResult` and to each `AppTab`.
+ */
+export interface ToolResults {
+  readonly publish: (name: string) => void;
+  readonly subscribe: (heard: (name: string) => void) => () => void;
+}
+
+export function toolResults(): ToolResults {
+  const listeners = new Set<(name: string) => void>();
+  return {
+    publish: (name) => {
+      for (const heard of listeners) heard(name);
+    },
+    subscribe: (heard) => {
+      listeners.add(heard);
+      return () => {
+        listeners.delete(heard);
+      };
+    },
+  };
+}

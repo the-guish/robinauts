@@ -11,7 +11,7 @@ import { expect, test, vi } from "vitest";
 
 import { json, refusal, stubFetch, type Call } from "../test/api";
 import { AppTab, START_TIMEOUT_MS } from "./AppTab";
-import type { App } from "./apps";
+import { type App, type ToolResults, toolResults } from "./apps";
 import { PROTOCOL_VERSION } from "./bridge";
 
 const APP: App = {
@@ -33,8 +33,8 @@ function answering(answer: (call: Call) => Response = () => json(LIST)) {
 }
 
 /** The tab, its frame, and what the frame's window is posted. */
-function tab() {
-  render(<AppTab agent="planner" app={APP} />);
+function tab(results?: ToolResults) {
+  render(<AppTab agent="planner" app={APP} results={results} />);
   const frame = screen.getByTitle<HTMLIFrameElement>("To-do list");
   const view = frame.contentWindow;
   if (view === null) throw new Error("the frame has no window");
@@ -56,8 +56,8 @@ const sent = (posted: ReturnType<typeof tab>["posted"]) =>
     return message as Record<string, unknown>;
   });
 
-async function started() {
-  const drawn = tab();
+async function started(results?: ToolResults) {
+  const drawn = tab(results);
   from(drawn.view, {
     jsonrpc: "2.0",
     id: 1,
@@ -230,4 +230,23 @@ test("a view that loads and never asks to start is said not to have", () => {
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("a tool of the app's server answering in the chat hands the view the app's answer again", async () => {
+  const fetch = answering();
+  const results = toolResults();
+  const { posted } = await started(results);
+  act(() => {
+    results.publish("other__show_todos");
+    results.publish("todo__add_todo");
+  });
+  await waitFor(() => {
+    expect(sent(posted)).toHaveLength(4);
+  });
+  expect(sent(posted)[3]).toEqual({
+    jsonrpc: "2.0",
+    method: "ui/notifications/tool-result",
+    params: LIST,
+  });
+  expect(fetch).toHaveBeenCalledTimes(2);
 });

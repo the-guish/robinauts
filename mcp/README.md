@@ -21,3 +21,4 @@ The servers:
 | folder | what it serves | state |
 | --- | --- | --- |
 | [to-do-list/](to-do-list/README.md) | a to-do list: four tools and a view for the side panel (MCP Apps) | one JSON file |
+| [diagrams/](diagrams/README.md) | a diagram of rectangles and arrows: the server lays it out, the side panel draws it animated (MCP Apps) | in memory |

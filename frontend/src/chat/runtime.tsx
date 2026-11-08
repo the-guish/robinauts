@@ -706,10 +706,18 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     afterLoss: boolean,
   ): Promise<void> {
     let lost: string | null = null;
+    // A result names its call alone; the call named the tool.
+    const tools = new Map<string, string>();
     try {
       for await (const { event } of attached.events) {
         if (control.signal.aborted) return;
         dispatch({ kind: "event", event });
+        if (event.type === "TOOL_CALL_START") {
+          tools.set(event.toolCallId, event.toolCallName);
+        } else if (event.type === "TOOL_CALL_RESULT") {
+          const name = tools.get(event.toolCallId);
+          if (name !== undefined) props.onToolResult?.(name);
+        }
       }
     } catch {
       if (control.signal.aborted) return;

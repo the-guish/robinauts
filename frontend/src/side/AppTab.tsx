@@ -18,6 +18,10 @@
  * server answered. Tool calls go to the backend, which relays them to the
  * server with its credential (`POST /api/apps/<server>/tools/<tool>`).
  *
+ * **Changes.** When a tool of the app's server answers in the chat, the
+ * app's own tool is called again and the view is handed its answer, so what
+ * the agent changed shows at once.
+ *
  * **Loading.** The view is hidden until the app's own tool has answered,
  * and a view that never starts, or a first call that fails, is said so in
  * its place, with a way to try again.
@@ -25,7 +29,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { detailOf, request } from "../api/client";
-import { type App, viewUrl } from "./apps";
+import { type App, type ToolResults, viewUrl } from "./apps";
 import {
   callToolResult,
   dispatch,
@@ -84,7 +88,11 @@ export function useHostTheme(): HostTheme {
   );
 }
 
-export function AppTab({ agent, app }: Readonly<{ agent: string; app: App }>) {
+export function AppTab({
+  agent,
+  app,
+  results,
+}: Readonly<{ agent: string; app: App; results?: ToolResults | undefined }>) {
   // "Try again" is a new frame, and a new handshake with it.
   const [attempt, setAttempt] = useState(0);
   return (
@@ -92,6 +100,7 @@ export function AppTab({ agent, app }: Readonly<{ agent: string; app: App }>) {
       key={attempt}
       agent={agent}
       app={app}
+      results={results}
       onRetry={() => {
         setAttempt((count) => count + 1);
       }}
@@ -107,8 +116,14 @@ type FrameState =
 function AppFrame({
   agent,
   app,
+  results,
   onRetry,
-}: Readonly<{ agent: string; app: App; onRetry: () => void }>) {
+}: Readonly<{
+  agent: string;
+  app: App;
+  results?: ToolResults | undefined;
+  onRetry: () => void;
+}>) {
   const theme = useHostTheme();
   const frame = useRef<HTMLIFrameElement>(null);
   const [state, setState] = useState<FrameState>({ status: "loading" });
@@ -184,11 +199,24 @@ function AppFrame({
       }
     };
     window.addEventListener("message", onMessage);
+    const deaf = results?.subscribe((name) => {
+      if (phase.current !== "running" || !name.startsWith(`${app.server}__`))
+        return;
+      call(app.tool, {}).then(
+        (answer) => {
+          post(target, toolResult(answer));
+        },
+        () => {
+          // The view keeps what it shows; the next change asks again.
+        },
+      );
+    });
     return () => {
       window.removeEventListener("message", onMessage);
+      deaf?.();
       dropped.abort();
     };
-  }, [agent, app.server, app.tool]);
+  }, [agent, app.server, app.tool, results]);
 
   // A view that loaded and never asked to start: an error page, say, which
   // the frame holds and nobody should see.

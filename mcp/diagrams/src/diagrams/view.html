@@ -1,0 +1,230 @@
+<!doctype html>
+<!--
+SPDX-License-Identifier: Apache-2.0
+Copyright The Robinauts Authors
+
+The diagram's view, for hosts that show MCP Apps (io.modelcontextprotocol/ui).
+One document: its style and its script are inline, and it names no other file, no
+address and no font, so it runs under a policy of default-src 'none' in a sandbox
+that allows scripts alone. It talks to the host and to nothing else, by postMessage,
+in JSON-RPC 2.0. It lays nothing out: the server does, and the view draws what it is
+given, animated: the items the last change touched, one after another, over 2 to 6
+seconds; the whole diagram, the first time.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diagram</title>
+<style>
+:root { color-scheme: light; --bg: #fff; --fg: #1f2328; --muted: #59636e; --node: #f6f8fa;
+  --line: #8c959f; --accent: #0b6bcb; }
+:root[data-theme="dark"] { color-scheme: dark; --bg: #16181d; --fg: #e6e8eb; --muted: #9aa4af;
+  --node: #1f232a; --line: #6e7681; --accent: #4c9ef0; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) { color-scheme: dark; --bg: #16181d; --fg: #e6e8eb; --muted: #9aa4af;
+    --node: #1f232a; --line: #6e7681; --accent: #4c9ef0; }
+}
+html, body { margin: 0; background: var(--bg); color: var(--fg); }
+body { font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding: 8px; }
+svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.node rect { fill: var(--node); stroke: var(--accent); stroke-width: 1.5; }
+.node.pinned rect { stroke-dasharray: 5 3; }
+.node text { fill: var(--fg); font-size: 13px; text-anchor: middle; dominant-baseline: central; }
+.edge line { stroke: var(--line); stroke-width: 1.5; fill: none; }
+.edge text { fill: var(--muted); font-size: 11px; text-anchor: middle; paint-order: stroke;
+  stroke: var(--bg); stroke-width: 4px; }
+#arrow path { fill: var(--line); }
+.status { color: var(--muted); margin: 4px 0; }
+</style>
+</head>
+<body>
+<p class="status" id="status" role="status" aria-live="polite">Loading&hellip;</p>
+<svg id="canvas" role="img" aria-labelledby="status" viewBox="0 0 0 0">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8"
+      orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <g id="edges"></g><g id="nodes"></g>
+</svg>
+<script>
+(() => {
+  "use strict";
+  const SVG = "http://www.w3.org/2000/svg";
+  const LINE_HEIGHT = 17;
+  const status = document.getElementById("status");
+  const canvas = document.getElementById("canvas");
+  const layers = { nodes: document.getElementById("nodes"), edges: document.getElementById("edges") };
+
+  /* The wire: JSON-RPC 2.0 over postMessage, with the parent window alone. */
+  const pending = new Map();
+  let nextId = 1;
+  const send = (message) => window.parent.postMessage(message, "*");
+  const request = (method, params) => new Promise((resolve, reject) => {
+    const id = nextId++;
+    pending.set(id, { resolve, reject });
+    send({ jsonrpc: "2.0", id, method, params });
+  });
+  window.addEventListener("message", (event) => {
+    const message = event.data;
+    if (event.source !== window.parent || !message || message.jsonrpc !== "2.0") return;
+    if (typeof message.method === "string") {
+      if (message.id === undefined || message.id === null) {
+        if (message.method === "ui/notifications/tool-result") show(message.params);
+        if (message.method === "ui/notifications/host-context-changed") theme(message.params);
+      } else if (message.method === "ping" || message.method === "ui/resource-teardown") {
+        send({ jsonrpc: "2.0", id: message.id, result: {} });
+      } else {
+        send({ jsonrpc: "2.0", id: message.id,
+          error: { code: -32601, message: "Method not found: " + message.method } });
+      }
+      return;
+    }
+    const call = pending.get(message.id);
+    if (!call) return;
+    pending.delete(message.id);
+    message.error ? call.reject(new Error(message.error.message)) : call.resolve(message.result);
+  });
+
+  function theme(context) {
+    if (context && (context.theme === "light" || context.theme === "dark")) {
+      document.documentElement.setAttribute("data-theme", context.theme);
+    }
+  }
+
+  /* What is on the screen: an element and its box per node, an element per arrow. */
+  const nodes = new Map();
+  const edges = new Map();
+  let revision = null;
+  let running = null;
+
+  function element(name, attributes, parent) {
+    const created = document.createElementNS(SVG, name);
+    for (const [key, value] of Object.entries(attributes)) created.setAttribute(key, value);
+    if (parent) parent.appendChild(created);
+    return created;
+  }
+
+  function show(result) {
+    const data = result && result.structuredContent;
+    if (!data || result.isError || !Array.isArray(data.nodes)) return;
+    if (data.revision === revision) return;
+    const steps = revision === null ? data.order : data.changed;
+    revision = data.revision;
+    status.textContent = data.nodes.length
+      ? "Diagram: " + data.nodes.length + " nodes, " + data.edges.length + " arrows."
+      : "The diagram is empty.";
+    canvas.setAttribute("viewBox", "0 0 " + data.width + " " + data.height);
+    canvas.style.maxWidth = data.width + "px";
+    animate(data, steps);
+  }
+
+  /* One change, animated. Each item it touched gets a slot of its own, in the server's order:
+     a new node fades in, a node that was there glides, a new arrow is drawn from its start.
+     Items it did not touch glide to where the layout puts them now; items gone fade out. */
+  function animate(data, steps) {
+    if (running) running.finish();
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const total = reduced || !steps.length ? 0 : Math.min(6000, Math.max(2000, 1500 + 250 * steps.length));
+    const slot = steps.length ? total / steps.length : 0;
+    const slotOf = new Map(steps.map((key, index) => [key, index]));
+    const timing = (key, other) => slotOf.has(key)
+      ? [slotOf.get(key) * slot, (slotOf.get(key) + 1) * slot] : other;
+    const tracks = [];
+    const fading = [];
+
+    const present = new Set(data.nodes.map((node) => node.id));
+    for (const [id, held] of nodes) if (!present.has(id)) { fading.push(held.el); nodes.delete(id); }
+    for (const node of data.nodes) {
+      let held = nodes.get(node.id);
+      const from = held ? held.box : null;
+      if (!held) {
+        held = { el: element("g", { class: "node", opacity: 0 }, layers.nodes) };
+        nodes.set(node.id, held);
+      }
+      draw(held.el, node);
+      held.box = from || node;
+      tracks.push({ held, from, to: node, at: timing(node.id, [0, Math.min(total, 1000)]) });
+    }
+    const keys = new Set(data.edges.map((edge) => edge.key));
+    for (const [key, held] of edges) if (!keys.has(key)) { fading.push(held.el); edges.delete(key); }
+    const lines = data.edges.map((edge) => {
+      let held = edges.get(edge.key);
+      const fresh = !held;
+      if (fresh) {
+        held = { el: element("g", { class: "edge" }, layers.edges) };
+        held.line = element("line", {}, held.el);
+        held.label = element("text", {}, held.el);
+        edges.set(edge.key, held);
+      }
+      held.label.textContent = edge.label;
+      return { held, edge, at: fresh ? timing(edge.key, [0, 0]) : [0, 0] };
+    });
+
+    const start = performance.now();
+    const frame = (now) => {
+      const t = now - start;
+      const part = ([from, to]) => to <= from ? (t >= from ? 1 : 0) : Math.min(1, Math.max(0, (t - from) / (to - from)));
+      const ease = (p) => p * p * (3 - 2 * p);
+      for (const track of tracks) {
+        const p = ease(part(track.at));
+        const { from, to } = track;
+        const box = from ? { x: from.x + (to.x - from.x) * p, y: from.y + (to.y - from.y) * p, w: to.w, h: to.h } : to;
+        const scale = from ? 1 : 0.85 + 0.15 * p;
+        track.held.box = box;
+        track.held.el.setAttribute("transform", `translate(${box.x} ${box.y}) scale(${scale})`);
+        track.held.el.setAttribute("opacity", from ? 1 : p);
+      }
+      for (const { held, edge, at } of lines) {
+        const a = nodes.get(edge.source).box, b = nodes.get(edge.target).box;
+        const [x1, y1] = border(a, b), [x2, y2] = border(b, a);
+        const p = part(at);
+        const length = Math.hypot(x2 - x1, y2 - y1);
+        for (const [key, value] of Object.entries({ x1, y1, x2, y2, "stroke-dasharray": length,
+          "stroke-dashoffset": length * (1 - p) })) held.line.setAttribute(key, value);
+        p >= 1 ? held.line.setAttribute("marker-end", "url(#arrow)") : held.line.removeAttribute("marker-end");
+        held.el.setAttribute("opacity", p > 0 ? 1 : 0);
+        held.label.setAttribute("x", (x1 + x2) / 2);
+        held.label.setAttribute("y", (y1 + y2) / 2);
+        held.label.setAttribute("opacity", p);
+      }
+      const gone = Math.max(0, 1 - t / 400);
+      for (const el of fading) gone > 0 ? el.setAttribute("opacity", gone) : el.remove();
+      if (t < total || gone > 0) running.id = requestAnimationFrame(frame);
+      else running = null;
+    };
+    running = { id: 0, finish: () => { cancelAnimationFrame(running.id); frame(start + total + 400); } };
+    frame(start);
+  }
+
+  /* A node's rectangle and its lines of text, drawn around its centre. */
+  function draw(el, node) {
+    el.textContent = "";
+    el.setAttribute("class", node.pinned ? "node pinned" : "node");
+    element("rect", { x: -node.w / 2, y: -node.h / 2, width: node.w, height: node.h, rx: 6 }, el);
+    const text = element("text", {}, el);
+    node.lines.forEach((line, index) => {
+      const span = element("tspan", { x: 0, y: (index - (node.lines.length - 1) / 2) * LINE_HEIGHT }, text);
+      span.textContent = line;
+    });
+  }
+
+  /* Where the line from `box`'s centre towards `other`'s leaves `box`. */
+  function border(box, other) {
+    const dx = other.x - box.x, dy = other.y - box.y;
+    if (!dx && !dy) return [box.x, box.y];
+    const s = Math.min(dx ? (box.w / 2 + 2) / Math.abs(dx) : Infinity, dy ? (box.h / 2 + 2) / Math.abs(dy) : Infinity);
+    return [box.x + dx * s, box.y + dy * s];
+  }
+
+  request("ui/initialize", { protocolVersion: "2025-06-18",
+    appInfo: { name: "diagrams", version: "0.1.0" }, appCapabilities: {} }).then(
+    (result) => {
+      theme(result && result.hostContext);
+      send({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} });
+    },
+    (error) => { status.textContent = "The host did not start this view: " + error.message; });
+})();
+</script>
+</body>
+</html>

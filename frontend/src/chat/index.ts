@@ -104,6 +104,12 @@ export interface ChatProps {
    */
   onModelRefused?: (modelId: ModelId) => void;
   /**
+   * That a tool answered in the turn on the screen, by its full name,
+   * `<server>__<tool>`. An app of that server beside the chat asks it again
+   * (`src/side/AppTab.tsx`), so what the agent changed shows there at once.
+   */
+  onToolResult?: (name: string) => void;
+  /**
    * What to draw above the box on an empty chat: the agent and model
    * pickers.
    *

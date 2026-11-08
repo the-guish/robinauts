@@ -1179,6 +1179,54 @@ test("a first message begins a conversation and says which one", async () => {
   expect(ended).toHaveBeenCalled();
 });
 
+test("each tool that answers in a turn is told by its full name", async () => {
+  stub((call) => {
+    if (call.url === "/api/turns") {
+      return streamed(
+        [
+          event(
+            "TEXT_MESSAGE_START",
+            { messageId: "m2", role: "assistant" },
+            2,
+          ),
+          event(
+            "TOOL_CALL_START",
+            {
+              toolCallId: "t1",
+              toolCallName: "diagrams__draw_diagram",
+              parentMessageId: "m2",
+            },
+            3,
+          ),
+          event("TOOL_CALL_END", { toolCallId: "t1" }, 4),
+          event("TEXT_MESSAGE_END", { messageId: "m2" }, 5),
+          event(
+            "TOOL_CALL_RESULT",
+            { messageId: "m3", toolCallId: "t1", content: "drawn" },
+            6,
+          ),
+          event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 7),
+        ],
+        { headers: streamHeaders(RUN, CONVERSATION) },
+      );
+    }
+    if (call.url === `/api/conversations/${CONVERSATION}`) {
+      return json(opened(conversation(1), TREE));
+    }
+    return undefined;
+  });
+  const answered = vi.fn();
+  const { result } = chatting({ onToolResult: answered });
+  await settle();
+  await act(async () => {
+    await result.current.send("draw it");
+  });
+  await waitFor(() => {
+    expect(result.current.state.runId).toBeNull();
+  });
+  expect(answered.mock.calls).toEqual([["diagrams__draw_diagram"]]);
+});
+
 test("a conversation with a run in flight is attached to at resume.after", async () => {
   const fetch = stub((call) => {
     if (call.url === `/api/conversations/${CONVERSATION}`) {
