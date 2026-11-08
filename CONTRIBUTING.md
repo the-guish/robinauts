@@ -54,8 +54,11 @@ or one at a time:
     scripts/check-tests.sh      pytest, with the architecture contracts
     scripts/check-extra-workers.sh
                                 the extra workers: lint, tests, the image
+    scripts/check-mcp-servers.sh
+                                the MCP servers under mcp/: lint, tests
     scripts/check-licences.sh   the dependency licence gate of DEPENDENCIES.md,
-                                over the backend's lock and the extra workers'
+                                over the backend's lock, the extra workers'
+                                and the MCP servers'
     scripts/check-audit.sh      pip-audit over the whole locked set
     scripts/check-frontend.sh   the frontend: format, lint, types, tests,
                                 the build with its licence gate, npm audit

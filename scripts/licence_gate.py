@@ -1357,11 +1357,16 @@ def run(
     environment: Path | None,
     offline: bool,
     out=sys.stdout,
+    composed: bool | None = None,
 ) -> int:
+    """`composed` says whether the lock's project is composed from the backend, as an extra
+    worker is; left out, any lock but the backend's own is taken to be."""
     policy = parse_policy(dependencies_path.read_text(encoding="utf-8"))
     lock = tomllib.loads(lock_path.read_text(encoding="utf-8"))
     backend = None
-    if lock_path.parent != LOCK.parent:
+    if composed is None:
+        composed = lock_path.parent != LOCK.parent
+    if composed:
         # An extra worker's lock: the backend it is composed from is ours too.
         backend_name = _project_name(LOCK.parent / "pyproject.toml")
         if backend_name is not None:
@@ -1464,6 +1469,12 @@ EXTRA_WORKERS = {
     for lock in sorted((ROOT / "extra-workers").glob("*/uv.lock"))
 }
 """Each extra worker with a lock, by its directory name: its lock and its environment."""
+MCP_SERVERS = {
+    lock.parent.name: (lock, lock.parent / ".venv")
+    for lock in sorted((ROOT / "mcp").glob("*/uv.lock"))
+}
+"""Each MCP server of this repository with a lock, by its directory name, as EXTRA_WORKERS.
+An MCP server stands alone: nothing of the backend is in its lock, nor counts as ours there."""
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1473,14 +1484,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="do not ask PyPI about packages the environment does not have",
     )
-    parser.add_argument(
+    which = parser.add_mutually_exclusive_group()
+    which.add_argument(
         "--extra-worker",
         choices=sorted(EXTRA_WORKERS),
         help="check this extra worker's lock and environment; the backend's when not given",
     )
+    which.add_argument(
+        "--mcp-server",
+        choices=sorted(MCP_SERVERS),
+        help="check this MCP server's lock and environment (mcp/<name>/)",
+    )
     arguments = parser.parse_args(argv)
     try:
-        # The paths come from the table, never from the argument itself.
+        # The paths come from the tables, never from the argument itself.
+        if arguments.mcp_server is not None:
+            lock, environment = MCP_SERVERS[arguments.mcp_server]
+            return run(lock, DEPENDENCIES, environment, arguments.offline, composed=False)
         lock, environment = EXTRA_WORKERS.get(arguments.extra_worker, (LOCK, ENVIRONMENT))
         return run(lock, DEPENDENCIES, environment, arguments.offline)
     except (ValueError, TypeError, KeyError, AttributeError, OSError) as problem:

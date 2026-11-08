@@ -49,6 +49,17 @@ updates:
     commit-message:
       prefix: "base-worker"
 
+  # The MCP servers, each a uv project of its own (mcp/README.md).
+  - package-ecosystem: "uv"
+    directory: "/mcp/to-do-list"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 10
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "to-do-list"
+
   # The actions this repository's workflows run, pinned to commit SHAs.
   - package-ecosystem: "github-actions"
     directory: "/"

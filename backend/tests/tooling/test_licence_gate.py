@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 from licence_gate import (
     _FORBIDDEN_IDENTIFIER,
+    MCP_SERVERS,
     SUPPORTED_LOCK_VERSIONS,
     Finding,
     LockedPackage,
@@ -34,6 +35,7 @@ from licence_gate import (
     evaluate_expression,
     identifier_for,
     identifier_from_classifier,
+    main,
     parse_policy,
     read_lock,
 )
@@ -1164,6 +1166,20 @@ def test_an_extra_worker_lock_owns_the_backend_at_its_exact_path(backend, editab
     lock = EXTRA_WORKER_LOCK.replace('"../../backend"', f'"{editable}"')
     packages, _ = read_lock(tomllib.loads(lock), "worker", backend)
     assert sorted(package.name for package in packages if package.local) == ours
+
+
+def test_each_mcp_server_is_checked_against_its_own_lock_and_environment():
+    assert MCP_SERVERS["to-do-list"] == (
+        ROOT / "mcp" / "to-do-list" / "uv.lock",
+        ROOT / "mcp" / "to-do-list" / ".venv",
+    )
+
+
+def test_one_lock_at_a_time(capsys):
+    with pytest.raises(SystemExit) as refused:
+        main(["--extra-worker", "base-worker", "--mcp-server", "to-do-list"])
+    assert refused.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
 
 
 def test_the_index_a_package_came_from_is_remembered():

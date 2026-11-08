@@ -12,6 +12,8 @@ robinauts/
   frontend/         the UI (ADR 0006)
   extra-workers/    workers that run beside the server, each a project of its
                     own composed from backend/ (extra-workers/README.md)
+  mcp/              MCP servers to try the platform with, each a project of its
+                    own that stands alone (mcp/README.md)
   backend/
     src/robinauts/
       shared_domain/    the records more than one package uses
