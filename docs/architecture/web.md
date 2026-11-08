@@ -25,7 +25,39 @@ How a phone is linked and ended (`docs/architecture/device-pairing.md`). Minting
 ## Catalogue
 
 - `list_agents`
-- `list_models`
+- `list_models`: each with its `context_window` in tokens, `null` when the configuration gives none.
+
+## Apps
+
+The MCP apps of an agent's tool servers, for the side panel
+([ADR 0007](../adr/0007-mcp-apps-in-the-side-panel.md), `web/apps.py`). An app is a tool whose
+`_meta.ui.resourceUri` names a `ui://` resource of type `text/html;profile=mcp-app`: its view.
+Each route wants a signed-in user, like `list_agents`, and names the agent. The agent's apps are
+those of the tool servers it names, less what a server's `exclude` keeps from it. Web reaches a
+server with its configured credential, read from `secret_env` as the worker reads it, within its
+`timeout_seconds`, over streamable HTTP with a client of its own (`web/mcp_client.py`): `mcp` is
+the engines' alone.
+
+- `list_apps`: `GET /api/apps?agent=<agent>`, answered
+  `{"apps": [{"id": "<server>/<tool>", "server", "tool", "title", "description"}]}`, server by
+  server in the agent's order. An app is listed when a view may call its tool. A server that
+  cannot be reached is left out and logged by its id and the kind of failure. An unknown agent
+  is 404 `UnknownAgentError`.
+- `open_app_view`: `GET /api/apps/<server>/<tool>/view?agent=<agent>`, the view's HTML, which the
+  panel frames. Its answer alone carries `Content-Security-Policy: default-src 'none';
+  script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:;
+  connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self';
+  sandbox allow-scripts`, `X-Frame-Options: SAMEORIGIN` and `Cache-Control: no-store`. The
+  origins a server asks for in `_meta.ui.csp` are not given. Outside the OpenAPI document: it is
+  a frame's address, not a call.
+- `call_app_tool`: `POST /api/apps/<server>/tools/<tool>` with `{"agent", "arguments"}`, a tool
+  call of the view's, answered with the server's `CallToolResult` as it gave it:
+  `{"content", "structuredContent", "isError"}`. A tool that failed is `isError` and 200. A tool
+  whose `_meta.ui.visibility` does not include `app` is refused.
+- What the agent is not given is refused alike, 404 `NotFound`: a server it does not name, a
+  tool the server does not offer it, a tool with no view, and, for a view, a server that cannot
+  be reached. A call that a server does not answer with a result is 502 `BadGateway`. No answer
+  carries a server's credential, and no refusal its error text.
 
 ## Sessions
 

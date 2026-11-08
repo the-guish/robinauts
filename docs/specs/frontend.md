@@ -113,14 +113,19 @@ neorc's rules (`neorc/contributing/js-dependencies.md`):
 - The typed API client is generated from the committed OpenAPI snapshot.
 - Content-Security-Policy: `default-src 'none'`; `script-src`, `font-src`,
   `connect-src` `'self'`; `style-src 'self' 'unsafe-inline'`;
-  `img-src 'self' data:`; `frame-ancestors 'none'`; plus `base-uri 'none'`
+  `img-src 'self' data:`; `frame-src 'self'`, so that the side panel can
+  frame an MCP app's view, which this server serves under a policy of its
+  own ([ADR 0007](../adr/0007-mcp-apps-in-the-side-panel.md));
+  `frame-ancestors 'none'`; plus `base-uri 'none'`
   and `form-action 'none'`, which `default-src` does not cover — the page's
   script and stylesheet are named relatively, so an injected `<base>` would
   re-point both, and no form here posts anywhere. Plus `nosniff`, and
   `X-Frame-Options: DENY` for a browser too old to read `frame-ancestors`.
   Every answer carries them, refusals and API answers included, with
   `Referrer-Policy: same-origin`. The policy does nothing on JSON, and one
-  list is simpler than two.
+  list is simpler than two. The one exception is an MCP app's view, whose
+  answer carries its own policy and `X-Frame-Options: SAMEORIGIN`
+  ([architecture/web.md](../architecture/web.md), "Apps").
 - The interface's paths are read: `GET` and `HEAD`, and a write to one is a
   `405` with `Allow: GET, HEAD`. Nothing under `/ui/` whose name begins with
   a dot is served or packaged: a directory a build writes into is one an
