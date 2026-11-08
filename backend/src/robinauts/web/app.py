@@ -25,6 +25,8 @@ routes reach the agents' tool servers for the side panel's MCP apps (``web/apps.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import ipaddress
 import logging
 import uuid
@@ -37,10 +39,10 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
-from fastapi import Depends, FastAPI, Header, Request, Response
+from fastapi import Depends, FastAPI, Header, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from robinauts.controller.contract.broker.ports import TurnBroker
@@ -54,6 +56,7 @@ from robinauts.controller.contract.domain import (
     NoActiveTurnError,
     NumberedEvent,
     OpenedSession,
+    SessionExistsError,
     TurnActiveError,
     UnknownAgentError,
     UnknownModelError,
@@ -115,7 +118,11 @@ STATUS_OF: dict[type[ControllerError], int] = {
     UnknownModelError: 422,
     TurnActiveError: 409,
     NoActiveTurnError: 404,
+    SessionExistsError: 409,
 }
+
+MAX_TASK_WAIT_SECONDS = 30.0
+"""The longest ``GET /api/tasks/{id}`` holds its request for the task's turn to end."""
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 SIGN_IN_PAGE = "/ui/#/sign-in?error="
@@ -500,6 +507,31 @@ class NewChatRequest(BaseModel):
     text: str
 
 
+class NewTaskRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: str
+    model_id: str | None = None
+    prompt: str
+    idempotency_key: Annotated[str, StringConstraints(pattern=r"^[!-~]{1,200}$")]
+    """One to 200 printable ASCII characters, with no space."""
+
+
+class StartedTaskResponse(BaseModel):
+    task_id: uuid.UUID
+    """The task's conversation."""
+    run_id: uuid.UUID
+    state: Literal["active", "finished", "failed", "cancelled", "interrupted"]
+
+
+class TaskResponse(StartedTaskResponse):
+    agent: str
+    model: str | None
+    answer: str | None
+    """The text of the answer once the turn has finished; ``null`` in every other state."""
+    ended_at: datetime | None
+
+
 class TurnRequest(BaseModel):
     text: str | None = None
     parent_id: uuid.UUID | None = None
@@ -604,6 +636,26 @@ def opened_view(opened: OpenedSession, default: str) -> OpenedConversationRespon
         resume=None if active is None else ResumeView(after=0, follows=active.follows),
         ended_badly=ended_badly_view(opened.ended_badly),
     )
+
+
+def text_of(message: Message) -> str:
+    return "".join(p.text for p in message.parts if isinstance(p, TextPart))
+
+
+def task_view(opened: OpenedSession) -> TaskResponse:
+    """A task as the wire shows it: its conversation's latest turn. Why a turn failed is the
+    operator's, and never in it."""
+    last, badly = opened.messages[-1], opened.ended_badly
+    view: dict[str, object] = {"task_id": opened.session.id, "agent": opened.session.agent}
+    if opened.active is not None:
+        view |= {"run_id": opened.active.turn_id, "state": "active", "model": last.model}
+    elif badly is not None:
+        view |= {"run_id": badly.id, "state": badly.state.value, "model": badly.model}
+        view["ended_at"] = badly.ended_at
+    else:
+        view |= {"run_id": last.turn_id, "state": "finished", "model": last.model}
+        view |= {"answer": text_of(last), "ended_at": last.created_at}
+    return TaskResponse.model_validate({"answer": None, "ended_at": None} | view)
 
 
 def ended_badly_view(turn: Turn | None) -> EndedBadlyView | None:
@@ -1107,6 +1159,73 @@ def create_app(
     ) -> ConversationSummary:
         forked = await controller.fork_session(user, conversation_id, at_message=body.at_message)
         return summary(forked, await default_model(forked.agent))
+
+    # --- tasks: one turn, read without streaming ---------------------------------
+
+    def repeat(
+        opened: OpenedSession, body: NewTaskRequest, response: Response
+    ) -> StartedTaskResponse:
+        """The task the key started, if this is the request that started it."""
+        question = opened.messages[0]
+        if (opened.session.agent, text_of(question)) != (body.agent_id, body.prompt) or (
+            body.model_id not in (None, question.model)
+        ):
+            raise SessionExistsError("the idempotency key holds a task of another request")
+        response.status_code = 200
+        view = task_view(opened)
+        return StartedTaskResponse(task_id=view.task_id, run_id=view.run_id, state=view.state)
+
+    @app.post(
+        "/api/tasks",
+        status_code=201,
+        responses={200: {"model": StartedTaskResponse, "description": "The task of that key"}},
+    )
+    async def start_task(
+        body: NewTaskRequest, response: Response, user: User = asking
+    ) -> StartedTaskResponse:
+        # The key names the conversation: a repeat finds it, two at once collide on its id, and
+        # a deleted task's key stays taken.
+        task_id = uuid.uuid5(user.id, body.idempotency_key)
+        with contextlib.suppress(SessionNotFoundError):
+            return repeat(await controller.open_session(user, task_id), body, response)
+        defaults = {a.id: a.default_model for a in await controller.list_agents()}
+        # An agent without a default is one the controller refuses before the model.
+        model = body.model_id or defaults.get(body.agent_id, "")
+        try:
+            started = await controller.start_session(
+                user, agent=body.agent_id, model=model, text=body.prompt, session_id=task_id
+            )
+        except SessionExistsError:
+            return repeat(await controller.open_session(user, task_id), body, response)
+        return StartedTaskResponse(task_id=task_id, run_id=started.turn_id, state="active")
+
+    @app.get("/api/tasks/{task_id}")
+    async def open_task(
+        task_id: uuid.UUID,
+        wait: Annotated[float, Query(ge=0, le=MAX_TASK_WAIT_SECONDS)] = 0,
+        user: User = asking,
+    ) -> TaskResponse:
+        opened = await controller.open_session(user, task_id)
+        if opened.active is not None and wait > 0:
+            # What a re-attached stream waits on, the store's wake-up, and not a poll.
+            events = controller.watch_turn(
+                user, task_id, opened.active.turn_id, after=opened.active.position
+            )
+            try:
+                async with asyncio.timeout(wait) as deadline, contextlib.aclosing(events):
+                    async for _ in events:
+                        pass
+            except TimeoutError:
+                if not deadline.expired():
+                    raise
+            opened = await controller.open_session(user, task_id)
+        return task_view(opened)
+
+    @app.post("/api/tasks/{task_id}/cancel", status_code=204)
+    async def cancel_task(task_id: uuid.UUID, user: User = asking) -> None:
+        # A task that has ended is left as it ended, and the answer is the same.
+        with contextlib.suppress(NoActiveTurnError):
+            await controller.cancel_turn(user, task_id)
 
     # --- turns: AG-UI over SSE, outside the OpenAPI document -------------------
 

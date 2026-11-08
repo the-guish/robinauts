@@ -159,8 +159,38 @@ and are not enforced yet:
 
 ## Without streaming
 
-- A client that cannot stream starts a turn and obtains the result once the
-  turn has finished. Planned.
+A client that cannot stream, such as a flow orchestrator running an agent
+step, runs a **task**: a conversation opened for one prompt, whose answer it
+reads once the turn has ended. The routes are plain JSON, in the OpenAPI
+document.
+
+| method and path | body | answers |
+|---|---|---|
+| `POST /api/tasks` | `{"agent_id": str, "model_id": str\|null, "prompt": str, "idempotency_key": str}` | 201 `{"task_id", "run_id", "state"}`; 200 and the same for a repeat |
+| `GET /api/tasks/{id}?wait=<seconds>` | — | `task_id`, `run_id`, `agent`, `model`, `state`, `answer`, `ended_at` |
+| `POST /api/tasks/{id}/cancel` | — | 204 |
+
+- **A task is a conversation**, started as `POST /api/turns` starts one,
+  and listed, opened, continued and deleted as any other. `task_id` is the
+  conversation's id and `run_id` its turn's. A task reads the
+  conversation's latest turn.
+- **The idempotency key names the conversation**: its id is derived from
+  the owner and the key, so the same key from the same owner finds the same
+  task (200), and two requests at once start one. The same key with another
+  agent, prompt or `model_id` is refused (409, `SessionExistsError`);
+  `model_id` left out matches any. A deleted task keeps its key until it is
+  purged, and a repeat answers 404 meanwhile. The key is 1 to 200 printable ASCII characters, with
+  no space.
+- **The state is the turn's**: `active`, then `finished`, `failed`,
+  `cancelled` or `interrupted`. `answer` is the text of a `finished` turn's
+  answer, and `null` otherwise. Why a turn failed is never in the answer.
+- **`wait`**, 0 to 30 seconds, holds the request until the turn ends, on
+  the wake-up a re-attached stream waits on, not a poll.
+- **A cancel** stops an active turn. A task that has ended is left as it
+  ended, and still answers 204.
+- **Refusals**: an unknown agent is 404; an unknown model, an empty prompt,
+  a field the body does not know, and a key or `wait` out of bounds are
+  422; a task that is not there, or somebody else's, is 404.
 
 ## Everything else
 

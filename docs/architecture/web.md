@@ -69,7 +69,8 @@ the engines' alone.
 
 ## Turns
 
-- `start_session`: the first message, with the agent and the model; mints the session.
+- `start_session`: the first message, with the agent and the model; mints the session,
+  under the id the caller gives, if any.
 - `send_message`: a message under a chosen parent, with the model. An edit is this under an earlier parent.
 - `regenerate_answer`: the answer to a question again, under the same question.
 - `resume_answer`: the turn of the session's latest answer, when it failed, continued from what its engine saved.

@@ -50,6 +50,10 @@ class NoActiveTurnError(ControllerError):
     pass
 
 
+class SessionExistsError(ControllerError):
+    """A new session under an id a session has already, visible or hidden."""
+
+
 # --- users --------------------------------------------------------------------
 
 

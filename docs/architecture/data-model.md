@@ -81,7 +81,9 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   pointer to the active turn on the session: what is active is looked up.
 - **A question, its task and its turn are stored in one operation**, the task before
   the turn, which refers to it. A question refused a turn is not left behind, and
-  neither is its task.
+  neither is its task. A new session is stored in the same operation as its first
+  question, task and turn, so a session never exists without them; a new session
+  under an id taken, hidden or not, is refused.
 - **A worker claims a queued task.** A turn is stored `active`, with a `queued` task,
   whose `worker_queue` is the worker its agent names, or `default`. A worker's
   `claim_tasks` makes one of its own tasks `running`, with a new lease, in one

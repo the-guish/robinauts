@@ -13,7 +13,7 @@ from collections.abc import Callable, Sequence
 from datetime import datetime
 
 from robinauts.controller.contract.broker.domain import Task, TaskState
-from robinauts.controller.contract.domain import TurnActiveError, User
+from robinauts.controller.contract.domain import SessionExistsError, TurnActiveError, User
 from robinauts.controller.ports.store import (
     Cursor,
     Document,
@@ -167,8 +167,19 @@ class InProcessStore(Store):
     # --- turns --------------------------------------------------------------
 
     async def queue_turn(
-        self, owner: uuid.UUID, turn: Turn, task: Task, question: StoredMessage | None
+        self,
+        owner: uuid.UUID,
+        turn: Turn,
+        task: Task,
+        question: StoredMessage | None,
+        session: Session | None = None,
     ) -> None:
+        if session is not None:
+            if session.id in self._sessions:
+                raise SessionExistsError(str(session.id))
+            if session.owner_id != owner:
+                raise SessionNotFoundError(str(session.id))
+            await self.add_session(session)
         self._visible(owner, turn.session_id)
         if self._active(turn.session_id) is not None:
             raise TurnActiveError(str(turn.session_id))

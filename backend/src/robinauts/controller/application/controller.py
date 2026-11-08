@@ -32,6 +32,7 @@ from robinauts.controller.contract.domain import (
     NumberedEvent,
     OpenedSession,
     SessionPage,
+    UnknownAgentError,
     UnknownModelError,
     User,
 )
@@ -161,11 +162,23 @@ class RobinautsController(Controller):
     ) -> Session:
         raise NotImplementedError("fork_session")
 
-    async def start_session(self, user: User, *, agent: str, model: str, text: str) -> TurnStarted:
-        agent_config = self._config.agents[agent]
+    async def start_session(
+        self,
+        user: User,
+        *,
+        agent: str,
+        model: str,
+        text: str,
+        session_id: uuid.UUID | None = None,
+    ) -> TurnStarted:
+        agent_config = self._config.agents.get(agent)
+        if agent_config is None:
+            raise UnknownAgentError(agent)
+        if not text.strip():
+            raise InvalidValueError("a message needs some text")
         now = self._now()
         session = Session(
-            uuid.uuid4(),
+            session_id or uuid.uuid4(),
             owner_id=user.id,
             agent=agent,
             engine=agent_config.engine,
@@ -184,8 +197,7 @@ class RobinautsController(Controller):
             engine=session.engine,
             model=model,
         )
-        await self._store.add_session(session)
-        # The worker creates the engine's session before it runs this first turn.
+        # Stored with its first turn. The worker creates the engine's session before it runs it.
         turn = await self._queue_turn(
             user, session, question, model, new_question=True, create_session=True
         )
@@ -323,7 +335,8 @@ class RobinautsController(Controller):
         model_config = self._config.models.get(model)
         if model_config is None:
             raise UnknownModelError(model)
-        await self._end_expired(session)
+        if not create_session:
+            await self._end_expired(session)
         now = self._now()
         turn_id = uuid.uuid4()
         payload: dict[str, object] = {"turn_id": str(turn_id), "create_session": create_session}
@@ -350,7 +363,8 @@ class RobinautsController(Controller):
         )
         stored = stored_message(question) if new_question else None
         # A worker claims the task and dispatches it.
-        await self._store.queue_turn(user.id, turn, task, stored)
+        new_session = session if create_session else None
+        await self._store.queue_turn(user.id, turn, task, stored, new_session)
         return turn
 
     async def watch_turn(

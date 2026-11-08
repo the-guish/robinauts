@@ -195,8 +195,7 @@ hard, the decision is taken with them in mind.
   model's state for one conversation is the framework's and is already
   stored ([agent-engines.md](agent-engines.md)).
 - Usage reporting (goal 7).
-- More delivery channels: a mobile application, a Slack bridge; and a way
-  to consume a run without streaming, for the clients that need it.
+- More delivery channels: a mobile application, a Slack bridge.
 - Agents created by users.
 - A container image.
 

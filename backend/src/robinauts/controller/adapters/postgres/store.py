@@ -30,7 +30,7 @@ import asyncpg
 from robinauts.controller.adapters.postgres.pool import close_pool, open_pool
 from robinauts.controller.adapters.postgres.schema import check_schema
 from robinauts.controller.contract.broker.domain import Task, TaskState
-from robinauts.controller.contract.domain import TurnActiveError, User
+from robinauts.controller.contract.domain import SessionExistsError, TurnActiveError, User
 from robinauts.controller.ports.store import (
     Cursor,
     Document,
@@ -60,6 +60,7 @@ QUEUED_CHANNEL = "robinauts_queued"
 
 ONE_ACTIVE = "turns_one_active_per_session"
 POSITION_TAKEN = "turn_events_pkey"
+SESSION_TAKEN = "sessions_pkey"
 USER_EXISTS = "users_provider_subject_key"
 
 _SESSION_COLUMNS = "id, owner_id, agent, engine, title, created_at, updated_at"
@@ -237,7 +238,12 @@ class PostgresStore(Store):
     # --- sessions -----------------------------------------------------------
 
     async def add_session(self, session: Session) -> None:
-        await self._pool.execute(
+        await self._insert_session(self._pool, session)
+
+    async def _insert_session(
+        self, on: asyncpg.Pool | asyncpg.Connection, session: Session
+    ) -> None:
+        await on.execute(
             f"INSERT INTO sessions ({_SESSION_COLUMNS}) VALUES ($1, $2, $3, $4, $5, $6, $7)",
             session.id,
             session.owner_id,
@@ -325,10 +331,17 @@ class PostgresStore(Store):
     # --- turns --------------------------------------------------------------
 
     async def queue_turn(
-        self, owner: uuid.UUID, turn: Turn, task: Task, question: StoredMessage | None
+        self,
+        owner: uuid.UUID,
+        turn: Turn,
+        task: Task,
+        question: StoredMessage | None,
+        session: Session | None = None,
     ) -> None:
         try:
             async with self._pool.acquire() as connection, connection.transaction():
+                if session is not None:
+                    await self._insert_session(connection, session)
                 held = await connection.fetchval(_VISIBLE + " FOR SHARE", turn.session_id, owner)
                 if held is None:
                     raise SessionNotFoundError(str(turn.session_id))
@@ -367,6 +380,8 @@ class PostgresStore(Store):
         except asyncpg.UniqueViolationError as violated:
             if violated.constraint_name == ONE_ACTIVE:
                 raise TurnActiveError(str(turn.session_id)) from violated
+            if violated.constraint_name == SESSION_TAKEN:
+                raise SessionExistsError(str(turn.session_id)) from violated
             raise
 
     async def append_event(

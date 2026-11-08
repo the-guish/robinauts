@@ -88,11 +88,17 @@ class Store(ABC):
 
     @abstractmethod
     async def queue_turn(
-        self, owner: uuid.UUID, turn: Turn, task: Task, question: StoredMessage | None
+        self,
+        owner: uuid.UUID,
+        turn: Turn,
+        task: Task,
+        question: StoredMessage | None,
+        session: Session | None = None,
     ) -> None:
-        """Store the question, when there is one, the task and the turn, or none of them:
-        ``TurnActiveError`` while the session has an active turn. A queued task wakes every
-        process waiting in ``wait_for_queued``."""
+        """Store the session, when it is new, the question, when there is one, the task and the
+        turn, or none of them: ``TurnActiveError`` while the session has an active turn,
+        ``SessionExistsError`` for a new session under an id taken, hidden or not. A queued task
+        wakes every process waiting in ``wait_for_queued``."""
 
     @abstractmethod
     async def claim_tasks(

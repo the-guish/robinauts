@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 from robinauts.controller.contract.broker.domain import RUN_TURN, Task, TaskState
-from robinauts.controller.contract.domain import TurnActiveError, User
+from robinauts.controller.contract.domain import SessionExistsError, TurnActiveError, User
 from robinauts.controller.ports.store import Store, StoredEvent, StoredMessage
 from robinauts.shared_domain.domain import (
     DEFAULT_WORKER,
@@ -226,6 +226,27 @@ class StoreContract:
         assert not await store.purge_session(me.id, one.id, NOW)
         assert await store.purge_session(me.id, one.id, NOW + 4 * MINUTE)
         assert not await store.purge_session(me.id, one.id, NOW + 4 * MINUTE)
+
+    @store_test
+    async def test_a_new_session_is_stored_with_its_first_turn_or_not_at_all(
+        self, store: Store
+    ) -> None:
+        me = await store.add_or_refresh_user(user())
+        one = session(me.id)
+        asked = question(one.id)
+        running, running_task = turn(one.id, asked.id)
+        await store.queue_turn(me.id, running, running_task, asked, one)
+        assert await store.get_session(me.id, one.id) == one
+        assert await store.messages_of(me.id, one.id) == [asked.document]
+        assert await store.latest_turn(me.id, one.id) == running
+
+        # The id is taken while the session is hidden too, and the refusal stores nothing.
+        await store.hide_session(me.id, one.id, NOW)
+        again = question(one.id, "again")
+        refused, refused_task = turn(one.id, again.id)
+        with pytest.raises(SessionExistsError):
+            await store.queue_turn(me.id, refused, refused_task, again, one)
+        assert await store.get_task(refused_task.id) is None
 
     # --- turns --------------------------------------------------------------
 

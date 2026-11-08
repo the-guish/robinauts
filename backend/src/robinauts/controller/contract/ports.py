@@ -82,8 +82,18 @@ class Controller(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def start_session(self, user: User, *, agent: str, model: str, text: str) -> TurnStarted:
-        """``UnknownAgentError``, ``UnknownModelError``; ``InvalidValueError`` for empty text."""
+    async def start_session(
+        self,
+        user: User,
+        *,
+        agent: str,
+        model: str,
+        text: str,
+        session_id: uuid.UUID | None = None,
+    ) -> TurnStarted:
+        """The session, under ``session_id`` when given, stored with its first question and turn
+        in one operation. ``UnknownAgentError``, ``UnknownModelError``; ``InvalidValueError`` for
+        empty text; ``SessionExistsError`` for an id taken."""
         raise NotImplementedError
 
     @abstractmethod
