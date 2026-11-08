@@ -37,16 +37,27 @@
     from a button, like the left panel. The two are never open together.
   - A tab strip, each tab with a close button. "Add a tab" opens a menu of
     every tab not open in this conversation: the built-ins first, then the
-    agent's MCP apps once the backend offers them. Picking one opens it on
-    top.
+    agent's MCP apps (`GET /api/apps`; on the empty chat, the agent picked
+    for it). Picking one opens it on top. An open tab stays mounted while
+    another is on top, so an app keeps what it shows.
   - Open tabs are remembered per conversation, per browser. Tabs opened on
     the empty chat move to the conversation its first message creates.
   - "Usage" counts the transcript on the screen: messages by role, tool
     calls, characters, and tokens estimated as characters ÷ 4, labelled as
     an estimate. Usage recording is planned ([core.md](core.md), goal 7).
   - "Context window" shows that estimate against the model's window as a
-    meter when `GET /api/models` states the window, and "unknown" until it
-    does. Today it does not.
+    meter when `GET /api/models` states the window (the operator's
+    `context_window`), and "unknown" when it does not.
+  - An MCP app's tab frames the app's view
+    ([ADR 0007](../adr/0007-mcp-apps-in-the-side-panel.md)), with
+    `sandbox="allow-scripts"` and never `allow-same-origin`. The panel is
+    the view's host: it answers `ui/initialize` with the theme, calls the
+    app's own tool once the view says it is ready and hands it the result,
+    relays the view's `tools/call` to the backend, answers `ping`, and
+    refuses anything else. It reads only messages from that frame, and
+    tells the view when the theme changes. The view is hidden until the
+    first call has answered; a view that does not start, or a first call
+    that fails, is said so in its place, with "Try again".
   - The keyboard: Left and Right move between tabs, Delete closes one;
     the menu takes the arrow keys and closes on Escape.
 - The theme follows the operating system by default. A light / dark /

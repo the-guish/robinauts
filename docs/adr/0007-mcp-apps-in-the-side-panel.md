@@ -53,6 +53,13 @@ calls.**
   given and a view may call (`_meta.ui.visibility`). The browser never
   reaches a tool server, so nothing new leaves the hosted environment
   (goal 3).
+- **The panel is the host, and reads only its frame.** The frontend
+  (`frontend/src/side/AppTab.tsx`, `bridge.ts`) reads a message only when
+  its `source` is the frame's window and it is JSON-RPC it understands.
+  An opaque origin has no name to post to, so the panel posts to `"*"`,
+  and sends only what the view may see: the theme, and what the view's
+  own server answered. A tool call the backend refuses is answered with
+  fixed words, not the backend's.
 - **The backend speaks MCP itself.** `mcp` is the engines' alone
   ([rules.md](../architecture/rules.md)). Web needs three requests over
   streamable HTTP, so it has a small client of its own on httpx, which web
