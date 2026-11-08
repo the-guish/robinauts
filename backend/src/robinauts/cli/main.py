@@ -18,7 +18,9 @@ development mode, for the mode's one local user. The interface is the directory
 this checkout when it is built. Storage is the PostgreSQL ``ROBINAUTS_DATABASE_URL`` names,
 which a start with sign-in needs; the local development mode is in this process without it. The
 sign-in records are kept on the same storage. The server never changes the database: it
-refuses one that is not this build's and names the command.
+refuses one that is not this build's and names the command. In the local development mode, an
+``[orchestration]`` table starts neorc beside the server, and stops it with the server
+(``cli/orchestration.py``, ``docs/architecture/orchestration.md``).
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ from typing import Any
 import uvicorn
 from fastapi import FastAPI
 
+from robinauts.cli import orchestration
 from robinauts.cli.composition import (
     CONTROLLER_TABLES,
     DATABASE_URL_VARIABLE,
@@ -52,6 +55,7 @@ from robinauts.cli.composition import (
     storage_from,
 )
 from robinauts.cli.lifecycle import Lifecycle, WorkerStartError
+from robinauts.cli.orchestration import Orchestration, OrchestrationStartError
 from robinauts.controller.contract.domain import ConfigError, DeviceSession, User
 from robinauts.controller.contract.ports import Credentials
 from robinauts.shared_domain.domain import Config, ControllerError, StorageConfig, StorageKind
@@ -94,8 +98,10 @@ def serving(
     problems = [
         f"{key}: unknown key, neither a table of the controller's nor of sign-in's"
         for key in tables
-        if key not in CONTROLLER_TABLES | SIGN_IN_KEYS
+        if key not in CONTROLLER_TABLES | SIGN_IN_KEYS | {orchestration.TABLE}
     ]
+    if orchestration.TABLE in tables and not dev_no_sign_in:
+        problems.append(orchestration.DEV_ONLY)
     sign_in = None
     if dev_no_sign_in:
         if held := sorted(SIGN_IN_KEYS & tables.keys()):
@@ -163,13 +169,17 @@ def build_app(
 
 
 async def serve(server: Server, lifecycle: Lifecycle) -> None:
-    """Serve until asked to stop: ``Server`` starts the controller and the worker as it starts
-    up and stops them as it shuts down. The stop here is for a server that never got as far
-    as its shut-down, and does nothing after the server's."""
+    """Serve until asked to stop: ``Server`` starts the controller, the worker and the
+    orchestrator as it starts up and stops them as it shuts down. The stop here is for a server
+    that never got as far as its shut-down, and does nothing after the server's."""
     try:
         await server.serve()
     finally:
-        await lifecycle.stop()
+        try:
+            if server.orchestration is not None:
+                await server.orchestration.stop()
+        finally:
+            await lifecycle.stop()
 
 
 class Server(uvicorn.Server):
@@ -182,18 +192,30 @@ class Server(uvicorn.Server):
     start waits for it to end and then shuts the server down, and one that stops the server is
     raised again only once ``serve`` returns, which on SIGTERM ends the process at once."""
 
-    def __init__(self, config: uvicorn.Config, lifecycle: Lifecycle) -> None:
+    def __init__(
+        self,
+        config: uvicorn.Config,
+        lifecycle: Lifecycle,
+        orchestration: Orchestration | None = None,
+    ) -> None:
         super().__init__(config)
         self._lifecycle = lifecycle
+        self.orchestration = orchestration
+        """neorc, started after the workers and before the server listens, and stopped first:
+        a task it runs then never meets a server that is going."""
 
     async def startup(self, sockets: list[Any] | None = None) -> None:
         await self._lifecycle.start()
+        if self.orchestration is not None:
+            await self.orchestration.start()
         # Even when asked to stop meanwhile: uvicorn shuts down, and so stops the lifecycle,
         # only a server that started.
         await super().startup(sockets=sockets)
 
     async def shutdown(self, sockets: list[Any] | None = None) -> None:
         try:
+            if self.orchestration is not None:
+                await self.orchestration.stop()
             await self._lifecycle.stop_worker()
         finally:
             try:
@@ -202,12 +224,46 @@ class Server(uvicorn.Server):
                 await self._lifecycle.stop()
 
 
+def orchestration_of(
+    tables: Mapping[str, Any],
+    environ: Mapping[str, str],
+    config: Config,
+    *,
+    config_path: Path,
+    api_url: str,
+) -> Orchestration | None:
+    """neorc as the ``[orchestration]`` table describes it, and where its worker reaches this
+    server's API; ``None`` without the table. ``ConfigError`` names what stops it from
+    starting."""
+    table = tables.get(orchestration.TABLE)
+    if table is None:
+        return None
+    if not isinstance(table, Mapping):
+        raise ConfigError(f"[{orchestration.TABLE}]: a table")
+    described = orchestration.parse_orchestration(
+        table, base=config_path.parent, default_code=REPO / "orchestration"
+    )
+    if problems := orchestration.check_ready(described, environ):
+        raise ConfigError("\n".join(problems))
+    return Orchestration(
+        described, environ, hidden=orchestration.hidden_variables(config), api_url=api_url
+    )
+
+
 def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     ui_dir = interface()
-    tables = read_tables(Path(os.environ["ROBINAUTS_CONFIG"]))
+    config_path = Path(os.environ["ROBINAUTS_CONFIG"])
+    tables = read_tables(config_path)
     try:
         config, secret_for, sign_in = serving(
             tables, os.environ, host=host, dev_no_sign_in=dev_no_sign_in
+        )
+        orchestrator = orchestration_of(
+            tables,
+            os.environ,
+            config,
+            config_path=config_path,
+            api_url=worker_broker_url(host, port),
         )
     except ConfigError as refused:
         print(refused, file=sys.stderr)
@@ -236,12 +292,13 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
         timeout_keep_alive=SERVER_KEEP_ALIVE_SECONDS,
     )
-    server = Server(config, lifecycle)
+    server = Server(config, lifecycle, orchestrator)
     try:
         asyncio.run(serve(server, lifecycle), loop_factory=config.get_loop_factory())
-    except (ControllerError, WorkerStartError) as refused:
+    except (ControllerError, WorkerStartError, OrchestrationStartError) as refused:
         # A database that will not open or is not this build's, an engine the build lacks or a
-        # secret missing, a worker process that did not start: said before anything listens.
+        # secret missing, a worker process or neorc that did not start: said before anything
+        # listens.
         print(refused, file=sys.stderr)
         return 1
     except KeyboardInterrupt:
