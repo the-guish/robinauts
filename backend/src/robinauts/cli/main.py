@@ -157,6 +157,7 @@ def build_app(
         healthy=lifecycle.healthy,
         sign_in=sign_in,
         secret_for=secret_for,
+        config=composed.config,
         ui_dir=ui_dir,
     )
 

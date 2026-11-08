@@ -94,6 +94,8 @@ class Composed:
     commands: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     """By worker, the command that starts the process of those whose table names one
     (``Config.commands``)."""
+    config: Config = field(default_factory=Config)
+    """What it was composed from: web reads the agents' tool servers in it, for their apps."""
 
 
 def compose(
@@ -129,7 +131,7 @@ def compose(
             engines=engines,
             name=name,
         )
-    return Composed(controller, credentials, workers, brokers, config.commands)
+    return Composed(controller, credentials, workers, brokers, config.commands, config)
 
 
 def compose_worker(

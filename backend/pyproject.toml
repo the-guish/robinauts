@@ -385,9 +385,11 @@ source_modules = ["robinauts.web.contract"]
 forbidden_modules = [
     "robinauts.web.agui",
     "robinauts.web.app",
+    "robinauts.web.apps",
     "robinauts.web.cookies",
     "robinauts.web.headers",
     "robinauts.web.logs",
+    "robinauts.web.mcp_client",
     "robinauts.web.oidc",
     "robinauts.web.pairing",
     "robinauts.web.sign_in",

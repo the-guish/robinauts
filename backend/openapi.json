@@ -92,6 +92,107 @@
         "title": "ApiTokenSummary",
         "type": "object"
       },
+      "AppListResponse": {
+        "properties": {
+          "apps": {
+            "items": {
+              "$ref": "#/components/schemas/AppSummary"
+            },
+            "title": "Apps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "apps"
+        ],
+        "title": "AppListResponse",
+        "type": "object"
+      },
+      "AppSummary": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "server": {
+            "title": "Server",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "server",
+          "tool",
+          "title",
+          "description"
+        ],
+        "title": "AppSummary",
+        "type": "object"
+      },
+      "AppToolCallRequest": {
+        "properties": {
+          "agent": {
+            "title": "Agent",
+            "type": "string"
+          },
+          "arguments": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Arguments",
+            "type": "object"
+          }
+        },
+        "required": [
+          "agent"
+        ],
+        "title": "AppToolCallRequest",
+        "type": "object"
+      },
+      "AppToolCallResponse": {
+        "description": "The MCP ``CallToolResult``, as the tool server gave it, under MCP's own names.",
+        "properties": {
+          "content": {
+            "items": {},
+            "title": "Content",
+            "type": "array"
+          },
+          "isError": {
+            "title": "Iserror",
+            "type": "boolean"
+          },
+          "structuredContent": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Structuredcontent"
+          }
+        },
+        "required": [
+          "content",
+          "structuredContent",
+          "isError"
+        ],
+        "title": "AppToolCallResponse",
+        "type": "object"
+      },
       "ApproveRequest": {
         "properties": {
           "number": {
@@ -521,6 +622,17 @@
       },
       "ModelSummary": {
         "properties": {
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -1048,6 +1160,103 @@
           }
         },
         "summary": "List Agents"
+      }
+    },
+    "/api/apps": {
+      "get": {
+        "operationId": "list_apps_api_apps_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "agent",
+            "required": true,
+            "schema": {
+              "title": "Agent",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "List Apps"
+      }
+    },
+    "/api/apps/{server}/tools/{tool}": {
+      "post": {
+        "operationId": "call_app_tool_api_apps__server__tools__tool__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server",
+            "required": true,
+            "schema": {
+              "title": "Server",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tool",
+            "required": true,
+            "schema": {
+              "title": "Tool",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppToolCallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolCallResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "Call App Tool"
       }
     },
     "/api/conversations": {

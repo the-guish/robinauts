@@ -34,4 +34,10 @@ def test_every_answer_carries_the_security_headers(api: httpx.Client) -> None:
     for name, answer in answers.items():
         for header, value in SECURITY_HEADERS:
             assert answer.headers.get_list(header) == [value], (name, header)
-    assert "frame-ancestors 'none'" in answers["page"].headers["content-security-policy"]
+    # The policy of docs/specs/frontend.md, word for word: the interface frames this server's
+    # own pages alone, an MCP app's view, and is framed by nothing.
+    assert answers["page"].headers["content-security-policy"] == (
+        "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline';"
+        " img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'self';"
+        " base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    )

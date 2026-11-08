@@ -150,9 +150,9 @@ async def test_everyday_use(agent: str) -> None:
             ("pydantic_ai", "Pydantic AI", "local_gpt"),
         ]
         models = (await api.get("/api/models"))["items"]
-        assert [(m["id"], m["title"]) for m in models] == [
-            ("local_gpt", "Local GPT"),
-            ("local_gpt_2", "Local GPT 2"),
+        assert [(m["id"], m["title"], m["context_window"]) for m in models] == [
+            ("local_gpt", "Local GPT", None),
+            ("local_gpt_2", "Local GPT 2", 200000),
         ]
 
         # --- Conversation A -----------------------------------------------------------------

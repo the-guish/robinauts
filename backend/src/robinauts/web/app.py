@@ -19,7 +19,8 @@ A controller operation that is not implemented answers 501. The ``/internal/work
 answer the server's own worker process alone, by the secret it was handed
 (``web/worker_api.py``).
 The shapes are the ones the frontend reads (``docs/specs/wire.md``); a turn's stream is
-AG-UI over SSE, its run id is the turn's id, and its thread id the session's.
+AG-UI over SSE, its run id is the turn's id, and its thread id the session's. The ``/api/apps``
+routes reach the agents' tool servers for the side panel's MCP apps (``web/apps.py``).
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, Request, Response
@@ -60,6 +61,7 @@ from robinauts.controller.contract.domain import (
 )
 from robinauts.controller.contract.ports import Controller, Credentials
 from robinauts.shared_domain.domain import (
+    Config,
     ControllerError,
     Message,
     ReasoningPart,
@@ -72,8 +74,9 @@ from robinauts.shared_domain.domain import (
     Turn,
 )
 from robinauts.web import agui
+from robinauts.web.apps import Apps, NoSuchAppError, ToolResult, UnansweredCallError
 from robinauts.web.cookies import Cookies
-from robinauts.web.headers import SecurityHeaders
+from robinauts.web.headers import VIEW_HEADERS, SecurityHeaders
 from robinauts.web.logs import loggable
 from robinauts.web.oidc import Exchange, SecretLookup, claims_from
 from robinauts.web.pairing import (
@@ -369,10 +372,47 @@ class AgentListResponse(BaseModel):
 class ModelSummary(BaseModel):
     id: str
     title: str
+    context_window: int | None = None
+    """In tokens, as the operator configured it; ``None`` when not configured. Always sent;
+    optional in the schema only so that a client's own model records need not carry it."""
 
 
 class ModelListResponse(BaseModel):
     items: list[ModelSummary]
+
+
+class AppSummary(BaseModel):
+    id: str
+    """``<server>/<tool>``."""
+    server: str
+    tool: str
+    title: str
+    description: str
+
+
+class AppListResponse(BaseModel):
+    apps: list[AppSummary]
+
+
+class AppToolCallRequest(BaseModel):
+    agent: str
+    arguments: dict[str, Any] = {}
+
+
+class AppToolCallResponse(BaseModel):
+    """The MCP ``CallToolResult``, as the tool server gave it, under MCP's own names."""
+
+    content: list[Any]
+    structuredContent: dict[str, Any] | None
+    isError: bool
+
+
+def tool_call_response(result: ToolResult) -> AppToolCallResponse:
+    return AppToolCallResponse(
+        content=result.content,
+        structuredContent=result.structured_content,
+        isError=result.is_error,
+    )
 
 
 class ConversationSummary(BaseModel):
@@ -600,13 +640,15 @@ def create_app(
     healthy: Callable[[], bool],
     sign_in: SignInConfig | None,
     secret_for: SecretLookup,
+    config: Config,
     ui_dir: Path | None = None,
 ) -> FastAPI:
     """The HTTP server alone. Whoever runs it opens the controller and starts the worker before
     it serves, and stops the worker and closes the controller after (``cli/lifecycle.py``).
     ``brokers``, one per worker by name, and ``worker_access`` serve the workers in processes
     of their own at ``/internal/worker/``; ``healthy`` says whether this node's workers are
-    heard from, for ``/health``. ``sign_in`` is ``None`` in the local development mode."""
+    heard from, for ``/health``. ``sign_in`` is ``None`` in the local development mode.
+    ``config`` names the agents' tool servers, whose secrets ``secret_for`` reads too."""
     exchange: Exchange | None = None
     flow: SignIn | None = None
     if sign_in is not None:
@@ -617,6 +659,7 @@ def create_app(
         credentials, device_days=DEVICE_DAYS if sign_in is None else sign_in.device_days
     )
     recent = RecentChecks()
+    apps = Apps(config, secret_for)
     local_user: User | None = None
 
     @asynccontextmanager
@@ -751,6 +794,14 @@ def create_app(
     @app.exception_handler(NotImplementedError)
     async def not_implemented(request: Request, exc: NotImplementedError) -> JSONResponse:
         return JSONResponse({"error": "NotImplemented", "detail": str(exc)}, status_code=501)
+
+    @app.exception_handler(NoSuchAppError)
+    async def no_such_app(request: Request, exc: NoSuchAppError) -> JSONResponse:
+        return JSONResponse({"error": "NotFound", "detail": str(exc)}, status_code=404)
+
+    @app.exception_handler(UnansweredCallError)
+    async def unanswered(request: Request, exc: UnansweredCallError) -> JSONResponse:
+        return JSONResponse({"error": "BadGateway", "detail": str(exc)}, status_code=502)
 
     @app.exception_handler(ControllerError)
     async def refused(request: Request, exc: ControllerError) -> JSONResponse:
@@ -983,7 +1034,38 @@ def create_app(
     @app.get("/api/models", dependencies=[asking])
     async def list_models() -> ModelListResponse:
         models = await controller.list_models()
-        return ModelListResponse(items=[ModelSummary(id=m.id, title=m.title) for m in models])
+        return ModelListResponse(
+            items=[
+                ModelSummary(id=m.id, title=m.title, context_window=m.context_window)
+                for m in models
+            ]
+        )
+
+    # --- MCP apps, for the side panel: web/apps.py -------------------------------
+
+    @app.get("/api/apps", dependencies=[asking])
+    async def list_apps(agent: str) -> AppListResponse:
+        found = await apps.of(agent)
+        return AppListResponse(
+            apps=[
+                AppSummary(
+                    id=a.id, server=a.server, tool=a.tool, title=a.title, description=a.description
+                )
+                for a in found
+            ]
+        )
+
+    # Framed by the panel, not called: outside the OpenAPI document.
+    @app.get("/api/apps/{server}/{tool}/view", dependencies=[asking], include_in_schema=False)
+    async def open_app_view(server: str, tool: str, agent: str) -> HTMLResponse:
+        html = await apps.view(agent, server, tool)
+        return HTMLResponse(html, headers=dict(VIEW_HEADERS))
+
+    @app.post("/api/apps/{server}/tools/{tool}", dependencies=[asking])
+    async def call_app_tool(
+        server: str, tool: str, body: AppToolCallRequest
+    ) -> AppToolCallResponse:
+        return tool_call_response(await apps.call(body.agent, server, tool, body.arguments))
 
     # --- sessions --------------------------------------------------------------
 
