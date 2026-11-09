@@ -118,13 +118,12 @@ taking out that module and its call.
 ### Installing neorc
 
 Robinauts depends on `neorc[http,manager,postgres]`, `neorc-core` and
-`neorc-ui`, from the-guish/neorc. Until neorc is on PyPI, `backend/uv.lock`
-pins them to the wheels a GitHub release of that fork carries, by URL and hash:
-a `v*` tag builds the three, with the UI built in. Before the first release,
-the lock pins a commit of the fork instead, on its
-`feature/ui-embedded-mode` branch (the UI's embedded mode, on a `main` that
-holds the asyncpg port), which `uv sync --no-build` cannot
-install. neorc's PostgreSQL adapter is on asyncpg: psycopg is LGPL-3.0, which
+`neorc-ui`. Until neorc is on PyPI, `backend/uv.lock` pins them to the wheels a
+GitHub release of neorc carries, by URL and hash: a `v*` tag builds the three,
+with the UI built in. Before the first release, the lock pins a commit of
+open-shipyard/neorc's `main` instead, which holds the asyncpg port and the UI's
+embedded mode, and which `uv sync --no-build` cannot install. neorc's
+PostgreSQL adapter is on asyncpg: psycopg is LGPL-3.0, which
 [DEPENDENCIES.md](../../DEPENDENCIES.md) forbids.
 
 ### What the worker is handed
