@@ -45,9 +45,9 @@ dependencies = [
     # import-linter contract below). `http` for its worker, `manager` for the
     # application mounted at /neorc and its UI, `postgres` for its store on
     # asyncpg. Not on PyPI yet: until the-guish/neorc tags a release, the
-    # sources below pin a commit of its asyncpg branch, which `uv sync
-    # --no-build` cannot install; the lock is then switched to the release's
-    # wheels, by URL and hash.
+    # sources below pin a commit of its embedded-ui branch (the asyncpg port,
+    # and the UI's embedded mode), which `uv sync --no-build` cannot install;
+    # the lock is then switched to the release's wheels, by URL and hash.
     "neorc[http,manager,postgres]",
     "neorc-core",
     "neorc-ui",
@@ -114,9 +114,9 @@ environments = [
 ]
 
 [tool.uv.sources]
-neorc = { git = "https://github.com/the-guish/neorc", rev = "c5fb3f8e297a21e828199636896ff94ff36e3983", subdirectory = "python/neorc" }
-neorc-core = { git = "https://github.com/the-guish/neorc", rev = "c5fb3f8e297a21e828199636896ff94ff36e3983", subdirectory = "python/neorc-core" }
-neorc-ui = { git = "https://github.com/the-guish/neorc", rev = "c5fb3f8e297a21e828199636896ff94ff36e3983", subdirectory = "python/neorc-ui" }
+neorc = { git = "https://github.com/the-guish/neorc", rev = "ab0b99658c4f7a95023e1c6c791ae91ceb75b74b", subdirectory = "python/neorc" }
+neorc-core = { git = "https://github.com/the-guish/neorc", rev = "ab0b99658c4f7a95023e1c6c791ae91ceb75b74b", subdirectory = "python/neorc-core" }
+neorc-ui = { git = "https://github.com/the-guish/neorc", rev = "ab0b99658c4f7a95023e1c6c791ae91ceb75b74b", subdirectory = "python/neorc-ui" }
 
 [project.scripts]
 robinauts = "robinauts.cli.main:run"

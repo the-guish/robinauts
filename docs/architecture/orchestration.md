@@ -71,14 +71,36 @@ things put it outside the server's process:
 
 It costs one process and a long-poll over the loopback interface.
 
-### The Flows page
+### The Flows pages
 
 The session (`GET /auth/session`) carries `flows_url`, `/neorc/ui/`, when the
-server mounts neorc, and nothing otherwise. The interface then shows **Flows**
-in the left panel, below the history, which opens `#/flows`: neorc's UI in a
-frame where the chat would be. `#/flows/runs/<id>` opens that run, as neorc's
-own `#/runs/<id>`. neorc's UI is built to work under any prefix: it finds its
-API one level above its page, and routes by its hash.
+server mounts neorc, and nothing otherwise. The interface then has one panel
+and one menu button for both: a **Flows** section in its left panel, below the
+history, is neorc's navigation, and neorc's UI, framed where the chat would
+be, is opened with `?embedded`, which leaves out neorc's own sidebar.
+
+The section holds what neorc's sidebar holds: **New run**, **Runs**, neorc's
+flows and its six latest runs, each status a dot. It reads them from neorc's
+API, one level above `flows_url`, and reads them again whenever neorc records
+an event, which it long-polls for (`frontend/src/flows/orchestrator.ts`). In
+the rail, New run and Runs stay as icons.
+
+Each page is a route of the shell's, translated to neorc's own hash in the
+frame:
+
+| route | neorc's page |
+|---|---|
+| `#/flows` | `#/runs` |
+| `#/flows/new` | `#/flows` |
+| `#/flows/runs/<id>` | `#/runs/<id>` |
+| `#/flows/flow/<name>` | `#/flows/<name>` |
+
+The frame is loaded once and then moved by its hash, both ways: a route of the
+shell's replaces the frame's hash, and a move inside the frame, such as a run
+started from its form, replaces the shell's route, so the address bar and the
+panel say where the frame is and Back undoes both at once. neorc's UI is built
+to work under any prefix: it finds its API one level above its page, and
+routes by its hash.
 
 The UI's answers say `frame-ancestors 'self'` and `x-frame-options:
 SAMEORIGIN` in the place of neorc's `'none'`, so the interface, and nothing on
@@ -99,7 +121,8 @@ Robinauts depends on `neorc[http,manager,postgres]`, `neorc-core` and
 `neorc-ui`, from the-guish/neorc. Until neorc is on PyPI, `backend/uv.lock`
 pins them to the wheels a GitHub release of that fork carries, by URL and hash:
 a `v*` tag builds the three, with the UI built in. Before the first release,
-the lock pins a commit of the fork instead, which `uv sync --no-build` cannot
+the lock pins a commit of the fork instead, on its `feature/embedded-ui`
+branch (the asyncpg port and the UI's embedded mode), which `uv sync --no-build` cannot
 install. neorc's PostgreSQL adapter is on asyncpg: psycopg is LGPL-3.0, which
 [DEPENDENCIES.md](../../DEPENDENCIES.md) forbids.
 

@@ -30,8 +30,9 @@ names, in the schema `neorc`:
 robinauts start --dev-no-sign-in
 ```
 
-Open **Flows** in the left panel: neorc's own page, at `/neorc/ui/`. Start a
-`guess_number` run there, or from a shell through the server's port:
+Use the **Flows** section of the left panel, below the history: **New run**,
+then `guess_number`, starts a run from neorc's own form, framed where the chat
+would be. Or start one from a shell through the server's port:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/neorc/flows/guess_number/runs -H 'content-type: application/json' -d '{"inputs": {}}'
@@ -39,4 +40,4 @@ curl -X POST http://127.0.0.1:8000/neorc/flows/guess_number/runs -H 'content-typ
 
 It plays the guessing game between two conversations, which show up in the
 history, and needs a model whose id or title holds `haiku`. The run then
-updates live in the Flows page.
+updates live in the frame and in the panel's recent runs.

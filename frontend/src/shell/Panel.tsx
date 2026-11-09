@@ -29,10 +29,10 @@ import {
   MonitorIcon,
   PanelLeftIcon,
   PlusIcon,
-  WorkflowIcon,
   XIcon,
 } from "../icons";
-import { DEVICES, FLOWS, formatRoute } from "../router";
+import { DEVICES, formatRoute, type FlowsView } from "../router";
+import { FlowsSection } from "../flows/FlowsSection";
 import type { User } from "../session/session";
 import { useWide } from "./breakpoint";
 import { useLockedScroll, useTrappedFocus } from "./drawer";
@@ -51,12 +51,12 @@ export interface PanelProps {
   /** Whether the page is "Linked devices", so its link can say so. */
   onDevices?: boolean;
   /**
-   * Whether the server serves an orchestrator's page, which "Flows" opens;
-   * with none, there is no "Flows" (`../flows/FlowsPage.tsx`).
+   * Where the server serves an orchestrator's page, which the "Flows"
+   * section opens; with none, there is no "Flows" (`../flows/`).
    */
-  flows?: boolean;
-  /** Whether the page is "Flows", so its link can say so. */
-  onFlows?: boolean;
+  flowsUrl?: string | null;
+  /** Which of its pages is up, if one is, so its link can say so. */
+  flowsView?: FlowsView | null;
   /** Collapsed to a rail of icons. Only on a screen wide enough for one. */
   collapsed: boolean;
   onCollapse: (collapsed: boolean) => void;
@@ -76,8 +76,8 @@ export function Panel({
   history,
   current,
   onDevices = false,
-  flows = false,
-  onFlows = false,
+  flowsUrl = null,
+  flowsView = null,
   collapsed,
   onCollapse,
   drawer,
@@ -160,21 +160,14 @@ export function Panel({
         />
       </nav>
 
-      {/* Below the history, and kept in the rail as its icon: a page of the
-          shell, as "Linked devices" is, so opened from the drawer it closes
-          the drawer. Only where the server has an orchestrator. */}
-      {flows && (
-        <a
-          href={formatRoute(FLOWS)}
-          title="Flows"
-          aria-label="Flows"
-          aria-current={onFlows ? "page" : undefined}
-          onClick={onCloseDrawer}
-          className="panel-flows"
-        >
-          <WorkflowIcon className="panel-icon" />
-          <span className="panel-wide">Flows</span>
-        </a>
+      {/* Below the history: the orchestrator's navigation, which its framed
+          page leaves out, so there is one panel and one menu button. */}
+      {flowsUrl !== null && (
+        <FlowsSection
+          url={flowsUrl}
+          view={flowsView}
+          onOpened={onCloseDrawer}
+        />
       )}
 
       {/* Everything that is not the history sits at the foot of the panel,
