@@ -25,6 +25,7 @@ import {
 const SESSION: Session = {
   sign_in: true,
   local_development: false,
+  flows: false,
   providers: [
     { id: "google", title: "Google" },
     { id: "okta", title: "Okta" },

@@ -22,6 +22,7 @@ const RUN = "11111111-2222-4333-8444-555555555555";
 const SESSION: Session = {
   sign_in: true,
   local_development: false,
+  flows: false,
   providers: [{ id: "google", title: "Google" }],
   user: { id: "u-1", provider: "google", name: "Ada", email: "ada@x.test" },
 };
@@ -1267,4 +1268,86 @@ test("the side panel is about a conversation, so not on a page that is not one",
   expect(
     screen.queryByRole("button", { name: "Open the side panel" }),
   ).toBeNull();
+});
+
+test("without an orchestrator the panel offers no flows", async () => {
+  await shell();
+  expect(within(panel()).queryByRole("link", { name: "Flows" })).toBeNull();
+});
+
+/** Render with the backend saying neorc's UI is there to frame. */
+async function withFlows() {
+  answering();
+  render(
+    <Shell
+      session={{ ...SESSION, flows: true }}
+      signOut={() => Promise.resolve()}
+    />,
+  );
+  await waitFor(() => {
+    expect(screen.queryByText("Loading the conversations…")).toBeNull();
+  });
+}
+
+test("with one, Flows sits under the history and goes to its page", async () => {
+  await withFlows();
+  const history = within(panel()).getByRole("navigation", { name: "History" });
+  const flows = within(panel()).getByRole("link", { name: "Flows" });
+  expect(flows).toHaveAttribute("href", "#/flows");
+  expect(flows).not.toHaveAttribute("aria-current");
+  // Under the history: it follows it in the document.
+  expect(
+    history.compareDocumentPosition(flows) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
+test("in the rail Flows keeps its name", async () => {
+  localStorage.setItem(`robinauts.${PANEL_KEY}`, "rail");
+  await withFlows();
+  expect(screen.getByRole("link", { name: "Flows" })).toHaveAttribute(
+    "title",
+    "Flows",
+  );
+});
+
+test("#/flows frames neorc's runs, sandboxed, where the chat would be", async () => {
+  location.hash = "#/flows";
+  await withFlows();
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Flows" }),
+  ).toBeVisible();
+  expect(screen.queryByRole("heading", { name: "New chat" })).toBeNull();
+  const frame = screen.getByTitle("neorc");
+  expect(frame).toHaveAttribute("src", "/neorc/ui/#/runs");
+  expect(frame).toHaveAttribute(
+    "sandbox",
+    "allow-scripts allow-same-origin allow-forms",
+  );
+  expect(screen.getByRole("link", { name: "Flows" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  // A page of the shell, not a conversation: no side panel.
+  expect(
+    screen.queryByRole("complementary", { name: "Side panel" }),
+  ).toBeNull();
+});
+
+test("#/flows/runs/<id> frames that run of neorc's", async () => {
+  location.hash = "#/flows/runs/run_42";
+  await withFlows();
+  expect(screen.getByTitle("neorc")).toHaveAttribute(
+    "src",
+    "/neorc/ui/#/runs/run_42",
+  );
+});
+
+test("#/flows without an orchestrator says so and frames nothing", async () => {
+  location.hash = "#/flows";
+  await shell();
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Flows" }),
+  ).toBeVisible();
+  expect(screen.queryByTitle("neorc")).toBeNull();
+  expect(screen.getByText(/No orchestrator is running/)).toBeVisible();
 });

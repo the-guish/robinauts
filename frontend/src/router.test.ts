@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 
 import {
   DEVICES,
+  FLOWS,
   formatRoute,
   isConversationId,
   LINK,
@@ -140,4 +141,35 @@ test("reading the same hash twice gives the same object", () => {
   const first = result.current;
   rerender();
   expect(result.current).toBe(first);
+});
+
+test("the flows page and a run of it are read out of the hash", () => {
+  expect(parseRoute("#/flows")).toEqual({ kind: "flows", run: null });
+  expect(parseRoute("#/flows/runs/run_01-ab")).toEqual({
+    kind: "flows",
+    run: "run_01-ab",
+  });
+});
+
+test("and written back the same way, round trip included", () => {
+  expect(formatRoute(FLOWS)).toBe("#/flows");
+  const run = { kind: "flows", run: "run_01-ab" } as const;
+  expect(formatRoute(run)).toBe("#/flows/runs/run_01-ab");
+  expect(parseRoute(formatRoute(run))).toEqual(run);
+});
+
+test("a run id that could forge a route here or in neorc is not one", () => {
+  for (const hash of [
+    "#/flows/runs/",
+    "#/flows/runs/a%2Fb",
+    "#/flows/runs/a/b",
+    "#/flows/runs/a#b",
+    "#/flows/runs/..",
+    `#/flows/runs/${"a".repeat(129)}`,
+    "#/flows/",
+    "#/flows/run/abc",
+  ]) {
+    expect(parseRoute(hash), hash).toEqual(NEW_CHAT);
+  }
+  expect(formatRoute({ kind: "flows", run: "a/b" })).toBe("#/flows");
 });

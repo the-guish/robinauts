@@ -38,7 +38,7 @@ port = 8420                               # the manager's port; the default
 database_url_env = "NEORC_DATABASE_URL"   # the default
 code_location = "orchestration"           # the handlers; default: this checkout's orchestration/
 flows = "orchestration/flows"             # the flow files; default: code_location/flows
-ui = true                                 # serve neorc's UI at /ui/; false when it is not built
+ui = true                                 # serve neorc's UI, for the Flows page; false when it is not built
 ```
 
 Relative paths start at the configuration file's directory. Robinauts does not
@@ -67,6 +67,64 @@ It never mints or removes a credential (403), and any other `rbo_` bearer is
 None of neorc's processes is handed what the configuration keeps from
 everything but the server: the model providers' keys, the tool servers'
 secrets, `ROBINAUTS_DATABASE_URL` and `ROBINAUTS_CONFIG`.
+
+### The Flows page
+
+The interface frames neorc's own UI on a page of its own, "Flows", under the
+conversations in the left panel. The server serves the manager it started
+on its own origin, under `/neorc/` ([web/neorc.py](../../backend/src/robinauts/web/neorc.py)):
+neorc's UI at `/neorc/ui/`, and its API right above it, which is where that
+UI looks for it. The page frames `/neorc/ui/`; `#/flows` is neorc's list of
+runs, and `#/flows/runs/<id>` is neorc's `#/runs/<id>`.
+
+- **Only in the local development mode with an `[orchestration]` table.**
+  Without it nothing answers under `/neorc/`, and `GET /auth/session` says
+  `flows: false`. With `ui = false` the API is still served, and the page
+  is not offered.
+- **Everything streams through.** An answer is passed on as the manager
+  sends it, so neorc's 20-second long polls of its event log work, and a
+  client that goes away cancels the request upstream. A request body is 8
+  MiB at most.
+- **neorc gets none of Robinauts' credentials.** The request reaches the
+  manager without `Cookie`, `Authorization` and `Origin`; the answer comes
+  back without `Set-Cookie`. The `Host` and `Origin` checks of the local
+  development mode apply under `/neorc/` as everywhere else.
+- **Framed by this server alone.** An answer under `/neorc/ui/` keeps
+  neorc's Content-Security-Policy, with `frame-ancestors 'none'` made
+  `'self'` and `connect-src 'self'` narrowed to `<origin>/neorc/`, and
+  carries `X-Frame-Options: SAMEORIGIN`. Every other answer under
+  `/neorc/` carries the server's usual headers, `DENY` included.
+
+#### What this costs: neorc's code on Robinauts' origin
+
+This variant puts neorc's bundle on the same origin as the interface and
+`/api/`. Any script in it, neorc's own or a package neorc bundles, runs as
+this origin, and so can call `/api/` as the person using the page, with
+whatever session they have. **Robinauts' dependency vetting does not cover
+neorc's packages**: `frontend/`'s rules, licence gate and cooldown govern
+this repository's bundle, not neorc's, which neorc vets under rules of its
+own.
+
+What holds it in, and how far:
+
+- **Local development only.** The table is refused with sign-in on, so
+  there is no session cookie to take: what a script in the frame can do is
+  what any process on the developer's machine can already do with the
+  loopback server.
+- **The policy.** neorc's `connect-src` reaches `/neorc/` and no further,
+  so its own `fetch` cannot reach `/api/`; its `script-src 'self'` and the
+  rest are neorc's and stay as neorc wrote them.
+- **The sandbox.** The frame is
+  `sandbox="allow-scripts allow-same-origin allow-forms"`: no navigating
+  the interface, no new windows, no downloads, no dialogs.
+  `allow-same-origin` is what lets neorc reach its API at all, and with it a
+  script in the frame can reach the parent page, whose own policy allows
+  `/api/`. **The policy and the sandbox stop the obvious ways, not a
+  determined script.**
+
+Before the page could be offered beyond the local development mode, this
+has to change: neorc on an origin of its own and framed across origins, or
+its bundle held to Robinauts' vetting.
 
 ### The flows Robinauts ships
 

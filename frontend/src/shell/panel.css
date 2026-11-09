@@ -108,6 +108,22 @@
   text-transform: uppercase;
 }
 
+/* "Flows", under the history: a row like a conversation's, with its icon. */
+.panel-flows {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: var(--radius);
+  padding: 0.375rem 0.5rem;
+  color: var(--muted);
+}
+
+.panel-flows[aria-current="page"] {
+  background-color: var(--tint);
+  color: var(--ink);
+}
+
 .panel-foot {
   margin-top: auto;
   display: flex;
@@ -219,6 +235,7 @@
 @media (hover: hover) {
   .panel-tool:hover,
   .panel-devices:hover,
+  .panel-flows:hover,
   .panel-signout:hover {
     background-color: var(--hover);
     color: var(--ink);

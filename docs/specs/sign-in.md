@@ -135,7 +135,8 @@ roles come, they work as follows.
 - The server logs a warning at start-up, and the interface shows a
   permanent banner saying that sign-in is off. `GET /auth/session` answers
   `sign_in: false` with `local_development: true`, no providers, and the
-  local user.
+  local user; and `flows: true` when an orchestrator's UI is there for the
+  Flows page ([architecture/orchestration.md](../architecture/orchestration.md)).
 - There is no session cookie here, and every request is the local user.
   A write that carries `Origin` must name the `Host` it was sent to, over
   `http` or `https`. A write with no `Origin` passes: browsers send one on

@@ -8,7 +8,9 @@
 - **The panel is ours**, and not part of the chat window
   ([ADR 0006](../adr/0006-chat-ui-on-react-alone.md)). Top to
   bottom: the collapse button and the brand; "new chat"; the conversation
-  history; projects, once they exist; and, pinned to the bottom, the
+  history; "Flows", only in the local development mode with an
+  orchestrator ([architecture/orchestration.md](../architecture/orchestration.md),
+  "The Flows page"); projects, once they exist; and, pinned to the bottom, the
   profile block with sign-out. Collapsed, it becomes an icon rail. The state is remembered
   per browser.
 - The application opens on an empty chat, ready for a first message, with
@@ -136,7 +138,11 @@ neorc's rules (`neorc/contributing/js-dependencies.md`):
   `Referrer-Policy: same-origin`. The policy does nothing on JSON, and one
   list is simpler than two. The one exception is an MCP app's view, whose
   answer carries its own policy and `X-Frame-Options: SAMEORIGIN`
-  ([architecture/web.md](../architecture/web.md), "Apps").
+  ([architecture/web.md](../architecture/web.md), "Apps"). The other is
+  neorc's UI under `/neorc/ui/`, local development only, which keeps neorc's
+  own policy with `frame-ancestors 'self'` and its `connect-src` narrowed to
+  `/neorc/` ([architecture/orchestration.md](../architecture/orchestration.md),
+  "The Flows page").
 - The interface's paths are read: `GET` and `HEAD`, and a write to one is a
   `405` with `Allow: GET, HEAD`. Nothing under `/ui/` whose name begins with
   a dot is served or packaged: a directory a build writes into is one an

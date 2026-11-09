@@ -1009,6 +1009,11 @@
               }
             ]
           },
+          "flows": {
+            "default": false,
+            "title": "Flows",
+            "type": "boolean"
+          },
           "local_development": {
             "default": false,
             "title": "Local Development",

@@ -16,6 +16,7 @@ import { DevicesPage, NO_PHONES, NO_TOKENS, SHOWN_ONCE } from "./DevicesPage";
 const SESSION: Session = {
   sign_in: true,
   local_development: false,
+  flows: false,
   providers: [{ id: "google", title: "Google" }],
   user: { id: "u-1", provider: "google", name: "Ada", email: "ada@x.test" },
 };

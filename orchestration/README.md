@@ -34,6 +34,12 @@ command = ["uv", "run", "--project", "../neorc", "neorc"]
 ui = false
 ```
 
+With neorc's UI built (`npm ci` and `npm run build` in neorc's
+`ts/neorc-ui`, then `uv sync --all-packages` again), leave `ui` out or set it to
+`true`: the interface then has a "Flows" page under the conversations, which
+frames neorc's UI ([docs/architecture/orchestration.md](../docs/architecture/orchestration.md),
+"The Flows page").
+
 Start the server with neorc's database:
 
 ```bash

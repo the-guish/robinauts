@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Chat } from "../chat";
 import { DevicesPage } from "../devices/DevicesPage";
+import { FlowsPage } from "../flows/FlowsPage";
 import { conversationIn, useHistory } from "../history/history";
 import { MenuIcon, PanelRightIcon } from "../icons";
 import { navigate, NEW_CHAT, useRoute } from "../router";
@@ -251,6 +252,8 @@ export function Shell({
   }, [sideDrawer]);
 
   const current = route.kind === "conversation" ? route.id : null;
+  // "Linked devices" and "Flows" are pages of the shell, not conversations.
+  const aPage = route.kind === "devices" || route.kind === "flows";
   const listed = conversationIn(history.items, current);
   // What the chat's own read said about the conversation on the screen,
   // which the panel's pages need not hold; the title is the panel's first,
@@ -371,6 +374,8 @@ export function Shell({
         history={history}
         current={current}
         onDevices={route.kind === "devices"}
+        flows={session.flows}
+        onFlows={route.kind === "flows"}
         collapsed={collapsed}
         onCollapse={setCollapsed}
         drawer={drawer}
@@ -416,7 +421,7 @@ export function Shell({
           >
             <MenuIcon className="shell-icon" />
           </button>
-          {route.kind !== "devices" && (
+          {!aPage && (
             <button
               type="button"
               ref={sideOpener}
@@ -450,6 +455,8 @@ export function Shell({
               the page stands where the chat would be. */}
           {route.kind === "devices" ? (
             <DevicesPage session={session} />
+          ) : route.kind === "flows" ? (
+            <FlowsPage available={session.flows} />
           ) : (
             <>
               <h1 className="shell-title">
@@ -504,7 +511,7 @@ export function Shell({
         </main>
       </div>
       {/* About the conversation, so not on a page that is not one. */}
-      {route.kind !== "devices" && (
+      {!aPage && (
         <SidePanel
           conversation={current ?? NEW_CHAT_TABS}
           offers={offers}

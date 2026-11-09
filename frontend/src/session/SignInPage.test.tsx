@@ -19,6 +19,7 @@ const ZERO_WIDTH = "\u200b";
 const CONFIGURED: Session = {
   sign_in: true,
   local_development: false,
+  flows: false,
   providers: [
     { id: "google", title: "Google" },
     { id: "okta", title: "Okta" },
@@ -95,7 +96,12 @@ test("no code, no complaint", () => {
 test("a deployment with no sign-in says so and offers nothing", () => {
   render(
     <SignInPage
-      session={{ sign_in: false, local_development: false, providers: [] }}
+      session={{
+        sign_in: false,
+        local_development: false,
+        flows: false,
+        providers: [],
+      }}
     />,
   );
   expect(screen.queryAllByRole("link")).toHaveLength(0);

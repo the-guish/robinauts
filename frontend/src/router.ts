@@ -10,7 +10,7 @@
  * prefix to build for, and nothing here depends on where the application is
  * mounted.
  *
- * No router library. Four routes, one event, and a store the size of this
+ * No router library. Six routes, one event, and a store the size of this
  * file; a library would be a dependency to vet, to keep pinned and to carry
  * in the bundle for something React already provides through
  * `useSyncExternalStore` (`docs/contributing/js-dependencies.md`).
@@ -19,6 +19,8 @@
  *     #/c/<id>      that conversation
  *     #/devices     "Linked devices": the phones and the API tokens
  *     #/link        what a phone's camera app opens a pairing code at
+ *     #/flows       "Flows": neorc's UI, framed (`src/flows/FlowsPage.tsx`)
+ *     #/flows/runs/<id>   the same, on that run of neorc's
  *
  * `#/link?v=1&c=…` is the URL inside a pairing QR
  * (`docs/architecture/device-pairing.md`). Its query is cut off like any
@@ -40,7 +42,8 @@ export type Route =
   | { readonly kind: "new" }
   | { readonly kind: "conversation"; readonly id: ConversationId }
   | { readonly kind: "devices" }
-  | { readonly kind: "link" };
+  | { readonly kind: "link" }
+  | { readonly kind: "flows"; readonly run: string | null };
 
 /** The empty chat: the route of a page that has been told nothing else. */
 export const NEW_CHAT: Route = { kind: "new" };
@@ -50,6 +53,21 @@ export const DEVICES: Route = { kind: "devices" };
 
 /** The page a pairing code opens in a browser. */
 export const LINK: Route = { kind: "link" };
+
+/** "Flows", on neorc's list of runs. */
+export const FLOWS: Route = { kind: "flows", run: null };
+
+/**
+ * The shape of a neorc run id this interface puts in a hash and hands on to
+ * neorc's own. neorc names a run with a string; the ids it gives are
+ * letters, digits, `-` and `_`, and nothing else is let through, so no id can
+ * forge a route here or there.
+ */
+const RUN_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+export function isRunId(value: string): boolean {
+  return RUN_ID.test(value);
+}
 
 /**
  * The shape of every id the backend gives a conversation.
@@ -91,7 +109,19 @@ export function parseRoute(hash: string): Route {
     (hash.startsWith("#") ? hash.slice(1) : hash).split("?")[0] ?? "";
   if (path === "/devices") return DEVICES;
   if (path === "/link") return LINK;
+  if (path === "/flows") return FLOWS;
   const parts = path.split("/");
+  const run = parts[3];
+  if (
+    parts.length === 4 &&
+    parts[0] === "" &&
+    parts[1] === "flows" &&
+    parts[2] === "runs" &&
+    run !== undefined &&
+    isRunId(run)
+  ) {
+    return { kind: "flows", run };
+  }
   const id = parts[2];
   if (
     parts.length === 3 &&
@@ -119,6 +149,10 @@ export function formatRoute(route: Route): string {
       return "#/devices";
     case "link":
       return "#/link";
+    case "flows":
+      return route.run !== null && isRunId(route.run)
+        ? `#/flows/runs/${route.run}`
+        : "#/flows";
     case "conversation":
       return isConversationId(route.id) ? `#/c/${route.id}` : "#/";
     default:

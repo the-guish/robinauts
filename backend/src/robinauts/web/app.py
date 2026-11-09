@@ -78,6 +78,8 @@ from robinauts.web.apps import Apps, NoSuchAppError, ToolResult, UnansweredCallE
 from robinauts.web.cookies import Cookies
 from robinauts.web.headers import VIEW_HEADERS, SecurityHeaders
 from robinauts.web.logs import loggable
+from robinauts.web.neorc import PREFIX as NEORC_PREFIX
+from robinauts.web.neorc import NeorcProxy, Orchestrator
 from robinauts.web.oidc import Exchange, SecretLookup, claims_from
 from robinauts.web.pairing import (
     FRESH_MINUTES,
@@ -285,6 +287,9 @@ class UserSessionResponse(BaseModel):
     """The token a token bearer is."""
     pairing: PairingStateView | None = None
     """The pairing the bearer of a claim waits on, before it is approved."""
+    flows: bool = False
+    """Whether the interface's Flows page has neorc's UI to frame, under ``/neorc/ui/``: the
+    local development mode with an ``[orchestration]`` table and neorc's UI on."""
 
 
 class MintedPairingResponse(BaseModel):
@@ -639,13 +644,18 @@ def create_app(
     secret_for: SecretLookup,
     config: Config,
     ui_dir: Path | None = None,
+    orchestrator: Orchestrator | None = None,
 ) -> FastAPI:
     """The HTTP server alone. Whoever runs it opens the controller and starts the worker before
     it serves, and stops the worker and closes the controller after (``cli/lifecycle.py``).
     ``brokers``, one per worker by name, and ``worker_access`` serve the workers in processes
     of their own at ``/internal/worker/``; ``healthy`` says whether this node's workers are
     heard from, for ``/health``. ``sign_in`` is ``None`` in the local development mode.
-    ``config`` names the agents' tool servers, whose secrets ``secret_for`` reads too."""
+    ``config`` names the agents' tool servers, whose secrets ``secret_for`` reads too.
+    ``orchestrator`` is the neorc manager started beside the server, served under ``/neorc/``
+    (``web/neorc.py``); the local development mode alone has one."""
+    if orchestrator is not None and sign_in is not None:
+        raise ValueError("neorc's manager runs with no authentication: local development only")
     exchange: Exchange | None = None
     flow: SignIn | None = None
     if sign_in is not None:
@@ -657,6 +667,7 @@ def create_app(
     )
     recent = RecentChecks()
     apps = Apps(config, secret_for)
+    neorc = NeorcProxy(orchestrator.manager) if orchestrator is not None else None
     local_user: User | None = None
 
     @asynccontextmanager
@@ -667,6 +678,8 @@ def create_app(
         yield
         if exchange is not None:
             await exchange.aclose()
+        if neorc is not None:
+            await neorc.aclose()
 
     # --- who is asking -----------------------------------------------------------
 
@@ -839,7 +852,10 @@ def create_app(
     async def current_user_session(request: Request) -> UserSessionResponse:
         if sign_in is None:
             return UserSessionResponse(
-                sign_in=False, local_development=True, user=user_summary(local_user)
+                sign_in=False,
+                local_development=True,
+                user=user_summary(local_user),
+                flows=orchestrator is not None and orchestrator.ui,
             )
         now = datetime.now(UTC)
         answer = UserSessionResponse(
@@ -1182,6 +1198,11 @@ def create_app(
         if healthy():
             return JSONResponse({"status": "ok"})
         return JSONResponse({"status": "the worker is not running"}, status_code=503)
+
+    # --- neorc, for the Flows page --------------------------------------------------
+
+    if neorc is not None:
+        app.mount(NEORC_PREFIX, neorc, name="neorc")
 
     # --- the interface ---------------------------------------------------------
 

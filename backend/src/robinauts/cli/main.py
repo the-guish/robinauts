@@ -61,6 +61,7 @@ from robinauts.controller.contract.ports import Credentials
 from robinauts.shared_domain.domain import Config, ControllerError, StorageConfig, StorageKind
 from robinauts.web.app import create_app
 from robinauts.web.contract.broker.wire import SERVER_KEEP_ALIVE_SECONDS
+from robinauts.web.neorc import Orchestrator
 from robinauts.web.sign_in import SIGN_IN_KEYS, SignInConfig, is_loopback, parse_sign_in
 
 REPO = Path(__file__).resolve().parents[4]
@@ -152,9 +153,11 @@ def build_app(
     sign_in: SignInConfig | None,
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
+    orchestrator: Orchestrator | None = None,
 ) -> FastAPI:
     """The HTTP server over what the composition built, with the lifecycle's gate for a worker
-    in a process of its own and its health. The app starts and stops nothing: ``serve`` does."""
+    in a process of its own and its health, and the neorc manager ``orchestrator`` names under
+    ``/neorc/``. The app starts and stops nothing: ``serve`` does."""
     return create_app(
         composed.controller,
         composed.credentials,
@@ -165,6 +168,7 @@ def build_app(
         secret_for=secret_for,
         config=composed.config,
         ui_dir=ui_dir,
+        orchestrator=orchestrator,
     )
 
 
@@ -284,7 +288,18 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         # that starts with a command of its own.
         in_process=storage.kind is not StorageKind.POSTGRES,
     )
-    app = build_app(composed, lifecycle, sign_in=sign_in, secret_for=secret_for, ui_dir=ui_dir)
+    proxied = None
+    if orchestrator is not None:
+        described = orchestrator.orchestration
+        proxied = Orchestrator(manager=described.manager_address, ui=described.ui)
+    app = build_app(
+        composed,
+        lifecycle,
+        sign_in=sign_in,
+        secret_for=secret_for,
+        ui_dir=ui_dir,
+        orchestrator=proxied,
+    )
     config = uvicorn.Config(
         app,
         host=host,

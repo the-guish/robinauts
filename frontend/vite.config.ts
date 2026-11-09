@@ -510,6 +510,8 @@ export default defineConfig({
       "/api": proxy,
       "/auth": proxy,
       "/health": proxy,
+      // neorc's UI and API, which the backend serves for the Flows page.
+      "/neorc": proxy,
       "/openapi.json": proxy,
     },
   },

@@ -390,6 +390,7 @@ forbidden_modules = [
     "robinauts.web.headers",
     "robinauts.web.logs",
     "robinauts.web.mcp_client",
+    "robinauts.web.neorc",
     "robinauts.web.oidc",
     "robinauts.web.pairing",
     "robinauts.web.sign_in",

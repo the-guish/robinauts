@@ -10,6 +10,10 @@
  * directly and knows nothing of what draws the chat, and nothing here ever
  * will.
  *
+ * **"Flows"** sits under the history, and only when the backend says neorc's
+ * UI is there to frame (`flows` on `/auth/session`): the local development
+ * mode with an orchestrator (`docs/architecture/orchestration.md`).
+ *
  * There is **no projects section**: projects are out of the POC. The spec's
  * panel has one, and it goes here, between the history and the profile
  * block, when they exist.
@@ -28,9 +32,10 @@ import {
   MonitorIcon,
   PanelLeftIcon,
   PlusIcon,
+  WorkflowIcon,
   XIcon,
 } from "../icons";
-import { DEVICES, formatRoute } from "../router";
+import { DEVICES, FLOWS, formatRoute } from "../router";
 import type { User } from "../session/session";
 import { useWide } from "./breakpoint";
 import { useLockedScroll, useTrappedFocus } from "./drawer";
@@ -48,6 +53,10 @@ export interface PanelProps {
   current: ConversationId | null;
   /** Whether the page is "Linked devices", so its link can say so. */
   onDevices?: boolean;
+  /** Whether there are flows to show: neorc's UI, which the backend frames. */
+  flows?: boolean;
+  /** Whether the page is "Flows", so its link can say so. */
+  onFlows?: boolean;
   /** Collapsed to a rail of icons. Only on a screen wide enough for one. */
   collapsed: boolean;
   onCollapse: (collapsed: boolean) => void;
@@ -67,6 +76,8 @@ export function Panel({
   history,
   current,
   onDevices = false,
+  flows = false,
+  onFlows = false,
   collapsed,
   onCollapse,
   drawer,
@@ -148,6 +159,22 @@ export function Panel({
           onOpened={onCloseDrawer}
         />
       </nav>
+
+      {/* Below the history, a link rather than a button, since it goes to a
+          page; in the rail it is its icon, with its name on the link. */}
+      {flows && (
+        <a
+          href={formatRoute(FLOWS)}
+          title="Flows"
+          aria-label="Flows"
+          aria-current={onFlows ? "page" : undefined}
+          onClick={onCloseDrawer}
+          className="panel-flows"
+        >
+          <WorkflowIcon className="panel-icon" />
+          <span className="panel-wide">Flows</span>
+        </a>
+      )}
 
       {/* Everything that is not the history sits at the foot of the panel,
           because `docs/specs/frontend.md` leaves no top bar to put it in.
