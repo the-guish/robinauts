@@ -24,7 +24,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { detailOf, request } from "../api/client";
 import type { ConversationId } from "../chat";
-import type { Conversation } from "../conversation/conversation";
+import type { ListedConversation } from "../conversation/conversation";
 
 /**
  * How many are asked for at a time.
@@ -37,7 +37,7 @@ export const PAGE = 30;
 /** The list, and everything that can be done to it. */
 export interface History {
   status: "loading" | "ready" | "failed";
-  items: Conversation[];
+  items: ListedConversation[];
   /** There is another page to ask for. */
   more: boolean;
   /** That page is on its way. */
@@ -66,7 +66,7 @@ export interface History {
 
 interface Listing {
   status: "loading" | "ready" | "failed";
-  items: Conversation[];
+  items: ListedConversation[];
   /** What to ask the next page with; `null` when this was the last. */
   cursor: string | null;
   loadingMore: boolean;
@@ -89,9 +89,9 @@ const NO_LIST = "The conversations could not be loaded";
 const NO_MORE = "More conversations could not be loaded";
 
 /** The same conversation twice is one conversation; the first wins. */
-function fold(items: Conversation[]): Conversation[] {
+function fold(items: ListedConversation[]): ListedConversation[] {
   const seen = new Set<string>();
-  const folded: Conversation[] = [];
+  const folded: ListedConversation[] = [];
   for (const item of items) {
     if (seen.has(item.id)) continue;
     seen.add(item.id);
@@ -223,9 +223,9 @@ export function useHistory(): History {
 
 /** The conversation of that id, if this page of the listing holds it. */
 export function conversationIn(
-  items: readonly Conversation[],
+  items: readonly ListedConversation[],
   id: ConversationId | null,
-): Conversation | null {
+): ListedConversation | null {
   if (id === null) return null;
   return items.find((item) => item.id === id) ?? null;
 }

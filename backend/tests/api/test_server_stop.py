@@ -5,6 +5,7 @@
 controller before the process ends. uvicorn raises the signal again once it has shut down,
 so whatever runs after its ``serve`` returns never runs on SIGTERM, and is cut short on SIGINT.
 A signal while the controller and the worker start waits for the start, then stops both.
+A poll of the change feed left open does not hold the stop back.
 """
 
 from __future__ import annotations
@@ -14,8 +15,11 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
+import httpx
 import pytest
 
 from util import stack
@@ -43,8 +47,17 @@ def test_a_signal_closes_the_controller_before_the_process_ends(
         stack.wait_until_up(f"http://127.0.0.1:{port}", running)
         activity = Path(tempfile.gettempdir()) / f"robinauts-worker-{running.pid}.alive"
         assert activity.exists()
+        feed = f"http://127.0.0.1:{port}/api/changes"
+        version = httpx.get(feed).json()["version"]
+        polled = {"after": version, "timeout": 30}
+        poll = threading.Thread(target=lambda: httpx.get(feed, params=polled, timeout=60))
+        poll.start()
+        time.sleep(0.5)
+        began = time.monotonic()
         running.send_signal(signum)
         _, said = running.communicate(timeout=30)
+        assert time.monotonic() - began < 10
+        poll.join(10)
     assert CLOSED in said, said.decode(errors="replace")
     assert b"Traceback" not in said, said.decode(errors="replace")
     assert running.returncode == status

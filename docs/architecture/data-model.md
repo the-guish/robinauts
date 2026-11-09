@@ -17,7 +17,7 @@ agent to another engine, and what its sessions then do, is stage two.
 
 | record | key | holds | document |
 |---|---|---|---|
-| user | `id` | `provider` and `subject` (unique together), `name`, `email`, `created_at`, `hosted_domain`, `groups` | no |
+| user | `id` | `provider` and `subject` (unique together), `name`, `email`, `created_at`, `hosted_domain`, `groups`, `change_version` | no |
 | session | `id` | `owner_id`, `agent`, `engine`, `title`, `created_at`, `updated_at`, `deleted_at` | no |
 | message | `id` | `session_id`, `parent_id`, `role`, `created_at` | **yes** |
 | turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `retries_message_id`, `task_id` | no |
@@ -89,7 +89,7 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   process asks. The worker then
   dispatches it in its own process. The task's `payload` names its turn.
 - **A turn finishes in one operation:** its answer, its last events, its state, its
-  task `done`, and the session's `updated_at`.
+  task `done`, the session's `updated_at`, and the owner's `change_version`.
 - **The runner numbers its turn's events** and is their only writer, one at a time, so
   positions commit in order. The store accepts the same document again at a position
   it has, since a write retried after a lost acknowledgement is not a second runner,
@@ -129,6 +129,13 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   none supplies it from the record. A runner that outlives its task's lease has lost the
   turn whether or not a reader has found it: every write names its time, and the store
   refuses one past the lease.
+- **A user's `change_version` counts the changes worth knowing.** The store adds
+  one to it in the same operation as each: a session added, renamed or hidden,
+  `queue_turn`, `finish_turn`, `end_expired_turn`, and a cancel that ends a queued
+  turn. Each bump wakes every process that waits on that user's version
+  (`docs/specs/wire.md`, "The change feed"). A store without transactions
+  across records keeps the counter on a record of its own and bumps it in the
+  same conditional write.
 - **No clocks and no ids in a store.** The controller mints every id and sets every
   time.
 - **A session and its records are addressed from the owner down.** Every operation on

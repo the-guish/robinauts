@@ -60,7 +60,8 @@ class Store(ABC):
         """``SessionNotFoundError`` for a session that is missing, hidden or another owner's."""
 
     @abstractmethod
-    async def update_session(self, session: Session) -> None: ...
+    async def update_session(self, session: Session) -> None:
+        """Its title and ``updated_at`` replaced: a rename."""
 
     @abstractmethod
     async def sessions_of(
@@ -219,3 +220,22 @@ class Store(ABC):
         """Wait until the turn has an event past ``after`` or has ended, or ``timeout``
         seconds have passed: true in the first two cases, false in the last. The caller reads
         the store again in every case."""
+
+    # --- changes --------------------------------------------------------------
+
+    @abstractmethod
+    async def running_sessions(
+        self, owner: uuid.UUID, sessions: Sequence[uuid.UUID]
+    ) -> frozenset[uuid.UUID]:
+        """Those of the owner's visible sessions that have an active turn."""
+
+    @abstractmethod
+    async def wait_for_changes(self, owner: uuid.UUID, after: int | None, timeout: float) -> int:
+        """The owner's change version, once it is other than ``after`` or ``timeout`` seconds
+        have passed; at once for ``after`` ``None``. A user the store does not have is at 0.
+
+        The version grows by one in the same operation as each change worth knowing:
+        ``add_session``, ``update_session``, ``hide_session``, ``queue_turn``,
+        ``finish_turn``, ``end_expired_turn``, and a ``request_cancel`` that ends a queued
+        turn. A change in any process wakes the wait, which holds no connection of the pool
+        while it waits."""

@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Chat } from "../chat";
+import { useChanges } from "../changes/changes";
 import { DevicesPage } from "../devices/DevicesPage";
 import { FlowsPage } from "../flows/FlowsPage";
 import { conversationIn, useHistory } from "../history/history";
@@ -179,6 +180,16 @@ export function Shell({
   // The pages that are not about a conversation: no side panel there.
   const aPage = route.kind === "devices" || flowsView !== null;
   const history = useHistory();
+  // Something of this user changed in another tab or client: the list is
+  // asked for again, and the chat reads its conversation again
+  // (`../changes/changes.ts`).
+  const [changes, setChanges] = useState(0);
+  const refreshHistory = history.refresh;
+  const changed = useCallback(() => {
+    refreshHistory();
+    setChanges((count) => count + 1);
+  }, [refreshHistory]);
+  useChanges(changed);
   // "New chat" pressed while the empty chat is already up changes no hash
   // and so re-renders nothing; the count is what remounts the area, so
   // nothing typed into it carries over into the next one.
@@ -508,6 +519,7 @@ export function Shell({
                 onConversationStarted={startedConversation}
                 onConversationOpened={conversationOpened}
                 onTurnEnded={turnEnded}
+                changes={changes}
                 onToolResult={results.publish}
                 welcome={welcome}
               />

@@ -36,6 +36,7 @@ from robinauts.cli.worker_process import (
     WORKER_NAME_VARIABLE,
 )
 from robinauts.shared_domain.domain import DEFAULT_WORKER
+from robinauts.web.changes import FeedGate
 from robinauts.web.worker_api import WorkerAccess
 
 _log = logging.getLogger(__name__)
@@ -96,6 +97,8 @@ class Lifecycle:
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._watching: dict[str, asyncio.Task[None]] = {}
         self.access = WorkerAccess(heard=self._heard)
+        self.feed = FeedGate()
+        """Closed by the server's shut-down, which ends the change feed's waits."""
         """What lets the workers' processes in through the API."""
         self.activity_files = {name: activity_file(name) for name in composed.workers}
         """When each worker was last heard from, by worker: the file's time."""

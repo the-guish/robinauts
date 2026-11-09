@@ -13,7 +13,9 @@ listening connection per store, held apart from the pool, and read the store aga
 case, so a notification lost with a dropped connection costs a timeout and nothing else. A
 request to stop a turn comes on the same connection, and one that is lost is read back with
 the next renewal of the task's lease. So does a queued task, which a worker that misses it
-finds at its next wait.
+finds at its next wait. Each change worth knowing bumps its owner's ``change_version`` in the
+same transaction, the ``users`` row locked last, and is announced on ``CHANGES_CHANNEL`` to the
+waiters of ``wait_for_changes``, keyed by owner.
 """
 
 from __future__ import annotations
@@ -57,6 +59,9 @@ CANCEL_CHANNEL = "robinauts_cancel"
 
 QUEUED_CHANNEL = "robinauts_queued"
 """Where a queued task is announced: ``<task> <worker>``."""
+
+CHANGES_CHANNEL = "robinauts_changes"
+"""Where a bump of a user's change version is announced: ``<user> <version>``."""
 
 ONE_ACTIVE = "turns_one_active_per_session"
 POSITION_TAKEN = "turn_events_pkey"
@@ -173,6 +178,18 @@ def _user(row: asyncpg.Record) -> User:
     )
 
 
+async def _bump(connection: asyncpg.Connection, owner: uuid.UUID) -> None:
+    """The owner's change version moved by one, and announced on commit. Last in its
+    transaction, so that the ``users`` row is the last lock it takes."""
+    version = await connection.fetchval(
+        "UPDATE users SET change_version = change_version + 1 WHERE id = $1"
+        " RETURNING change_version",
+        owner,
+    )
+    if version is not None:
+        await connection.execute("SELECT pg_notify($1, $2)", CHANGES_CHANNEL, f"{owner} {version}")
+
+
 def _rows(status: str) -> int:
     """The row count at the end of a command tag such as ``UPDATE 1``."""
     return int(status.rsplit(" ", 1)[-1])
@@ -190,6 +207,8 @@ class PostgresStore(Store):
         self._waiters: dict[uuid.UUID, set[asyncio.Future[None]]] = {}
         self._queued_waiters: dict[str, set[asyncio.Future[None]]] = {}
         """By worker: those waiting for a task it may claim."""
+        self._change_waiters: dict[uuid.UUID, set[asyncio.Future[None]]] = {}
+        """By owner: those waiting for their change version to move."""
         self._stops: list[Callable[[uuid.UUID], object]] = []
         self._opening: asyncio.Lock | None = None
 
@@ -237,16 +256,18 @@ class PostgresStore(Store):
     # --- sessions -----------------------------------------------------------
 
     async def add_session(self, session: Session) -> None:
-        await self._pool.execute(
-            f"INSERT INTO sessions ({_SESSION_COLUMNS}) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            session.id,
-            session.owner_id,
-            session.agent,
-            session.engine,
-            session.title,
-            session.created_at,
-            session.updated_at,
-        )
+        async with self._pool.acquire() as connection, connection.transaction():
+            await connection.execute(
+                f"INSERT INTO sessions ({_SESSION_COLUMNS}) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                session.id,
+                session.owner_id,
+                session.agent,
+                session.engine,
+                session.title,
+                session.created_at,
+                session.updated_at,
+            )
+            await _bump(connection, session.owner_id)
 
     async def get_session(self, owner: uuid.UUID, session: uuid.UUID) -> Session:
         row = await self._pool.fetchrow(
@@ -260,12 +281,16 @@ class PostgresStore(Store):
         return _session(row)
 
     async def update_session(self, session: Session) -> None:
-        await self._pool.execute(
-            "UPDATE sessions SET title = $2, updated_at = $3 WHERE id = $1",
-            session.id,
-            session.title,
-            session.updated_at,
-        )
+        async with self._pool.acquire() as connection, connection.transaction():
+            status = await connection.execute(
+                "UPDATE sessions SET title = $2, updated_at = $3 WHERE id = $1 AND owner_id = $4",
+                session.id,
+                session.title,
+                session.updated_at,
+                session.owner_id,
+            )
+            if _rows(status) > 0:
+                await _bump(connection, session.owner_id)
 
     async def sessions_of(
         self, owner: uuid.UUID, limit: int, before: Cursor | None
@@ -284,15 +309,17 @@ class PostgresStore(Store):
         return [_session(row) for row in rows]
 
     async def hide_session(self, owner: uuid.UUID, session: uuid.UUID, at: datetime) -> None:
-        status = await self._pool.execute(
-            "UPDATE sessions SET deleted_at = $3"
-            " WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL",
-            session,
-            owner,
-            at,
-        )
-        if _rows(status) == 0:
-            raise SessionNotFoundError(str(session))
+        async with self._pool.acquire() as connection, connection.transaction():
+            status = await connection.execute(
+                "UPDATE sessions SET deleted_at = $3"
+                " WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL",
+                session,
+                owner,
+                at,
+            )
+            if _rows(status) == 0:
+                raise SessionNotFoundError(str(session))
+            await _bump(connection, owner)
 
     async def purge_session(self, owner: uuid.UUID, session: uuid.UUID, now: datetime) -> bool:
         async with self._pool.acquire() as connection, connection.transaction():
@@ -364,6 +391,7 @@ class PostgresStore(Store):
                     await connection.execute(
                         "SELECT pg_notify($1, $2)", QUEUED_CHANNEL, f"{task.id} {task.worker}"
                     )
+                await _bump(connection, owner)
         except asyncpg.UniqueViolationError as violated:
             if violated.constraint_name == ONE_ACTIVE:
                 raise TurnActiveError(str(turn.session_id)) from violated
@@ -476,6 +504,7 @@ class PostgresStore(Store):
                         event.expires_at,
                     )
                 await connection.execute("SELECT pg_notify($1, $2)", CHANNEL, f"{turn} end")
+                await _bump(connection, owner)
         except asyncpg.UniqueViolationError as violated:
             if violated.constraint_name in (POSITION_TAKEN, "messages_pkey"):
                 raise TurnLostError(f"turn {turn} was finished already") from violated
@@ -513,6 +542,7 @@ class PostgresStore(Store):
             if answer is not None:
                 await self._insert_message(connection, answer)
             await connection.execute("SELECT pg_notify($1, $2)", CHANNEL, f"{turn} end")
+            await _bump(connection, owner)
         return _turn(row)
 
     async def renew_leases(
@@ -573,6 +603,7 @@ class PostgresStore(Store):
                     "UPDATE turns SET state = 'cancelled', ended_at = $2 WHERE id = $1", turn, at
                 )
                 await connection.execute("SELECT pg_notify($1, $2)", CHANNEL, f"{turn} end")
+                await _bump(connection, owner)
             elif state == TaskState.RUNNING.value:
                 await connection.execute(
                     "UPDATE tasks SET cancel_requested_at = $2 WHERE id = $1", task, at
@@ -675,6 +706,51 @@ class PostgresStore(Store):
                     if not waiting:
                         del self._waiters[turn]
 
+    # --- changes ------------------------------------------------------------
+
+    async def running_sessions(
+        self, owner: uuid.UUID, sessions: Sequence[uuid.UUID]
+    ) -> frozenset[uuid.UUID]:
+        rows = await self._pool.fetch(
+            "SELECT t.session_id FROM turns AS t JOIN sessions AS s ON s.id = t.session_id"
+            " WHERE t.session_id = ANY($2) AND t.state = 'active'"
+            "   AND s.owner_id = $1 AND s.deleted_at IS NULL",
+            owner,
+            list(sessions),
+        )
+        return frozenset(row["session_id"] for row in rows)
+
+    async def wait_for_changes(self, owner: uuid.UUID, after: int | None, timeout: float) -> int:
+        if after is None:
+            return await self._change_version(owner)
+        await self._listen()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            # Registered before the version is read, so a bump between the read and the
+            # sleep wakes it.
+            woken: asyncio.Future[None] = loop.create_future()
+            self._change_waiters.setdefault(owner, set()).add(woken)
+            try:
+                version = await self._change_version(owner)
+                remaining = deadline - loop.time()
+                if version != after or remaining <= 0:
+                    return version
+                try:
+                    await asyncio.wait_for(asyncio.shield(woken), remaining)
+                except TimeoutError:
+                    return await self._change_version(owner)
+            finally:
+                waiting = self._change_waiters.get(owner)
+                if waiting is not None:
+                    waiting.discard(woken)
+                    if not waiting:
+                        del self._change_waiters[owner]
+
+    async def _change_version(self, owner: uuid.UUID) -> int:
+        version = await self._pool.fetchval("SELECT change_version FROM users WHERE id = $1", owner)
+        return 0 if version is None else int(version)
+
     # --- helpers ------------------------------------------------------------
 
     async def _ready(
@@ -707,6 +783,7 @@ class PostgresStore(Store):
             await listener.add_listener(CHANNEL, self._wake_watchers)
             await listener.add_listener(CANCEL_CHANNEL, self._stop_cancelled_task)
             await listener.add_listener(QUEUED_CHANNEL, self._wake_queued_waiters)
+            await listener.add_listener(CHANGES_CHANNEL, self._wake_change_waiters)
             self._listener = listener
 
     def _wake_watchers(self, connection: object, pid: int, channel: str, payload: str) -> None:
@@ -716,6 +793,18 @@ class PostgresStore(Store):
         except ValueError:
             return
         for woken in self._waiters.get(turn, ()):
+            if not woken.done():
+                woken.set_result(None)
+
+    def _wake_change_waiters(
+        self, connection: object, pid: int, channel: str, payload: str
+    ) -> None:
+        head, _, _ = payload.partition(" ")
+        try:
+            owner = uuid.UUID(head)
+        except ValueError:
+            return
+        for woken in self._change_waiters.get(owner, ()):
             if not woken.done():
                 woken.set_result(None)
 

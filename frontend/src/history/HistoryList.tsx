@@ -29,7 +29,7 @@ import {
 
 import { ApiError, detailOf } from "../api/client";
 import type { ConversationId } from "../chat";
-import type { Conversation } from "../conversation/conversation";
+import type { ListedConversation } from "../conversation/conversation";
 import { shownTitle } from "../conversation/conversation";
 import {
   CheckIcon,
@@ -164,7 +164,7 @@ function HistoryItem({
   onGone,
   onOpened,
 }: Readonly<{
-  conversation: Conversation;
+  conversation: ListedConversation;
   isCurrent: boolean;
   history: History;
   /** Called when a write has left this row off the list it came back with. */
@@ -372,6 +372,15 @@ function HistoryItem({
           >
             {name}
           </a>
+          {/* A turn is running in it, here or in another client
+              (`docs/specs/wire.md`, "The change feed"). */}
+          {conversation.running && (
+            <span
+              role="img"
+              aria-label="Answering"
+              className="history-running"
+            />
+          )}
           <button
             ref={actions}
             type="button"

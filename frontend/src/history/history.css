@@ -87,6 +87,15 @@
   color: var(--ink);
 }
 
+/* A turn is running in this conversation. */
+.history-running {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: var(--radius-pill);
+  background-color: var(--muted);
+}
+
 .history-link[aria-current="page"] {
   background-color: var(--tint);
   font-weight: 600;
