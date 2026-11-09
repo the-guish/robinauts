@@ -1119,3 +1119,38 @@ function held(message: Message): ChatMessage {
       : { state: "stored" as const }),
   };
 }
+
+/**
+ * What a read of a conversation found, as far as redrawing it goes: the
+ * conversation, its last message and its running turn.
+ */
+export interface Read {
+  conversationId: string;
+  lastId: string | null;
+  runId: string | null;
+}
+
+/** That much of an answer to `GET /api/conversations/{id}`. */
+export function lastRead(
+  conversationId: string,
+  opened: { messages: readonly { id: string }[]; run_id: string | null },
+): Read {
+  return {
+    conversationId,
+    lastId: opened.messages.at(-1)?.id ?? null,
+    runId: opened.run_id,
+  };
+}
+
+/**
+ * Whether a second read found what the first did, so that showing it would
+ * redraw nothing a person needs to see.
+ */
+export function sameRead(before: Read | null, after: Read): boolean {
+  return (
+    before !== null &&
+    before.conversationId === after.conversationId &&
+    before.lastId === after.lastId &&
+    before.runId === after.runId
+  );
+}

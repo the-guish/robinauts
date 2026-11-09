@@ -119,7 +119,11 @@ class RobinautsController(Controller):
         before = None if cursor is None else _decode_cursor(cursor)
         sessions = await self._store.sessions_of(user.id, limit, before)
         following = _encode_cursor(sessions[-1]) if len(sessions) == limit else None
-        return SessionPage(tuple(sessions), cursor=following)
+        running = await self._store.running_sessions(user.id, [s.id for s in sessions])
+        return SessionPage(tuple(sessions), cursor=following, running=running)
+
+    async def wait_for_changes(self, user: User, *, after: int | None, timeout: float) -> int:
+        return await self._store.wait_for_changes(user.id, after, timeout)
 
     async def open_session(self, user: User, session_id: uuid.UUID) -> OpenedSession:
         session = await self._store.get_session(user.id, session_id)

@@ -207,6 +207,19 @@
         "title": "ApproveRequest",
         "type": "object"
       },
+      "ChangesResponse": {
+        "properties": {
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "ChangesResponse",
+        "type": "object"
+      },
       "ClaimRequest": {
         "properties": {
           "code": {
@@ -293,7 +306,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/ConversationSummary"
+              "$ref": "#/components/schemas/ListedConversation"
             },
             "title": "Items",
             "type": "array"
@@ -506,6 +519,52 @@
           "at_message"
         ],
         "title": "ForkRequest",
+        "type": "object"
+      },
+      "ListedConversation": {
+        "properties": {
+          "agent": {
+            "title": "Agent",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "agent",
+          "model",
+          "created_at",
+          "updated_at",
+          "running"
+        ],
+        "title": "ListedConversation",
         "type": "object"
       },
       "MessageView": {
@@ -1246,6 +1305,66 @@
           }
         },
         "summary": "Call App Tool"
+      }
+    },
+    "/api/changes": {
+      "get": {
+        "description": "The user's change version: at once without ``after``, else once it differs from\n``after`` or ``timeout`` seconds have passed. It signals and carries nothing else.",
+        "operationId": "changes_api_changes_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timeout",
+            "required": false,
+            "schema": {
+              "default": 25.0,
+              "maximum": 30.0,
+              "minimum": 0,
+              "title": "Timeout",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "Changes"
       }
     },
     "/api/conversations": {

@@ -96,6 +96,16 @@ export interface ChatProps {
    */
   onTurnEnded?: () => void;
   /**
+   * A count that grows each time something of this user changed elsewhere
+   * (`src/changes/changes.ts`).
+   *
+   * Each new value reads the open conversation again. The read redraws
+   * nothing while a turn is being sent or watched here, or when the last
+   * message and the running turn are as they were. It attaches to a turn it
+   * finds running, as opening the conversation does.
+   */
+  changes?: number;
+  /**
    * That a first message was refused because the deployment does not offer
    * the model it named -- `modelId` above (`docs/specs/wire.md`).
    *

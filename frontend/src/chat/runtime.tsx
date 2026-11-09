@@ -52,7 +52,7 @@ import {
   request,
   UNKNOWN_MODEL,
 } from "../api/client";
-import { cancelRun } from "../conversation/conversation";
+import { cancelRun, type Opened } from "../conversation/conversation";
 import type { ChatProps } from "./index";
 import {
   attach,
@@ -65,9 +65,11 @@ import {
   EMPTY,
   ENDED_BADLY,
   isUnsent,
+  lastRead,
   ONE_AT_A_TIME,
   ONE_AT_A_TIME_ANSWER,
   reduce,
+  sameRead,
   STOP_DID_NOT_ARRIVE,
   storedParent,
   turnStart,
@@ -76,6 +78,7 @@ import {
   type ChatAction,
   type ChatMessage,
   type ChatState,
+  type Read,
 } from "./state";
 
 /** What is said when there is nobody to talk to. */
@@ -292,6 +295,17 @@ export function useChat(props: ChatProps): Chatting {
     };
   }, [conversationId, turns]);
 
+  // **Something changed elsewhere** (`ChatProps.changes`): the open
+  // conversation is read again, and `refresh` decides whether that redraws
+  // anything. The count it was mounted with is not a change.
+  const changes = props.changes ?? 0;
+  const seenChanges = useRef(changes);
+  useEffect(() => {
+    if (changes === seenChanges.current) return;
+    seenChanges.current = changes;
+    void turns.refresh();
+  }, [changes, turns]);
+
   // Going away stops watching: the stream is a view of the run, and closing
   // it changes nothing about the run (`docs/specs/runs.md`).
   useEffect(() => {
@@ -461,6 +475,12 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
   let state = EMPTY;
   /** The stream being watched; aborted when another starts or this goes away. */
   let watching: AbortController | null = null;
+  /** The run that stream is of, while it is still being read. */
+  let watchingRun: string | null = null;
+  /** What the last read of the conversation found (`sameRead`). */
+  let shown: Read | null = null;
+  /** The re-read a change asked for, while it is in the air. */
+  let refreshing: AbortController | null = null;
   /**
    * The turns whose request is still in the air.
    *
@@ -545,8 +565,12 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
   /** Stop watching, and forget the conversation this chat began. */
   function stop(): void {
     ours = null;
+    shown = null;
+    refreshing?.abort();
+    refreshing = null;
     watching?.abort();
     watching = null;
+    watchingRun = null;
     for (const beginning of starting) beginning.abort();
     starting.clear();
   }
@@ -581,6 +605,16 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
       return;
     }
     if (signal.aborted) return;
+    show(conversationId, opened, afterLoss);
+  }
+
+  /** Show what a read of the conversation found, and watch a run it found. */
+  function show(
+    conversationId: string,
+    opened: Opened,
+    afterLoss = false,
+  ): void {
+    shown = lastRead(conversationId, opened);
     props.onConversationOpened?.(opened.conversation);
     dispatch({
       kind: "opened",
@@ -608,6 +642,59 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
         },
       );
     }
+  }
+
+  /**
+   * Whether nothing here is under way that a re-read could disturb: no turn
+   * being sent or watched, and no read of the conversation in the air.
+   */
+  function quiet(): boolean {
+    return (
+      state.runId === null &&
+      !state.sending &&
+      !state.loading &&
+      starting.size === 0 &&
+      watchingRun === null
+    );
+  }
+
+  /**
+   * Read the open conversation again because something changed elsewhere.
+   *
+   * **It disturbs nothing.** While a turn of this chat is being sent or
+   * watched, its own stream and the read that ends it are the truth, so
+   * nothing is asked. An answer that finds the last message and the running
+   * turn as they were redraws nothing: the boxes, the edit box and the
+   * scroll position stay as they are either way, and a redraw would only
+   * redo what is on the screen. A conversation deleted elsewhere is said as
+   * not here; any other failure of a re-read is left unsaid, and the next
+   * change asks again.
+   */
+  async function refresh(): Promise<void> {
+    const conversationId = state.conversationId;
+    if (conversationId === null || state.failure !== null || !quiet()) return;
+    refreshing?.abort();
+    const control = new AbortController();
+    refreshing = control;
+    let opened: Opened;
+    try {
+      opened = await request("get", "/api/conversations/{conversation_id}", {
+        path: { conversation_id: conversationId },
+        signal: control.signal,
+      });
+    } catch (failure) {
+      if (control.signal.aborted || refreshing !== control) return;
+      refreshing = null;
+      if (failure instanceof ApiError && failure.status === 404 && quiet()) {
+        dispatch({ kind: "unopened", detail: said(failure), missing: true });
+      }
+      return;
+    }
+    if (control.signal.aborted || refreshing !== control) return;
+    refreshing = null;
+    if (state.conversationId !== conversationId || !quiet()) return;
+    if (sameRead(shown, lastRead(conversationId, opened))) return;
+    show(conversationId, opened);
   }
 
   /**
@@ -654,12 +741,20 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
         starting.delete(control);
         // This page went away while the request was in the air.
         if (control.signal.aborted) return;
+        // **A watcher on the same run is left alone.** Two reads can each
+        // find the run a change started elsewhere; the second watch would
+        // only replay what the first is already drawing.
+        if (watch && watchingRun === attached.runId) {
+          control.abort();
+          return;
+        }
         // **The one being watched is let go of here and not before.** A turn
         // a conversation that is already answering refuses (409) must leave
         // the first run's stream alone; stopping it to make room for a turn
         // that never began would lose the answer that is arriving.
         watching?.abort();
         watching = control;
+        watchingRun = attached.runId;
         dispatch({
           kind: "started",
           runId: attached.runId,
@@ -724,6 +819,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
       lost = LOST_TOUCH;
     }
     if (control.signal.aborted) return;
+    if (watching === control) watchingRun = null;
 
     if (lost !== null) {
       // **The connection went and the run did not have to.** A client that
@@ -941,6 +1037,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     stop,
     saying,
     read,
+    refresh,
     onNew,
     onEdit,
     onReload,

@@ -60,6 +60,13 @@ class Controller(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def wait_for_changes(self, user: User, *, after: int | None, timeout: float) -> int:
+        """The user's change version (``docs/specs/wire.md``, "The change feed"), once it is
+        other than ``after`` or ``timeout`` seconds have passed; at once for ``after``
+        ``None``."""
+        raise NotImplementedError
+
+    @abstractmethod
     async def open_session(self, user: User, session_id: uuid.UUID) -> OpenedSession:
         """``SessionNotFoundError`` for one the user does not have."""
         raise NotImplementedError

@@ -85,6 +85,14 @@ CREATE TABLE IF NOT EXISTS schema_version (
 -- (docs/architecture/device-pairing.md, "While a device lives"). `email` is
 -- only an address the provider verified; `hosted_domain` is Google's `hd`.
 --
+-- `change_version` counts the changes of this user's conversations that a
+-- client open elsewhere needs to know about: a session added, renamed or
+-- hidden, a turn started, a turn ended by any path. The store adds one to it in
+-- the same transaction as the change, and announces the new value on
+-- `robinauts_changes` as `<user> <version>` (docs/specs/wire.md, "The change
+-- feed"). The row is locked last in every transaction that bumps it, after the
+-- session, the turn and the task, so that no two of them wait for each other.
+--
 -- Deleting a user deletes their sessions, by the cascade on
 -- `sessions.owner_id`. The cascade does not reach the engines, so whatever
 -- deletes a user purges their sessions first, calling `forget` for each.
@@ -98,6 +106,7 @@ CREATE TABLE IF NOT EXISTS users (
     created_at timestamptz NOT NULL,
     hosted_domain text,
     groups text[] NOT NULL DEFAULT '{}',
+    change_version bigint NOT NULL DEFAULT 0,
     CONSTRAINT users_provider_subject_key UNIQUE (provider, subject)
 );
 

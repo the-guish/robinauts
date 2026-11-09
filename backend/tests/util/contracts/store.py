@@ -434,3 +434,52 @@ class StoreContract:
             me.id, one.id, running.id, TurnState.FINISHED, NOW, None, None, [piece(2)], NOW
         )
         assert await store.wait_for_events(me.id, one.id, running.id, 9, 0.05) is True
+
+    # --- changes ------------------------------------------------------------
+
+    @store_test
+    async def test_each_change_worth_knowing_bumps_its_owners_version_alone(
+        self, store: Store
+    ) -> None:
+        me, other = user(), user("other")
+        for each in (me, other):
+            await store.add_or_refresh_user(each)
+        assert await store.wait_for_changes(me.id, None, 0) == 0
+        one = session(me.id)
+        await store.add_session(one)
+        await store.update_session(dataclasses.replace(one, title="renamed"))
+        asked = question(one.id)
+        running, running_task = turn(one.id, asked.id)
+        await store.queue_turn(me.id, running, running_task, asked)
+        assert await store.running_sessions(me.id, [one.id]) == {one.id}
+        assert await store.running_sessions(other.id, [one.id]) == frozenset()
+        await self.append(store, me, one, running, piece(1))
+        assert await store.wait_for_changes(me.id, None, 0) == 3
+        await store.finish_turn(
+            me.id, one.id, running.id, TurnState.FINISHED, NOW, None, None, [piece(2)], NOW
+        )
+        assert await store.running_sessions(me.id, [one.id]) == frozenset()
+        await store.hide_session(me.id, one.id, NOW)
+        assert await store.wait_for_changes(me.id, None, 0) == 5
+        assert await store.wait_for_changes(other.id, None, 0) == 0
+
+    @store_test
+    async def test_wait_for_changes_wakes_on_its_owners_change_and_at_its_timeout(
+        self, store: Store
+    ) -> None:
+        me, other = user(), user("other")
+        for each in (me, other):
+            await store.add_or_refresh_user(each)
+
+        async def soon(owner: User) -> None:
+            await asyncio.sleep(0.05)
+            await store.add_session(session(owner.id))
+
+        adding = asyncio.create_task(soon(other))
+        assert await store.wait_for_changes(me.id, 0, 0.5) == 0
+        await adding
+        adding = asyncio.create_task(soon(me))
+        assert await store.wait_for_changes(me.id, 0, 5.0) == 1
+        await adding
+        # A version the caller is ahead of, or behind, is answered at once.
+        assert await store.wait_for_changes(me.id, 7, 5.0) == 1

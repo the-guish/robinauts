@@ -16,6 +16,10 @@ import type { components } from "../api/schema";
 import type { ConversationId } from "../chat";
 
 export type Conversation = components["schemas"]["ConversationSummary"];
+/** A conversation as the panel's list has it, with whether a turn runs in it. */
+export type ListedConversation = components["schemas"]["ListedConversation"];
+/** What reading one conversation answers (`GET /api/conversations/{id}`). */
+export type Opened = components["schemas"]["OpenedConversationResponse"];
 export type Message = components["schemas"]["MessageView"];
 export type Resume = components["schemas"]["ResumeView"];
 export type EndedBadly = components["schemas"]["EndedBadlyView"];

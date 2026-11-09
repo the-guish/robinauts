@@ -213,6 +213,8 @@ class ModelListing:
 class SessionPage:
     sessions: tuple[Session, ...]
     cursor: str | None = None
+    running: frozenset[uuid.UUID] = frozenset()
+    """Those of ``sessions`` that have an active turn."""
 
 
 @dataclass(frozen=True, slots=True)

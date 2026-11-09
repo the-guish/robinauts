@@ -154,6 +154,7 @@ def build_app(
         composed.credentials,
         composed.brokers,
         worker_access=lifecycle.access,
+        feed=lifecycle.feed,
         healthy=lifecycle.healthy,
         sign_in=sign_in,
         secret_for=secret_for,
@@ -193,6 +194,8 @@ class Server(uvicorn.Server):
         await super().startup(sockets=sockets)
 
     async def shutdown(self, sockets: list[Any] | None = None) -> None:
+        # The change feed's polls end first: uvicorn waits for every open request.
+        self._lifecycle.feed.close()
         try:
             await self._lifecycle.stop_worker()
         finally:

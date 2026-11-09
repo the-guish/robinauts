@@ -386,6 +386,7 @@ forbidden_modules = [
     "robinauts.web.agui",
     "robinauts.web.app",
     "robinauts.web.apps",
+    "robinauts.web.changes",
     "robinauts.web.cookies",
     "robinauts.web.headers",
     "robinauts.web.logs",

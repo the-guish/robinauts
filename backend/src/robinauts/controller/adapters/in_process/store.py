@@ -42,6 +42,8 @@ class InProcessStore(Store):
         self._changed = asyncio.Condition()
         self._cancel_requested: set[uuid.UUID] = set()
         self._stops: list[Callable[[uuid.UUID], object]] = []
+        self._versions: dict[uuid.UUID, int] = {}
+        """By owner: the change version, 0 until the first change."""
 
     async def open(self) -> None:
         """Nothing to open: the engines keep their state in this process too."""
@@ -90,6 +92,10 @@ class InProcessStore(Store):
         async with self._changed:
             self._changed.notify_all()
 
+    def _bump(self, owner: uuid.UUID) -> None:
+        """The owner's change version moved by one; the caller notifies."""
+        self._versions[owner] = self._versions.get(owner, 0) + 1
+
     # --- users --------------------------------------------------------------
 
     async def add_or_refresh_user(self, user: User) -> User:
@@ -119,12 +125,19 @@ class InProcessStore(Store):
     async def add_session(self, session: Session) -> None:
         self._sessions[session.id] = session
         self._messages[session.id] = []
+        self._bump(session.owner_id)
+        await self._notify()
 
     async def get_session(self, owner: uuid.UUID, session: uuid.UUID) -> Session:
         return self._visible(owner, session)
 
     async def update_session(self, session: Session) -> None:
+        there = self._sessions.get(session.id)
+        if there is None or there.owner_id != session.owner_id:
+            return
         self._sessions[session.id] = session
+        self._bump(session.owner_id)
+        await self._notify()
 
     async def sessions_of(
         self, owner: uuid.UUID, limit: int, before: Cursor | None
@@ -142,6 +155,7 @@ class InProcessStore(Store):
     async def hide_session(self, owner: uuid.UUID, session: uuid.UUID, at: datetime) -> None:
         self._visible(owner, session)
         self._hidden[session] = at
+        self._bump(owner)
         await self._notify()
 
     async def purge_session(self, owner: uuid.UUID, session: uuid.UUID, now: datetime) -> bool:
@@ -177,6 +191,7 @@ class InProcessStore(Store):
         self._tasks[task.id] = task
         self._turns[turn.id] = turn
         self._events[turn.id] = []
+        self._bump(owner)
         await self._notify()
 
     async def append_event(
@@ -236,6 +251,7 @@ class InProcessStore(Store):
         self._sessions[session] = dataclasses.replace(
             self._sessions[session], updated_at=updated_at
         )
+        self._bump(owner)
         await self._notify()
 
     async def end_expired_turn(
@@ -259,6 +275,7 @@ class InProcessStore(Store):
         self._tasks[task.id] = dataclasses.replace(task, state=TaskState.DONE)
         if answer is not None:
             self._messages[session].append(answer)
+        self._bump(owner)
         await self._notify()
         return ended
 
@@ -316,6 +333,7 @@ class InProcessStore(Store):
             # No worker holds it: both end here.
             self._tasks[task.id] = dataclasses.replace(task, state=TaskState.DONE)
             self._turns[turn] = dataclasses.replace(active, state=TurnState.CANCELLED, ended_at=at)
+            self._bump(owner)
             await self._notify()
         elif task.state is TaskState.RUNNING:
             self._cancel_requested.add(task.id)
@@ -375,3 +393,30 @@ class InProcessStore(Store):
             except TimeoutError:
                 return ready()
             return True
+
+    # --- changes ------------------------------------------------------------
+
+    async def running_sessions(
+        self, owner: uuid.UUID, sessions: Sequence[uuid.UUID]
+    ) -> frozenset[uuid.UUID]:
+        return frozenset(
+            s
+            for s in sessions
+            if (found := self._sessions.get(s)) is not None
+            and found.owner_id == owner
+            and s not in self._hidden
+            and self._active(s) is not None
+        )
+
+    async def wait_for_changes(self, owner: uuid.UUID, after: int | None, timeout: float) -> int:
+        def version() -> int:
+            return self._versions.get(owner, 0)
+
+        if after is None:
+            return version()
+        async with self._changed:
+            try:
+                await asyncio.wait_for(self._changed.wait_for(lambda: version() != after), timeout)
+            except TimeoutError:
+                pass
+            return version()
