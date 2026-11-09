@@ -56,7 +56,7 @@ def test_a_provider_is_served_with_its_sign_in() -> None:
         ({}, "127.0.0.1", False, "--dev-no-sign-in"),
         ({}, "0.0.0.0", True, "--host 0.0.0.0"),
         ({"agent": {}}, "127.0.0.1", True, "agent: unknown key"),
-        ({"orchestration": {}}, "127.0.0.1", False, r"\[orchestration\]: neorc is started"),
+        ({"orchestration": {}}, "127.0.0.1", False, r"\[orchestration\]: neorc is served"),
     ],
 )
 def test_a_start_is_refused_with_its_reason(
