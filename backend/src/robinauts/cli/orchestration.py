@@ -293,8 +293,8 @@ class Orchestration:
         from neorc.postgres._notifier import EVENTS_CHANNEL, TASKS_CHANNEL
 
         store = PostgresStore(database_url, schema=SCHEMA)
-        tasks = PostgresTaskNotifier(database_url, channel=TASKS_CHANNEL, schema=SCHEMA)
-        events = PostgresTaskNotifier(database_url, channel=EVENTS_CHANNEL, schema=SCHEMA)
+        tasks = PostgresTaskNotifier(database_url, channel=TASKS_CHANNEL)
+        events = PostgresTaskNotifier(database_url, channel=EVENTS_CHANNEL)
 
         async def open_() -> None:
             await create_schema(database_url, schema=SCHEMA)

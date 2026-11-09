@@ -179,6 +179,18 @@ Both are pinned to an exact version in
 Dependabot does not see them. The licence gate itself needs no tool at all:
 it is the Python standard library.
 
+## neorc's UI, a built bundle inside a wheel
+
+`neorc-ui`, which `robinauts start` serves at `/neorc/ui/` when it embeds neorc
+([docs/architecture/orchestration.md](docs/architecture/orchestration.md)), is
+a Python wheel whose payload is a built JavaScript bundle. The gate reads its
+metadata, Apache-2.0, and cannot see inside the bundle; the wheel carries the
+notices of what it bundles in `neorc_ui/static/THIRD_PARTY_LICENSES.txt`, which
+neorc's own build writes and refuses to write for a licence outside its
+allowlist. Read for the commit `backend/uv.lock` pins (2026-11-09): twenty
+packages, eleven MIT, eight ISC and one BSD-3-Clause, all on the allowed list
+above. It is read again whenever the pin moves.
+
 ## Restricted dependencies in use
 
 Three things in each row below are checked against reality on every run, so a

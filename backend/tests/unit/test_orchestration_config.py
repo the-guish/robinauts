@@ -131,7 +131,5 @@ def test_a_machine_without_the_flows_neorc_s_command_or_its_ui_is_refused(
         (b"default-src 'none'", b"default-src 'none'; frame-ancestors 'self'"),
     ],
 )
-def test_neorc_s_ui_policy_is_kept_but_for_who_may_frame_it(
-    policy: bytes, framable: bytes
-) -> None:
+def test_neorc_s_ui_policy_is_kept_but_for_who_may_frame_it(policy: bytes, framable: bytes) -> None:
     assert _framable_policy(policy) == framable

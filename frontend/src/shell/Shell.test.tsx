@@ -1134,6 +1134,15 @@ test("#/devices is a page of the shell: the panel stays, the chat goes", async (
 const sidePanel = () =>
   screen.getByRole("complementary", { name: "Side panel" });
 
+/** The frame the flows page draws; the panel's link has the same name. */
+const frameOrNull = () =>
+  document.querySelector<HTMLIFrameElement>('iframe[title="Flows"]');
+const frame = () => {
+  const found = frameOrNull();
+  if (found === null) throw new Error("no Flows frame");
+  return found;
+};
+
 /** A server that mounts an orchestrator, and says where its page is. */
 const WITH_FLOWS: Session = { ...SESSION, flows_url: "/neorc/ui/" };
 
@@ -1161,37 +1170,36 @@ test("#/flows frames the orchestrator's page where the chat would be", async () 
   location.hash = "#/flows";
   await shell(undefined, undefined, WITH_FLOWS);
   expect(panel()).toBeVisible();
-  const frame = screen.getByTitle("Flows");
-  expect(frame.tagName).toBe("IFRAME");
-  expect(frame).toHaveAttribute("src", "/neorc/ui/");
+  expect(frame()).toHaveAttribute("src", "/neorc/ui/");
   expect(screen.queryByRole("heading", { name: "New chat" })).toBeNull();
   expect(screen.getByRole("link", { name: "Flows" })).toHaveAttribute(
     "aria-current",
     "page",
   );
   // Not a conversation, so nothing about one.
-  expect(screen.queryByRole("complementary", { name: "Side panel" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Open the side panel" })).toBeNull();
+  expect(
+    screen.queryByRole("complementary", { name: "Side panel" }),
+  ).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Open the side panel" }),
+  ).toBeNull();
 });
 
 test("#/flows/runs/<id> opens that run, as the orchestrator's own #/runs/<id>", async () => {
   location.hash = `#/flows/runs/${RUN}`;
   await shell(undefined, undefined, WITH_FLOWS);
-  expect(screen.getByTitle("Flows")).toHaveAttribute(
-    "src",
-    `/neorc/ui/#/runs/${RUN}`,
-  );
+  expect(frame()).toHaveAttribute("src", `/neorc/ui/#/runs/${RUN}`);
   await act(async () => {
     location.hash = "#/flows";
     await new Promise((done) => setTimeout(done, 0));
   });
-  expect(screen.getByTitle("Flows")).toHaveAttribute("src", "/neorc/ui/");
+  expect(frame()).toHaveAttribute("src", "/neorc/ui/");
 });
 
 test("#/flows on a server with no orchestrator is the empty chat", async () => {
   location.hash = "#/flows";
   await shell();
-  expect(screen.queryByTitle("Flows")).toBeNull();
+  expect(frameOrNull()).toBeNull();
   expect(
     screen.getByRole("heading", { level: 1, name: "New chat" }),
   ).toBeVisible();
