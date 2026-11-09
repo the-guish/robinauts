@@ -1,0 +1,19 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright The Robinauts Authors */
+
+/*
+ * "Flows" (`./FlowsPage.tsx`): the orchestrator's page in a frame that
+ * fills the column the chat would otherwise fill.
+ */
+
+.flows {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+.flows-frame {
+  flex: 1;
+  border: 0;
+  background-color: var(--ground);
+}

@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 
 import {
   DEVICES,
+  FLOWS,
   formatRoute,
   isConversationId,
   LINK,
@@ -47,6 +48,23 @@ test("and written back the same way, round trip included", () => {
   expect(parseRoute(formatRoute(LINK))).toEqual(LINK);
 });
 
+test("the flows page, and a run on it, are read out of the hash", () => {
+  expect(parseRoute("#/flows")).toEqual({ kind: "flows", run: null });
+  expect(parseRoute(`#/flows/runs/${ID}`)).toEqual({ kind: "flows", run: ID });
+});
+
+test("the flows routes are written back the same way, round trip included", () => {
+  expect(formatRoute(FLOWS)).toBe("#/flows");
+  expect(formatRoute({ kind: "flows", run: ID })).toBe(`#/flows/runs/${ID}`);
+  expect(parseRoute(formatRoute(FLOWS))).toEqual(FLOWS);
+  expect(parseRoute(formatRoute({ kind: "flows", run: ID }))).toEqual({
+    kind: "flows",
+    run: ID,
+  });
+  // A run id that is not one of ours is the page with no run, not a path.
+  expect(formatRoute({ kind: "flows", run: "../elsewhere" })).toBe("#/flows");
+});
+
 test("a pairing code's query is cut off, and the route is the link page", () => {
   // The URL inside a pairing QR: the code is the app's, never this page's.
   expect(parseRoute("#/link?v=1&c=abc123")).toEqual({ kind: "link" });
@@ -71,6 +89,12 @@ test("every other hash is the empty chat", () => {
     "#/devices/",
     "#/devices/x",
     "#/link/x",
+    "#/flows/",
+    "#/flows/runs",
+    "#/flows/runs/",
+    `#/flows/runs/${ID}/x`,
+    "#/flows/runs/nope",
+    `#/flows/run/${ID}`,
     "#/Devices",
     // The sign-in page's own hash, which it reads for itself: this must not
     // claim it, and reading it writes nothing.

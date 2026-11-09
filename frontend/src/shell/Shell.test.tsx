@@ -63,9 +63,10 @@ function otherwise(call: Call): Response {
 async function shell(
   signOut = () => Promise.resolve(),
   answer?: (call: Call) => Response | undefined,
+  session: Session = SESSION,
 ) {
   const fetch = answering(answer);
-  const drawn = render(<Shell session={SESSION} signOut={signOut} />);
+  const drawn = render(<Shell session={session} signOut={signOut} />);
   await waitFor(() => {
     expect(screen.queryByText("Loading the conversations…")).toBeNull();
   });
@@ -1132,6 +1133,69 @@ test("#/devices is a page of the shell: the panel stays, the chat goes", async (
 
 const sidePanel = () =>
   screen.getByRole("complementary", { name: "Side panel" });
+
+/** A server that mounts an orchestrator, and says where its page is. */
+const WITH_FLOWS: Session = { ...SESSION, flows_url: "/neorc/ui/" };
+
+test("Flows is in the panel, below the history, only on a server with an orchestrator", async () => {
+  const { unmount } = await shell();
+  expect(screen.queryByRole("link", { name: "Flows" })).toBeNull();
+  unmount();
+  await shell(undefined, undefined, WITH_FLOWS);
+  const flows = screen.getByRole("link", { name: "Flows" });
+  expect(flows).toHaveAttribute("href", "#/flows");
+  expect(flows).not.toHaveAttribute("aria-current");
+  const history = screen.getByRole("navigation", { name: "History" });
+  expect(
+    history.compareDocumentPosition(flows) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  // In the rail it stays, as its icon, with its name on the link.
+  fireEvent.click(screen.getByRole("button", { name: "Collapse the panel" }));
+  expect(screen.getByRole("link", { name: "Flows" })).toHaveAttribute(
+    "title",
+    "Flows",
+  );
+});
+
+test("#/flows frames the orchestrator's page where the chat would be", async () => {
+  location.hash = "#/flows";
+  await shell(undefined, undefined, WITH_FLOWS);
+  expect(panel()).toBeVisible();
+  const frame = screen.getByTitle("Flows");
+  expect(frame.tagName).toBe("IFRAME");
+  expect(frame).toHaveAttribute("src", "/neorc/ui/");
+  expect(screen.queryByRole("heading", { name: "New chat" })).toBeNull();
+  expect(screen.getByRole("link", { name: "Flows" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  // Not a conversation, so nothing about one.
+  expect(screen.queryByRole("complementary", { name: "Side panel" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Open the side panel" })).toBeNull();
+});
+
+test("#/flows/runs/<id> opens that run, as the orchestrator's own #/runs/<id>", async () => {
+  location.hash = `#/flows/runs/${RUN}`;
+  await shell(undefined, undefined, WITH_FLOWS);
+  expect(screen.getByTitle("Flows")).toHaveAttribute(
+    "src",
+    `/neorc/ui/#/runs/${RUN}`,
+  );
+  await act(async () => {
+    location.hash = "#/flows";
+    await new Promise((done) => setTimeout(done, 0));
+  });
+  expect(screen.getByTitle("Flows")).toHaveAttribute("src", "/neorc/ui/");
+});
+
+test("#/flows on a server with no orchestrator is the empty chat", async () => {
+  location.hash = "#/flows";
+  await shell();
+  expect(screen.queryByTitle("Flows")).toBeNull();
+  expect(
+    screen.getByRole("heading", { level: 1, name: "New chat" }),
+  ).toBeVisible();
+});
 
 /** The helper agent's one app, as `GET /api/apps` lists it. */
 const TO_DO_APP = {

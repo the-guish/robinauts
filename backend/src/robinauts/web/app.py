@@ -285,6 +285,9 @@ class UserSessionResponse(BaseModel):
     """The token a token bearer is."""
     pairing: PairingStateView | None = None
     """The pairing the bearer of a claim waits on, before it is approved."""
+    flows_url: str | None = None
+    """Where this server serves an orchestrator's page of flows and runs, when it mounts one:
+    a path of its own origin, which the interface frames."""
 
 
 class MintedPairingResponse(BaseModel):
@@ -639,13 +642,17 @@ def create_app(
     secret_for: SecretLookup,
     config: Config,
     ui_dir: Path | None = None,
+    flows_url: str | None = None,
 ) -> FastAPI:
     """The HTTP server alone. Whoever runs it opens the controller and starts the worker before
     it serves, and stops the worker and closes the controller after (``cli/lifecycle.py``).
     ``brokers``, one per worker by name, and ``worker_access`` serve the workers in processes
     of their own at ``/internal/worker/``; ``healthy`` says whether this node's workers are
     heard from, for ``/health``. ``sign_in`` is ``None`` in the local development mode.
-    ``config`` names the agents' tool servers, whose secrets ``secret_for`` reads too."""
+    ``config`` names the agents' tool servers, whose secrets ``secret_for`` reads too.
+    ``flows_url`` is where whoever runs the app mounts an orchestrator's page on it, if
+    anywhere: the session says so, and the interface frames it. The app knows nothing else of
+    it."""
     exchange: Exchange | None = None
     flow: SignIn | None = None
     if sign_in is not None:
@@ -839,7 +846,10 @@ def create_app(
     async def current_user_session(request: Request) -> UserSessionResponse:
         if sign_in is None:
             return UserSessionResponse(
-                sign_in=False, local_development=True, user=user_summary(local_user)
+                sign_in=False,
+                local_development=True,
+                user=user_summary(local_user),
+                flows_url=flows_url,
             )
         now = datetime.now(UTC)
         answer = UserSessionResponse(
@@ -857,6 +867,7 @@ def create_app(
                     answer.pairing = PairingStateView(state=state.value)
             return answer
         answer.user = user_summary(asker.user)
+        answer.flows_url = flows_url
         if asker.device is not None:
             answer.device = device_summary(asker.device)
         elif asker.via is Via.TOKEN:

@@ -661,3 +661,15 @@ ignore_imports = [
     "robinauts.cli.** -> *",
 ]
 unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "neorc only under cli"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts"]
+forbidden_modules = ["neorc", "neorc_core", "neorc_ui"]
+ignore_imports = [
+    "robinauts.cli -> *",
+    "robinauts.cli.** -> *",
+]
+unmatched_ignore_imports_alerting = "none"

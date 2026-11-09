@@ -19,8 +19,9 @@ this checkout when it is built. Storage is the PostgreSQL ``ROBINAUTS_DATABASE_U
 which a start with sign-in needs; the local development mode is in this process without it. The
 sign-in records are kept on the same storage. The server never changes the database: it
 refuses one that is not this build's and names the command. In the local development mode, an
-``[orchestration]`` table starts neorc beside the server, and stops it with the server
-(``cli/orchestration.py``, ``docs/architecture/orchestration.md``).
+``[orchestration]`` table embeds neorc in the server, at ``/neorc``, and starts and stops what
+runs beside it with the server (``cli/orchestration.py``,
+``docs/architecture/orchestration.md``).
 """
 
 from __future__ import annotations
@@ -152,10 +153,12 @@ def build_app(
     sign_in: SignInConfig | None,
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
+    orchestrator: Orchestration | None = None,
 ) -> FastAPI:
     """The HTTP server over what the composition built, with the lifecycle's gate for a worker
-    in a process of its own and its health. The app starts and stops nothing: ``serve`` does."""
-    return create_app(
+    in a process of its own and its health, and neorc's manager mounted on it when there is an
+    orchestrator. The app starts and stops nothing: ``serve`` does."""
+    app = create_app(
         composed.controller,
         composed.credentials,
         composed.brokers,
@@ -165,7 +168,11 @@ def build_app(
         secret_for=secret_for,
         config=composed.config,
         ui_dir=ui_dir,
+        flows_url=None if orchestrator is None else orchestration.UI_URL,
     )
+    if orchestrator is not None:
+        app.mount(orchestration.MOUNT, orchestrator.mounted)
+    return app
 
 
 async def serve(server: Server, lifecycle: Lifecycle) -> None:
@@ -232,9 +239,9 @@ def orchestration_of(
     config_path: Path,
     api_url: str,
 ) -> Orchestration | None:
-    """neorc as the ``[orchestration]`` table describes it, and where its worker reaches this
-    server's API; ``None`` without the table. ``ConfigError`` names what stops it from
-    starting."""
+    """neorc as the ``[orchestration]`` table describes it, on this server's storage, and where
+    its worker reaches this server; ``None`` without the table. ``ConfigError`` names what stops
+    it from starting."""
     table = tables.get(orchestration.TABLE)
     if table is None:
         return None
@@ -243,10 +250,18 @@ def orchestration_of(
     described = orchestration.parse_orchestration(
         table, base=config_path.parent, default_code=REPO / "orchestration"
     )
-    if problems := orchestration.check_ready(described, environ):
+    command = orchestration.neorc_command()
+    ui = orchestration.built_ui()
+    if problems := orchestration.check_ready(described, command=command, ui=ui):
         raise ConfigError("\n".join(problems))
     return Orchestration(
-        described, environ, hidden=orchestration.hidden_variables(config), api_url=api_url
+        described,
+        environ,
+        hidden=orchestration.hidden_variables(config),
+        api_url=api_url,
+        database_url=environ.get(DATABASE_URL_VARIABLE) or None,
+        command=command,
+        ui=ui,
     )
 
 
@@ -284,7 +299,14 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         # that starts with a command of its own.
         in_process=storage.kind is not StorageKind.POSTGRES,
     )
-    app = build_app(composed, lifecycle, sign_in=sign_in, secret_for=secret_for, ui_dir=ui_dir)
+    app = build_app(
+        composed,
+        lifecycle,
+        sign_in=sign_in,
+        secret_for=secret_for,
+        ui_dir=ui_dir,
+        orchestrator=orchestrator,
+    )
     config = uvicorn.Config(
         app,
         host=host,

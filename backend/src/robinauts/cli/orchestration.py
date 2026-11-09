@@ -1,24 +1,33 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The orchestrator ``robinauts start`` runs beside itself in the local development mode:
-neorc's manager, its scheduler and one worker, each a process of its own started with neorc's
-own command (``docs/architecture/orchestration.md``). Nothing here imports neorc: the
-``[orchestration]`` table of the configuration names the command that runs it, and neorc is
-installed on its own.
+"""The orchestrator ``robinauts start`` runs in the local development mode: neorc, embedded
+(``docs/architecture/orchestration.md``). This module is the one place in Robinauts that imports
+neorc, and ``cli/main.py`` the one place that calls it: take both out and the server is what it
+was without the ``[orchestration]`` table.
 
-The order is neorc's: the manager first, on the loopback interface and with no authentication,
-as the local development mode is; once it answers ``/health``, the flows are uploaded to it; then
-the scheduler, and the worker, which runs the flows' tasks with the handlers at
-``code_location``. The worker alone is handed this server's URL, in ``ROBINAUTS_API_URL``: that
-is how a task reaches this server's API. It is handed no credential: the local development mode
-has no sign-in, every request is its one user's, and what a flow starts is the developer's, as
-the browser's is. The stop goes the other way round.
+- neorc's **manager** is an application inside this server's, mounted at ``/neorc`` with its UI
+  at ``/neorc/ui/``, behind this server's own checks: the local development mode's ``Host`` and
+  ``Origin`` rules reach it as they reach every path. It has no authentication of its own, as
+  that mode has none. Its storage follows this server's: in this process without
+  ``ROBINAUTS_DATABASE_URL``, else on that PostgreSQL, in a schema of its own, ``neorc``.
+- the flows in ``flows`` are **uploaded** to it at every start;
+- its **scheduler** runs in this process, on the manager directly;
+- one **worker**, on the ``default`` queue, runs in a process of its own, with neorc's own
+  command, against ``http://127.0.0.1:<port>/neorc``, and with the handlers at
+  ``code_location``.
 
-None of neorc's processes is handed what the configuration keeps secret from everything but
-the server: the model providers' keys, the tool servers' secrets, the database's URL. neorc's
-own database is the PostgreSQL the variable ``database_url_env`` names, handed to it as
-``NEORC_DATABASE_URL``."""
+The worker is a process of its own, not a task in this one, for three reasons. neorc puts the
+code location first on ``sys.path``, so a handler module could shadow a package this server
+imports later. The handlers read ``ROBINAUTS_API_URL`` from their environment, and this
+process's holds the model providers' keys and the database's URL, which a process of its own
+is not handed. And a handler that blocks, or crashes its interpreter, takes a worker down, not
+the server.
+
+The UI is framed by the interface: its answers say ``frame-ancestors 'self'`` and
+``SAMEORIGIN`` rather than neorc's ``'none'``, which this server's headers, set only where an
+answer has none, then leave alone. Every other answer under ``/neorc`` carries this server's.
+"""
 
 from __future__ import annotations
 
@@ -26,12 +35,18 @@ import asyncio
 import logging
 import shlex
 import signal
-import urllib.error
-import urllib.request
-from collections.abc import Mapping
+import sys
+from collections.abc import Awaitable, Callable, Mapping, MutableMapping
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from fastapi import FastAPI
+from neorc.manager import create_app
+from neorc_core import Manager, NeorcError, Scheduler
+from neorc_core.flows import read_flows
+from neorc_core.local import DirectManagerClient, MemoryStore, MemoryTaskNotifier
 
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.shared_domain.domain import Config
@@ -41,7 +56,16 @@ _log = logging.getLogger(__name__)
 TABLE = "orchestration"
 """The configuration's table that turns the orchestrator on."""
 
-KEYS = frozenset({"command", "port", "database_url_env", "code_location", "flows", "ui"})
+KEYS = frozenset({"code_location", "flows", "ui"})
+GONE = frozenset({"command", "port", "database_url_env"})
+"""Keys of the table when neorc ran beside the server, refused with the reason."""
+
+MOUNT = "/neorc"
+"""Where neorc's manager is mounted on this server."""
+UI_URL = f"{MOUNT}/ui/"
+"""Where its UI is, which the interface frames."""
+SCHEMA = "neorc"
+"""The PostgreSQL schema neorc keeps its tables in, beside this server's."""
 
 API_URL_VARIABLE = "ROBINAUTS_API_URL"
 """Where the handlers reach this server, handed to the worker."""
@@ -49,30 +73,26 @@ API_TOKEN_VARIABLE = "ROBINAUTS_API_TOKEN"
 """The API token the handlers send as a bearer when they have one: what a neorc started on its
 own, against a server with sign-in on, is given (``docs/specs/sign-in.md``, "API tokens"). The
 worker started here is handed none, whatever the shell had: this server takes none."""
-NEORC_DATABASE_URL_VARIABLE = "NEORC_DATABASE_URL"
 SERVER_SECRETS = frozenset({"ROBINAUTS_DATABASE_URL", "ROBINAUTS_CONFIG"})
-"""What the server's own environment holds that no neorc process is handed, beside the
-variables the configuration names."""
+"""What the server's own environment holds that the worker is not handed, beside the variables
+the configuration names."""
 
-HOST = "127.0.0.1"
-DEFAULT_PORT = 8420
 DEFAULT_QUEUE = "default"
-
-MANAGER_START_SECONDS = 60.0
-"""How long `start` waits for neorc's manager to answer ``/health``."""
-UPLOAD_SECONDS = 60.0
+POLL_SECONDS = 5.0
+"""How long the scheduler waits in one poll; a stop cuts it short."""
 STOP_SECONDS = 15.0
-"""How long `stop` waits for each process after its SIGTERM before it kills it."""
+"""How long the stop waits for the worker after its SIGTERM, and for the scheduler, before it
+kills or cancels them."""
 
 DEV_ONLY = (
-    f"[{TABLE}]: neorc is started with no authentication, which only the local development"
+    f"[{TABLE}]: neorc is served with no authentication, which only the local development"
     " mode allows for now: start with --dev-no-sign-in, or take the table out"
 )
 
 
 class OrchestrationStartError(RuntimeError):
-    """One of neorc's processes could not be started, ended before it was ready, or did not
-    get ready in time."""
+    """neorc's storage would not open, its flows were refused, or its worker could not be
+    started."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,14 +101,7 @@ class OrchestrationConfig:
 
     code_location: Path
     flows: Path
-    command: tuple[str, ...] = ("neorc",)
-    port: int = DEFAULT_PORT
-    database_url_env: str = NEORC_DATABASE_URL_VARIABLE
     ui: bool = True
-
-    @property
-    def manager_address(self) -> str:
-        return f"http://{HOST}:{self.port}"
 
 
 def parse_orchestration(
@@ -96,23 +109,11 @@ def parse_orchestration(
 ) -> OrchestrationConfig:
     """The ``[orchestration]`` table, with its relative paths taken from ``base``, the
     configuration file's directory. ``ConfigError`` names every problem."""
-    problems = [f"[{TABLE}] {key}: unknown key" for key in sorted(table.keys() - KEYS)]
-    command = table.get("command", ["neorc"])
-    if (
-        not isinstance(command, list)
-        or not command
-        or not all(isinstance(part, str) and part for part in command)
-    ):
-        problems.append(f"[{TABLE}] command: a non-empty list of non-empty strings")
-        command = ["neorc"]
-    port = table.get("port", DEFAULT_PORT)
-    if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:
-        problems.append(f"[{TABLE}] port: a port number, 1 to 65535")
-        port = DEFAULT_PORT
-    database_url_env = table.get("database_url_env", NEORC_DATABASE_URL_VARIABLE)
-    if not isinstance(database_url_env, str) or not database_url_env:
-        problems.append(f"[{TABLE}] database_url_env: the name of an environment variable")
-        database_url_env = NEORC_DATABASE_URL_VARIABLE
+    problems = [
+        f"[{TABLE}] {key}: no longer read: neorc runs inside the server, at {MOUNT}"
+        for key in sorted(table.keys() & GONE)
+    ]
+    problems += [f"[{TABLE}] {key}: unknown key" for key in sorted(table.keys() - KEYS - GONE)]
     ui = table.get("ui", True)
     if not isinstance(ui, bool):
         problems.append(f"[{TABLE}] ui: true or false")
@@ -129,86 +130,131 @@ def parse_orchestration(
     flows = paths.get("flows", code_location / "flows")
     if problems:
         raise ConfigError("\n".join(problems))
-    return OrchestrationConfig(
-        code_location=code_location,
-        flows=flows,
-        command=tuple(command),
-        port=port,
-        database_url_env=database_url_env,
-        ui=ui,
-    )
+    return OrchestrationConfig(code_location=code_location, flows=flows, ui=ui)
 
 
-def check_ready(orchestration: OrchestrationConfig, environ: Mapping[str, str]) -> list[str]:
-    """What stops the orchestrator from starting on this machine, before anything starts."""
+def neorc_command() -> tuple[str, ...]:
+    """neorc's own command, as installed beside this interpreter with neorc."""
+    return (str(Path(sys.executable).with_name("neorc")),)
+
+
+def check_ready(
+    orchestration: OrchestrationConfig, *, command: tuple[str, ...], ui: Path | None
+) -> list[str]:
+    """What stops the orchestrator from starting on this machine, before anything starts.
+    ``ui`` is where neorc's built UI is, ``None`` when it is not there."""
     problems = []
-    if not environ.get(orchestration.database_url_env):
-        problems.append(
-            f"[{TABLE}]: no database for neorc: set {orchestration.database_url_env} to the"
-            " PostgreSQL its manager keeps its flows and runs in"
-        )
     where = {"code_location": orchestration.code_location, "flows": orchestration.flows}
     for what, path in where.items():
         if not path.is_dir():
             problems.append(f"[{TABLE}] {what}: no directory at {path}")
+    if not Path(command[0]).is_file():
+        problems.append(f"[{TABLE}]: no neorc command at {command[0]} to run its worker with")
+    if orchestration.ui and ui is None:
+        problems.append(
+            f"[{TABLE}] ui: the installed neorc-ui holds no built UI; install its wheel, or set"
+            " ui = false"
+        )
     return problems
 
 
+def built_ui() -> Path | None:
+    """The directory of neorc's built UI, or ``None`` when the installed neorc-ui has none."""
+    import neorc_ui
+
+    try:
+        return neorc_ui.static_dir()
+    except FileNotFoundError:
+        return None
+
+
 def hidden_variables(config: Config) -> frozenset[str]:
-    """The variables no neorc process is handed: those the configuration reads a secret from,
+    """The variables the worker is not handed: those the configuration reads a secret from,
     and the server's own."""
     named = {p.api_key_env for p in config.providers.values()}
     named |= {t.secret_env for t in config.tool_servers.values() if t.secret_env}
     return frozenset(named) | SERVER_SECRETS
 
 
-def neorc_environment(
-    environ: Mapping[str, str],
-    orchestration: OrchestrationConfig,
-    *,
-    hidden: frozenset[str],
-    api_url: str | None = None,
+def worker_environment(
+    environ: Mapping[str, str], *, hidden: frozenset[str], api_url: str
 ) -> dict[str, str]:
-    """The environment a neorc process starts with: the server's, without ``hidden`` and
-    without an API token, with neorc's database in ``NEORC_DATABASE_URL``; and for the worker,
-    this server's URL in ``ROBINAUTS_API_URL``."""
+    """The environment the worker starts with: the server's, without ``hidden`` and without an
+    API token, and with this server's URL in ``ROBINAUTS_API_URL``."""
     environment = {k: v for k, v in environ.items() if k not in hidden}
-    environment.pop(API_URL_VARIABLE, None)
     environment.pop(API_TOKEN_VARIABLE, None)
-    environment[NEORC_DATABASE_URL_VARIABLE] = environ[orchestration.database_url_env]
-    if api_url is not None:
-        environment[API_URL_VARIABLE] = api_url
+    environment[API_URL_VARIABLE] = api_url
     return environment
 
 
-def neorc_commands(orchestration: OrchestrationConfig) -> dict[str, tuple[str, ...]]:
-    """The command of each step, by name, in the order they run."""
-    neorc = orchestration.command
-    address = ("--manager-address", orchestration.manager_address)
-    manager = (*neorc, "manager", "start", "--host", HOST, "--port", str(orchestration.port))
-    manager += ("--no-auth", "--create-schema")
-    if not orchestration.ui:
-        manager += ("--no-ui",)
-    return {
-        "manager": manager,
-        "upload": (*neorc, "flows", "upload", str(orchestration.flows), *address),
-        "scheduler": (*neorc, "scheduler", "start", *address),
-        "worker": (
-            *neorc,
-            "worker",
-            "start",
-            *address,
-            "--code-location",
-            str(orchestration.code_location),
-            "--queue",
-            DEFAULT_QUEUE,
-        ),
-    }
+def worker_command(
+    orchestration: OrchestrationConfig, *, command: tuple[str, ...], api_url: str
+) -> tuple[str, ...]:
+    """The worker's command: neorc's, against the manager mounted on this server."""
+    return (
+        *command,
+        "worker",
+        "start",
+        "--manager-address",
+        f"{api_url}{MOUNT}",
+        "--code-location",
+        str(orchestration.code_location),
+        "--queue",
+        DEFAULT_QUEUE,
+    )
+
+
+ASGIApp = Callable[
+    [MutableMapping[str, Any], Callable[[], Awaitable[Any]], Callable[[Any], Awaitable[None]]],
+    Awaitable[None],
+]
+
+
+class Framable:
+    """neorc's application, with the answers under its UI framable by this server's pages:
+    ``frame-ancestors 'self'`` in the place of neorc's ``'none'``, and ``x-frame-options:
+    SAMEORIGIN``. Nothing else changes, and no other path: the API's answers carry this
+    server's headers, ``DENY`` included."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(
+        self,
+        scope: MutableMapping[str, Any],
+        receive: Callable[[], Awaitable[Any]],
+        send: Callable[[Any], Awaitable[None]],
+    ) -> None:
+        below = scope.get("path", "").removeprefix(scope.get("root_path", ""))
+        if scope["type"] != "http" or not (below == "/ui" or below.startswith("/ui/")):
+            await self.app(scope, receive, send)
+            return
+
+        async def framable(message: Any) -> None:
+            if message["type"] == "http.response.start":
+                headers = [
+                    (name, _framable_policy(value) if name == b"content-security-policy" else value)
+                    for name, value in message.get("headers", [])
+                    if name != b"x-frame-options"
+                ]
+                headers.append((b"x-frame-options", b"SAMEORIGIN"))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, framable)
+
+
+def _framable_policy(policy: bytes) -> bytes:
+    directives = [d.strip() for d in policy.split(b";") if d.strip()]
+    kept = [d for d in directives if not d.startswith(b"frame-ancestors")]
+    return b"; ".join([*kept, b"frame-ancestors 'self'"])
 
 
 class Orchestration:
-    """neorc's manager, scheduler and worker, started in that order and stopped the other way
-    round. ``api_url`` is where the worker reaches this server."""
+    """neorc in this server: the manager's application, ``app``, to mount at ``MOUNT``; and
+    ``start`` and ``stop`` for what runs beside it, around the server's own. ``api_url`` is where
+    the worker reaches this server; ``database_url`` is this server's PostgreSQL, ``None`` for
+    storage in this process."""
 
     def __init__(
         self,
@@ -217,19 +263,50 @@ class Orchestration:
         *,
         hidden: frozenset[str],
         api_url: str,
+        database_url: str | None,
+        command: tuple[str, ...],
+        ui: Path | None,
     ) -> None:
         self.orchestration = orchestration
-        self.commands = neorc_commands(orchestration)
-        self._environment = neorc_environment(environ, orchestration, hidden=hidden)
-        self._worker_environment = neorc_environment(
-            environ, orchestration, hidden=hidden, api_url=api_url
+        self.worker_command = worker_command(orchestration, command=command, api_url=api_url)
+        self._worker_environment = worker_environment(environ, hidden=hidden, api_url=api_url)
+        self._database_url = database_url
+        self._stack = AsyncExitStack()
+        self._open: Callable[[], Awaitable[None]] | None = None
+        if database_url is None:
+            self.manager = Manager(
+                MemoryStore(), tasks=MemoryTaskNotifier(), events=MemoryTaskNotifier()
+            )
+        else:
+            self.manager = self._on_postgres(database_url)
+        self.app: FastAPI = create_app(
+            self.manager, access=None, ui=ui if orchestration.ui else None
         )
-        self._processes: dict[str, asyncio.subprocess.Process] = {}
-        self._watching: dict[str, asyncio.Task[None]] = {}
+        self.mounted = Framable(self.app)
+        self._scheduler: Scheduler | None = None
+        self._scheduling: asyncio.Task[None] | None = None
+        self._worker: asyncio.subprocess.Process | None = None
+        self._watching: asyncio.Task[None] | None = None
+
+    def _on_postgres(self, database_url: str) -> Manager:
+        from neorc.postgres import PostgresStore, PostgresTaskNotifier, create_schema
+        from neorc.postgres._notifier import EVENTS_CHANNEL, TASKS_CHANNEL
+
+        store = PostgresStore(database_url, schema=SCHEMA)
+        tasks = PostgresTaskNotifier(database_url, channel=TASKS_CHANNEL, schema=SCHEMA)
+        events = PostgresTaskNotifier(database_url, channel=EVENTS_CHANNEL, schema=SCHEMA)
+
+        async def open_() -> None:
+            await create_schema(database_url, schema=SCHEMA)
+            for part in (store, tasks, events):
+                await self._stack.enter_async_context(part)
+
+        self._open = open_
+        return Manager(store, tasks=tasks, events=events)
 
     async def start(self) -> None:
-        """Start the manager, upload the flows, start the scheduler and the worker. A start
-        that fails, or is cancelled, part way stops what it had started before it raises."""
+        """Open the storage, upload the flows, start the scheduler and the worker. A start that
+        fails, or is cancelled, part way stops what it had started before it raises."""
         try:
             await self._start()
         except BaseException:
@@ -237,122 +314,96 @@ class Orchestration:
             raise
 
     async def _start(self) -> None:
-        manager = await self._spawn("manager", self._environment)
-        await self._wait_until_healthy(manager)
+        if self._open is not None:
+            try:
+                await self._open()
+            except (OSError, NeorcError) as error:
+                raise OrchestrationStartError(f"neorc's storage did not open: {error}") from error
         await self._upload()
-        await self._spawn("scheduler", self._environment)
-        await self._spawn("worker", self._worker_environment)
-        for name, process in self._processes.items():
-            self._watching[name] = asyncio.create_task(
-                self._watch(name, process), name=f"neorc {name}"
-            )
+        self._scheduler = Scheduler(DirectManagerClient(self.manager), poll_timeout=POLL_SECONDS)
+        self._scheduling = asyncio.create_task(self._schedule(self._scheduler), name="neorc")
+        await self._spawn_worker()
         _log.info(
-            "neorc is up: its manager at %s, its flows from %s",
-            self.orchestration.manager_address,
+            "neorc is up: its manager at %s, its flows from %s, %s",
+            MOUNT,
             self.orchestration.flows,
-        )
-
-    async def _spawn(self, name: str, environment: dict[str, str]) -> asyncio.subprocess.Process:
-        command = self.commands[name]
-        _log.info("neorc %s starts with the command: %s", name, shlex.join(command))
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *command, env=environment, stdin=asyncio.subprocess.DEVNULL
-            )
-        except OSError as error:
-            raise OrchestrationStartError(
-                f"neorc's {name} could not be started with {shlex.join(command)}: {error}"
-            ) from error
-        self._processes[name] = process
-        return process
-
-    async def _wait_until_healthy(self, manager: asyncio.subprocess.Process) -> None:
-        """Until the manager answers ``/health``; fail when it ends first, or takes longer
-        than ``MANAGER_START_SECONDS``."""
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + MANAGER_START_SECONDS
-        url = f"{self.orchestration.manager_address}/health"
-        while loop.time() < deadline:
-            if manager.returncode is not None:
-                raise OrchestrationStartError(
-                    f"neorc's manager ended with code {manager.returncode} before it answered"
-                    f" (started with: {shlex.join(self.commands['manager'])})"
-                )
-            if await asyncio.to_thread(_answers, url):
-                return
-            await asyncio.sleep(0.2)
-        raise OrchestrationStartError(
-            f"neorc's manager did not answer {url} within {MANAGER_START_SECONDS:g} s"
+            "on PostgreSQL" if self._database_url else "in this process",
         )
 
     async def _upload(self) -> None:
-        command = self.commands["upload"]
+        flows = self.orchestration.flows
         try:
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                env=self._environment,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
+            stored = await DirectManagerClient(self.manager).upload_flows(read_flows(flows))
+        except (OSError, NeorcError) as error:
+            raise OrchestrationStartError(f"neorc refused the flows in {flows}: {error}") from error
+        _log.info("neorc flows from %s: %s new of %s", flows, sum(stored), len(stored))
+
+    async def _schedule(self, scheduler: Scheduler) -> None:
+        try:
+            await scheduler.run()
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            _log.exception("neorc's scheduler stopped: no run moves until the server restarts")
+
+    async def _spawn_worker(self) -> None:
+        command = self.worker_command
+        _log.info("neorc's worker starts with the command: %s", shlex.join(command))
+        try:
+            self._worker = await asyncio.create_subprocess_exec(
+                *command, env=self._worker_environment, stdin=asyncio.subprocess.DEVNULL
             )
         except OSError as error:
             raise OrchestrationStartError(
-                f"the flows could not be uploaded with {shlex.join(command)}: {error}"
+                f"neorc's worker could not be started with {shlex.join(command)}: {error}"
             ) from error
-        try:
-            said, _ = await asyncio.wait_for(process.communicate(), UPLOAD_SECONDS)
-        except TimeoutError:
-            process.kill()
-            await process.wait()
-            raise OrchestrationStartError(
-                f"uploading the flows took longer than {UPLOAD_SECONDS:g} s"
-            ) from None
-        text = said.decode(errors="replace").strip()
-        if process.returncode != 0:
-            raise OrchestrationStartError(
-                f"neorc refused the flows in {self.orchestration.flows}"
-                f" (code {process.returncode}): {text}"
-            )
-        for line in text.splitlines():
-            _log.info("neorc flows: %s", line)
+        self._watching = asyncio.create_task(self._watch(self._worker), name="neorc worker")
+
+    async def _watch(self, process: asyncio.subprocess.Process) -> None:
+        code = await process.wait()
+        _log.error(
+            "neorc's worker ended with code %s: no task runs until the server restarts"
+            " (it was started with: %s)",
+            code,
+            shlex.join(self.worker_command),
+        )
 
     async def stop(self) -> None:
-        """Stop the worker, the scheduler and the manager, in that order, each with SIGTERM
-        and, after ``STOP_SECONDS``, killed. Safe to repeat."""
-        for name in ("worker", "scheduler", "manager"):
-            await self._stop_process(name)
+        """Stop the worker, with SIGTERM and, after ``STOP_SECONDS``, killed; then the scheduler;
+        then close the storage. Safe to repeat."""
+        try:
+            await self._stop_worker()
+        finally:
+            try:
+                await self._stop_scheduler()
+            finally:
+                await self._stack.aclose()
 
-    async def _stop_process(self, name: str) -> None:
-        watching = self._watching.pop(name, None)
+    async def _stop_worker(self) -> None:
+        watching, self._watching = self._watching, None
         if watching is not None:
             watching.cancel()
             await asyncio.gather(watching, return_exceptions=True)
-        process = self._processes.pop(name, None)
+        process, self._worker = self._worker, None
         if process is None or process.returncode is not None:
             return
         process.send_signal(signal.SIGTERM)
         try:
             await asyncio.wait_for(process.wait(), STOP_SECONDS)
         except TimeoutError:
-            _log.warning("neorc's %s did not stop in %s s: killed", name, STOP_SECONDS)
+            _log.warning("neorc's worker did not stop in %s s: killed", STOP_SECONDS)
             process.kill()
             await process.wait()
 
-    async def _watch(self, name: str, process: asyncio.subprocess.Process) -> None:
-        code = await process.wait()
-        _log.error(
-            "neorc's %s ended with code %s: the orchestrator is down until the server restarts"
-            " (it was started with: %s)",
-            name,
-            code,
-            shlex.join(self.commands[name]),
-        )
-
-
-def _answers(url: str) -> bool:
-    """Whether ``url`` answers 200 now."""
-    try:
-        with urllib.request.urlopen(url, timeout=2) as answer:  # noqa: S310 -- loopback http
-            return bool(answer.status == 200)
-    except (urllib.error.URLError, OSError):
-        return False
+    async def _stop_scheduler(self) -> None:
+        scheduling, self._scheduling = self._scheduling, None
+        if self._scheduler is not None:
+            self._scheduler.stop()
+            self._scheduler = None
+        if scheduling is None:
+            return
+        try:
+            await asyncio.wait_for(asyncio.shield(scheduling), STOP_SECONDS)
+        except TimeoutError:
+            scheduling.cancel()
+            await asyncio.gather(scheduling, return_exceptions=True)

@@ -60,4 +60,5 @@ httpx -> web, worker.http_turn_broker, langchain_engine, pydantic_ai_engine
 fastapi -> web, cli
 starlette, ag_ui -> web
 uvicorn -> cli
+neorc, neorc_core, neorc_ui -> cli
 qrcodegen -> web

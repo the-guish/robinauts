@@ -83,4 +83,5 @@ export const RefreshCwIcon = icon("refresh-cw");
 export const SquareIcon = icon("square");
 export const SunIcon = icon("sun");
 export const TrashIcon = icon("trash");
+export const WorkflowIcon = icon("workflow");
 export const XIcon = icon("x");

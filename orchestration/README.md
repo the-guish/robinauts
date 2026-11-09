@@ -1,8 +1,8 @@
 # Orchestration flows
 
 The neorc flows that Robinauts ships, and their handlers. `robinauts start
---dev-no-sign-in` runs them on the neorc it starts beside itself when the
-configuration has an `[orchestration]` table
+--dev-no-sign-in` runs them on the neorc it embeds when the configuration has
+an `[orchestration]` table
 ([docs/architecture/orchestration.md](../docs/architecture/orchestration.md)).
 
 - `flows/`: the flow files, uploaded to neorc's manager at every start.
@@ -15,34 +15,28 @@ configuration has an `[orchestration]` table
 
 ## Trying it
 
-neorc is not a dependency of Robinauts: get it on its own, with a PostgreSQL
-for its manager.
-
-```bash
-git clone https://github.com/open-shipyard/neorc ../neorc
-```
-
-```bash
-(cd ../neorc && uv sync --all-packages)
-```
-
-Then add to the configuration, beside the model tables:
+neorc is a dependency of Robinauts, installed by `uv sync` with the rest. Add
+to the configuration, beside the model tables:
 
 ```toml
 [orchestration]
-command = ["uv", "run", "--project", "../neorc", "neorc"]
-ui = false
 ```
 
-Start the server with neorc's database:
+Start the server as usual; neorc keeps its flows and runs where the server
+keeps its own, in the process or in the PostgreSQL `ROBINAUTS_DATABASE_URL`
+names, in the schema `neorc`:
 
 ```bash
-NEORC_DATABASE_URL=postgresql://localhost/neorc robinauts start --dev-no-sign-in
+robinauts start --dev-no-sign-in
 ```
 
-Then start a run. It plays the guessing game between two conversations,
-which show up in the UI, and needs a model whose id or title holds `haiku`:
+Open **Flows** in the left panel: neorc's own page, at `/neorc/ui/`. Start a
+`guess_number` run there, or from a shell through the server's port:
 
 ```bash
-curl -X POST http://127.0.0.1:8420/flows/guess_number/runs -H 'content-type: application/json' -d '{"inputs": {}}'
+curl -X POST http://127.0.0.1:8000/neorc/flows/guess_number/runs -H 'content-type: application/json' -d '{"inputs": {}}'
 ```
+
+It plays the guessing game between two conversations, which show up in the
+history, and needs a model whose id or title holds `haiku`. The run then
+updates live in the Flows page.

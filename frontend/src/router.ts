@@ -10,7 +10,7 @@
  * prefix to build for, and nothing here depends on where the application is
  * mounted.
  *
- * No router library. Four routes, one event, and a store the size of this
+ * No router library. Six routes, one event, and a store the size of this
  * file; a library would be a dependency to vet, to keep pinned and to carry
  * in the bundle for something React already provides through
  * `useSyncExternalStore` (`docs/contributing/js-dependencies.md`).
@@ -19,6 +19,13 @@
  *     #/c/<id>      that conversation
  *     #/devices     "Linked devices": the phones and the API tokens
  *     #/link        what a phone's camera app opens a pairing code at
+ *     #/flows       the orchestrator's page, when the server has one
+ *     #/flows/runs/<id>  that run on it
+ *
+ * The two flows routes frame the page the session names (`flows_url`) and
+ * are what the panel's "Flows" links to. Inside the frame the orchestrator
+ * keeps a hash of its own, `#/runs/<id>`, which `flowsPage` writes from the
+ * second (`./flows/FlowsPage.tsx`).
  *
  * `#/link?v=1&c=…` is the URL inside a pairing QR
  * (`docs/architecture/device-pairing.md`). Its query is cut off like any
@@ -40,7 +47,8 @@ export type Route =
   | { readonly kind: "new" }
   | { readonly kind: "conversation"; readonly id: ConversationId }
   | { readonly kind: "devices" }
-  | { readonly kind: "link" };
+  | { readonly kind: "link" }
+  | { readonly kind: "flows"; readonly run: string | null };
 
 /** The empty chat: the route of a page that has been told nothing else. */
 export const NEW_CHAT: Route = { kind: "new" };
@@ -50,6 +58,9 @@ export const DEVICES: Route = { kind: "devices" };
 
 /** The page a pairing code opens in a browser. */
 export const LINK: Route = { kind: "link" };
+
+/** The orchestrator's page, with no run chosen. */
+export const FLOWS: Route = { kind: "flows", run: null };
 
 /**
  * The shape of every id the backend gives a conversation.
@@ -91,7 +102,19 @@ export function parseRoute(hash: string): Route {
     (hash.startsWith("#") ? hash.slice(1) : hash).split("?")[0] ?? "";
   if (path === "/devices") return DEVICES;
   if (path === "/link") return LINK;
+  if (path === "/flows") return FLOWS;
   const parts = path.split("/");
+  const run = parts[3];
+  if (
+    parts.length === 4 &&
+    parts[0] === "" &&
+    parts[1] === "flows" &&
+    parts[2] === "runs" &&
+    run !== undefined &&
+    isUuid(run)
+  ) {
+    return { kind: "flows", run };
+  }
   const id = parts[2];
   if (
     parts.length === 3 &&
@@ -119,6 +142,12 @@ export function formatRoute(route: Route): string {
       return "#/devices";
     case "link":
       return "#/link";
+    case "flows":
+      return route.run === null
+        ? "#/flows"
+        : isUuid(route.run)
+          ? `#/flows/runs/${route.run}`
+          : "#/flows";
     case "conversation":
       return isConversationId(route.id) ? `#/c/${route.id}` : "#/";
     default:
