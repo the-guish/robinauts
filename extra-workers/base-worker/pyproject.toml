@@ -23,6 +23,8 @@ dev = [
 ]
 
 [tool.uv]
+# neorc-from-source: the backend depends on neorc, which uv builds from source.
+no-binary-package = ["neorc", "neorc-core", "neorc-ui"]
 # Nothing of its own to install: the worker is the backend's module. The tests alone are here.
 package = false
 environments = [

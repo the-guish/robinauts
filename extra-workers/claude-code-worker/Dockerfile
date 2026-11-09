@@ -36,7 +36,9 @@ COPY backend/src backend/src
 COPY extra-workers/claude-code-worker/pyproject.toml extra-workers/claude-code-worker/uv.lock \
     extra-workers/claude-code-worker/
 COPY extra-workers/claude-code-worker/src extra-workers/claude-code-worker/src
-RUN cd extra-workers/claude-code-worker && uv sync --locked --no-dev
+# neorc-from-source: the worker never imports neorc, and this image has no Node.js to build it.
+RUN cd extra-workers/claude-code-worker && uv sync --locked --no-dev \
+    --no-install-package neorc --no-install-package neorc-core --no-install-package neorc-ui
 
 # Nothing runs as root. The transcripts and the workspaces are the two volumes it writes.
 RUN useradd --system --create-home --home-dir /var/lib/robinauts --shell /usr/sbin/nologin \

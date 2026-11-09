@@ -48,7 +48,8 @@ python3 -m venv "$work/venv"
 # The guide's two steps, and nothing before them -- no `pip install --upgrade
 # pip` either, so that what is rehearsed is what the guide tells somebody to
 # type. `ensurepip`'s own pip is what a fresh venv has, and it installs this.
-"$work/venv/bin/pip" install --quiet --require-hashes -r "$work/wheel/requirements.txt"
+"$work/venv/bin/pip" install --quiet --require-hashes -r "$work/wheel/requirements.txt" \
+    --find-links "$work/wheel/neorc-wheels" # neorc-from-source
 "$work/venv/bin/pip" install --quiet --no-deps "$wheel"
 "$work/venv/bin/robinauts" version
 

@@ -79,7 +79,9 @@ printf 'beside it, %s pins %s packages, every one of them hashed\n' "$requiremen
 # convenience nobody is told to use.
 uv venv "$work/venv" >&2
 python="$work/venv/bin/python"
-uv pip install --python "$python" --require-hashes -r "$requirements" >&2
+# neorc-from-source: --find-links, for the wheels built beside this one.
+uv pip install --python "$python" --require-hashes -r "$requirements" \
+    --find-links "$into/neorc-wheels" >&2
 uv pip install --python "$python" --no-deps "$wheel" >&2
 
 "$python" - "$wheel" <<'PYTHON'

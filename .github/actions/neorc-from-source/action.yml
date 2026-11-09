@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+#
+# neorc-from-source: neorc publishes no wheels yet, so uv builds it, and building
+# neorc-ui needs Node.js. Every job that installs the backend without Node.js of
+# its own uses this (docs/architecture/orchestration.md, "Installing neorc").
+name: neorc-from-source
+description: The toolchain that building neorc from source needs.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version-file: frontend/.nvmrc

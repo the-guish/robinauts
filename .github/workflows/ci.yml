@@ -69,6 +69,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # neorc-from-source
+      - uses: ./.github/actions/neorc-from-source
       # The uv version lives with the other hand-bumped pins, in one file.
       - run: . ./scripts/tool-versions.sh && echo "UV_VERSION=$UV_VERSION" >>"$GITHUB_ENV"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -121,6 +123,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # neorc-from-source
+      - uses: ./.github/actions/neorc-from-source
       # The uv version lives with the other hand-bumped pins, in one file.
       - run: . ./scripts/tool-versions.sh && echo "UV_VERSION=$UV_VERSION" >>"$GITHUB_ENV"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -234,6 +238,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # neorc-from-source
+      - uses: ./.github/actions/neorc-from-source
       # The uv version lives with the other hand-bumped pins, in one file.
       - run: . ./scripts/tool-versions.sh && echo "UV_VERSION=$UV_VERSION" >>"$GITHUB_ENV"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -271,6 +277,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # neorc-from-source
+      - uses: ./.github/actions/neorc-from-source
       # The uv version lives with the other hand-bumped pins, in one file.
       - run: . ./scripts/tool-versions.sh && echo "UV_VERSION=$UV_VERSION" >>"$GITHUB_ENV"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -352,13 +360,15 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: robinauts-wheel
-          # Both files: the wheel, and the locked runtime set with its hashes.
+          # The wheel, the locked runtime set with its hashes, and neorc's wheels.
           # A deployment installs the second first, so that what runs is the
           # set the licence gate and pip-audit judged rather than whatever pip
           # resolves on the day (docs/deployment.md).
           path: |
             ${{ runner.temp }}/wheel/*.whl
             ${{ runner.temp }}/wheel/requirements.txt
+            # neorc-from-source
+            ${{ runner.temp }}/wheel/neorc-wheels/*.whl
           if-no-files-found: error
           retention-days: 14
 

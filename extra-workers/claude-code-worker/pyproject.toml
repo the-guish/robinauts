@@ -30,6 +30,8 @@ dev = [
 claude-code = "robinauts_claude_worker.engine:init_claude_code"
 
 [tool.uv]
+# neorc-from-source: the backend depends on neorc, which uv builds from source.
+no-binary-package = ["neorc", "neorc-core", "neorc-ui"]
 environments = [
     "sys_platform == 'linux'",
     "sys_platform == 'darwin'",

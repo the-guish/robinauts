@@ -41,12 +41,12 @@ schema and the built interface, and nothing else is built on the machine.
 
 - **Normally**: download the `robinauts-wheel` artifact of a green CI run
   (`.github/workflows/ci.yml`, job "the wheel, built and installed"). It
-  holds **two** files — the `.whl` and `requirements.txt` — and you want
-  both.
+  holds the `.whl`, `requirements.txt` and a `neorc-wheels/` directory, and
+  you want all three.
 - **From a checkout**, on a build machine with the Node version
   `frontend/.nvmrc` names: `scripts/build-wheel.sh <output-directory>`
-  prints the path of the wheel it built and writes `requirements.txt`
-  beside it. `scripts/check-wheel.sh` builds it, looks inside it, installs
+  prints the path of the wheel it built and writes `requirements.txt` and
+  `neorc-wheels/` beside it. `scripts/check-wheel.sh` builds it, looks inside it, installs
   it into an empty virtual environment **the way section 2 does** — the
   locked set under its hashes, then the wheel with `--no-deps` — and runs
   the command.
@@ -71,7 +71,8 @@ The locked set goes in **first**, and the wheel then goes in with
         --shell /usr/sbin/nologin robinauts
     sudo -u robinauts python3 -m venv /var/lib/robinauts/venv
     sudo -u robinauts /var/lib/robinauts/venv/bin/pip install \
-        --require-hashes -r /tmp/requirements.txt
+        --require-hashes -r /tmp/requirements.txt \
+        --find-links /tmp/neorc-wheels
     sudo -u robinauts /var/lib/robinauts/venv/bin/pip install \
         --no-deps /tmp/robinauts-0.1.0-py3-none-any.whl
     sudo -u robinauts /var/lib/robinauts/venv/bin/robinauts version
@@ -85,6 +86,10 @@ trial: it just installs whatever `pip` resolves today rather than the set
 the gates judged. `--require-hashes` is redundant — a requirements file
 that carries hashes already makes `pip` insist on them — and is written out
 so that a file somebody edited cannot quietly lose them.
+
+<!-- neorc-from-source -->
+`--find-links` names the wheels of neorc, which this build made. neorc is not
+on PyPI yet.
 
 ## 3. The database
 
@@ -646,7 +651,7 @@ effect at the next restart, because the file is read once at start-up.
 1. Stop the service.
 2. In the same virtual environment, the same two steps as the first
    install, with the new artifact's own pair of files:
-   `pip install --require-hashes -r requirements.txt` then
+   `pip install --require-hashes -r requirements.txt --find-links neorc-wheels` then
    `pip install --no-deps --force-reinstall robinauts-<new>.whl`.
 3. `robinauts version` — until the first release the schema version stays
    1, so what to compare is the `schema.sql` hash it prints beside it. If

@@ -118,12 +118,22 @@ taking out that module and its call.
 ### Installing neorc
 
 Robinauts depends on `neorc[http,manager,postgres]`, `neorc-core` and
-`neorc-ui`. Until neorc is on PyPI, `backend/uv.lock` pins them to the wheels a
-GitHub release of neorc carries, by URL and hash: a `v*` tag builds the three,
-with the UI built in. Before the first release, the lock pins a commit of
-open-shipyard/neorc's `main` instead, which holds the asyncpg port and the UI's
-embedded mode, and which `uv sync --no-build` cannot install. neorc's
-PostgreSQL adapter is on asyncpg: psycopg is LGPL-3.0, which
+`neorc-ui`. neorc publishes no wheels yet. Robinauts builds them from a commit
+of open-shipyard/neorc's `main`, named in `[tool.uv.sources]` in
+`backend/pyproject.toml`.
+
+uv builds these three packages from that commit. Every other package stays under
+`--no-build`. The build needs Node.js, at the version `frontend/.nvmrc` names.
+`scripts/neorc-from-source.sh` builds the wheels of a release, and refuses a
+commit outside neorc's `main`. The extra workers' images leave neorc out.
+
+When neorc publishes wheels, take this step out:
+
+1. `git grep neorc-from-source` lists every part of it. Remove each one.
+2. Point the three dependencies at the published wheels.
+3. Run `uv lock` in `backend/` and in each extra worker.
+
+neorc's PostgreSQL adapter is on asyncpg: psycopg is LGPL-3.0, which
 [DEPENDENCIES.md](../../DEPENDENCIES.md) forbids.
 
 ### What the worker is handed

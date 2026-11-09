@@ -44,10 +44,9 @@ dependencies = [
     # (docs/architecture/orchestration.md), imported by `robinauts.cli` alone (the
     # import-linter contract below). `http` for its worker, `manager` for the
     # application mounted at /neorc and its UI, `postgres` for its store on
-    # asyncpg. Not on PyPI yet: until neorc tags a release, the sources below
-    # pin a commit of open-shipyard/neorc's main (the asyncpg port, #78, and
-    # the UI's embedded mode, #82), which `uv sync --no-build` cannot install;
-    # the lock is then switched to the release's wheels, by URL and hash.
+    # asyncpg. neorc-from-source: neorc publishes no wheels yet, so the sources
+    # below pin a commit of open-shipyard/neorc's main (the asyncpg port, #78,
+    # and the UI's embedded mode, #82), and uv builds it from there.
     "neorc[http,manager,postgres]",
     "neorc-core",
     "neorc-ui",
@@ -104,6 +103,10 @@ dev = [
 ]
 
 [tool.uv]
+# neorc-from-source: uv builds these three from the commit in [tool.uv.sources].
+# `--no-build` holds for every other package
+# (docs/architecture/orchestration.md, "Installing neorc").
+no-binary-package = ["neorc", "neorc-core", "neorc-ui"]
 # The platforms the project runs on, and the only ones the lock resolves for:
 # Windows is not a target (docs/deployment.md). A package that another platform
 # alone would need is then not locked, and the licence gate reads the lock
