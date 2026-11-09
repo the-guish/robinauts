@@ -26,6 +26,18 @@
   edit in its own box. A first message refused because its model or its
   agent is no longer offered says which, and keeps the text; a refused
   model is forgotten by the browser.
+- **A page left open follows other clients.** Each tab holds one request on
+  the change feed ([wire.md](wire.md), "The change feed"). On a change it
+  reads the conversation list and the open conversation again, and attaches
+  to a turn it finds running.
+- A re-read redraws nothing when the open conversation's last message and
+  running turn are as they were. What the person is typing, an open edit box,
+  the scroll position and a turn this tab is streaming stay as they are.
+- A hidden tab pauses the feed and reads again as soon as it is visible.
+  A tab streaming a turn already holds two connections, and a browser allows
+  six per origin over HTTP/1.1.
+- The history marks a conversation with a running turn, from the list's
+  `running` field.
 - On a small screen the panel becomes an overlay drawer opened from a
   button, and the chat is usable on a phone.
 - **The right side panel** is ours too (`src/side/`). It holds tabs

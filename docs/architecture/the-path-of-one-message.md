@@ -72,6 +72,9 @@ first by `add_message`, and `start_turn(session, follows)` has no turn id.
     `turns_one_active_per_session` means 409, and the transaction takes the question
     and the task back with it.
   - `SELECT pg_notify('robinauts_queued', '<task>')`.
+  - `UPDATE users SET change_version = change_version + 1` for the owner, and
+    `SELECT pg_notify('robinauts_changes', '<owner> <version>')`, which wakes the
+    owner's other tabs and clients ([wire.md](../specs/wire.md), "The change feed").
 - **AWS:** one `TransactWriteItems`:
   - a `ConditionCheck` that the session item exists without `deleted_at`;
   - a `Put` of the question, with `SK = MSG#<created_at>#<id>` and the document as a
@@ -81,6 +84,7 @@ first by `add_message`, and `start_turn(session, follows)` has no turn id.
     failed condition means 409. It is how a store with no partial unique index holds
     "one running turn per session".
   - a `Put` of the turn item.
+  - an `Update` that adds one to the owner's change counter.
 
 ### 5. The turn is dispatched
 
@@ -242,7 +246,8 @@ All of that is one store operation. Today it is several calls.
     `turns_one_active_per_session` by itself. No row means a reader ended the turn,
     or its task's lease has passed: `TurnLostError`, the transaction rolled back, and the
     runner has nothing more to write;
-  - `SELECT pg_notify('robinauts_turns', '<turn> end')`.
+  - `SELECT pg_notify('robinauts_turns', '<turn> end')`;
+  - the owner's `change_version` bumped and announced, as in step 4.
 - **AWS:** one `TransactWriteItems`:
   - a `Put` of the message and of the two events;
   - an `Update` of the turn, on condition that it is `running`, which failing is
@@ -250,6 +255,7 @@ All of that is one store operation. Today it is several calls.
   - a `Delete` of the session's `ACTIVE` marker;
   - an `Update` of the session's `updated_at`. That changes `GSI1SK`, so the session
     moves to the top of the list.
+  - an `Update` that adds one to the owner's change counter.
 
   The worker's invocation then returns, and its billing stops.
 

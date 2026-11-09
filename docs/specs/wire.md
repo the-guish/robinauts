@@ -157,6 +157,52 @@ and are not enforced yet:
 - A body is bounded at one mebibyte, refused with 413 on the declared length
   before a byte of it is read.
 
+## The change feed
+
+A turn's stream shows one turn. The change feed tells a client that something
+of the signed-in user changed somewhere. A page left open follows what other
+clients do through it. The feed is part of the plain JSON API, described by
+OpenAPI.
+
+| method and path | answers |
+|---|---|
+| `GET /api/changes?after=<version>&timeout=<seconds>` | `{"version": int}`: the user's change version |
+
+- **Each user has one change version.** It is an integer that starts at 0 and
+  grows by one with each change worth knowing. A store bumps it in the same
+  transaction as the change.
+- **These changes bump it:** a conversation created, renamed or deleted; a
+  turn started; a turn ended, whichever way it ends. A turn's events do not
+  bump it. The turn's stream is what shows them.
+- **The feed only signals.** Its answer holds the version and nothing about
+  any conversation. A client that sees a new version reads what it shows
+  again: the conversation list and the open conversation.
+- **Without `after`, the route answers the current version at once.** A
+  client starts with that answer.
+- **With `after`, the route waits while the version equals `after`.** It
+  answers as soon as the version differs from `after`, or with the unchanged
+  version once `timeout` seconds have passed. A version below or above
+  `after` is answered at once. A client ahead of the server has met a new
+  database, and reads everything again.
+- **`timeout` is between 0 and 30 seconds, and 25 when left out.** A value
+  outside that range is refused (422), as is a negative `after`.
+- **A change of another user never wakes the wait.** Each user sees only
+  their own version. A bearer token, a device and a cookie reach the same
+  feed. The local development mode has one user, who owns everything,
+  including what API clients start there.
+- **A waiting request holds no database connection.** The wait listens for a
+  notification keyed by the user, sent with every bump. A change in any
+  process of the deployment wakes it.
+- **A closed tab and a stopping server end the wait at once.** The server
+  answers the unchanged version to a stop, and nothing to a client gone.
+- **Planned changes add bumps.** A tool that suspends a run
+  ([core.md](core.md), "Planned") will bump the version when it starts
+  waiting for a person. The feed needs no change for it.
+
+`GET /api/conversations` lists each conversation with `running`, true while it
+has an active turn. A client shows activity in conversations off the screen
+from that field.
+
 ## Without streaming
 
 - A client that cannot stream starts a turn and obtains the result once the
