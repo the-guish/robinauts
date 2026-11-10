@@ -11,18 +11,18 @@ from typing import Any
 
 import pytest
 
-from robinauts.cli.orchestration import (
+from robinauts.controller.contract.domain import ConfigError
+from robinauts.orchestrator.adapters.neorc.embedded import (
     API_TOKEN_VARIABLE,
     API_URL_VARIABLE,
-    OrchestrationConfig,
     _framable_policy,
     check_ready,
     hidden_variables,
-    parse_orchestration,
     worker_command,
     worker_environment,
 )
-from robinauts.controller.contract.domain import ConfigError
+from robinauts.orchestrator.contract.domain import OrchestrationConfig
+from robinauts.orchestrator.core.config import parse_orchestration
 from robinauts.shared_domain.domain import Config, ProviderConfig, ProviderKind, ToolServerConfig
 
 BASE = Path("/etc/robinauts")

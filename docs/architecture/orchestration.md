@@ -17,7 +17,7 @@ On a cluster Neorc would be started on its own and connected to a running instan
 
 An `[orchestration]` table in the configuration turns it on. `robinauts start
 --dev-no-sign-in` then embeds neorc in its own process and on its own port
-([cli/orchestration.py](../../backend/src/robinauts/cli/orchestration.py)):
+([orchestrator/adapters/neorc/embedded.py](../../backend/src/robinauts/orchestrator/adapters/neorc/embedded.py)):
 
 1. neorc's **manager** is an application mounted at `/neorc`, its UI at
    `/neorc/ui/`, with no authentication of its own, as the local development
@@ -109,11 +109,14 @@ answer under `/neorc` carries this server's headers, `DENY` included.
 
 ### Where neorc may be imported
 
-In `cli/` alone, the composition root (an import-linter contract in
-`backend/pyproject.toml`, and [rules.md](rules.md)); in practice in
-`cli/orchestration.py`, which `cli/main.py` calls. `web/` knows a URL to put in
-the session and nothing else, and `controller/` nothing. Taking neorc out is
-taking out that module and its call.
+In `orchestrator/adapters/neorc/` alone (an import-linter contract in
+`backend/pyproject.toml`, and [rules.md](rules.md)). The orchestrator is a
+sibling of the controller: it may see the controller's contract, and the
+controller sees nothing of it. `cli/composition.py` builds the neorc adapter;
+`cli/main.py` sees the orchestrator's contract alone, an `Orchestrator` to
+mount, start and stop. `web/` knows a URL to put in the session and nothing
+else. Taking neorc out is taking out that package and its wiring in
+`cli/composition.py`.
 
 ### Installing neorc
 

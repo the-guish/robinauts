@@ -11,7 +11,8 @@ A worker in a process of its own is built with `compose_worker`, over the core i
 The file holds web's tables beside the controller's, so web is handed the tables of one
 reading and parses its own. Also
 what `robinauts db init` does, since it is the one other thing that names the store and the
-engines together."""
+engines together. And the orchestrator, when the ``[orchestration]`` table asks for one:
+neorc, embedded (``orchestrator/adapters/neorc``)."""
 
 from __future__ import annotations
 
@@ -41,6 +42,9 @@ from robinauts.controller.contract.domain import ConfigError
 from robinauts.controller.contract.ports import Controller, Credentials
 from robinauts.controller.core.config import parse_config
 from robinauts.controller.ports.store import Store
+from robinauts.orchestrator.adapters.neorc import embedded as neorc
+from robinauts.orchestrator.contract.domain import TABLE, Orchestrator
+from robinauts.orchestrator.core.config import parse_orchestration
 from robinauts.shared_domain.domain import DEFAULT_WORKER, Config, StorageConfig, StorageKind
 from robinauts.tools import sessions
 from robinauts.tools.contract.ports import ToolProvider
@@ -201,3 +205,37 @@ async def init_database(url: str, config: Config, secret_for: SecretLookup) -> s
     finally:
         await pool.close()
     return SCHEMA_READY.format(version=SCHEMA_VERSION, digest=SCHEMA_SHA256[:12])
+
+
+def orchestrator_of(
+    tables: Mapping[str, Any],
+    environ: Mapping[str, str],
+    config: Config,
+    *,
+    config_path: Path,
+    default_code: Path,
+    api_url: str,
+) -> Orchestrator | None:
+    """neorc as the ``[orchestration]`` table describes it, on this server's storage, and where
+    its worker reaches this server; ``None`` without the table. ``default_code`` is where the
+    handlers are when the table names none. ``ConfigError`` names what stops it from
+    starting."""
+    table = tables.get(TABLE)
+    if table is None:
+        return None
+    if not isinstance(table, Mapping):
+        raise ConfigError(f"[{TABLE}]: a table")
+    described = parse_orchestration(table, base=config_path.parent, default_code=default_code)
+    command = neorc.neorc_command()
+    ui = neorc.built_ui()
+    if problems := neorc.check_ready(described, command=command, ui=ui):
+        raise ConfigError("\n".join(problems))
+    return neorc.EmbeddedNeorc(
+        described,
+        environ,
+        hidden=neorc.hidden_variables(config),
+        api_url=api_url,
+        database_url=environ.get(DATABASE_URL_VARIABLE) or None,
+        command=command,
+        ui=ui,
+    )

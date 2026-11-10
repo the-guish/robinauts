@@ -20,8 +20,7 @@ which a start with sign-in needs; the local development mode is in this process 
 sign-in records are kept on the same storage. The server never changes the database: it
 refuses one that is not this build's and names the command. In the local development mode, an
 ``[orchestration]`` table embeds neorc in the server, at ``/neorc``, and starts and stops what
-runs beside it with the server (``cli/orchestration.py``,
-``docs/architecture/orchestration.md``).
+runs beside it with the server (``orchestrator/``, ``docs/architecture/orchestration.md``).
 """
 
 from __future__ import annotations
@@ -42,7 +41,6 @@ from typing import Any
 import uvicorn
 from fastapi import FastAPI
 
-from robinauts.cli import orchestration
 from robinauts.cli.composition import (
     CONTROLLER_TABLES,
     DATABASE_URL_VARIABLE,
@@ -52,13 +50,21 @@ from robinauts.cli.composition import (
     configure,
     init_database,
     load,
+    orchestrator_of,
     read_tables,
     storage_from,
 )
 from robinauts.cli.lifecycle import Lifecycle, WorkerStartError
-from robinauts.cli.orchestration import Orchestration, OrchestrationStartError
 from robinauts.controller.contract.domain import ConfigError, DeviceSession, User
 from robinauts.controller.contract.ports import Credentials
+from robinauts.orchestrator.contract.domain import (
+    DEV_ONLY,
+    MOUNT,
+    TABLE,
+    UI_URL,
+    OrchestrationStartError,
+    Orchestrator,
+)
 from robinauts.shared_domain.domain import Config, ControllerError, StorageConfig, StorageKind
 from robinauts.web.app import create_app
 from robinauts.web.contract.broker.wire import SERVER_KEEP_ALIVE_SECONDS
@@ -99,10 +105,10 @@ def serving(
     problems = [
         f"{key}: unknown key, neither a table of the controller's nor of sign-in's"
         for key in tables
-        if key not in CONTROLLER_TABLES | SIGN_IN_KEYS | {orchestration.TABLE}
+        if key not in CONTROLLER_TABLES | SIGN_IN_KEYS | {TABLE}
     ]
-    if orchestration.TABLE in tables and not dev_no_sign_in:
-        problems.append(orchestration.DEV_ONLY)
+    if TABLE in tables and not dev_no_sign_in:
+        problems.append(DEV_ONLY)
     sign_in = None
     if dev_no_sign_in:
         if held := sorted(SIGN_IN_KEYS & tables.keys()):
@@ -153,7 +159,7 @@ def build_app(
     sign_in: SignInConfig | None,
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
-    orchestrator: Orchestration | None = None,
+    orchestrator: Orchestrator | None = None,
 ) -> FastAPI:
     """The HTTP server over what the composition built, with the lifecycle's gate for a worker
     in a process of its own and its health, and neorc's manager mounted on it when there is an
@@ -169,10 +175,10 @@ def build_app(
         secret_for=secret_for,
         config=composed.config,
         ui_dir=ui_dir,
-        flows_url=None if orchestrator is None else orchestration.UI_URL,
+        flows_url=None if orchestrator is None else UI_URL,
     )
     if orchestrator is not None:
-        app.mount(orchestration.MOUNT, orchestrator.mounted)
+        app.mount(MOUNT, orchestrator.mounted)
     return app
 
 
@@ -204,7 +210,7 @@ class Server(uvicorn.Server):
         self,
         config: uvicorn.Config,
         lifecycle: Lifecycle,
-        orchestration: Orchestration | None = None,
+        orchestration: Orchestrator | None = None,
     ) -> None:
         super().__init__(config)
         self._lifecycle = lifecycle
@@ -234,40 +240,6 @@ class Server(uvicorn.Server):
                 await self._lifecycle.stop()
 
 
-def orchestration_of(
-    tables: Mapping[str, Any],
-    environ: Mapping[str, str],
-    config: Config,
-    *,
-    config_path: Path,
-    api_url: str,
-) -> Orchestration | None:
-    """neorc as the ``[orchestration]`` table describes it, on this server's storage, and where
-    its worker reaches this server; ``None`` without the table. ``ConfigError`` names what stops
-    it from starting."""
-    table = tables.get(orchestration.TABLE)
-    if table is None:
-        return None
-    if not isinstance(table, Mapping):
-        raise ConfigError(f"[{orchestration.TABLE}]: a table")
-    described = orchestration.parse_orchestration(
-        table, base=config_path.parent, default_code=REPO / "orchestration"
-    )
-    command = orchestration.neorc_command()
-    ui = orchestration.built_ui()
-    if problems := orchestration.check_ready(described, command=command, ui=ui):
-        raise ConfigError("\n".join(problems))
-    return Orchestration(
-        described,
-        environ,
-        hidden=orchestration.hidden_variables(config),
-        api_url=api_url,
-        database_url=environ.get(DATABASE_URL_VARIABLE) or None,
-        command=command,
-        ui=ui,
-    )
-
-
 def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     ui_dir = interface()
     config_path = Path(os.environ["ROBINAUTS_CONFIG"])
@@ -276,11 +248,12 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         config, secret_for, sign_in = serving(
             tables, os.environ, host=host, dev_no_sign_in=dev_no_sign_in
         )
-        orchestrator = orchestration_of(
+        orchestrator = orchestrator_of(
             tables,
             os.environ,
             config,
             config_path=config_path,
+            default_code=REPO / "orchestration",
             api_url=worker_broker_url(host, port),
         )
     except ConfigError as refused:

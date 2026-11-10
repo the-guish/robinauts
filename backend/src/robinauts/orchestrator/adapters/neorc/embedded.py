@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The orchestrator ``robinauts start`` runs in the local development mode: neorc, embedded
-(``docs/architecture/orchestration.md``). This module is the one place in Robinauts that imports
-neorc, and ``cli/main.py`` the one place that calls it: take both out and the server is what it
-was without the ``[orchestration]`` table.
+"""neorc, embedded in this server (``docs/architecture/orchestration.md``). This package is the
+one place in Robinauts that imports neorc: take it and its wiring in ``cli.composition`` out and
+the server is what it was without the ``[orchestration]`` table.
 
 - neorc's **manager** is an application inside this server's, mounted at ``/neorc`` with its UI
   at ``/neorc/ui/``, behind this server's own checks: the local development mode's ``Host`` and
@@ -38,32 +37,26 @@ import signal
 import sys
 from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from contextlib import AsyncExitStack
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
 from neorc.manager import create_app
 from neorc_core import Manager, NeorcError, Scheduler
 from neorc_core.flows import read_flows
 from neorc_core.local import DirectManagerClient, MemoryStore, MemoryTaskNotifier
 
-from robinauts.controller.contract.domain import ConfigError
+from robinauts.orchestrator.contract.domain import (
+    MOUNT,
+    TABLE,
+    ASGIApp,
+    OrchestrationConfig,
+    OrchestrationStartError,
+    Orchestrator,
+)
 from robinauts.shared_domain.domain import Config
 
 _log = logging.getLogger(__name__)
 
-TABLE = "orchestration"
-"""The configuration's table that turns the orchestrator on."""
-
-KEYS = frozenset({"code_location", "flows", "ui"})
-GONE = frozenset({"command", "port", "database_url_env"})
-"""Keys of the table when neorc ran beside the server, refused with the reason."""
-
-MOUNT = "/neorc"
-"""Where neorc's manager is mounted on this server."""
-UI_URL = f"{MOUNT}/ui/"
-"""Where its UI is, which the interface frames."""
 SCHEMA = "neorc"
 """The PostgreSQL schema neorc keeps its tables in, beside this server's."""
 
@@ -83,54 +76,6 @@ POLL_SECONDS = 5.0
 STOP_SECONDS = 15.0
 """How long the stop waits for the worker after its SIGTERM, and for the scheduler, before it
 kills or cancels them."""
-
-DEV_ONLY = (
-    f"[{TABLE}]: neorc is served with no authentication, which only the local development"
-    " mode allows for now: start with --dev-no-sign-in, or take the table out"
-)
-
-
-class OrchestrationStartError(RuntimeError):
-    """neorc's storage would not open, its flows were refused, or its worker could not be
-    started."""
-
-
-@dataclass(frozen=True, slots=True)
-class OrchestrationConfig:
-    """The ``[orchestration]`` table, read: paths are absolute."""
-
-    code_location: Path
-    flows: Path
-    ui: bool = True
-
-
-def parse_orchestration(
-    table: Mapping[str, Any], *, base: Path, default_code: Path
-) -> OrchestrationConfig:
-    """The ``[orchestration]`` table, with its relative paths taken from ``base``, the
-    configuration file's directory. ``ConfigError`` names every problem."""
-    problems = [
-        f"[{TABLE}] {key}: no longer read: neorc runs inside the server, at {MOUNT}"
-        for key in sorted(table.keys() & GONE)
-    ]
-    problems += [f"[{TABLE}] {key}: unknown key" for key in sorted(table.keys() - KEYS - GONE)]
-    ui = table.get("ui", True)
-    if not isinstance(ui, bool):
-        problems.append(f"[{TABLE}] ui: true or false")
-        ui = True
-    paths: dict[str, Path] = {}
-    for key in ("code_location", "flows"):
-        value = table.get(key)
-        if value is not None and (not isinstance(value, str) or not value):
-            problems.append(f"[{TABLE}] {key}: a path")
-            value = None
-        if value is not None:
-            paths[key] = base / value
-    code_location = paths.get("code_location", default_code)
-    flows = paths.get("flows", code_location / "flows")
-    if problems:
-        raise ConfigError("\n".join(problems))
-    return OrchestrationConfig(code_location=code_location, flows=flows, ui=ui)
 
 
 def neorc_command() -> tuple[str, ...]:
@@ -204,12 +149,6 @@ def worker_command(
     )
 
 
-ASGIApp = Callable[
-    [MutableMapping[str, Any], Callable[[], Awaitable[Any]], Callable[[Any], Awaitable[None]]],
-    Awaitable[None],
-]
-
-
 class Framable:
     """neorc's application, with the answers under its UI framable by this server's pages:
     ``frame-ancestors 'self'`` in the place of neorc's ``'none'``, and ``x-frame-options:
@@ -250,8 +189,8 @@ def _framable_policy(policy: bytes) -> bytes:
     return b"; ".join([*kept, b"frame-ancestors 'self'"])
 
 
-class Orchestration:
-    """neorc in this server: the manager's application, ``app``, to mount at ``MOUNT``; and
+class EmbeddedNeorc(Orchestrator):
+    """neorc in this server: the manager's application, ``mounted``, to mount at ``MOUNT``; and
     ``start`` and ``stop`` for what runs beside it, around the server's own. ``api_url`` is where
     the worker reaches this server; ``database_url`` is this server's PostgreSQL, ``None`` for
     storage in this process."""
@@ -279,14 +218,18 @@ class Orchestration:
             )
         else:
             self.manager = self._on_postgres(database_url)
-        self.app: FastAPI = create_app(
+        self.app: ASGIApp = create_app(
             self.manager, access=None, ui=ui if orchestration.ui else None
         )
-        self.mounted = Framable(self.app)
+        self._mounted = Framable(self.app)
         self._scheduler: Scheduler | None = None
         self._scheduling: asyncio.Task[None] | None = None
         self._worker: asyncio.subprocess.Process | None = None
         self._watching: asyncio.Task[None] | None = None
+
+    @property
+    def mounted(self) -> ASGIApp:
+        return self._mounted
 
     def _on_postgres(self, database_url: str) -> Manager:
         from neorc.postgres import PostgresStore, PostgresTaskNotifier, create_schema
