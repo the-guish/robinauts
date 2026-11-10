@@ -18,6 +18,9 @@ What they have in common, and what a new one keeps:
   `docker run -i` of its image, that carries those streams, that signal and the
   variables its `-e` flags name, and a mount of the configuration file. The
   database's URL is not passed on: the worker reaches the core over HTTP alone.
+- **What more than one worker needs is in [worker-common/](worker-common/README.md)**,
+  a library each worker lists as a dependency and its image copies, never in
+  a copy per worker: the shared start, the GitHub token, cloning a repository.
 - **It runs `robinauts.cli.worker_process`**, the backend's own worker module,
   with any engine of its own installed beside the `robinauts` package and
   registered under the `robinauts.engines` entry-point group. Leases,
@@ -32,6 +35,9 @@ What they have in common, and what a new one keeps:
   for. It never creates, requests, stores, prints or shares a key or a token;
   the person or the operator does, with the vendor's own tools, and the
   worker's documentation says who makes which credential and where it goes.
+  A GitHub token, the one credential every worker may be handed, comes from
+  a file the command names with `--env-file`, and is handed to git as a
+  header scoped to the GitHub server ([worker-common/](worker-common/README.md)).
 - **It is checked like the rest of the repository**: SPDX headers on every
   file, its lock under the licence gate (`scripts/check-licences.sh`), ruff and
   black under the backend's rules, its own tests, and the image built in CI.
@@ -40,8 +46,12 @@ The workers:
 
 | folder | what it runs | state |
 | --- | --- | --- |
-| [base-worker/](base-worker/README.md) | the backend's worker module and nothing else: any engine the backend ships, for the agents of its worker | in memory, as long as the container |
+| [base-worker/](base-worker/README.md) | the backend's worker module, through the shared start, and git: any engine the backend ships, for the agents of its worker | in memory, as long as the container |
 | [claude-code-worker/](claude-code-worker/README.md) | the same, with the engine `claude-code` plugged in: each turn a query of the Claude Agent SDK, which drives the Claude Code binary it bundles, in a directory of the conversation's own | Claude Code's transcripts and the conversations' workspaces, in two volumes |
+
+Beside them, [worker-common/](worker-common/README.md) is not a worker but the
+library they share, with no image of its own; the checks run over it as over
+the workers.
 
 `base-worker/` is what a new extra worker starts from: copy it, add the package
 that brings the engine, keep the rest. `claude-code-worker/` is one made that

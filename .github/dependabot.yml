@@ -57,6 +57,15 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "claude-code-worker"
+  - package-ecosystem: "uv"
+    directory: "/extra-workers/worker-common"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 10
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "worker-common"
 
   # The MCP servers, each a uv project of its own (mcp/README.md).
   - package-ecosystem: "uv"

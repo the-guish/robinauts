@@ -29,7 +29,7 @@ import sys
 import tomllib
 import urllib.error
 import urllib.request
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 from email.parser import BytesParser
 from enum import Enum
@@ -867,7 +867,7 @@ def _is_ours(
     source: dict,
     members: set[str],
     project: str | None,
-    backend: tuple[str, str] | None = None,
+    beside: Collection[tuple[str, str]] = (),
 ) -> bool:
     """Whether a locked package is this repository's own code.
 
@@ -878,14 +878,16 @@ def _is_ours(
     directory of ours is judged like anything else, whatever it calls itself
     and however its source is spelled.
 
-    An extra worker's lock adds one more: the backend, as `backend` names it,
-    locked editable at exactly the path `backend` gives.
+    An extra worker's lock adds the projects it is composed from, as `beside`
+    names them, each by its name and locked editable at exactly the path it
+    gives: the backend, and the projects beside the worker under
+    `extra-workers/` (`worker-common`).
     """
     if not {"editable", "virtual"} & set(source):
         return False
     if name in members:
         return True
-    if backend is not None and (name, source.get("editable")) == backend:
+    if (name, source.get("editable")) in beside:
         return True
     if project is None or name != project:
         return False
@@ -927,7 +929,7 @@ def _entries(lock: dict) -> list[dict]:
 
 
 def read_lock(
-    lock: dict, project: str | None = None, backend: tuple[str, str] | None = None
+    lock: dict, project: str | None = None, beside: Collection[tuple[str, str]] = ()
 ) -> tuple[list[LockedPackage], set[str]]:
     """The locked packages, and the names that only development brings in.
 
@@ -953,7 +955,7 @@ def read_lock(
     for entry in _entries(lock):
         name = canonical_name(entry["name"])
         source = entry.get("source") or {}
-        local = _is_ours(name, source, members, project, backend)
+        local = _is_ours(name, source, members, project, beside)
         packages.append(
             LockedPackage(
                 name,
@@ -1363,17 +1365,20 @@ def run(
     worker is; left out, any lock but the backend's own is taken to be."""
     policy = parse_policy(dependencies_path.read_text(encoding="utf-8"))
     lock = tomllib.loads(lock_path.read_text(encoding="utf-8"))
-    backend = None
+    beside: set[tuple[str, str]] = set()
     if composed is None:
         composed = lock_path.parent != LOCK.parent
     if composed:
-        # An extra worker's lock: the backend it is composed from is ours too.
-        backend_name = _project_name(LOCK.parent / "pyproject.toml")
-        if backend_name is not None:
-            path = LOCK.parent.relative_to(lock_path.parent, walk_up=True).as_posix()
-            backend = (backend_name, path)
+        # An extra worker's lock: the backend it is composed from is ours too, and so is each
+        # project beside it under extra-workers/ that it may be composed from.
+        projects = [LOCK.parent, *(path.parent for path in EXTRA_WORKER_PROJECTS)]
+        for folder in projects:
+            name = _project_name(folder / "pyproject.toml")
+            if name is not None and folder != lock_path.parent:
+                path = folder.relative_to(lock_path.parent, walk_up=True).as_posix()
+                beside.add((name, path))
     packages, development_only = read_lock(
-        lock, _project_name(lock_path.parent / "pyproject.toml"), backend
+        lock, _project_name(lock_path.parent / "pyproject.toml"), beside
     )
     source = MetadataSource(environment if environment and environment.exists() else None, offline)
 
@@ -1469,6 +1474,9 @@ EXTRA_WORKERS = {
     for lock in sorted((ROOT / "extra-workers").glob("*/uv.lock"))
 }
 """Each extra worker with a lock, by its directory name: its lock and its environment."""
+EXTRA_WORKER_PROJECTS = sorted((ROOT / "extra-workers").glob("*/pyproject.toml"))
+"""Each project under extra-workers/, a worker or a library the workers share: what an extra
+worker's lock may hold, editable, as ours."""
 MCP_SERVERS = {
     lock.parent.name: (lock, lock.parent / ".venv")
     for lock in sorted((ROOT / "mcp").glob("*/uv.lock"))

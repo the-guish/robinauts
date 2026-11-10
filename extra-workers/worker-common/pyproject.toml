@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+
+[project]
+name = "robinauts-worker-common"
+version = "0.1.0"
+description = "What the extra workers share: their start, the GitHub token, and cloning a repository."
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "The Robinauts Authors" }]
+dependencies = [
+    # The worker module the start hands over to, from the backend beside this folder
+    # (tool.uv.sources below): the same build as the worker that installs this library.
+    "robinauts",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "black>=24.0",
+]
+
+[tool.uv]
+# neorc-from-source: the backend depends on neorc, which uv builds from source.
+no-binary-package = ["neorc", "neorc-core", "neorc-ui"]
+environments = [
+    "sys_platform == 'linux'",
+    "sys_platform == 'darwin'",
+]
+
+[tool.uv.sources]
+# Editable, from the checkout: backend/hatch_build.py refuses a wheel built without the
+# interface, which a worker never serves.
+robinauts = { path = "../../backend", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/robinauts_worker_common"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error"]
+
+# The backend's rules, word for word (backend/pyproject.toml), with this package first-party
+# beside robinauts: scripts/check-extra-workers.sh runs them over this folder.
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "PT018"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["robinauts", "robinauts_worker_common"]

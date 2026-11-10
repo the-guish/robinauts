@@ -9,7 +9,8 @@ input, and the line ``ready`` expected on its standard output. The worker is the
 worker module, ``robinauts.cli.worker_process``, with the ``claude-code`` engine plugged in
 through its entry point; this module runs in front of it alone, to check what that module cannot
 know: that this worker's environment is one of the two credential modes (CREDENTIALS.md), that
-the configuration gives it agents on its engine, and that no database was handed to it. What it
+the configuration gives it agents on its engine, that no database was handed to it, and what
+every extra worker checks (robinauts_worker_common: the GitHub token it may be handed). What it
 refuses, it says all at once on its standard error and exits 2, before the secret is read.
 """
 
@@ -30,6 +31,7 @@ from robinauts.worker.engine_settings import engine_settings
 from robinauts_claude_worker import engine
 from robinauts_claude_worker.credentials import credential_problems
 from robinauts_claude_worker.settings import SettingsError, settings_from
+from robinauts_worker_common.__main__ import problems_of as shared_problems
 
 CONFIG_VARIABLE = "ROBINAUTS_CONFIG"
 """The deployment's TOML file, the same the server reads: this worker's agents are in it."""
@@ -73,7 +75,7 @@ def providers_of(name: str, config: Config) -> list[ModelProviderConfig]:
 def problems_of(environ: Mapping[str, str]) -> list[str]:
     """Everything that keeps this worker from starting, read from its environment and the
     configuration that environment names: one line each, none for a start that may go on."""
-    problems = environment_problems(environ)
+    problems = environment_problems(environ) + shared_problems(environ)
     try:
         settings = settings_from(environ)
     except SettingsError as refused:

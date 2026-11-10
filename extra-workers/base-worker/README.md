@@ -3,7 +3,10 @@
 The backend's own worker, `robinauts.cli.worker_process`, in a container: an
 image the server starts with `docker run -i`, which runs the
 turns of the agents on its worker with any engine the backend ships, LangChain,
-Pydantic AI or the echo engine. It is the base of every other extra worker: copy
+Pydantic AI or the echo engine. It starts through the extra workers' shared
+start, `python -m robinauts_worker_common`, which checks the GitHub token it
+may be handed, and it carries git, to clone repositories with that token
+([../worker-common/README.md](../worker-common/README.md)). It is the base of every other extra worker: copy
 the folder, add the package that brings your engine, keep the rest.
 
 It reaches the core over HTTP alone and opens no database. The engines keep
@@ -33,6 +36,7 @@ command = [
     "docker", "run", "-i", "--rm", "--network", "host",
     "-e", "ROBINAUTS_CONFIG", "-e", "ROBINAUTS_WORKER_NAME", "-e", "ROBINAUTS_WORKER_BROKER_URL",
     "-e", "ROBINAUTS_OPENAI_KEY",
+    "--env-file", "/etc/robinauts/github.env",
     "-v", "/etc/robinauts/robinauts.toml:/etc/robinauts/robinauts.toml:ro",
     "robinauts-base-worker",
 ]
@@ -56,6 +60,11 @@ What each part of the command is for:
   agents use, by the name the provider's `api_key_env` gives: the worker reads
   it from its own environment, as the server would. A `--env-file` does the
   same for several.
+- `--env-file /etc/robinauts/github.env` hands the worker `GITHUB_TOKEN`, the
+  GitHub token **you** make on GitHub, to clone private repositories with.
+  It is optional: leave the flag out to clone public repositories alone. Who
+  makes it, what it may reach and how the file is written are in
+  [../worker-common/README.md](../worker-common/README.md), "The GitHub token".
 - Not passed: `ROBINAUTS_DATABASE_URL`. A worker handed the URL would open
   the engines' tables in it, and those tables belong to the server.
 - Not passed either: `ROBINAUTS_WORKER_PARENT`, which a worker on the same
@@ -92,9 +101,13 @@ run as before.
    `pyproject.toml` under `[project.entry-points."robinauts.engines"]`: the name
    a configuration uses, pointing at a function `init(settings, storage)` that
    returns an `AgentEngine`. The worker module finds it there.
-3. Add what the engine needs to `dependencies`, and to the image.
+3. Add what the engine needs to `dependencies`, and to the image. Keep
+   `robinauts-worker-common` and the lines that copy it: what more than one
+   worker needs goes there, not in a copy
+   ([../worker-common/README.md](../worker-common/README.md)).
 4. Keep the `CMD`, or put a thin entry of your own in front of it that checks
-   what your engine needs in the environment and then calls
+   what your engine needs in the environment, together with
+   `robinauts_worker_common.__main__.problems_of`, and then calls
    `robinauts.cli.worker_process.main()`.
 5. Say in the README who makes which credential and where it goes. Robinauts
    makes none.

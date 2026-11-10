@@ -12,6 +12,9 @@ dependencies = [
     # The worker module, the broker's HTTP client and the engine contract, from the backend
     # beside this folder (tool.uv.sources below): the same build as the server it serves.
     "robinauts",
+    # What the extra workers share: their start, the GitHub token, cloning a repository
+    # (../worker-common/README.md).
+    "robinauts-worker-common",
     # The Claude Agent SDK, which drives the Claude Code binary it bundles.
     "claude-agent-sdk>=0.2,<0.3",
 ]
@@ -41,6 +44,8 @@ environments = [
 # Editable, from the checkout: backend/hatch_build.py refuses a wheel built without the
 # interface, which a worker never serves.
 robinauts = { path = "../../backend", editable = true }
+# Editable from the checkout too, beside this folder; the image copies it to the same place.
+robinauts-worker-common = { path = "../worker-common", editable = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -68,4 +73,4 @@ src = ["src", "tests"]
 select = ["E", "F", "I", "UP", "B", "PT018"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["robinauts", "robinauts_claude_worker"]
+known-first-party = ["robinauts", "robinauts_claude_worker", "robinauts_worker_common"]

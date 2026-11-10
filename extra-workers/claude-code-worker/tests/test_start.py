@@ -99,11 +99,12 @@ def test_everything_is_checked_in_order(tmp_path: Path) -> None:
     config = tmp_path / "robinauts.toml"
     config.write_text(CONFIG)
     server = {**SERVER, "ROBINAUTS_CONFIG": str(config)}
-    # The environment first, the server's variables and this worker's together.
-    problems = problems_of({"ROBINAUTS_CLAUDE_MAX_TURNS": "x"})
+    # The environment first, the server's variables, every extra worker's and this one's together.
+    problems = problems_of({"ROBINAUTS_CLAUDE_MAX_TURNS": "x", "GITHUB_TOKEN": ""})
     assert [line.split(" ")[0] for line in problems] == [
         "ROBINAUTS_CONFIG",
         "ROBINAUTS_WORKER_BROKER_URL",
+        "GITHUB_TOKEN",
         "ROBINAUTS_CLAUDE_AUTH",
         "ROBINAUTS_CLAUDE_MAX_TURNS",
     ]
@@ -117,6 +118,8 @@ def test_everything_is_checked_in_order(tmp_path: Path) -> None:
     (problem,) = problems_of(personal)
     assert problem.startswith("personal mode needs CLAUDE_CODE_OAUTH_TOKEN")
     assert problems_of({**personal, "CLAUDE_CODE_OAUTH_TOKEN": "t"}) == []
+    github = {**personal, "CLAUDE_CODE_OAUTH_TOKEN": "t", "GITHUB_TOKEN": "github_pat_x"}
+    assert problems_of(github) == []
     (problem,) = problems_of({**server, "ROBINAUTS_CLAUDE_AUTH": "deployed"})
     assert problem.startswith("deployed mode reads the API key of provider 'anthropic'")
     deployed = {**server, "ROBINAUTS_CLAUDE_AUTH": "deployed", "ANTHROPIC_API_KEY": "k"}

@@ -1152,19 +1152,42 @@ source = { editable = "../../backend" }
 """
 
 
+BACKEND = ("robinauts", "../../backend")
+COMMON = ("robinauts-worker-common", "../worker-common")
+
+
 @pytest.mark.parametrize(
-    ("backend", "editable", "ours"),
+    ("beside", "editable", "ours"),
     [
-        (("robinauts", "../../backend"), "../../backend", ["robinauts", "worker"]),
-        (None, "../../backend", ["worker"]),
-        (("robinauts", "../../backend"), "../../vendor/robinauts", ["worker"]),
-        (("robinauts", "../../backend"), "../../backend/", ["worker"]),
-        (("other", "../../backend"), "../../backend", ["worker"]),
+        ({BACKEND}, "../../backend", ["robinauts", "worker"]),
+        ((), "../../backend", ["worker"]),
+        ({BACKEND}, "../../vendor/robinauts", ["worker"]),
+        ({BACKEND}, "../../backend/", ["worker"]),
+        ({("other", "../../backend")}, "../../backend", ["worker"]),
     ],
 )
-def test_an_extra_worker_lock_owns_the_backend_at_its_exact_path(backend, editable, ours):
+def test_an_extra_worker_lock_owns_the_backend_at_its_exact_path(beside, editable, ours):
     lock = EXTRA_WORKER_LOCK.replace('"../../backend"', f'"{editable}"')
-    packages, _ = read_lock(tomllib.loads(lock), "worker", backend)
+    packages, _ = read_lock(tomllib.loads(lock), "worker", beside)
+    assert sorted(package.name for package in packages if package.local) == ours
+
+
+@pytest.mark.parametrize(
+    ("editable", "ours"),
+    [
+        ("../worker-common", ["robinauts", "robinauts-worker-common", "worker"]),
+        ("../../vendor/worker-common", ["robinauts", "worker"]),
+        ("../worker-common/", ["robinauts", "worker"]),
+    ],
+)
+def test_an_extra_worker_lock_owns_a_project_beside_it_at_its_exact_path(editable, ours):
+    lock = EXTRA_WORKER_LOCK + f"""
+[[package]]
+name = "robinauts-worker-common"
+version = "0.1.0"
+source = {{ editable = "{editable}" }}
+"""
+    packages, _ = read_lock(tomllib.loads(lock), "worker", {BACKEND, COMMON})
     assert sorted(package.name for package in packages if package.local) == ours
 
 

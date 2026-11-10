@@ -12,6 +12,9 @@ dependencies = [
     # The worker module, the broker's HTTP client and the engines the backend ships, from the
     # backend beside this folder (tool.uv.sources below): the same build as the server it serves.
     "robinauts",
+    # What the extra workers share: their start, the GitHub token, cloning a repository
+    # (../worker-common/README.md).
+    "robinauts-worker-common",
 ]
 
 [dependency-groups]
@@ -36,6 +39,8 @@ environments = [
 # Editable, from the checkout: backend/hatch_build.py refuses a wheel built without the
 # interface, which a worker never serves.
 robinauts = { path = "../../backend", editable = true }
+# Editable from the checkout too, beside this folder; the image copies it to the same place.
+robinauts-worker-common = { path = "../worker-common", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -56,4 +61,4 @@ src = ["tests"]
 select = ["E", "F", "I", "UP", "B", "PT018"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["robinauts"]
+known-first-party = ["robinauts", "robinauts_worker_common"]
