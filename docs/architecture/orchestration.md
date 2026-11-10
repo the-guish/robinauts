@@ -248,3 +248,13 @@ neither neorc nor Robinauts.
 
 - `guess_number`: a guessing game between two conversations with the first
   agent the server offers.
+- `code_and_review`: a task done on a repository and reviewed, from a form
+  (`code_and_review.form.toml`): the chosen agent, on the chosen model,
+  clones the chosen repository at the chosen branch, does the task on a branch
+  of its own and opens a pull request; a second conversation reviews it
+  against the task. Each answer ends with a `RESULT` line of JSON the handler
+  reads: the pull request's URL, then the verdict, `approve` or
+  `request_changes`, which is the run's output. The agent reaches GitHub with
+  the token its worker was handed
+  ([extra-workers/worker-common](../../extra-workers/worker-common/README.md));
+  the handlers hold none.

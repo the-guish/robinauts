@@ -38,3 +38,35 @@ curl -X POST http://127.0.0.1:8000/api/flows/guess_number/runs -H 'content-type:
 It plays the guessing game between two conversations, which show up in the
 history, and needs a model whose id or title holds `haiku`. The run then
 updates live in the frame and in the panel's recent runs.
+
+## Code and review
+
+`code_and_review` has an agent do a task on a repository and open a pull
+request, and a second conversation review it. Its form offers the repositories
+of the flows folder's `flows.toml`, which the shipped folder has none of: use a
+folder of your own, with the two files of the flow and the repositories it may
+work on.
+
+```bash
+mkdir -p ~/robinauts/flows
+cp orchestration/flows/code_and_review.* ~/robinauts/flows/
+cat > ~/robinauts/flows/flows.toml <<'TOML'
+[repositories.robinauts]
+url = "https://github.com/<owner>/<name>"
+branches = ["main"]
+TOML
+ROBINAUTS_FLOWS_DIR=~/robinauts/flows robinauts start --dev-no-sign-in
+```
+
+The agent needs to run commands and reach GitHub: an agent of the Claude Code
+worker ([extra-workers/claude-code-worker](../extra-workers/claude-code-worker/README.md)),
+handed a GitHub token by `--env-file`
+([extra-workers/worker-common](../extra-workers/worker-common/README.md)). To
+clone is all that README asks of the token; this flow also pushes a branch and
+opens a pull request, so its token needs, on those repositories alone,
+**Contents: Read and write** and **Pull requests: Read and write**.
+
+Then **New run**, **Code and review**: the task in words, the repository and
+branch, the agent and the model. The run's output is the review's verdict and
+summary, with the pull request's URL and both conversations, which are in the
+history.

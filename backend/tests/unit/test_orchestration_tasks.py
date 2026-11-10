@@ -155,3 +155,85 @@ def test_the_game_is_told_the_number_it_keeps_secret(
     tasks: ModuleType, number: int, told: str
 ) -> None:
     assert told in tasks.game_prompt(number)
+
+
+@pytest.mark.parametrize(
+    ("value", "split"),
+    [
+        ("https://github.com/o/r@main", ("https://github.com/o/r", "main")),
+        ("git@github.com:o/r.git@feature/x", ("git@github.com:o/r.git", "feature/x")),
+    ],
+)
+def test_a_repository_and_its_branch_are_split_at_the_last_at(
+    tasks: ModuleType, value: str, split: tuple[str, str]
+) -> None:
+    assert tasks.split_repo_branch(value) == split
+
+
+@pytest.mark.parametrize("value", ["https://github.com/o/r", "@main", "https://github.com/o/r@"])
+def test_a_value_that_is_not_a_repository_and_a_branch_is_refused(
+    tasks: ModuleType, value: str
+) -> None:
+    with pytest.raises(RuntimeError, match="is not a repository and a branch"):
+        tasks.split_repo_branch(value)
+
+
+@pytest.mark.parametrize(
+    ("answer", "result"),
+    [
+        ('Done.\nRESULT {"pr_url": "u"}', {"pr_url": "u"}),
+        ('RESULT {"a": 1}\nmore\n`RESULT {"a": 2}`\n', {"a": 2}),
+        ('  RESULT   {"verdict": "approve"}  ', {"verdict": "approve"}),
+    ],
+)
+def test_the_result_is_the_json_of_the_last_result_line(
+    tasks: ModuleType, answer: str, result: dict[str, object]
+) -> None:
+    assert tasks.result_of(answer) == result
+
+
+@pytest.mark.parametrize(
+    "answer",
+    ["Done, no line.", "RESULT not json", 'RESULT ["a list"]', 'RESULT {"a": 1}\nRESULT oops'],
+)
+def test_an_answer_without_a_result_line_of_json_is_refused(tasks: ModuleType, answer: str) -> None:
+    with pytest.raises(RuntimeError, match="no RESULT line of JSON"):
+        tasks.result_of(answer)
+
+
+@pytest.mark.parametrize(
+    ("url", "is_one"),
+    [
+        ("https://github.com/o/r/pull/12", True),
+        ("https://ghe.example/o/r/pull/3", True),
+        ("<the pull request's URL>", False),
+        ("https://github.com/o/r/issues/12", False),
+        ("https://github.com/o/r/pull/12/files", False),
+    ],
+)
+def test_a_pull_request_is_told_by_its_url(tasks: ModuleType, url: str, is_one: bool) -> None:
+    assert bool(tasks.PULL_REQUEST.fullmatch(url)) is is_one
+
+
+def test_the_prompts_carry_the_task_and_ask_for_their_result_line(tasks: ModuleType) -> None:
+    task = "Fix {the} bug"
+    implement = tasks.IMPLEMENT_PROMPT.format(
+        url="https://github.com/o/r", base="main", task=task, result=tasks.RESULT
+    )
+    assert "Fix {the} bug" in implement
+    assert "--branch main" in implement
+    assert implement.rstrip().endswith(
+        'RESULT {"pr_url": "<the pull request\'s URL>", "branch": "<the branch you pushed>"}'
+    )
+    review = tasks.REVIEW_PROMPT.format(
+        pr_url="https://github.com/o/r/pull/1",
+        url="https://github.com/o/r",
+        task=task,
+        branch="robinauts/fix",
+        base="main",
+        result=tasks.RESULT,
+    )
+    assert "robinauts/fix" in review
+    assert review.rstrip().endswith(
+        'RESULT {"verdict": "approve" or "request_changes", "summary": "<two or three sentences>"}'
+    )

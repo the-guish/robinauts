@@ -35,6 +35,10 @@ export const LOADING = "Loading the flows…";
 /** What it says when the flows folder holds none. */
 export const NO_FLOWS = "The flows folder holds no flow.";
 
+/** Under a list of values the configuration leaves empty. */
+export const NOTHING_TO_CHOOSE =
+  "Nothing to choose from: the configuration offers no value for this list.";
+
 export function NewRunPage({ flow }: Readonly<{ flow: string | null }>) {
   const [flows, setFlows] = useState<readonly Flow[] | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
@@ -220,7 +224,9 @@ function Field({
   onChange: (value: FieldValue) => void;
 }>) {
   const id = useId();
+  const noteId = useId();
   const control = controlOf(input);
+  const empty = control === "select" && (input.options ?? []).length === 0;
   const text = typeof value === "string" ? value : "";
   if (control === "checkbox") {
     return (
@@ -246,23 +252,31 @@ function Field({
         {input.label}
       </label>
       {control === "select" ? (
-        <select
-          id={id}
-          value={text}
-          disabled={busy}
-          required
-          onChange={(event) => {
-            onChange(event.target.value);
-          }}
-          className="flows-input"
-        >
-          <option value="">Choose…</option>
-          {(input.options ?? []).map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        <>
+          <select
+            id={id}
+            value={text}
+            disabled={busy}
+            required
+            aria-describedby={empty ? noteId : undefined}
+            onChange={(event) => {
+              onChange(event.target.value);
+            }}
+            className="flows-input"
+          >
+            <option value="">Choose…</option>
+            {(input.options ?? []).map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          {empty && (
+            <p id={noteId} className="flows-note">
+              {NOTHING_TO_CHOOSE}
+            </p>
+          )}
+        </>
       ) : control === "text" ? (
         <textarea
           id={id}

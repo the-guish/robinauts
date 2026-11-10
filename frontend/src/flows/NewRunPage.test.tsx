@@ -4,7 +4,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 
 import { callsTo, json, refusal, stubFetch, type Call } from "../test/api";
-import { LOADING, NewRunPage, NO_FLOWS } from "./NewRunPage";
+import { LOADING, NewRunPage, NO_FLOWS, NOTHING_TO_CHOOSE } from "./NewRunPage";
 
 const RUN = "11111111-1111-4111-8111-111111111111";
 
@@ -180,5 +180,27 @@ test("a flow the folder does not hold is said so, with the way back", async () =
   expect(screen.getByRole("link", { name: "See the flows" })).toHaveAttribute(
     "href",
     "#/flows/new",
+  );
+});
+
+test("a list the configuration leaves empty says so under its choice", async () => {
+  const bare = {
+    ...CODE,
+    inputs: CODE.inputs.map((input) =>
+      input.name === "repo_branch" ? { ...input, options: [] } : input,
+    ),
+  };
+  answering((call) =>
+    call.url === "/api/flows" ? json({ items: [bare] }) : undefined,
+  );
+  render(<NewRunPage flow="code_review" />);
+  const form = await screen.findByRole("form", {
+    name: "Start Code and review",
+  });
+  expect(within(form).getByLabelText("Repository")).toHaveAccessibleDescription(
+    NOTHING_TO_CHOOSE,
+  );
+  expect(within(form).getByLabelText("Agent")).not.toHaveAccessibleDescription(
+    NOTHING_TO_CHOOSE,
   );
 });
