@@ -52,11 +52,11 @@ from robinauts.cli.composition import (
     configure,
     init_database,
     load,
-    orchestrator_of,
     read_tables,
     storage_from,
 )
 from robinauts.cli.lifecycle import Lifecycle, WorkerStartError
+from robinauts.cli.orchestration import orchestrator_of
 from robinauts.controller.contract.domain import ConfigError, DeviceSession, User
 from robinauts.controller.contract.ports import Credentials
 from robinauts.orchestrator.contract.domain import (

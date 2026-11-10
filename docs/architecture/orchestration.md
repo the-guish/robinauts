@@ -186,11 +186,16 @@ answer under `/neorc` carries this server's headers, `DENY` included.
 In `orchestrator/adapters/neorc/` alone (an import-linter contract in
 `backend/pyproject.toml`, and [rules.md](rules.md)). The orchestrator is a
 sibling of the controller: it may see the controller's contract, and the
-controller sees nothing of it. `cli/composition.py` builds the neorc adapter;
-`cli/main.py` sees the orchestrator's contract alone, an `Orchestrator` to
-mount, start and stop. `web/` knows a URL to put in the session and nothing
-else. Taking neorc out is taking out that package and its wiring in
-`cli/composition.py`.
+controller sees nothing of it. `cli/orchestration.py` builds it, and
+`cli/main.py` alone imports that module; `cli/main.py` otherwise sees the
+orchestrator's contract alone, an `Orchestrator` to mount, start and stop, and
+the `Flows` that `web/` serves. `web/` sees that contract and nothing else.
+Taking neorc out is taking out that package and `cli/orchestration.py`.
+
+`cli/orchestration.py` is apart from `cli/composition.py` because a worker in
+a process of its own imports the composition, and the extra workers' images
+leave neorc out. A contract keeps it so: nothing `cli/worker_process.py` or
+`cli/composition.py` imports may reach neorc, even through another module.
 
 ### Installing neorc
 

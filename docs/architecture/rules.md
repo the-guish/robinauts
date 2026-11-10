@@ -13,7 +13,8 @@ controller -> shared_domain; nothing of the orchestrator
 orchestrator -> shared_domain, controller.contract
 worker -> controller.contract.broker, web.contract.broker, agent_engines.contract, tools.contract
 web -> controller.contract, orchestrator.contract
-cli -> web, controller, orchestrator, worker, tools, agent_engines.contract, all but web, controller.contract and orchestrator.contract by cli.composition alone; imported by nothing
+cli -> web, controller, orchestrator, worker, tools, agent_engines.contract, all but web, controller.contract and orchestrator.contract by cli.composition alone, but the orchestrator, which cli.orchestration builds; imported by nothing
+cli.worker_process, cli.composition -> nothing that reaches neorc, even indirectly
 
 ```mermaid
 flowchart TD
