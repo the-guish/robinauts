@@ -18,9 +18,11 @@ development mode, for the mode's one local user. The interface is the directory
 this checkout when it is built. Storage is the PostgreSQL ``ROBINAUTS_DATABASE_URL`` names,
 which a start with sign-in needs; the local development mode is in this process without it. The
 sign-in records are kept on the same storage. The server never changes the database: it
-refuses one that is not this build's and names the command. In the local development mode, an
-``[orchestration]`` table embeds neorc in the server, at ``/neorc``, and starts and stops what
-runs beside it with the server (``orchestrator/``, ``docs/architecture/orchestration.md``).
+refuses one that is not this build's and names the command. That file is the agents'
+configuration; the flows' is a folder of its own, which ``ROBINAUTS_FLOWS_DIR`` names. In the
+local development mode, a flows folder embeds neorc in the server, at ``/neorc``, and starts and
+stops what runs beside it with the server (``orchestrator/``,
+``docs/architecture/orchestration.md``).
 """
 
 from __future__ import annotations
@@ -59,7 +61,9 @@ from robinauts.controller.contract.domain import ConfigError, DeviceSession, Use
 from robinauts.controller.contract.ports import Credentials
 from robinauts.orchestrator.contract.domain import (
     DEV_ONLY,
+    FLOWS_VARIABLE,
     MOUNT,
+    MOVED,
     TABLE,
     UI_URL,
     OrchestrationStartError,
@@ -102,12 +106,13 @@ def serving(
     """What ``start`` serves with: the controller's configuration, how a secret is read, and
     sign-in's, ``None`` in the local development mode. ``ConfigError`` names every problem of
     a start that is refused."""
+    unknown = "{}: unknown key, neither a table of the controller's nor of sign-in's"
     problems = [
-        f"{key}: unknown key, neither a table of the controller's nor of sign-in's"
+        MOVED if key == TABLE else unknown.format(key)
         for key in tables
-        if key not in CONTROLLER_TABLES | SIGN_IN_KEYS | {TABLE}
+        if key not in CONTROLLER_TABLES | SIGN_IN_KEYS
     ]
-    if TABLE in tables and not dev_no_sign_in:
+    if environ.get(FLOWS_VARIABLE) and not dev_no_sign_in:
         problems.append(DEV_ONLY)
     sign_in = None
     if dev_no_sign_in:
@@ -249,10 +254,8 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
             tables, os.environ, host=host, dev_no_sign_in=dev_no_sign_in
         )
         orchestrator = orchestrator_of(
-            tables,
             os.environ,
             config,
-            config_path=config_path,
             default_code=REPO / "orchestration",
             api_url=worker_broker_url(host, port),
         )

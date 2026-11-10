@@ -3,7 +3,7 @@
 
 """neorc, embedded in this server (``docs/architecture/orchestration.md``). This package is the
 one place in Robinauts that imports neorc: take it and its wiring in ``cli.composition`` out and
-the server is what it was without the ``[orchestration]`` table.
+the server is what it was without a flows folder.
 
 - neorc's **manager** is an application inside this server's, mounted at ``/neorc`` with its UI
   at ``/neorc/ui/``, behind this server's own checks: the local development mode's ``Host`` and
@@ -46,8 +46,9 @@ from neorc_core.flows import read_flows
 from neorc_core.local import DirectManagerClient, MemoryStore, MemoryTaskNotifier
 
 from robinauts.orchestrator.contract.domain import (
+    FLOWS_VARIABLE,
     MOUNT,
-    TABLE,
+    SETTINGS_FILE,
     ASGIApp,
     OrchestrationConfig,
     OrchestrationStartError,
@@ -89,16 +90,20 @@ def check_ready(
     """What stops the orchestrator from starting on this machine, before anything starts.
     ``ui`` is where neorc's built UI is, ``None`` when it is not there."""
     problems = []
-    where = {"code_location": orchestration.code_location, "flows": orchestration.flows}
-    for what, path in where.items():
-        if not path.is_dir():
-            problems.append(f"[{TABLE}] {what}: no directory at {path}")
+    if not orchestration.flows.is_dir():
+        problems.append(f"{FLOWS_VARIABLE}: no directory at {orchestration.flows}")
+    if not orchestration.code_location.is_dir():
+        problems.append(
+            f"{SETTINGS_FILE} code_location: no directory at {orchestration.code_location}"
+        )
     if not Path(command[0]).is_file():
-        problems.append(f"[{TABLE}]: no neorc command at {command[0]} to run its worker with")
+        problems.append(
+            f"{FLOWS_VARIABLE}: no neorc command at {command[0]} to run its worker with"
+        )
     if orchestration.ui and ui is None:
         problems.append(
-            f"[{TABLE}] ui: the installed neorc-ui holds no built UI; install its wheel, or set"
-            " ui = false"
+            f"{SETTINGS_FILE} ui: the installed neorc-ui holds no built UI; install its wheel, or"
+            " set ui = false"
         )
     return problems
 

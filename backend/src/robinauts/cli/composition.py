@@ -11,7 +11,7 @@ A worker in a process of its own is built with `compose_worker`, over the core i
 The file holds web's tables beside the controller's, so web is handed the tables of one
 reading and parses its own. Also
 what `robinauts db init` does, since it is the one other thing that names the store and the
-engines together. And the orchestrator, when the ``[orchestration]`` table asks for one:
+engines together. And the orchestrator, when ``ROBINAUTS_FLOWS_DIR`` names a flows folder:
 neorc, embedded (``orchestrator/adapters/neorc``)."""
 
 from __future__ import annotations
@@ -42,9 +42,10 @@ from robinauts.controller.contract.domain import ConfigError
 from robinauts.controller.contract.ports import Controller, Credentials
 from robinauts.controller.core.config import parse_config
 from robinauts.controller.ports.store import Store
+from robinauts.orchestrator.adapters.flows_folder import read_settings
 from robinauts.orchestrator.adapters.neorc import embedded as neorc
-from robinauts.orchestrator.contract.domain import TABLE, Orchestrator
-from robinauts.orchestrator.core.config import parse_orchestration
+from robinauts.orchestrator.contract.domain import FLOWS_VARIABLE, Orchestrator
+from robinauts.orchestrator.core.config import parse_flows_settings
 from robinauts.shared_domain.domain import DEFAULT_WORKER, Config, StorageConfig, StorageKind
 from robinauts.tools import sessions
 from robinauts.tools.contract.ports import ToolProvider
@@ -208,24 +209,22 @@ async def init_database(url: str, config: Config, secret_for: SecretLookup) -> s
 
 
 def orchestrator_of(
-    tables: Mapping[str, Any],
     environ: Mapping[str, str],
     config: Config,
     *,
-    config_path: Path,
     default_code: Path,
     api_url: str,
 ) -> Orchestrator | None:
-    """neorc as the ``[orchestration]`` table describes it, on this server's storage, and where
-    its worker reaches this server; ``None`` without the table. ``default_code`` is where the
-    handlers are when the table names none. ``ConfigError`` names what stops it from
-    starting."""
-    table = tables.get(TABLE)
-    if table is None:
+    """neorc over the flows folder ``ROBINAUTS_FLOWS_DIR`` names, as its ``flows.toml``
+    describes it, on this server's storage, and where its worker reaches this server; ``None``
+    without the variable. ``default_code`` is where the handlers are when ``flows.toml`` names
+    none. ``ConfigError`` names what stops it from starting."""
+    named = environ.get(FLOWS_VARIABLE)
+    if not named:
         return None
-    if not isinstance(table, Mapping):
-        raise ConfigError(f"[{TABLE}]: a table")
-    described = parse_orchestration(table, base=config_path.parent, default_code=default_code)
+    folder = Path(named).absolute()
+    settings = read_settings(folder) if folder.is_dir() else {}
+    described = parse_flows_settings(settings, folder=folder, default_code=default_code)
     command = neorc.neorc_command()
     ui = neorc.built_ui()
     if problems := neorc.check_ready(described, command=command, ui=ui):

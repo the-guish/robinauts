@@ -70,6 +70,10 @@ What an internal platform team deploys and controls.
   It was `ROBINAUTS_AUTH_CONFIG` while sign-in was all the file held; that
   name is still read, with a warning at start-up, and is deprecated. If both
   are set, `ROBINAUTS_CONFIG` is what is read and the start-up log says so.
+  That file is the **agents'** configuration. The **flows'** is a folder of
+  its own, apart from it, which `ROBINAUTS_FLOWS_DIR` names: the flow files
+  and their settings, `flows.toml`; without it there is no orchestrator
+  ([architecture/orchestration.md](../architecture/orchestration.md)).
 - What the operator configures: sign-in providers, the allow list and the
   admins ([sign-in.md](sign-in.md)); model providers, models, agents and
   the MCP tool servers agents may use; limits and retention (below).

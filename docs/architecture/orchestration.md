@@ -15,8 +15,9 @@ On a cluster Neorc would be started on its own and connected to a running instan
 
 ## Local development: neorc inside `robinauts start`
 
-An `[orchestration]` table in the configuration turns it on. `robinauts start
---dev-no-sign-in` then embeds neorc in its own process and on its own port
+A flows folder turns it on (below, [Two configurations](#two-configurations-agents-and-flows)).
+`robinauts start --dev-no-sign-in` then embeds neorc in its own process and on
+its own port
 ([orchestrator/adapters/neorc/embedded.py](../../backend/src/robinauts/orchestrator/adapters/neorc/embedded.py)):
 
 1. neorc's **manager** is an application mounted at `/neorc`, its UI at
@@ -27,7 +28,7 @@ An `[orchestration]` table in the configuration turns it on. `robinauts start
    `ROBINAUTS_DATABASE_URL`, gone at the stop; on that PostgreSQL with it, in a
    schema of its own, `neorc`, made at the start if it is not there. Its tables
    are named `neorc_*` besides, so none meets one of this server's;
-3. the flows in `flows` are **uploaded**, at every start;
+3. the flows in the flows folder are **uploaded**, at every start;
 4. its **scheduler** runs in this process, on the manager directly;
 5. one **worker**, on the `default` queue, with the handlers in
    `code_location`, runs in a process of its own: neorc's own command, as
@@ -40,20 +41,36 @@ killed after fifteen seconds, then the scheduler, then the storage. If the
 storage does not open, the flows are refused or the worker cannot be started,
 the start is refused and nothing listens.
 
+With sign-in on, a flows folder is refused for now: neorc's manager would be
+served with no authentication. On a cluster neorc is started on its own.
+
+### Two configurations: agents and flows
+
+The agents and the flows are configured apart, each in a place of its own:
+
+| | named by | holds |
+|---|---|---|
+| **agents** | `ROBINAUTS_CONFIG`, a TOML file | model providers, models, tool servers, agents, workers, sign-in: everything Robinauts has without neorc |
+| **flows** | `ROBINAUTS_FLOWS_DIR`, a folder | the flow files (`*.yaml`, `*.yml`), uploaded to neorc as they are, and `flows.toml`, their settings |
+
+Without `ROBINAUTS_FLOWS_DIR` there is no orchestrator. The agents' file knows
+nothing of the flows: an `[orchestration]` table in it, where the flows'
+settings were before they had a folder, is refused with where they went.
+
+`flows.toml` is optional; these are its keys and their defaults:
+
 ```toml
-[orchestration]
-code_location = "orchestration"           # the handlers; default: this checkout's orchestration/
-flows = "orchestration/flows"             # the flow files; default: code_location/flows
-ui = true                                 # serve neorc's UI at /neorc/ui/; the default
+code_location = "handlers"   # the handlers; default: this checkout's orchestration/
+ui = true                    # serve neorc's UI at /neorc/ui/; the default
 ```
 
-Relative paths start at the configuration file's directory. The table's
-`command`, `port` and `database_url_env`, from when neorc ran beside the server
-as processes of its own, are refused with the reason: there is no second port
-and no second database any more.
+A relative `code_location` starts at the flows folder. A folder of a person's
+own flows, anywhere, may call the handlers Robinauts ships, which are the
+default:
 
-With sign-in on, the table is refused for now: neorc's manager would be served
-with no authentication. On a cluster neorc is started on its own.
+```bash
+ROBINAUTS_FLOWS_DIR=~/robinauts/flows robinauts start --dev-no-sign-in
+```
 
 ### Why the worker is a process of its own
 
@@ -147,9 +164,9 @@ task reaches this server's API, and no credential, whatever the shell held in
 is its one user's, and what a flow starts is the developer's, as what the
 browser starts is.
 
-neorc's worker is not handed what the configuration keeps from everything but
-the server: the model providers' keys, the tool servers' secrets,
-`ROBINAUTS_DATABASE_URL` and `ROBINAUTS_CONFIG`.
+neorc's worker is not handed what the agents' configuration keeps from
+everything but the server: the model providers' keys, the tool servers'
+secrets, `ROBINAUTS_DATABASE_URL` and `ROBINAUTS_CONFIG`.
 
 ### The flows Robinauts ships
 

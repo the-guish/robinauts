@@ -56,7 +56,7 @@ def test_a_provider_is_served_with_its_sign_in() -> None:
         ({}, "127.0.0.1", False, "--dev-no-sign-in"),
         ({}, "0.0.0.0", True, "--host 0.0.0.0"),
         ({"agent": {}}, "127.0.0.1", True, "agent: unknown key"),
-        ({"orchestration": {}}, "127.0.0.1", False, r"\[orchestration\]: neorc is served"),
+        ({"orchestration": {}}, "127.0.0.1", True, r"\[orchestration\]: no longer read"),
     ],
 )
 def test_a_start_is_refused_with_its_reason(
@@ -64,6 +64,16 @@ def test_a_start_is_refused_with_its_reason(
 ) -> None:
     with pytest.raises(ConfigError, match=refusal):
         serving(tables, {}, host=host, dev_no_sign_in=mode)
+
+
+def test_a_flows_folder_is_served_in_the_local_development_mode_alone() -> None:
+    environ = {
+        "ROBINAUTS_DATABASE_URL": "postgresql://robinauts.example.com/robinauts",
+        "ROBINAUTS_FLOWS_DIR": "/etc/robinauts/flows",
+    }
+    with pytest.raises(ConfigError, match="ROBINAUTS_FLOWS_DIR: neorc is served"):
+        serving(SIGN_IN, environ, host="0.0.0.0", dev_no_sign_in=False)
+    serving({}, environ, host="127.0.0.1", dev_no_sign_in=True)
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost"])
