@@ -12,6 +12,7 @@ repository's own.
 | `robinauts_worker_common.github` | the GitHub token a worker may be handed: the variable, its checks, the header git sends it in |
 | `robinauts_worker_common.clone` | cloning a GitHub repository inside the container, with that token; `run_git`, every other git command the same way |
 | `robinauts_worker_common.worktrees` | the repositories of the flows' settings: one shared clone of each, and a worktree of each per session, on `rb/<session id>` |
+| `robinauts_worker_common.tasks` | the task payloads the extra workers know: `code_task/1`, which repositories a session works on and the branch each starts from |
 
 ## Using it from a worker
 
@@ -161,6 +162,10 @@ On disk, with the Claude Code worker's volume:
         <repository id>/            a worktree of that clone, on the branch rb/<session id>
 ```
 
+- **A session's repositories are decided at its first turn.** Without a task,
+  every repository; with a `code_task/1` ("A code task", below), the ones it
+  names. A later turn makes no worktree anew, and brings back one that was
+  lost.
 - **A clone** is made the first time a session needs it, and fetched before
   each new worktree of it. It is the remote's default branch, `origin/HEAD`,
   whatever it is called. Nothing works in it: it holds the worktrees' history.
@@ -195,6 +200,31 @@ await repositories.remove_worktrees(session_id, workspaces / session_id)
 
 `WorktreeError`, a `GitError` like `CloneError`, is a clone, a fetch or a
 worktree that failed; it never holds the token.
+
+### A code task
+
+A question may carry a task payload beside its text, for the engine rather
+than the model ([docs/specs/wire.md](../../docs/specs/wire.md), "Task
+payloads"). The extra workers know one task:
+
+```json
+{"task_key": "code_task/1", "repositories": {"robinauts": {"branch": "main"}}}
+```
+
+Its first turn makes the worktrees of the repositories it names alone, each
+from its branch rather than the default one: `origin/<branch>`, as just
+fetched, on the session's own branch as ever. Each id must be one of
+`[repositories]`, and each branch one of that repository's `branches`: a
+payload asks for nothing the operator did not list. One that does is refused,
+and the turn ends with the reason before any worktree is made. Any other
+`task_key` is no task of theirs, and the turn runs as without one.
+
+```python
+from robinauts_worker_common.tasks import code_task_starts
+
+starts = code_task_starts(task_payload, repositories.repositories)   # None for no code task
+await repositories.add_worktrees(session_id, folder, starts=starts, first=checkpoint is None)
+```
 
 ## Enhancements
 

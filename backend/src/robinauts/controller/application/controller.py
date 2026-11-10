@@ -10,8 +10,9 @@ import base64
 import dataclasses
 import logging
 import uuid
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Mapping
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from robinauts.controller.application.intervals import run_at_intervals
 from robinauts.controller.contract.broker.documents import (
@@ -37,6 +38,7 @@ from robinauts.controller.contract.domain import (
 )
 from robinauts.controller.contract.ports import Controller
 from robinauts.controller.core.projects import project_name
+from robinauts.controller.core.task_payloads import check_task_payload
 from robinauts.controller.core.titles import title_from_text
 from robinauts.controller.ports.store import Cursor, Store
 from robinauts.shared_domain.domain import (
@@ -190,7 +192,9 @@ class RobinautsController(Controller):
         model: str,
         text: str,
         project: uuid.UUID | None = None,
+        task_payload: Mapping[str, Any] | None = None,
     ) -> TurnStarted:
+        payload = check_task_payload(task_payload)
         agent_config = self._config.agents[agent]
         if project is None:
             project = (await self._default_project(user)).id
@@ -217,6 +221,7 @@ class RobinautsController(Controller):
             agent=agent,
             engine=session.engine,
             model=model,
+            task_payload=payload,
         )
         await self._store.add_session(session)
         # The worker creates the engine's session before it runs this first turn.
@@ -233,12 +238,14 @@ class RobinautsController(Controller):
         parent_id: uuid.UUID,
         model: str,
         text: str,
+        task_payload: Mapping[str, Any] | None = None,
     ) -> TurnStarted:
+        payload = check_task_payload(task_payload)
         session = await self._store.get_session(user.id, session_id)
         messages = await load_messages(self._store, user.id, session_id)
         if all(m.id != parent_id for m in messages):
             raise MessageNotFoundError(str(parent_id))
-        return await self._ask(user, session, parent_id, model, text)
+        return await self._ask(user, session, parent_id, model, text, payload)
 
     async def edit_message(
         self,
@@ -248,16 +255,26 @@ class RobinautsController(Controller):
         message_id: uuid.UUID,
         model: str,
         text: str,
+        task_payload: Mapping[str, Any] | None = None,
     ) -> TurnStarted:
+        payload = check_task_payload(task_payload)
         session = await self._store.get_session(user.id, session_id)
         messages = await load_messages(self._store, user.id, session_id)
         edited = next((m for m in messages if m.id == message_id), None)
         if edited is None or edited.role is not Role.USER:
             raise MessageNotFoundError(str(message_id))
-        return await self._ask(user, session, edited.parent_id, model, text)
+        # An edit from the interface sends text alone: the task stays the edited question's.
+        kept = edited.task_payload if payload is None else payload
+        return await self._ask(user, session, edited.parent_id, model, text, kept)
 
     async def _ask(
-        self, user: User, session: Session, parent_id: uuid.UUID | None, model: str, text: str
+        self,
+        user: User,
+        session: Session,
+        parent_id: uuid.UUID | None,
+        model: str,
+        text: str,
+        task_payload: Mapping[str, Any] | None = None,
     ) -> TurnStarted:
         if not text or not text.strip():
             raise InvalidValueError("a message needs some text")
@@ -271,6 +288,7 @@ class RobinautsController(Controller):
             agent=session.agent,
             engine=session.engine,
             model=model,
+            task_payload=task_payload,
         )
         turn = await self._queue_turn(user, session, question, model, new_question=True)
         return TurnStarted(session.id, turn.id, question)

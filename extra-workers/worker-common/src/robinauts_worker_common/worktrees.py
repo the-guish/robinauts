@@ -53,10 +53,12 @@ class WorktreeError(GitError):
 
 @dataclass(frozen=True, slots=True)
 class Repository:
-    """A repository of the flows' settings: its id there, and its https URL on the server."""
+    """A repository of the flows' settings: its id there, its https URL on the server, and the
+    branches a task may start from."""
 
     id: str
     url: str
+    branches: tuple[str, ...] = ()
 
 
 def repositories_of(
@@ -86,7 +88,8 @@ def repositories_of(
     found, problems = [], []
     for repository in flows.repositories:
         try:
-            found.append(Repository(repository.id, repository_url(repository.url, server)))
+            url = repository_url(repository.url, server)
+            found.append(Repository(repository.id, url, repository.branches))
         except GitHubError as refused:
             problems.append(f"{path} [repositories.{repository.id}]: {refused}")
         if not _SESSION.fullmatch(repository.id):
@@ -207,20 +210,45 @@ class Repositories:
         await self._git(["worktree", "prune"], f"pruning {repository.id}", path)
         return path
 
-    async def add_worktrees(self, session: str, folder: Path) -> list[Path]:
-        """A worktree of each repository in ``folder``, on the branch ``rb/<session>``, made
-        where it is missing: from the default branch as just fetched, or from the branch when a
-        worktree of it was lost. A worktree there already is left as it is: it holds the
-        agent's work. Returns the worktrees."""
+    async def add_worktrees(
+        self,
+        session: str,
+        folder: Path,
+        *,
+        starts: Mapping[str, str] | None = None,
+        first: bool = True,
+    ) -> list[Path]:
+        """The session's worktrees in ``folder``, on the branch ``rb/<session>``, made where
+        they are missing. A worktree there already is left as it is: it holds the agent's work.
+        One whose worktree was lost comes back on its branch, its commits kept.
+
+        A session's repositories are decided at its ``first`` turn: those of ``starts``, each
+        from its branch there (a task's, ``tasks.code_task_starts``), or else every repository,
+        from its default branch, each as just fetched. A later turn makes none anew, but those
+        ``starts`` names. Returns the worktrees the session has."""
         branch = branch_of(session)
         folder.mkdir(parents=True, exist_ok=True)
-        return list(
-            await asyncio.gather(
-                *(self._add(repository, branch, folder) for repository in self.repositories)
+        unknown = sorted(set(starts or {}) - {repository.id for repository in self.repositories})
+        if unknown:
+            raise WorktreeError(f"no repository {', '.join(unknown)} to make a worktree of")
+        chosen = [r for r in self.repositories if starts is None or r.id in starts]
+        made = await asyncio.gather(
+            *(
+                self._add(
+                    repository,
+                    branch,
+                    folder,
+                    start=None if starts is None else starts[repository.id],
+                    create=first or starts is not None,
+                )
+                for repository in chosen
             )
         )
+        return [path for path in made if path is not None]
 
-    async def _add(self, repository: Repository, branch: str, folder: Path) -> Path:
+    async def _add(
+        self, repository: Repository, branch: str, folder: Path, *, start: str | None, create: bool
+    ) -> Path | None:
         target = folder / repository.id
         if (target / ".git").exists():
             return target
@@ -231,9 +259,12 @@ class Repositories:
             )
             if known.strip():
                 arguments = ["worktree", "add", "--", str(target), branch]
+            elif not create:
+                return None
             else:
+                origin = "origin/HEAD" if start is None else f"origin/{start}"
                 arguments = ["worktree", "add", "--no-track", "-b", branch, "--"]
-                arguments += [str(target), "origin/HEAD"]
+                arguments += [str(target), origin]
             await self._git(arguments, f"the worktree of {repository.id}", path)
         return target
 

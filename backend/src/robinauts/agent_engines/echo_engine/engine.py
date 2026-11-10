@@ -3,6 +3,9 @@
 
 """An engine that calls its one tool on every turn and answers a fixed string plus the result.
 
+A turn with a task payload says it back after the answer, as JSON, behind ``TASK_PAYLOAD``: what
+lets a test see that the payload reached the engine.
+
 A prompt that starts with ``poison`` ends its turn badly instead: the tool returns an error and
 the engine raises, as a real engine does when a tool keeps failing.
 
@@ -13,8 +16,10 @@ is for quick smoke tests of the interface and for tests that need a turn and not
 
 from __future__ import annotations
 
+import json
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
+from typing import Any
 
 from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
@@ -29,6 +34,8 @@ from robinauts.agent_engines.contract.domain import (
 from robinauts.agent_engines.contract.ports import AgentEngine
 
 TOOL = "echo"
+TASK_PAYLOAD = "\ntask payload: "
+"""What comes before a turn's task payload, as JSON, when it has one."""
 ANSWER = "The tool said: "
 POISON = "poison"
 POISONED = "the message is poisoned"
@@ -64,6 +71,7 @@ class EchoEngine(AgentEngine):
         checkpoint_id: str | None,
         timeout_seconds: float,
         resume: bool = False,
+        task_payload: Mapping[str, Any] | None = None,
     ) -> AsyncGenerator[Event, None]:
         call_id = f"call-{uuid.uuid4().hex[:8]}"
         yield ToolCall(call_id=call_id, name=TOOL, raw_input={"text": prompt})
@@ -74,7 +82,13 @@ class EchoEngine(AgentEngine):
         yield ToolResult(call_id=call_id, name=TOOL, raw_output=result)
         yield TextDelta(text=ANSWER)
         yield TextDelta(text=result)
-        yield Done(text=ANSWER + result, checkpoint_id=str(uuid.uuid4()))
+        # A task payload, said back, so that a test sees what reached the engine.
+        said = (
+            "" if task_payload is None else TASK_PAYLOAD + json.dumps(task_payload, sort_keys=True)
+        )
+        if said:
+            yield TextDelta(text=said)
+        yield Done(text=ANSWER + result + said, checkpoint_id=str(uuid.uuid4()))
 
     async def fork(self, source_id: uuid.UUID, target_id: uuid.UUID, *, checkpoint_id: str) -> None:
         # Nothing to copy: no turn reads an earlier one.

@@ -235,6 +235,14 @@ failed turn leaves what it wrote; the next turn resumes before it, which cuts
 it off. The server's `turn_timeout_seconds`, stall detection, cancels and
 leases work as for every engine, since the worker is the server's own.
 
+Before Claude Code starts, the session's worktrees are made in its directory
+([worker-common](../worker-common/README.md), "Repositories and worktrees"):
+at its first turn, of every repository of the flows' settings, or, when the
+question carries a `code_task/1` task payload, of the repositories it names,
+each from its branch ("A code task" there). A code task this worker cannot set
+up ends the turn with the reason, before the agent starts. The agent sees the
+question's text alone: the payload is the worker's.
+
 ## Checks
 
 `scripts/check-extra-workers.sh` runs this folder's lint, tests and, where

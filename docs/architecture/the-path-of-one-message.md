@@ -21,7 +21,8 @@ the step says so.
 ### 1. The UI sends the turn
 
 The frontend's AG-UI client sends `POST /api/conversations/{id}/turns` with
-`{text, parent_id, model_id}`. The response is the turn's stream.
+`{text, parent_id, model_id}`, and a flow may add a `task_payload` beside the text
+([wire.md](../specs/wire.md), "Task payloads"). The response is the turn's stream.
 
 - **PostgreSQL:** browser → reverse proxy (TLS) → uvicorn → FastAPI.
 - **AWS:** browser → CloudFront (TLS, the same origin as the UI) → a Lambda function URL
@@ -48,8 +49,9 @@ that user to choose the model (`model_of`, `web/app.py`).
 
 ### 3. The controller builds the question
 
-`send_message` checks that the parent belongs to the session. It mints the message's
-id and time and encodes the whole message as a versioned document
+`send_message` checks that the parent belongs to the session, and a task payload's
+shape and size. It mints the message's id and time and encodes the whole message, the
+payload with it, as a versioned document
 (`docs/architecture/data-model.md`).
 
 ### 4. The controller stores the question and starts the turn, atomically
@@ -144,7 +146,7 @@ returns without running the engine.
 ### 8. The engine loads its state
 
 `engine.stream(session_id, definition, prompt, model=…, checkpoint_id=…,
-timeout_seconds=120)`. The LangChain engine builds `create_agent(chat_model, tools,
+timeout_seconds=120, task_payload=…)`, the payload the question was asked with, or none. The LangChain engine builds `create_agent(chat_model, tools,
 system_prompt, checkpointer)` and starts from that checkpoint.
 
 - **PostgreSQL:** the engine's own tables, through the asyncpg pool it was given

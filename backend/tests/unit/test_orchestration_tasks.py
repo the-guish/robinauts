@@ -222,7 +222,8 @@ def test_the_prompts_carry_the_task_and_ask_for_their_result_line(tasks: ModuleT
     )
     assert "Fix {the} bug" in implement
     assert "the folder `app`" in implement
-    assert "git reset --hard origin/main" in implement
+    assert "started from main" in implement
+    assert "git reset" not in implement
     assert implement.rstrip().endswith(
         'RESULT {"pr_url": "<the pull request\'s URL>", "branch": "<the branch you pushed>"}'
     )
@@ -238,3 +239,10 @@ def test_the_prompts_carry_the_task_and_ask_for_their_result_line(tasks: ModuleT
     assert review.rstrip().endswith(
         'RESULT {"verdict": "approve" or "request_changes", "summary": "<two or three sentences>"}'
     )
+
+
+def test_a_conversation_on_a_repository_carries_its_code_task(tasks: ModuleType) -> None:
+    assert tasks.code_task("app", "develop") == {
+        "task_key": "code_task/1",
+        "repositories": {"app": {"branch": "develop"}},
+    }

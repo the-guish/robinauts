@@ -30,8 +30,8 @@ The code and review (``flows/code_and_review.yaml``) is two conversations on the
 the model the run was started with:
 
 - **implement**: the agent does the task in its session's worktree of the chosen repository,
-  from the chosen branch, pushes the session's branch and opens a pull request against the
-  chosen branch;
+  which a ``code_task/1`` task payload has the worker start from the chosen branch, pushes the
+  session's branch and opens a pull request against the chosen branch;
 - **review**: a second conversation reads that pull request in its own worktree, against the
   task, and changes nothing.
 
@@ -88,9 +88,14 @@ PULL_REQUEST = re.compile(r"https://[^/\s]+/[^/\s]+/[^/\s]+/pull/[0-9]+")
 VERDICTS = frozenset({"approve", "request_changes"})
 """What a review may conclude."""
 
+CODE_TASK = "code_task/1"
+"""The task payload that has the extra worker make the conversation's worktree of a repository
+from a branch (``extra-workers/worker-common/README.md``, "A code task")."""
+
 IMPLEMENT_PROMPT = """\
 Work on the repository {repo}, from its branch {base}. Your working directory holds a worktree
-of it, the folder `{repo}`, on a branch of this conversation's own: work there, on that branch.
+of it, the folder `{repo}`, started from {base} on a branch of this conversation's own: work
+there, on that branch, and make no other.
 
 The task:
 
@@ -98,12 +103,11 @@ The task:
 
 Do it from start to finish:
 
-1. In `{repo}`, start from {base}: `git fetch origin {base}`, then
-   `git reset --hard origin/{base}`. Stay on the branch the worktree is on; make no other.
-2. Do the task. Run the project's own checks for what you changed, and fix what fails.
-3. Commit, and push with a plain `git push`, which creates the branch on GitHub with the
+1. Do the task in `{repo}`. Run the project's own checks for what you changed, and fix what
+   fails.
+2. Commit, and push with a plain `git push`, which creates the branch on GitHub with the
    token in your environment.
-4. Open a pull request of that branch against {base}, with a title and a description that
+3. Open a pull request of that branch against {base}, with a title and a description that
    say what changed and why: a POST to `https://api.github.com/repos/<owner>/<name>/pulls`
    with the header `Authorization: Bearer $GITHUB_TOKEN`, where `<owner>/<name>` is the
    repository of `git remote get-url origin`.
@@ -236,11 +240,24 @@ def _say(conversation: str, text: str) -> str:
     return _latest_answer(conversation)[1]
 
 
-def _open(text: str, *, model: str | None = None, agent: str | None = None) -> dict[str, str]:
+def code_task(repo: str, branch: str) -> dict[str, Any]:
+    """The task payload of a conversation on ``repo``, its worktree started from ``branch``."""
+    return {"task_key": CODE_TASK, "repositories": {repo: {"branch": branch}}}
+
+
+def _open(
+    text: str,
+    *,
+    model: str | None = None,
+    agent: str | None = None,
+    task_payload: dict[str, Any] | None = None,
+) -> dict[str, str]:
     """Start a conversation with ``agent``, else the first agent, and ``text``, and wait for its
-    first answer."""
+    first answer. ``task_payload`` goes beside the text, for the agent's engine."""
     agent = agent or _first_agent()
     body: dict[str, Any] = {"agent_id": agent, "text": text}
+    if task_payload is not None:
+        body["task_payload"] = task_payload
     if model is not None:
         body["model_id"] = model
     conversation = _run_turn("/api/turns", body)
@@ -317,7 +334,7 @@ def implement(task: str, repo_branch: str, model: str, agent: str) -> dict[str, 
     conversation."""
     repo, base = split_repo_branch(repo_branch)
     prompt = IMPLEMENT_PROMPT.format(repo=repo, base=base, task=task, result=RESULT)
-    opened = _open(prompt, model=model, agent=agent)
+    opened = _open(prompt, model=model, agent=agent, task_payload=code_task(repo, base))
     found = result_of(opened["answer"])
     pr_url = found.get("pr_url")
     branch = found.get("branch")
@@ -348,7 +365,8 @@ def review(implemented: dict[str, Any], model: str, agent: str) -> dict[str, Any
         base=implemented["base"],
         result=RESULT,
     )
-    opened = _open(prompt, model=model, agent=agent)
+    payload = code_task(implemented["repository"], implemented["base"])
+    opened = _open(prompt, model=model, agent=agent, task_payload=payload)
     found = result_of(opened["answer"])
     verdict = found.get("verdict")
     if verdict not in VERDICTS:
