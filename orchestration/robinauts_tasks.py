@@ -29,15 +29,19 @@ by reading its stream to the end; its answer is then read from the conversation.
 The code and review (``flows/code_and_review.yaml``) is two conversations on the agent and
 the model the run was started with:
 
-- **implement**: the agent clones the repository at the chosen branch, does the task on a
-  branch of its own, pushes it and opens a pull request against the chosen branch;
-- **review**: a second conversation reviews that pull request against the task, and changes
-  nothing.
+- **implement**: the agent does the task in its session's worktree of the chosen repository,
+  from the chosen branch, pushes the session's branch and opens a pull request against the
+  chosen branch;
+- **review**: a second conversation reads that pull request in its own worktree, against the
+  task, and changes nothing.
 
 Each ends its answer with one ``RESULT`` line of JSON, which the handler reads: the pull
 request's URL, then the review's verdict. An answer without one, or with one that is not what
-was asked, fails the task with what it said. The agent reaches GitHub with the token its
-worker was given (``extra-workers/worker-common/README.md``): the handlers hold none.
+was asked, fails the task with what it said. The worktrees, their branches and the push are
+the extra worker's, from the same ``[repositories]`` of ``flows.toml`` the form offers
+(``extra-workers/worker-common/README.md``, "Repositories and worktrees"); the agent reaches
+GitHub with the token its worker was given. The handlers hold none, and name the repository
+by its id there, which is the folder of its worktree.
 
 neorc delivers a task at least once: a task that runs again sends its message again. For the
 code and review, that is a second pull request.
@@ -85,37 +89,42 @@ VERDICTS = frozenset({"approve", "request_changes"})
 """What a review may conclude."""
 
 IMPLEMENT_PROMPT = """\
-Work on the repository {url}, starting from its branch {base}.
+Work on the repository {repo}, from its branch {base}. Your working directory holds a worktree
+of it, the folder `{repo}`, on a branch of this conversation's own: work there, on that branch.
 
 The task:
 
 {task}
 
-Do it from start to finish, in your workspace:
+Do it from start to finish:
 
-1. Clone it: `python -m robinauts_worker_common.clone {url} repo --branch {base}`.
-2. Make a branch of your own from {base}, named `robinauts/<a few words of the task>`, and do
-   the task there. Run the project's own checks for what you changed, and fix what fails.
-3. Commit, push the branch, and open a pull request against {base}, with a title and a
-   description that say what changed and why. Use the GitHub token in `GITHUB_TOKEN`: as git's
-   basic authentication, user `x-access-token`, for the push; as a bearer for GitHub's REST
-   API, which opens the pull request.
+1. In `{repo}`, start from {base}: `git fetch origin {base}`, then
+   `git reset --hard origin/{base}`. Stay on the branch the worktree is on; make no other.
+2. Do the task. Run the project's own checks for what you changed, and fix what fails.
+3. Commit, and push with a plain `git push`, which creates the branch on GitHub with the
+   token in your environment.
+4. Open a pull request of that branch against {base}, with a title and a description that
+   say what changed and why: a POST to `https://api.github.com/repos/<owner>/<name>/pulls`
+   with the header `Authorization: Bearer $GITHUB_TOKEN`, where `<owner>/<name>` is the
+   repository of `git remote get-url origin`.
 
 End your answer with exactly one line, and nothing after it:
 
 {result} {{"pr_url": "<the pull request's URL>", "branch": "<the branch you pushed>"}}
 """
-"""What opens the implementing conversation."""
+"""What opens the implementing conversation. The worktree, its branch and the push are the
+extra worker's (``extra-workers/worker-common/README.md``, "Repositories and worktrees")."""
 
 REVIEW_PROMPT = """\
-Review the pull request {pr_url}, which was opened to do this task on {url}:
+Review the pull request {pr_url}, which was opened to do this task on the repository {repo}:
 
 {task}
 
-Clone the repository (`python -m robinauts_worker_common.clone {url} repo`), check out the pull
-request's branch, {branch}, and read its changes against {base}. Judge whether it does the
-task, whether it is correct, and whether it is safe to merge. Change nothing, push nothing,
-and post nothing.
+Your working directory holds a worktree of {repo}, the folder `{repo}`. Read the pull
+request's changes there without checking its branch out: `git fetch origin`, then
+`git diff origin/{base}...origin/{branch}`. Judge whether it does the task, whether it is
+correct, and whether it is safe to merge. Change nothing, commit nothing, push nothing, and
+post nothing.
 
 End your answer with exactly one line, and nothing after it:
 
@@ -150,12 +159,12 @@ def _get(path: str) -> Any:
 
 
 def split_repo_branch(value: str) -> tuple[str, str]:
-    """A repository and its branch, as a form's list of values gives them: ``<url>@<branch>``.
-    A URL may hold an ``@`` of its own (``git@host:...``); a branch name may not."""
-    url, at, branch = value.rpartition("@")
-    if not at or not url or not branch:
-        raise RuntimeError(f"{value!r} is not a repository and a branch, <url>@<branch>")
-    return url, branch
+    """A repository's id and its branch, as a form's list of values gives them:
+    ``<id>@<branch>``. A branch name holds no ``@``."""
+    repo, at, branch = value.rpartition("@")
+    if not at or not repo or not branch:
+        raise RuntimeError(f"{value!r} is not a repository and a branch, <id>@<branch>")
+    return repo, branch
 
 
 def result_of(answer: str) -> dict[str, Any]:
@@ -303,24 +312,27 @@ def summarize(number: int, judged: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def implement(task: str, repo_branch: str, model: str, agent: str) -> dict[str, Any]:
-    """Have ``agent``, on ``model``, do ``task`` on the repository and open a pull request
-    against the branch; return the pull request, its branch and the conversation."""
-    url, base = split_repo_branch(repo_branch)
-    prompt = IMPLEMENT_PROMPT.format(url=url, base=base, task=task, result=RESULT)
+    """Have ``agent``, on ``model``, do ``task`` in its worktree of the repository and open a
+    pull request against the branch; return the pull request, its branch and the
+    conversation."""
+    repo, base = split_repo_branch(repo_branch)
+    prompt = IMPLEMENT_PROMPT.format(repo=repo, base=base, task=task, result=RESULT)
     opened = _open(prompt, model=model, agent=agent)
     found = result_of(opened["answer"])
     pr_url = found.get("pr_url")
+    branch = found.get("branch")
     if not isinstance(pr_url, str) or not PULL_REQUEST.fullmatch(pr_url):
         raise RuntimeError(
             f"conversation {opened['conversation_id']} names no pull request: {found!r}"
         )
-    branch = found.get("branch")
+    if not isinstance(branch, str) or not branch:
+        raise RuntimeError(f"conversation {opened['conversation_id']} names no branch: {found!r}")
     return {
         "task": task,
-        "repository": url,
+        "repository": repo,
         "base": base,
         "pr_url": pr_url,
-        "branch": branch if isinstance(branch, str) else "",
+        "branch": branch,
         "conversation_id": opened["conversation_id"],
     }
 
@@ -330,9 +342,9 @@ def review(implemented: dict[str, Any], model: str, agent: str) -> dict[str, Any
     task; return its verdict and summary, with both conversations."""
     prompt = REVIEW_PROMPT.format(
         pr_url=implemented["pr_url"],
-        url=implemented["repository"],
+        repo=implemented["repository"],
         task=implemented["task"],
-        branch=implemented["branch"] or "the pull request's head",
+        branch=implemented["branch"],
         base=implemented["base"],
         result=RESULT,
     )

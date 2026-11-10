@@ -160,8 +160,8 @@ def test_the_game_is_told_the_number_it_keeps_secret(
 @pytest.mark.parametrize(
     ("value", "split"),
     [
-        ("https://github.com/o/r@main", ("https://github.com/o/r", "main")),
-        ("git@github.com:o/r.git@feature/x", ("git@github.com:o/r.git", "feature/x")),
+        ("app@main", ("app", "main")),
+        ("app@feature/x", ("app", "feature/x")),
     ],
 )
 def test_a_repository_and_its_branch_are_split_at_the_last_at(
@@ -170,7 +170,7 @@ def test_a_repository_and_its_branch_are_split_at_the_last_at(
     assert tasks.split_repo_branch(value) == split
 
 
-@pytest.mark.parametrize("value", ["https://github.com/o/r", "@main", "https://github.com/o/r@"])
+@pytest.mark.parametrize("value", ["app", "@main", "app@"])
 def test_a_value_that_is_not_a_repository_and_a_branch_is_refused(
     tasks: ModuleType, value: str
 ) -> None:
@@ -218,22 +218,23 @@ def test_a_pull_request_is_told_by_its_url(tasks: ModuleType, url: str, is_one: 
 def test_the_prompts_carry_the_task_and_ask_for_their_result_line(tasks: ModuleType) -> None:
     task = "Fix {the} bug"
     implement = tasks.IMPLEMENT_PROMPT.format(
-        url="https://github.com/o/r", base="main", task=task, result=tasks.RESULT
+        repo="app", base="main", task=task, result=tasks.RESULT
     )
     assert "Fix {the} bug" in implement
-    assert "--branch main" in implement
+    assert "the folder `app`" in implement
+    assert "git reset --hard origin/main" in implement
     assert implement.rstrip().endswith(
         'RESULT {"pr_url": "<the pull request\'s URL>", "branch": "<the branch you pushed>"}'
     )
     review = tasks.REVIEW_PROMPT.format(
         pr_url="https://github.com/o/r/pull/1",
-        url="https://github.com/o/r",
+        repo="app",
         task=task,
-        branch="robinauts/fix",
+        branch="rb/1234",
         base="main",
         result=tasks.RESULT,
     )
-    assert "robinauts/fix" in review
+    assert "git diff origin/main...origin/rb/1234" in review
     assert review.rstrip().endswith(
         'RESULT {"verdict": "approve" or "request_changes", "summary": "<two or three sentences>"}'
     )

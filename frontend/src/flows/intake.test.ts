@@ -14,7 +14,7 @@ const FLOW: Flow = {
       label: "Repository",
       type: "string",
       lov: "repo_branch",
-      options: [{ value: "https://git.example/app@main", label: "app · main" }],
+      options: [{ value: "app@main", label: "app · main" }],
     },
     { name: "task", label: "Task", type: "string", lov: null, options: null },
     { name: "tries", label: "Tries", type: "number", lov: null, options: null },
@@ -58,7 +58,7 @@ test("an untouched form is empty, its boxes unticked", () => {
 
 test("filled fields are the inputs, each in the JSON form the orchestrator takes", () => {
   const read = inputsOf(FLOW, {
-    repo_branch: "https://git.example/app@main",
+    repo_branch: "app@main",
     task: "Fix the bug",
     tries: "3",
     draft: true,
@@ -66,7 +66,7 @@ test("filled fields are the inputs, each in the JSON form the orchestrator takes
   });
   expect(read).toEqual({
     inputs: {
-      repo_branch: "https://git.example/app@main",
+      repo_branch: "app@main",
       task: "Fix the bug",
       tries: 3,
       draft: true,

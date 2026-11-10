@@ -58,13 +58,20 @@ TOML
 ROBINAUTS_FLOWS_DIR=~/robinauts/flows robinauts start --dev-no-sign-in
 ```
 
-The agent needs to run commands and reach GitHub: an agent of the Claude Code
-worker ([extra-workers/claude-code-worker](../extra-workers/claude-code-worker/README.md)),
-handed a GitHub token by `--env-file`
-([extra-workers/worker-common](../extra-workers/worker-common/README.md)). To
-clone is all that README asks of the token; this flow also pushes a branch and
-opens a pull request, so its token needs, on those repositories alone,
-**Contents: Read and write** and **Pull requests: Read and write**.
+The agent works in a worktree of the repository, which the extra worker makes
+for each conversation from those same `[repositories]`, on a branch of the
+conversation's own, and pushes it with the worker's GitHub token: an agent of
+the Claude Code worker
+([extra-workers/claude-code-worker](../extra-workers/claude-code-worker/README.md)),
+whose command passes `ROBINAUTS_FLOWS_DIR` on and mounts the folder, and is
+handed the token by `--env-file`
+([extra-workers/worker-common](../extra-workers/worker-common/README.md),
+"Repositories and worktrees"). The token needs, on those repositories alone,
+**Contents: Read and write** to push and **Pull requests: Read and write** to
+open the pull request.
+
+The worktree starts from the repository's default branch; the agent is told
+to move it to the branch chosen in the form before it starts.
 
 Then **New run**, **Code and review**: the task in words, the repository and
 branch, the agent and the model. The run's output is the review's verdict and

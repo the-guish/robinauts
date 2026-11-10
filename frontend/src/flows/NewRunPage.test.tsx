@@ -19,8 +19,8 @@ const CODE = {
       type: "string",
       lov: "repo_branch",
       options: [
-        { value: "https://git.example/app@main", label: "app · main" },
-        { value: "https://git.example/app@next", label: "app · next" },
+        { value: "app@main", label: "app · main" },
+        { value: "app@next", label: "app · next" },
       ],
     },
     {
@@ -93,7 +93,7 @@ test("a flow's form offers each list's values, and a run starts with the inputs 
       .map((option) => option.textContent),
   ).toEqual(["Choose…", "app · main", "app · next"]);
   fireEvent.change(repository, {
-    target: { value: "https://git.example/app@next" },
+    target: { value: "app@next" },
   });
   fireEvent.change(within(form).getByLabelText("Agent"), {
     target: { value: "coder" },
@@ -109,7 +109,7 @@ test("a flow's form offers each list's values, and a run starts with the inputs 
       url: "/api/flows/code_review/runs",
       body: {
         inputs: {
-          repo_branch: "https://git.example/app@next",
+          repo_branch: "app@next",
           agent: "coder",
           task: "Fix the bug",
         },
@@ -153,7 +153,7 @@ test("the server's refusal is shown under the button, and nothing moves", async 
     name: "Start Code and review",
   });
   fireEvent.change(within(form).getByLabelText("Repository"), {
-    target: { value: "https://git.example/app@main" },
+    target: { value: "app@main" },
   });
   fireEvent.change(within(form).getByLabelText("Agent"), {
     target: { value: "coder" },

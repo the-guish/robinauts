@@ -114,7 +114,7 @@ There are three lists of values:
 
 | `lov` | the values | the value sent |
 |---|---|---|
-| `repo_branch` | each branch of each repository of `flows.toml` | `<url>@<branch>` |
+| `repo_branch` | each branch of each repository of `flows.toml` | `<id>@<branch>`, the repository by its id there |
 | `model` | the models of the agents' configuration | the model's id |
 | `agent` | its agents, each labelled with the worker it runs on | the agent's id |
 
@@ -204,8 +204,11 @@ Taking neorc out is taking out that package and `cli/orchestration.py`.
 
 `cli/orchestration.py` is apart from `cli/composition.py` because a worker in
 a process of its own imports the composition, and the extra workers' images
-leave neorc out. A contract keeps it so: nothing `cli/worker_process.py` or
-`cli/composition.py` imports may reach neorc, even through another module.
+leave neorc out. The extra workers also read `[repositories]` of `flows.toml`
+with the orchestrator's own parser, `orchestrator/core/config.py`. A contract
+keeps all of it so: nothing `cli/worker_process.py`, `cli/composition.py`,
+`orchestrator/contract/` or `orchestrator/core/config.py` imports may reach
+neorc, even through another module.
 
 ### Installing neorc
 
@@ -249,12 +252,14 @@ neither neorc nor Robinauts.
 - `guess_number`: a guessing game between two conversations with the first
   agent the server offers.
 - `code_and_review`: a task done on a repository and reviewed, from a form
-  (`code_and_review.form.toml`): the chosen agent, on the chosen model,
-  clones the chosen repository at the chosen branch, does the task on a branch
-  of its own and opens a pull request; a second conversation reviews it
-  against the task. Each answer ends with a `RESULT` line of JSON the handler
-  reads: the pull request's URL, then the verdict, `approve` or
-  `request_changes`, which is the run's output. The agent reaches GitHub with
-  the token its worker was handed
-  ([extra-workers/worker-common](../../extra-workers/worker-common/README.md));
-  the handlers hold none.
+  (`code_and_review.form.toml`): the chosen agent, on the chosen model, does
+  the task in its session's worktree of the chosen repository, from the chosen
+  branch, pushes the session's branch and opens a pull request against the
+  chosen branch; a second conversation reads the pull request in its own
+  worktree and reviews it against the task. Each answer ends with a `RESULT`
+  line of JSON the handler reads: the pull request's URL and branch, then the
+  verdict, `approve` or `request_changes`, which is the run's output. The
+  worktrees, their branches and the push are the extra worker's, from the same
+  `[repositories]` the form offers
+  ([extra-workers/worker-common](../../extra-workers/worker-common/README.md),
+  "Repositories and worktrees"); the handlers hold no credential.
