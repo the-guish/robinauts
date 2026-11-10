@@ -113,11 +113,14 @@ def test_deployed_mode_refuses_a_personal_token_and_what_it_cannot_run(
 
 
 def test_what_the_subprocess_is_handed() -> None:
-    assert subprocess_environment(AuthMode.PERSONAL, ANTHROPIC, Keys()) == {}
+    # The worker's GitHub token is emptied in both: Claude Code's Bash is the agent's.
+    assert subprocess_environment(AuthMode.PERSONAL, ANTHROPIC, Keys()) == {"GITHUB_TOKEN": ""}
     assert subprocess_environment(AuthMode.DEPLOYED, ANTHROPIC, Keys()) == {
-        "ANTHROPIC_API_KEY": "key-of-anthropic"
+        "GITHUB_TOKEN": "",
+        "ANTHROPIC_API_KEY": "key-of-anthropic",
     }
     assert subprocess_environment(AuthMode.DEPLOYED, GATEWAY, Keys()) == {
+        "GITHUB_TOKEN": "",
         "ANTHROPIC_API_KEY": "key-of-gateway",
         "ANTHROPIC_BASE_URL": "https://gateway.example/api",
     }

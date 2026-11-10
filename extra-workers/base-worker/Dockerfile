@@ -14,6 +14,12 @@
 
 FROM python:3.12-slim
 
+# git, for the clones of robinauts_worker_common.clone (../worker-common/README.md), and the
+# certificates it checks the GitHub server's against.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
 # uv, at the version scripts/tool-versions.sh pins for CI.
 COPY --from=ghcr.io/astral-sh/uv:0.12.6 /uv /uvx /bin/
 
@@ -30,6 +36,9 @@ COPY backend/pyproject.toml backend/uv.lock backend/hatch_build.py backend/
 COPY backend/src backend/src
 COPY extra-workers/base-worker/pyproject.toml extra-workers/base-worker/uv.lock \
     extra-workers/base-worker/
+# What the extra workers share, installed editable from where the worker's lock says it is.
+COPY extra-workers/worker-common/pyproject.toml extra-workers/worker-common/
+COPY extra-workers/worker-common/src extra-workers/worker-common/src
 # neorc-from-source: the worker never imports neorc, and this image has no Node.js to build it.
 RUN cd extra-workers/base-worker && uv sync --locked --no-dev \
     --no-install-package neorc --no-install-package neorc-core --no-install-package neorc-ui
@@ -41,5 +50,7 @@ USER robinauts
 ENV PATH=/opt/robinauts/venv/bin:$PATH
 
 # The backend's worker module, as the server starts it in a process of its own: it reads its
-# secret on its standard input, says `ready` on its standard output, and stops at SIGTERM.
-CMD ["python", "-m", "robinauts.cli.worker_process"]
+# secret on its standard input, says `ready` on its standard output, and stops at SIGTERM. In
+# front of it, the extra workers' shared start, which checks the GitHub token it may be handed
+# (`--env-file`, ../worker-common/README.md) before the secret is read.
+CMD ["python", "-m", "robinauts_worker_common"]

@@ -1880,6 +1880,7 @@ source = { editable = "." }
 dependencies = [
     { name = "claude-agent-sdk" },
     { name = "robinauts" },
+    { name = "robinauts-worker-common" },
 ]
 
 [package.dev-dependencies]
@@ -1894,12 +1895,31 @@ dev = [
 requires-dist = [
     { name = "claude-agent-sdk", specifier = ">=0.2,<0.3" },
     { name = "robinauts", editable = "../../backend" },
+    { name = "robinauts-worker-common", editable = "../worker-common" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "black", specifier = ">=24.0" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "ruff", specifier = ">=0.6" },
+]
+
+[[package]]
+name = "robinauts-worker-common"
+version = "0.1.0"
+source = { editable = "../worker-common" }
+dependencies = [
+    { name = "robinauts" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "robinauts", editable = "../../backend" }]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "black", specifier = ">=24.0" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "ruff", specifier = ">=0.6" },
 ]

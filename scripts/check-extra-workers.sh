@@ -3,7 +3,8 @@
 # Copyright The Robinauts Authors
 #
 # The extra workers (extra-workers/README.md): each is a Python project of its
-# own, composed from the backend beside it. For each, in turn: its locked
+# own, composed from the backend beside it, and so is worker-common, the library
+# they share, which has no image. For each, in turn: its locked
 # environment, ruff and black under its own configuration (the backend's rules,
 # copied), its tests, and its image, built where Docker is there to build it.
 # Then the one rule the backend's import-linter cannot see: nothing under
@@ -43,7 +44,8 @@ for project in "$root"/extra-workers/*/; do
 done
 
 printf '\n== backend/src names no extra worker ==\n'
-if grep -rn "robinauts_claude_worker\|claude_agent_sdk\|extra_workers" "$root/backend/src"; then
+if grep -rn "robinauts_claude_worker\|robinauts_worker_common\|claude_agent_sdk\|extra_workers" \
+    "$root/backend/src"; then
     printf 'backend/src names an extra worker: the layers are the other way round\n' >&2
     exit 1
 fi

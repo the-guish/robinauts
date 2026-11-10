@@ -27,6 +27,7 @@ from urllib.parse import urlsplit
 from robinauts.agent_engines.contract.domain import ModelProviderConfig, ProviderKind
 from robinauts.agent_engines.contract.ports import ProviderKeyLookup
 from robinauts_claude_worker.settings import AuthMode
+from robinauts_worker_common.github import HIDDEN_FROM_AGENTS
 
 OAUTH_TOKEN_VARIABLE = "CLAUDE_CODE_OAUTH_TOKEN"
 """A subscription token from ``claude setup-token``: the personal mode's credential."""
@@ -139,12 +140,13 @@ def credential_problems(
 def subprocess_environment(
     mode: AuthMode, provider: ModelProviderConfig, keys: ProviderKeyLookup
 ) -> dict[str, str]:
-    """What the Claude Code subprocess is handed beside the environment it inherits: in
+    """What the Claude Code subprocess is handed over the environment it inherits: in
     deployed mode the provider's key, and its endpoint when it has one; in personal mode
-    nothing, since the inherited token is the credential."""
+    nothing, since the inherited token is the credential. In both, the worker's GitHub token
+    emptied, since Claude Code's tools are the agent's (robinauts_worker_common.github)."""
     if mode is AuthMode.PERSONAL:
-        return {}
-    handed = {API_KEY_VARIABLE: keys.key_for(provider.id)}
+        return dict(HIDDEN_FROM_AGENTS)
+    handed = {**HIDDEN_FROM_AGENTS, API_KEY_VARIABLE: keys.key_for(provider.id)}
     if provider.base_url:
         handed[BASE_URL_VARIABLE] = provider.base_url
     return handed

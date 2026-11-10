@@ -36,6 +36,9 @@ COPY backend/src backend/src
 COPY extra-workers/claude-code-worker/pyproject.toml extra-workers/claude-code-worker/uv.lock \
     extra-workers/claude-code-worker/
 COPY extra-workers/claude-code-worker/src extra-workers/claude-code-worker/src
+# What the extra workers share, installed editable from where the worker's lock says it is.
+COPY extra-workers/worker-common/pyproject.toml extra-workers/worker-common/
+COPY extra-workers/worker-common/src extra-workers/worker-common/src
 # neorc-from-source: the worker never imports neorc, and this image has no Node.js to build it.
 RUN cd extra-workers/claude-code-worker && uv sync --locked --no-dev \
     --no-install-package neorc --no-install-package neorc-core --no-install-package neorc-ui

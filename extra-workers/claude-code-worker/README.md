@@ -73,6 +73,12 @@ worker adds:
   and the conversations' workspaces. Without them nothing outlives the
   container ("What is kept, and what is lost").
 - Every knob of "Configuration" goes in the same way, `-e NAME=value`.
+- `--env-file /etc/robinauts/github.env`, optional: `GITHUB_TOKEN`, for the
+  worker's own clones (`robinauts_worker_common.clone`), checked at the start
+  like every extra worker's
+  ([../worker-common/README.md](../worker-common/README.md)). Claude Code is
+  handed it emptied: its `Bash` and its `git` are the agent's, and the agent
+  never reads the token.
 - Not passed, and not to be: `ROBINAUTS_DATABASE_URL`. The worker refuses to
   start with it.
 
