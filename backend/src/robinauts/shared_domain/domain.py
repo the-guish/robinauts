@@ -24,6 +24,10 @@ class SessionNotFoundError(ControllerError):
     """Also for a session that exists and is not the user's."""
 
 
+class ProjectNotFoundError(ControllerError):
+    """Also for a project that exists and is not the user's."""
+
+
 class UnknownEngineError(ControllerError):
     """An agent configured on an engine this build does not have."""
 
@@ -229,6 +233,20 @@ class Message:
     """An answer whose turn failed: what it streamed before it failed, and no checkpoint."""
 
 
+DEFAULT_PROJECT = "Default"
+"""The name of the project every owner has, which a session is in unless another is chosen."""
+
+
+@dataclass(frozen=True, slots=True)
+class Project:
+    """A named group of one owner's sessions. Each owner's names are unique."""
+
+    id: uuid.UUID
+    owner_id: uuid.UUID
+    name: str
+    created_at: datetime
+
+
 @dataclass(frozen=True, slots=True)
 class Session:
     id: uuid.UUID
@@ -240,6 +258,8 @@ class Session:
     created_at: datetime
     updated_at: datetime
     title: str = ""
+    project_id: uuid.UUID = field(kw_only=True)
+    """The owner's project the session is in: ``DEFAULT_PROJECT`` unless another was chosen."""
 
 
 class TurnState(StrEnum):

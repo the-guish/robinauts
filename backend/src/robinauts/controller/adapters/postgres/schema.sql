@@ -112,6 +112,31 @@ CREATE TABLE IF NOT EXISTS users (
 
 
 -- ---------------------------------------------------------------------------
+-- Projects.
+-- ---------------------------------------------------------------------------
+
+-- A project: a named group of one owner's sessions (docs/specs/privacy.md).
+--
+-- Every owner has one named `Default`, made the first time it is needed, and
+-- a session that names no other project is in it. Names are unique per owner,
+-- so asking for a project by a name the owner already has finds that one.
+--
+-- `owner_id` cascades, like the sessions': a project is its owner's.
+CREATE TABLE IF NOT EXISTS projects (
+    id uuid
+        CONSTRAINT projects_pkey PRIMARY KEY,
+    owner_id uuid NOT NULL
+        CONSTRAINT projects_owner_id_fkey REFERENCES users (id) ON DELETE CASCADE,
+    name text NOT NULL,
+    created_at timestamptz NOT NULL,
+    CONSTRAINT projects_owner_id_name_key UNIQUE (owner_id, name),
+    -- What a session's composite key points at, so that its project is its
+    -- owner's.
+    CONSTRAINT projects_owner_id_id_key UNIQUE (owner_id, id)
+);
+
+
+-- ---------------------------------------------------------------------------
 -- Sessions.
 -- ---------------------------------------------------------------------------
 
@@ -138,18 +163,31 @@ CREATE TABLE IF NOT EXISTS users (
 --
 -- `owner_id` cascades: a user's sessions are private to them, and there is
 -- nobody else for them to belong to once the user is gone.
+--
+-- `project_id` is mandatory: a session is always in a project of its owner's,
+-- the owner's `Default` one unless another was chosen. The composite key
+-- points `(owner_id, project_id)` at `(owner_id, id)`, so a project of another
+-- owner cannot be named. There is no way to delete a project yet, so nothing
+-- here says what becomes of its sessions.
 CREATE TABLE IF NOT EXISTS sessions (
     id uuid
         CONSTRAINT sessions_pkey PRIMARY KEY,
     owner_id uuid NOT NULL
         CONSTRAINT sessions_owner_id_fkey REFERENCES users (id) ON DELETE CASCADE,
+    project_id uuid NOT NULL,
     agent text NOT NULL,
     engine text NOT NULL,
     title text NOT NULL,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
-    deleted_at timestamptz
+    deleted_at timestamptz,
+    CONSTRAINT sessions_project_fkey FOREIGN KEY (owner_id, project_id)
+        REFERENCES projects (owner_id, id)
 );
+
+-- The composite key's referencing side, which a project's deletion would read.
+CREATE INDEX IF NOT EXISTS sessions_project_idx
+    ON sessions (project_id);
 
 -- The listing: one owner's sessions, most recently updated first, ties broken
 -- by id so that the order is total and a keyset page, whose cursor is

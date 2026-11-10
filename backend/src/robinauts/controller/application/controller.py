@@ -36,11 +36,14 @@ from robinauts.controller.contract.domain import (
     User,
 )
 from robinauts.controller.contract.ports import Controller
+from robinauts.controller.core.projects import project_name
 from robinauts.controller.core.titles import title_from_text
 from robinauts.controller.ports.store import Cursor, Store
 from robinauts.shared_domain.domain import (
+    DEFAULT_PROJECT,
     Config,
     Message,
+    Project,
     Role,
     Session,
     TextPart,
@@ -165,8 +168,34 @@ class RobinautsController(Controller):
     ) -> Session:
         raise NotImplementedError("fork_session")
 
-    async def start_session(self, user: User, *, agent: str, model: str, text: str) -> TurnStarted:
+    async def list_projects(self, user: User) -> tuple[Project, ...]:
+        await self._default_project(user)
+        return tuple(await self._store.projects_of(user.id))
+
+    async def create_project(self, user: User, name: str) -> Project:
+        return await self._store.ensure_project(
+            Project(uuid.uuid4(), user.id, project_name(name), self._now())
+        )
+
+    async def _default_project(self, user: User) -> Project:
+        return await self._store.ensure_project(
+            Project(uuid.uuid4(), user.id, DEFAULT_PROJECT, self._now())
+        )
+
+    async def start_session(
+        self,
+        user: User,
+        *,
+        agent: str,
+        model: str,
+        text: str,
+        project: uuid.UUID | None = None,
+    ) -> TurnStarted:
         agent_config = self._config.agents[agent]
+        if project is None:
+            project = (await self._default_project(user)).id
+        else:
+            project = (await self._store.get_project(user.id, project)).id
         now = self._now()
         session = Session(
             uuid.uuid4(),
@@ -176,6 +205,7 @@ class RobinautsController(Controller):
             created_at=now,
             updated_at=now,
             title=title_from_text(text),
+            project_id=project,
         )
         question = Message(
             uuid.uuid4(),

@@ -27,7 +27,7 @@ from robinauts.shared_domain.domain import (
     TurnState,
 )
 from util.aio import asyncio_test
-from util.contracts.store import StoreContract, turn
+from util.contracts.store import StoreContract, add_user, session, turn
 from util.controller_db import TemporarySchema, requires_postgres, temporary_schema, url
 
 pytestmark = requires_postgres
@@ -55,8 +55,8 @@ class TestPostgresStore(StoreContract):
 
 async def seeded(store: Store) -> tuple[User, Session, StoredMessage, Turn]:
     """A session of a user with a question and a running turn."""
-    me = await store.add_or_refresh_user(User(uuid.uuid4(), "local", "me", created_at=NOW))
-    one = Session(uuid.uuid4(), me.id, "a", "echo", NOW, NOW)
+    me = await add_user(store, User(uuid.uuid4(), "local", "me", created_at=NOW))
+    one = session(me.id)
     await store.add_session(one)
     asked = StoredMessage(uuid.uuid4(), one.id, None, Role.USER, NOW, {"v": 1, "text": "hi"})
     running, task = turn(one.id, asked.id, lease_until=LEASE)

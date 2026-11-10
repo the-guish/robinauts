@@ -70,6 +70,8 @@ from robinauts.shared_domain.domain import (
     Config,
     ControllerError,
     Message,
+    Project,
+    ProjectNotFoundError,
     ReasoningPart,
     Role,
     Session,
@@ -124,6 +126,7 @@ MAX_CHANGES_TIMEOUT = 30.0
 STATUS_OF: dict[type[ControllerError], int] = {
     InvalidValueError: 422,
     SessionNotFoundError: 404,
+    ProjectNotFoundError: 404,
     MessageNotFoundError: 404,
     UnknownAgentError: 404,
     UnknownModelError: 422,
@@ -489,11 +492,27 @@ def tool_call_response(result: ToolResult) -> AppToolCallResponse:
     )
 
 
+class ProjectSummary(BaseModel):
+    id: uuid.UUID
+    name: str
+    created_at: datetime
+
+
+class ProjectListResponse(BaseModel):
+    items: list[ProjectSummary]
+    """Oldest first: the ``Default`` one is always among them."""
+
+
+class NewProjectRequest(BaseModel):
+    name: str
+
+
 class ConversationSummary(BaseModel):
     id: uuid.UUID
     title: str
     agent: str
     model: str
+    project_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
 
@@ -585,6 +604,8 @@ class NewChatRequest(BaseModel):
     agent_id: str
     model_id: str | None = None
     text: str
+    project_id: uuid.UUID | None = None
+    """The project the conversation goes in; left out, the user's ``Default`` one."""
 
 
 class TurnRequest(BaseModel):
@@ -631,12 +652,17 @@ def token_summary(token: ApiToken) -> ApiTokenSummary:
     )
 
 
+def project_summary(project: Project) -> ProjectSummary:
+    return ProjectSummary(id=project.id, name=project.name, created_at=project.created_at)
+
+
 def summary(session: Session, model: str) -> ConversationSummary:
     return ConversationSummary(
         id=session.id,
         title=session.title,
         agent=session.agent,
         model=model,
+        project_id=session.project_id,
         created_at=session.created_at,
         updated_at=session.updated_at,
     )
@@ -1179,6 +1205,18 @@ def create_app(
     ) -> AppToolCallResponse:
         return tool_call_response(await apps.call(body.agent, server, tool, body.arguments))
 
+    # --- projects --------------------------------------------------------------
+
+    @app.get("/api/projects")
+    async def list_projects(user: User = asking) -> ProjectListResponse:
+        projects = await controller.list_projects(user)
+        return ProjectListResponse(items=[project_summary(p) for p in projects])
+
+    @app.post("/api/projects", status_code=201)
+    async def create_project(body: NewProjectRequest, user: User = asking) -> ProjectSummary:
+        """The user's project of that name: a new one, or the one they already had."""
+        return project_summary(await controller.create_project(user, body.name))
+
     # --- sessions --------------------------------------------------------------
 
     @app.get("/api/conversations")
@@ -1251,7 +1289,7 @@ def create_app(
     async def start_session(body: NewChatRequest, user: User = asking) -> StreamingResponse:
         model = body.model_id or await default_model(body.agent_id)
         started = await controller.start_session(
-            user, agent=body.agent_id, model=model, text=body.text
+            user, agent=body.agent_id, model=model, text=body.text, project=body.project_id
         )
         return await stream_turn(user, started.session_id, started.turn_id, 0)
 

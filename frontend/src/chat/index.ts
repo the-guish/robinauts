@@ -76,6 +76,12 @@ export interface ChatProps {
   conversationId: ConversationId | null;
   agentId: AgentId | null;
   modelId: ModelId | null;
+  /**
+   * The project a first message starts the conversation in, like `agentId`
+   * a choice only while there is no conversation. Left out or `null`, the
+   * backend puts it in the user's "Default" project.
+   */
+  projectId?: string | null;
   onConversationStarted: (id: ConversationId) => void;
   /**
    * What the server says the conversation is, each time it is read.

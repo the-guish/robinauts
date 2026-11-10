@@ -16,6 +16,9 @@ type Opened = components["schemas"]["OpenedConversationResponse"];
 /** The run a conversation that is answering is answering with. */
 export const RUN = "11111111-2222-4333-8444-555555555555";
 
+/** The id of the "Default" project every conversation here is in. */
+export const DEFAULT_PROJECT_ID = "00000000-0000-4000-8000-999999999999";
+
 /** A conversation id of the shape the router insists on. */
 export function id(n: number): string {
   return `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -30,6 +33,7 @@ export function conversation(
     title,
     agent: "helper",
     model: "sonnet",
+    project_id: DEFAULT_PROJECT_ID,
     created_at: "2026-09-01T10:00:00Z",
     updated_at: "2026-09-02T10:00:00Z",
   };

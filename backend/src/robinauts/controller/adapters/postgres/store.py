@@ -41,6 +41,8 @@ from robinauts.controller.ports.store import (
     StoredMessage,
 )
 from robinauts.shared_domain.domain import (
+    Project,
+    ProjectNotFoundError,
     Role,
     Session,
     SessionNotFoundError,
@@ -66,8 +68,10 @@ CHANGES_CHANNEL = "robinauts_changes"
 ONE_ACTIVE = "turns_one_active_per_session"
 POSITION_TAKEN = "turn_events_pkey"
 USER_EXISTS = "users_provider_subject_key"
+PROJECT_OF_ANOTHER = "sessions_project_fkey"
 
-_SESSION_COLUMNS = "id, owner_id, agent, engine, title, created_at, updated_at"
+_SESSION_COLUMNS = "id, owner_id, project_id, agent, engine, title, created_at, updated_at"
+_PROJECT_COLUMNS = "id, owner_id, name, created_at"
 _TURN_COLUMNS = (
     "id, session_id, follows, model, state, started_at, ended_at, error, retries_message_id,"
     " task_id"
@@ -130,7 +134,12 @@ def _session(row: asyncpg.Record) -> Session:
         row["created_at"],
         row["updated_at"],
         row["title"],
+        project_id=row["project_id"],
     )
+
+
+def _project(row: asyncpg.Record) -> Project:
+    return Project(row["id"], row["owner_id"], row["name"], row["created_at"])
 
 
 def _turn(row: asyncpg.Record) -> Turn:
@@ -253,20 +262,68 @@ class PostgresStore(Store):
         )
         return _user(row)
 
+    # --- projects -----------------------------------------------------------
+
+    async def ensure_project(self, project: Project) -> Project:
+        async with self._pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                f"INSERT INTO projects ({_PROJECT_COLUMNS}) VALUES ($1, $2, $3, $4)"
+                " ON CONFLICT ON CONSTRAINT projects_owner_id_name_key DO NOTHING"
+                f" RETURNING {_PROJECT_COLUMNS}",
+                project.id,
+                project.owner_id,
+                project.name,
+                project.created_at,
+            )
+            if row is not None:
+                await _bump(connection, project.owner_id)
+                return _project(row)
+            there = await connection.fetchrow(
+                f"SELECT {_PROJECT_COLUMNS} FROM projects WHERE owner_id = $1 AND name = $2",
+                project.owner_id,
+                project.name,
+            )
+            return _project(there)
+
+    async def get_project(self, owner: uuid.UUID, project: uuid.UUID) -> Project:
+        row = await self._pool.fetchrow(
+            f"SELECT {_PROJECT_COLUMNS} FROM projects WHERE id = $1 AND owner_id = $2",
+            project,
+            owner,
+        )
+        if row is None:
+            raise ProjectNotFoundError(str(project))
+        return _project(row)
+
+    async def projects_of(self, owner: uuid.UUID) -> list[Project]:
+        rows = await self._pool.fetch(
+            f"SELECT {_PROJECT_COLUMNS} FROM projects WHERE owner_id = $1"
+            " ORDER BY created_at, id",
+            owner,
+        )
+        return [_project(row) for row in rows]
+
     # --- sessions -----------------------------------------------------------
 
     async def add_session(self, session: Session) -> None:
         async with self._pool.acquire() as connection, connection.transaction():
-            await connection.execute(
-                f"INSERT INTO sessions ({_SESSION_COLUMNS}) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-                session.id,
-                session.owner_id,
-                session.agent,
-                session.engine,
-                session.title,
-                session.created_at,
-                session.updated_at,
-            )
+            try:
+                await connection.execute(
+                    f"INSERT INTO sessions ({_SESSION_COLUMNS})"
+                    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    session.id,
+                    session.owner_id,
+                    session.project_id,
+                    session.agent,
+                    session.engine,
+                    session.title,
+                    session.created_at,
+                    session.updated_at,
+                )
+            except asyncpg.exceptions.ForeignKeyViolationError as violated:
+                if violated.constraint_name == PROJECT_OF_ANOTHER:
+                    raise ProjectNotFoundError(str(session.project_id)) from violated
+                raise
             await _bump(connection, session.owner_id)
 
     async def get_session(self, owner: uuid.UUID, session: uuid.UUID) -> Session:

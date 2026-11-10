@@ -11,26 +11,33 @@
  * directly and knows nothing of what draws the chat, and nothing here ever
  * will.
  *
- * There is **no projects section**: projects are out of the POC. The spec's
- * panel has one, and it goes here, between the history and the profile
- * block, when they exist.
+ * **The history is drawn a project at a time** (`../projects/`): each
+ * project folds away under its heading, and "New project" beside the
+ * history's heading makes another. Projects are the user's own; sharing one
+ * with other people is not there yet.
  *
  * The shape is neorc's, written again for this project; recorded in
  * `docs/legal/ip-clearance.md`.
  */
-import { useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 
-import { ApiError } from "../api/client";
+import { ApiError, detailOf } from "../api/client";
 import type { ConversationId } from "../chat";
 import type { History } from "../history/history";
 import { HistoryList } from "../history/HistoryList";
 import {
+  CheckIcon,
   LogOutIcon,
   MonitorIcon,
   PanelLeftIcon,
   PlusIcon,
   XIcon,
 } from "../icons";
+import {
+  MAX_PROJECT_NAME_CHARS,
+  type Folded,
+  type Project,
+} from "../projects/projects";
 import { DEVICES, formatRoute, type FlowsView } from "../router";
 import { FlowsSection } from "../flows/FlowsSection";
 import type { User } from "../session/session";
@@ -48,6 +55,14 @@ export interface PanelProps {
   history: History;
   /** The conversation the page is on, so the list can mark it. */
   current: ConversationId | null;
+  /** The user's projects, once they have come, to group the history by. */
+  projects?: readonly Project[] | null;
+  /** Which projects are folded away. */
+  folded?: Folded;
+  /** Start a new chat in that project. */
+  onNewChatIn?: (project: string) => void;
+  /** Make a project of that name; a refusal is thrown, to be shown here. */
+  onNewProject?: (name: string) => Promise<void>;
   /** Whether the page is "Linked devices", so its link can say so. */
   onDevices?: boolean;
   /**
@@ -75,6 +90,10 @@ export function Panel({
   user,
   history,
   current,
+  projects = null,
+  folded,
+  onNewChatIn,
+  onNewProject,
   onDevices = false,
   flowsUrl = null,
   flowsView = null,
@@ -152,11 +171,26 @@ export function Panel({
       {/* The one part of the panel that scrolls: a long history must not
           push the profile block off the bottom of the screen. */}
       <nav aria-label="History" className="panel-history panel-wide">
-        <h2 className="panel-heading">History</h2>
+        <div className="panel-heading-row">
+          <h2 className="panel-heading">History</h2>
+          {onNewProject !== undefined && (
+            <NewProject onNewProject={onNewProject} />
+          )}
+        </div>
         <HistoryList
           history={history}
           current={current}
           onOpened={onCloseDrawer}
+          projects={projects}
+          {...(folded === undefined ? {} : { folded })}
+          {...(onNewChatIn === undefined
+            ? {}
+            : {
+                onNewChatIn: (project: string) => {
+                  onNewChatIn(project);
+                  onCloseDrawer();
+                },
+              })}
         />
       </nav>
 
@@ -187,6 +221,123 @@ export function Panel({
         />
       </div>
     </aside>
+  );
+}
+
+/**
+ * "New project": a button that opens a name box in its place. Enter or the
+ * check makes it, Escape or the cross leaves it; a refusal is said under the
+ * box, which keeps what was typed.
+ */
+function NewProject({
+  onNewProject,
+}: Readonly<{ onNewProject: (name: string) => Promise<void> }>) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+  const box = useRef<HTMLInputElement>(null);
+  const opener = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open) box.current?.focus();
+    else if (wasOpen.current) opener.current?.focus();
+    wasOpen.current = open;
+  }, [open]);
+  const close = () => {
+    setOpen(false);
+    setName("");
+    setRefused(null);
+  };
+  const save = async () => {
+    if (busy) return;
+    const trimmed = name.trim();
+    if (trimmed === "") {
+      setRefused("A project needs a name.");
+      return;
+    }
+    if ([...trimmed].length > MAX_PROJECT_NAME_CHARS) {
+      setRefused(
+        `A project's name is at most ${MAX_PROJECT_NAME_CHARS} characters long.`,
+      );
+      return;
+    }
+    setBusy(true);
+    setRefused(null);
+    try {
+      await onNewProject(trimmed);
+      close();
+    } catch (failure) {
+      setRefused(detailOf(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!open) {
+    return (
+      <button
+        ref={opener}
+        type="button"
+        title="New project"
+        aria-label="New project"
+        onClick={() => {
+          setOpen(true);
+        }}
+        className="panel-tool panel-new-project"
+      >
+        <PlusIcon className="panel-icon-small" />
+      </button>
+    );
+  }
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.stopPropagation();
+        close();
+      }}
+      className="panel-project-form"
+    >
+      <input
+        ref={box}
+        aria-label="Project name"
+        placeholder="Project name"
+        value={name}
+        readOnly={busy}
+        aria-disabled={busy}
+        onChange={(event) => {
+          setName(event.target.value);
+        }}
+        className="panel-project-box"
+      />
+      <button
+        type="submit"
+        title="Create the project"
+        aria-label="Create the project"
+        aria-disabled={busy}
+        className="panel-tool"
+      >
+        <CheckIcon className="panel-icon-small" />
+      </button>
+      <button
+        type="button"
+        title="Cancel the new project"
+        aria-label="Cancel the new project"
+        onClick={close}
+        className="panel-tool"
+      >
+        <XIcon className="panel-icon-small" />
+      </button>
+      {refused !== null && (
+        <p role="alert" className="panel-project-refused">
+          {refused}
+        </p>
+      )}
+    </form>
   );
 }
 
