@@ -18,9 +18,10 @@ development mode, for the mode's one local user. The interface is the directory
 this checkout when it is built. Storage is the PostgreSQL ``ROBINAUTS_DATABASE_URL`` names,
 which a start with sign-in needs; the local development mode is in this process without it. The
 sign-in records are kept on the same storage. The server never changes the database: it
-refuses one that is not this build's and names the command. In the local development mode, an
-``[orchestration]`` table embeds neorc in the server, at ``/neorc``, and starts and stops what
-runs beside it with the server (``cli/orchestration.py``,
+refuses one that is not this build's and names the command. That file is the agents'
+configuration; the flows' is a folder of its own, which ``ROBINAUTS_FLOWS_DIR`` names. In the
+local development mode, a flows folder embeds neorc in the server, at ``/neorc``, and starts and
+stops what runs beside it with the server (``orchestrator/``,
 ``docs/architecture/orchestration.md``).
 """
 
@@ -42,7 +43,6 @@ from typing import Any
 import uvicorn
 from fastapi import FastAPI
 
-from robinauts.cli import orchestration
 from robinauts.cli.composition import (
     CONTROLLER_TABLES,
     DATABASE_URL_VARIABLE,
@@ -52,13 +52,24 @@ from robinauts.cli.composition import (
     configure,
     init_database,
     load,
+    orchestrator_of,
     read_tables,
     storage_from,
 )
 from robinauts.cli.lifecycle import Lifecycle, WorkerStartError
-from robinauts.cli.orchestration import Orchestration, OrchestrationStartError
 from robinauts.controller.contract.domain import ConfigError, DeviceSession, User
 from robinauts.controller.contract.ports import Credentials
+from robinauts.orchestrator.contract.domain import (
+    DEV_ONLY,
+    FLOWS_VARIABLE,
+    MOUNT,
+    MOVED,
+    TABLE,
+    UI_URL,
+    Orchestration,
+    OrchestrationStartError,
+    Orchestrator,
+)
 from robinauts.shared_domain.domain import Config, ControllerError, StorageConfig, StorageKind
 from robinauts.web.app import create_app
 from robinauts.web.contract.broker.wire import SERVER_KEEP_ALIVE_SECONDS
@@ -96,13 +107,14 @@ def serving(
     """What ``start`` serves with: the controller's configuration, how a secret is read, and
     sign-in's, ``None`` in the local development mode. ``ConfigError`` names every problem of
     a start that is refused."""
+    unknown = "{}: unknown key, neither a table of the controller's nor of sign-in's"
     problems = [
-        f"{key}: unknown key, neither a table of the controller's nor of sign-in's"
+        MOVED if key == TABLE else unknown.format(key)
         for key in tables
-        if key not in CONTROLLER_TABLES | SIGN_IN_KEYS | {orchestration.TABLE}
+        if key not in CONTROLLER_TABLES | SIGN_IN_KEYS
     ]
-    if orchestration.TABLE in tables and not dev_no_sign_in:
-        problems.append(orchestration.DEV_ONLY)
+    if environ.get(FLOWS_VARIABLE) and not dev_no_sign_in:
+        problems.append(DEV_ONLY)
     sign_in = None
     if dev_no_sign_in:
         if held := sorted(SIGN_IN_KEYS & tables.keys()):
@@ -153,7 +165,7 @@ def build_app(
     sign_in: SignInConfig | None,
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
-    orchestrator: Orchestration | None = None,
+    orchestration: Orchestration | None = None,
 ) -> FastAPI:
     """The HTTP server over what the composition built, with the lifecycle's gate for a worker
     in a process of its own and its health, and neorc's manager mounted on it when there is an
@@ -169,10 +181,11 @@ def build_app(
         secret_for=secret_for,
         config=composed.config,
         ui_dir=ui_dir,
-        flows_url=None if orchestrator is None else orchestration.UI_URL,
+        flows_url=None if orchestration is None else UI_URL,
+        flows=None if orchestration is None else orchestration.flows,
     )
-    if orchestrator is not None:
-        app.mount(orchestration.MOUNT, orchestrator.mounted)
+    if orchestration is not None:
+        app.mount(MOUNT, orchestration.embedded.mounted)
     return app
 
 
@@ -204,7 +217,7 @@ class Server(uvicorn.Server):
         self,
         config: uvicorn.Config,
         lifecycle: Lifecycle,
-        orchestration: Orchestration | None = None,
+        orchestration: Orchestrator | None = None,
     ) -> None:
         super().__init__(config)
         self._lifecycle = lifecycle
@@ -234,40 +247,6 @@ class Server(uvicorn.Server):
                 await self._lifecycle.stop()
 
 
-def orchestration_of(
-    tables: Mapping[str, Any],
-    environ: Mapping[str, str],
-    config: Config,
-    *,
-    config_path: Path,
-    api_url: str,
-) -> Orchestration | None:
-    """neorc as the ``[orchestration]`` table describes it, on this server's storage, and where
-    its worker reaches this server; ``None`` without the table. ``ConfigError`` names what stops
-    it from starting."""
-    table = tables.get(orchestration.TABLE)
-    if table is None:
-        return None
-    if not isinstance(table, Mapping):
-        raise ConfigError(f"[{orchestration.TABLE}]: a table")
-    described = orchestration.parse_orchestration(
-        table, base=config_path.parent, default_code=REPO / "orchestration"
-    )
-    command = orchestration.neorc_command()
-    ui = orchestration.built_ui()
-    if problems := orchestration.check_ready(described, command=command, ui=ui):
-        raise ConfigError("\n".join(problems))
-    return Orchestration(
-        described,
-        environ,
-        hidden=orchestration.hidden_variables(config),
-        api_url=api_url,
-        database_url=environ.get(DATABASE_URL_VARIABLE) or None,
-        command=command,
-        ui=ui,
-    )
-
-
 def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     ui_dir = interface()
     config_path = Path(os.environ["ROBINAUTS_CONFIG"])
@@ -276,11 +255,10 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         config, secret_for, sign_in = serving(
             tables, os.environ, host=host, dev_no_sign_in=dev_no_sign_in
         )
-        orchestrator = orchestration_of(
-            tables,
+        orchestration = orchestrator_of(
             os.environ,
             config,
-            config_path=config_path,
+            default_code=REPO / "orchestration",
             api_url=worker_broker_url(host, port),
         )
     except ConfigError as refused:
@@ -308,7 +286,7 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         sign_in=sign_in,
         secret_for=secret_for,
         ui_dir=ui_dir,
-        orchestrator=orchestrator,
+        orchestration=orchestration,
     )
     config = uvicorn.Config(
         app,
@@ -317,7 +295,7 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
         timeout_keep_alive=SERVER_KEEP_ALIVE_SECONDS,
     )
-    server = Server(config, lifecycle, orchestrator)
+    server = Server(config, lifecycle, None if orchestration is None else orchestration.embedded)
     try:
         asyncio.run(serve(server, lifecycle), loop_factory=config.get_loop_factory())
     except (ControllerError, WorkerStartError, OrchestrationStartError) as refused:

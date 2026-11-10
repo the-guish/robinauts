@@ -25,12 +25,16 @@ robinauts/
       controller/       the application: contract/ (and contract/broker/),
                         core/, ports/, application/,
                         adapters/{in_process,postgres}/
+      orchestrator/     flows and their runs, a sibling of the controller that
+                        sees its contract alone: contract/, ports/, core/,
+                        application/, adapters/ (adapters/neorc/ is the one
+                        place neorc is imported)
       worker/           runs the turns; of the controller it sees
                         contract/broker/ alone
       web/              the HTTP server and sign-in
-      cli/              the robinauts command: builds the controller and the worker
-                        (composition.py), and starts and stops them, neorc
-                        (orchestration.py) and the HTTP server
+      cli/              the robinauts command: builds the controller, the worker
+                        and the orchestrator (composition.py), and starts and
+                        stops them and the HTTP server
     tests/              unit/, fast/, api/, adapters_free/, adapters_metered/,
                         e2e/, tooling/, util/
 ```

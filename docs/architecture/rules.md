@@ -9,14 +9,17 @@ runs them.
 shared_domain -> nothing from robinauts; any package but agent_engines may import it
 agent_engines -> nothing from robinauts
 tools -> agent_engines.contract
-controller -> shared_domain
+controller -> shared_domain; nothing of the orchestrator
+orchestrator -> shared_domain, controller.contract
 worker -> controller.contract.broker, web.contract.broker, agent_engines.contract, tools.contract
-web -> controller.contract
-cli -> web, controller, worker, tools, agent_engines.contract, all but web and controller.contract by cli.composition alone; imported by nothing
+web -> controller.contract, orchestrator.contract
+cli -> web, controller, orchestrator, worker, tools, agent_engines.contract, all but web, controller.contract and orchestrator.contract by cli.composition alone; imported by nothing
 
 ```mermaid
 flowchart TD
     web --> controller
+    web --> orchestrator
+    orchestrator --> controller
     worker -- "web/direct" --> controller
     worker --> tools
     worker --> agent_engines
@@ -46,6 +49,15 @@ core -> contract, ports; pure functions, no I/O
 adapters -> contract, ports
 application -> contract, ports, core
 
+## Inside orchestrator
+
+contract -> nothing from robinauts
+ports -> contract
+core -> contract, ports, controller.contract, shared_domain; pure functions, no I/O
+adapters -> contract, ports, controller.contract, shared_domain
+adapters.neorc -> the one place neorc is imported
+application -> contract, ports, core, controller.contract, shared_domain
+
 ## Inside web
 
 contract -> controller.contract; nothing else of web
@@ -60,5 +72,5 @@ httpx -> web, worker.http_turn_broker, langchain_engine, pydantic_ai_engine
 fastapi -> web, cli
 starlette, ag_ui -> web
 uvicorn -> cli
-neorc, neorc_core, neorc_ui -> cli
+neorc, neorc_core, neorc_ui -> orchestrator.adapters.neorc
 qrcodegen -> web

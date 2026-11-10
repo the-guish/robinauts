@@ -2,7 +2,7 @@
 # Copyright The Robinauts Authors
 
 """The orchestrator ``robinauts start`` embeds in the local development mode
-(``docs/architecture/orchestration.md``): with an ``[orchestration]`` table, neorc's manager is
+(``docs/architecture/orchestration.md``): with a flows folder, neorc's manager is
 mounted at ``/neorc``, its UI at ``/neorc/ui/``, behind this server's checks and port; the flows
 are uploaded at the start, its scheduler runs in the server and its worker in a process of its
 own, against ``/neorc``. A run of ``guess_number`` started through the mount plays the game
@@ -48,19 +48,20 @@ title = "Echo"
 system_prompt = ""
 model = "haiku"
 engine = "echo"
-
-[orchestration]
-code_location = "{code}"
 """
+
+SHIPPED = REPO / "orchestration" / "flows"
+"""The flows folder Robinauts ships, with no settings file: the handlers beside it."""
 
 RUN_SECONDS = 120.0
 """Ten rounds of the game on the echo engine, with a margin for a slow machine."""
 
 
-def environment_for(config: Path) -> dict[str, str]:
+def environment_for(config: Path, flows: Path = SHIPPED) -> dict[str, str]:
     environment = {
         **os.environ,
         "ROBINAUTS_CONFIG": str(config),
+        "ROBINAUTS_FLOWS_DIR": str(flows),
         "ECHO_API_KEY": "not-a-real-key",
         # The worker imports the handlers from the checkout: it must leave nothing there.
         "PYTHONDONTWRITEBYTECODE": "1",
@@ -127,7 +128,7 @@ def test_neorc_is_mounted_in_the_server_and_a_run_of_its_flow_plays_the_game(
     tmp_path: Path,
 ) -> None:
     config = tmp_path / "robinauts.toml"
-    config.write_text(CONFIG.format(code=REPO / "orchestration"))
+    config.write_text(CONFIG)
     with started(config, environment_for(config)) as (url, said):
         with httpx.Client(base_url=url, timeout=30.0) as api:
             session = api.get("/auth/session").json()
@@ -140,7 +141,7 @@ def test_neorc_is_mounted_in_the_server_and_a_run_of_its_flow_plays_the_game(
 
 def test_the_ui_is_framable_by_this_server_alone_and_the_api_by_nothing(tmp_path: Path) -> None:
     config = tmp_path / "robinauts.toml"
-    config.write_text(CONFIG.format(code=REPO / "orchestration"))
+    config.write_text(CONFIG)
     with started(config, environment_for(config)) as (url, _):
         with httpx.Client(base_url=url, timeout=30.0) as api:
             page = api.get("/neorc/ui/")
@@ -170,25 +171,158 @@ def test_the_ui_is_framable_by_this_server_alone_and_the_api_by_nothing(tmp_path
 
 
 def test_a_start_whose_flows_are_refused_is_refused_before_it_binds(tmp_path: Path) -> None:
-    code = tmp_path / "code"
-    (code / "flows").mkdir(parents=True)
-    (code / "flows" / "broken.yaml").write_text("name: broken\nversion: 1.0.0\nsteps: 3\n")
+    flows = tmp_path / "flows"
+    flows.mkdir()
+    (flows / "broken.yaml").write_text("name: broken\nversion: 1.0.0\nsteps: 3\n")
     config = tmp_path / "robinauts.toml"
-    config.write_text(CONFIG.format(code=code))
+    config.write_text(CONFIG)
     port = stack.free_port()
     start = [str(stack.ROBINAUTS), "start", "--dev-no-sign-in", "--port", str(port)]
-    refused = subprocess.run(start, env=environment_for(config), capture_output=True, timeout=60)
+    environment = environment_for(config, flows)
+    refused = subprocess.run(start, env=environment, capture_output=True, timeout=60)
     assert refused.returncode == 1
     assert b"neorc refused the flows in" in refused.stderr, refused.stderr
 
 
-def test_a_table_of_the_old_shape_is_refused_with_the_reason(tmp_path: Path) -> None:
+def test_a_folder_of_one_s_own_flows_is_served_as_its_flows_toml_says(tmp_path: Path) -> None:
+    """A folder anywhere, with the shipped handlers as its default, and the UI turned off."""
+    flows = tmp_path / "my-flows"
+    flows.mkdir()
+    (flows / "guess_number.yaml").write_text((SHIPPED / "guess_number.yaml").read_text())
+    (flows / "flows.toml").write_text("ui = false\n")
     config = tmp_path / "robinauts.toml"
-    config.write_text(CONFIG.format(code=REPO / "orchestration") + "port = 8420\n")
+    config.write_text(CONFIG)
+    with started(config, environment_for(config, flows)) as (url, _):
+        with httpx.Client(base_url=url, timeout=30.0) as api:
+            listed = api.get("/neorc/flows").json()["flows"]
+            page = api.get("/neorc/ui/")
+    assert [f["name"] for f in listed] == ["guess_number"]
+    assert page.status_code == 404
+
+
+def test_a_flows_toml_that_is_not_toml_is_refused_before_it_binds(tmp_path: Path) -> None:
+    flows = tmp_path / "flows"
+    flows.mkdir()
+    (flows / "flows.toml").write_text("ui = \n")
+    config = tmp_path / "robinauts.toml"
+    config.write_text(CONFIG)
+    start = [str(stack.ROBINAUTS), "start", "--dev-no-sign-in", "--port", str(stack.free_port())]
+    environment = environment_for(config, flows)
+    refused = subprocess.run(start, env=environment, capture_output=True, timeout=30)
+    assert refused.returncode == 1
+    assert b"flows.toml: not TOML" in refused.stderr, refused.stderr
+
+
+PROBE_FLOW = """
+name: intake_probe
+version: 0.1.0
+inputs:
+  task: string
+  repo_branch: string
+  model: string
+  agent: string
+output: tasks.pick
+steps:
+  pick:
+    queue: default
+    handler: robinauts_tasks:pick_number
+"""
+PROBE_FORM = """
+title = "Probe"
+[inputs.repo_branch]
+label = "Repository"
+lov = "repo_branch"
+[inputs.model]
+lov = "model"
+[inputs.agent]
+lov = "agent"
+"""
+PROBE_SETTINGS = """
+[repositories.app]
+url = "https://git.example/app"
+branches = ["main", "next"]
+"""
+
+
+def probe_folder(tmp_path: Path, form: str = PROBE_FORM) -> Path:
+    """A flows folder of one flow with four string inputs, three of them from lists of values."""
+    flows = tmp_path / "flows"
+    flows.mkdir()
+    (flows / "intake_probe.yaml").write_text(PROBE_FLOW)
+    (flows / "intake_probe.form.toml").write_text(form)
+    (flows / "flows.toml").write_text(PROBE_SETTINGS)
+    return flows
+
+
+def test_a_flow_with_a_form_is_listed_with_its_values_and_started_with_them(
+    tmp_path: Path,
+) -> None:
+    """The form's lists come from the flows folder's repositories and the agents'
+    configuration; a run starts once its inputs fit them, with them as they came."""
+    config = tmp_path / "robinauts.toml"
+    config.write_text(CONFIG)
+    inputs = {
+        "task": "Fix the bug",
+        "repo_branch": "https://git.example/app@next",
+        "model": "haiku",
+        "agent": "echo",
+    }
+    with started(config, environment_for(config, probe_folder(tmp_path))) as (url, _):
+        with httpx.Client(base_url=url, timeout=30.0, headers={"origin": url}) as api:
+            listed = api.get("/api/flows").json()["items"]
+            wrong = api.post(
+                "/api/flows/intake_probe/runs", json={"inputs": {**inputs, "model": "gpt"}}
+            )
+            missing = api.post("/api/flows/intake_probe/runs", json={"inputs": {"task": "x"}})
+            unknown = api.post("/api/flows/nothing/runs", json={"inputs": {}})
+            begun = api.post("/api/flows/intake_probe/runs", json={"inputs": inputs})
+            assert begun.status_code == 201, begun.text
+            run = api.get(f"/neorc/runs/{begun.json()['id']}").json()
+    [probe] = listed
+    assert (probe["name"], probe["title"], probe["has_form"]) == ("intake_probe", "Probe", True)
+    fields = {field["name"]: field for field in probe["inputs"]}
+    assert list(fields) == ["repo_branch", "model", "agent", "task"]
+    assert fields["repo_branch"]["options"] == [
+        {"value": "https://git.example/app@main", "label": "app · main"},
+        {"value": "https://git.example/app@next", "label": "app · next"},
+    ]
+    assert fields["model"]["options"] == [{"value": "haiku", "label": "Echo Haiku"}]
+    assert fields["agent"]["options"] == [{"value": "echo", "label": "Echo · default"}]
+    assert fields["task"] == {
+        "name": "task",
+        "label": "task",
+        "type": "string",
+        "lov": None,
+        "options": None,
+    }
+    assert wrong.status_code == 422
+    assert "'gpt' is not one of its model values" in wrong.json()["detail"]
+    assert missing.status_code == 422
+    assert unknown.status_code == 404
+    assert run["inputs"] == inputs
+
+
+def test_a_form_that_does_not_fit_its_flow_is_refused_before_it_binds(tmp_path: Path) -> None:
+    config = tmp_path / "robinauts.toml"
+    config.write_text(CONFIG)
+    flows = probe_folder(tmp_path, form='[inputs.colour]\nlov = "model"\n')
+    start = [str(stack.ROBINAUTS), "start", "--dev-no-sign-in", "--port", str(stack.free_port())]
+    environment = environment_for(config, flows)
+    refused = subprocess.run(start, env=environment, capture_output=True, timeout=30)
+    assert refused.returncode == 1
+    assert b"intake_probe declares no input 'colour'" in refused.stderr, refused.stderr
+
+
+def test_the_flows_settings_in_the_agents_file_are_refused_with_where_they_went(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "robinauts.toml"
+    config.write_text(CONFIG + "\n[orchestration]\n")
     start = [str(stack.ROBINAUTS), "start", "--dev-no-sign-in", "--port", str(stack.free_port())]
     refused = subprocess.run(start, env=environment_for(config), capture_output=True, timeout=30)
     assert refused.returncode == 1
-    assert b"[orchestration] port: no longer read: neorc runs inside the server" in refused.stderr
+    assert b"[orchestration]: no longer read from this file" in refused.stderr
+    assert b"ROBINAUTS_FLOWS_DIR" in refused.stderr
 
 
 @contextmanager
@@ -210,7 +344,7 @@ def a_database() -> Iterator[str]:
 @pytest.mark.skipif(os.environ.get("ROBINAUTS_TEST_DATABASE_URL") is None, reason=NO_DATABASE)
 def test_on_postgresql_neorc_keeps_its_tables_in_a_schema_of_its_own(tmp_path: Path) -> None:
     config = tmp_path / "robinauts.toml"
-    config.write_text(CONFIG.format(code=REPO / "orchestration"))
+    config.write_text(CONFIG)
     with a_database() as database_url:
         environment = environment_for(config)
         environment["ROBINAUTS_DATABASE_URL"] = database_url

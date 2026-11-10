@@ -11,7 +11,8 @@ A worker in a process of its own is built with `compose_worker`, over the core i
 The file holds web's tables beside the controller's, so web is handed the tables of one
 reading and parses its own. Also
 what `robinauts db init` does, since it is the one other thing that names the store and the
-engines together."""
+engines together. And the orchestrator, when ``ROBINAUTS_FLOWS_DIR`` names a flows folder:
+neorc, embedded (``orchestrator/adapters/neorc``)."""
 
 from __future__ import annotations
 
@@ -41,6 +42,12 @@ from robinauts.controller.contract.domain import ConfigError
 from robinauts.controller.contract.ports import Controller, Credentials
 from robinauts.controller.core.config import parse_config
 from robinauts.controller.ports.store import Store
+from robinauts.orchestrator.adapters.flows_folder import read_forms, read_settings
+from robinauts.orchestrator.adapters.neorc import embedded as neorc
+from robinauts.orchestrator.application.flows import FlowForms
+from robinauts.orchestrator.contract.domain import FLOWS_VARIABLE, FormSpec, Orchestration
+from robinauts.orchestrator.core.config import parse_flows_settings
+from robinauts.orchestrator.core.forms import check_forms, parse_form
 from robinauts.shared_domain.domain import DEFAULT_WORKER, Config, StorageConfig, StorageKind
 from robinauts.tools import sessions
 from robinauts.tools.contract.ports import ToolProvider
@@ -201,3 +208,59 @@ async def init_database(url: str, config: Config, secret_for: SecretLookup) -> s
     finally:
         await pool.close()
     return SCHEMA_READY.format(version=SCHEMA_VERSION, digest=SCHEMA_SHA256[:12])
+
+
+def orchestrator_of(
+    environ: Mapping[str, str],
+    config: Config,
+    *,
+    default_code: Path,
+    api_url: str,
+) -> Orchestration | None:
+    """neorc over the flows folder ``ROBINAUTS_FLOWS_DIR`` names, as its ``flows.toml``
+    describes it, on this server's storage, and where its worker reaches this server; and the
+    folder's flows as forms, with the lists of values ``config``, the agents' configuration,
+    and the folder's repositories give. ``None`` without the variable. ``default_code`` is
+    where the handlers are when ``flows.toml`` names none. ``ConfigError`` names what stops it
+    from starting."""
+    named = environ.get(FLOWS_VARIABLE)
+    if not named:
+        return None
+    folder = Path(named).absolute()
+    problems: list[str] = []
+    forms: dict[str, FormSpec] = {}
+    declared: dict[str, dict[str, str]] = {}
+    settings: dict[str, Any] = {}
+    if folder.is_dir():
+        settings = read_settings(folder)
+        for flow, table in read_forms(folder).items():
+            form, wrong = parse_form(flow, table)
+            problems += wrong
+            if form is not None:
+                forms[flow] = form
+        declared = neorc.declared_inputs(folder)
+        problems += check_forms(forms, declared)
+    try:
+        described = parse_flows_settings(
+            settings, folder=folder, default_code=default_code, forms=forms
+        )
+    except ConfigError as refused:
+        problems.insert(0, str(refused))
+    else:
+        command = neorc.neorc_command()
+        ui = neorc.built_ui()
+        problems = neorc.check_ready(described, command=command, ui=ui) + problems
+    if problems:
+        raise ConfigError("\n".join(problems))
+    embedded = neorc.EmbeddedNeorc(
+        described,
+        environ,
+        hidden=neorc.hidden_variables(config),
+        api_url=api_url,
+        database_url=environ.get(DATABASE_URL_VARIABLE) or None,
+        command=command,
+        ui=ui,
+    )
+    return Orchestration(
+        embedded=embedded, flows=FlowForms(embedded.engine, described, declared, config)
+    )

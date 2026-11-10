@@ -252,6 +252,7 @@ source_modules = ["robinauts.shared_domain"]
 forbidden_modules = [
     "robinauts.agent_engines",
     "robinauts.controller",
+    "robinauts.orchestrator",
     "robinauts.tools",
     "robinauts.worker",
     "robinauts.web",
@@ -266,6 +267,7 @@ source_modules = ["robinauts.agent_engines"]
 forbidden_modules = [
     "robinauts.shared_domain",
     "robinauts.controller",
+    "robinauts.orchestrator",
     "robinauts.tools",
     "robinauts.worker",
     "robinauts.web",
@@ -299,6 +301,7 @@ allow_indirect_imports = true
 source_modules = ["robinauts.controller"]
 forbidden_modules = [
     "robinauts.agent_engines",
+    "robinauts.orchestrator",
     "robinauts.tools",
     "robinauts.worker",
     "robinauts.web",
@@ -378,7 +381,7 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "web imports only the controller's contract"
+name = "web imports only the controller's and the orchestrator's contracts"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts.web"]
@@ -388,6 +391,10 @@ forbidden_modules = [
     "robinauts.controller.ports",
     "robinauts.controller.adapters",
     "robinauts.controller.application",
+    "robinauts.orchestrator.ports",
+    "robinauts.orchestrator.core",
+    "robinauts.orchestrator.adapters",
+    "robinauts.orchestrator.application",
     "robinauts.agent_engines",
     "robinauts.tools",
     "robinauts.worker",
@@ -397,7 +404,7 @@ forbidden_modules = [
 # What another package may import of web. A new module of web adds itself to the list.
 
 [[tool.importlinter.contracts]]
-name = "web's contract imports only the controller's contract"
+name = "web's contract imports only the controller's and the orchestrator's contracts"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts.web.contract"]
@@ -418,6 +425,10 @@ forbidden_modules = [
     "robinauts.controller.core",
     "robinauts.controller.adapters",
     "robinauts.controller.application",
+    "robinauts.orchestrator.ports",
+    "robinauts.orchestrator.core",
+    "robinauts.orchestrator.adapters",
+    "robinauts.orchestrator.application",
     "robinauts.cli",
     "robinauts.agent_engines",
     "robinauts.tools",
@@ -440,6 +451,7 @@ forbidden_modules = [
     "robinauts.controller.core",
     "robinauts.controller.adapters",
     "robinauts.controller.application",
+    "robinauts.orchestrator",
     "robinauts.cli",
     "robinauts.agent_engines.echo_engine",
     "robinauts.agent_engines.langchain_engine",
@@ -465,11 +477,84 @@ source_modules = [
 forbidden_modules = ["robinauts.worker"]
 ignore_imports = ["robinauts.cli.composition -> robinauts.worker.*"]
 
+# --- orchestrator ----------------------------------------------------------------
+# A sibling of the controller: flows and their runs, on neorc. It may see the
+# controller's contract; nothing of the controller sees it (above).
+
+[[tool.importlinter.contracts]]
+name = "orchestrator imports shared_domain and the controller's contract alone"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.orchestrator"]
+forbidden_modules = [
+    "robinauts.controller.ports",
+    "robinauts.controller.core",
+    "robinauts.controller.adapters",
+    "robinauts.controller.application",
+    "robinauts.agent_engines",
+    "robinauts.tools",
+    "robinauts.worker",
+    "robinauts.web",
+    "robinauts.cli",
+]
+
+[[tool.importlinter.contracts]]
+name = "the orchestrator's contract imports nothing from robinauts"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.orchestrator.contract"]
+forbidden_modules = [
+    "robinauts.orchestrator.ports",
+    "robinauts.orchestrator.core",
+    "robinauts.orchestrator.adapters",
+    "robinauts.orchestrator.application",
+    "robinauts.controller",
+    "robinauts.shared_domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "orchestrator.ports imports only the orchestrator's contract"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.orchestrator.ports"]
+forbidden_modules = [
+    "robinauts.orchestrator.core",
+    "robinauts.orchestrator.adapters",
+    "robinauts.orchestrator.application",
+]
+
+[[tool.importlinter.contracts]]
+name = "orchestrator.core imports the contracts and the ports"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.orchestrator.core"]
+forbidden_modules = [
+    "robinauts.orchestrator.adapters",
+    "robinauts.orchestrator.application",
+]
+
+[[tool.importlinter.contracts]]
+name = "orchestrator.adapters imports the contracts and the ports"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.orchestrator.adapters"]
+forbidden_modules = [
+    "robinauts.orchestrator.core",
+    "robinauts.orchestrator.application",
+]
+
+[[tool.importlinter.contracts]]
+name = "orchestrator.application imports the contracts, the ports and the core"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.orchestrator.application"]
+forbidden_modules = ["robinauts.orchestrator.adapters"]
+
 # --- cli -----------------------------------------------------------------------
 # What runs Robinauts: it builds the parts with composition and runs web over them.
 
 [[tool.importlinter.contracts]]
-name = "cli imports web and the controller's contract, but for its composition"
+name = "cli imports web and the controller's and the orchestrator's contracts, but for its composition"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts.cli"]
@@ -478,6 +563,10 @@ forbidden_modules = [
     "robinauts.controller.core",
     "robinauts.controller.adapters",
     "robinauts.controller.application",
+    "robinauts.orchestrator.ports",
+    "robinauts.orchestrator.core",
+    "robinauts.orchestrator.adapters",
+    "robinauts.orchestrator.application",
     "robinauts.agent_engines",
     "robinauts.tools",
     "robinauts.worker",
@@ -496,6 +585,7 @@ source_modules = [
     "robinauts.tools",
     "robinauts.worker",
     "robinauts.web",
+    "robinauts.orchestrator",
 ]
 forbidden_modules = ["robinauts.cli"]
 
@@ -512,6 +602,7 @@ allow_indirect_imports = true
 source_modules = ["robinauts.tools"]
 forbidden_modules = [
     "robinauts.controller",
+    "robinauts.orchestrator",
     "robinauts.cli",
     "robinauts.agent_engines.echo_engine",
     "robinauts.agent_engines.langchain_engine",
@@ -683,13 +774,13 @@ ignore_imports = [
 unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
-name = "neorc only under cli"
+name = "neorc only under orchestrator.adapters.neorc"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts"]
 forbidden_modules = ["neorc", "neorc_core", "neorc_ui"]
 ignore_imports = [
-    "robinauts.cli -> *",
-    "robinauts.cli.** -> *",
+    "robinauts.orchestrator.adapters.neorc -> *",
+    "robinauts.orchestrator.adapters.neorc.** -> *",
 ]
 unmatched_ignore_imports_alerting = "none"
