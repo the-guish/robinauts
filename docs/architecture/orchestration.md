@@ -51,13 +51,14 @@ The agents and the flows are configured apart, each in a place of its own:
 | | named by | holds |
 |---|---|---|
 | **agents** | `ROBINAUTS_CONFIG`, a TOML file | model providers, models, tool servers, agents, workers, sign-in: everything Robinauts has without neorc |
-| **flows** | `ROBINAUTS_FLOWS_DIR`, a folder | the flow files (`*.yaml`, `*.yml`), uploaded to neorc as they are, and `flows.toml`, their settings |
+| **flows** | `ROBINAUTS_FLOWS_DIR`, a folder | the flow files (`*.yaml`, `*.yml`), uploaded to neorc as they are; their forms, `<flow>.form.toml`; and `flows.toml`, their settings and repositories |
 
 Without `ROBINAUTS_FLOWS_DIR` there is no orchestrator. The agents' file knows
 nothing of the flows: an `[orchestration]` table in it, where the flows'
 settings were before they had a folder, is refused with where they went.
 
-`flows.toml` is optional; these are its keys and their defaults:
+`flows.toml` is optional; these are its keys and their defaults (and its
+`[repositories]`, under [Flows as forms](#flows-as-forms)):
 
 ```toml
 code_location = "handlers"   # the handlers; default: this checkout's orchestration/
@@ -71,6 +72,62 @@ default:
 ```bash
 ROBINAUTS_FLOWS_DIR=~/robinauts/flows robinauts start --dev-no-sign-in
 ```
+
+### Flows as forms
+
+The interface starts a flow from a form of its own, not from neorc's: the
+server lists every flow of the flows folder with its inputs, and the values
+each may take, and starts a run once the inputs fit
+([orchestrator/application/flows.py](../../backend/src/robinauts/orchestrator/application/flows.py)).
+The inputs go to neorc as they came: neorc knows nothing of the forms, and its
+flow files are plain neorc flows.
+
+| route | answer |
+|---|---|
+| `GET /api/flows` | every flow, with its inputs: a label, the type the flow declares, and the values a list of values offers |
+| `POST /api/flows/<name>/runs` | `{"inputs": {...}}`; 201 with the run's id, 404 for a flow the folder does not hold, 422 for inputs that do not fit |
+
+A flow's form is `<flow name>.form.toml`, beside it in the flows folder. It is
+optional: without one, every input is a plain field.
+
+```toml
+title = "Code and review"
+
+[inputs.task]
+label = "Task"
+
+[inputs.repo_branch]
+label = "Repository"
+lov = "repo_branch"
+
+[inputs.model]
+lov = "model"
+
+[inputs.agent]
+lov = "agent"
+```
+
+The form's inputs come first, in its order, then those it leaves out. An input
+it names must be one its flow declares, and an input with a list of values
+must be a `string`: a form that does not fit its flow is refused at the start.
+There are three lists of values:
+
+| `lov` | the values | the value sent |
+|---|---|---|
+| `repo_branch` | each branch of each repository of `flows.toml` | `<url>@<branch>` |
+| `model` | the models of the agents' configuration | the model's id |
+| `agent` | its agents, each labelled with the worker it runs on | the agent's id |
+
+The repositories are the flows' configuration, in `flows.toml`:
+
+```toml
+[repositories.robinauts]
+url = "https://github.com/the-guish/robinauts"
+branches = ["main"]
+```
+
+A model the chosen agent's engine cannot reach is not refused yet: that needs
+the engines' provider kinds, which the orchestrator does not see.
 
 ### Why the worker is a process of its own
 

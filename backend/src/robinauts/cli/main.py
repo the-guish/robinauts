@@ -66,6 +66,7 @@ from robinauts.orchestrator.contract.domain import (
     MOVED,
     TABLE,
     UI_URL,
+    Orchestration,
     OrchestrationStartError,
     Orchestrator,
 )
@@ -164,7 +165,7 @@ def build_app(
     sign_in: SignInConfig | None,
     secret_for: SecretLookup,
     ui_dir: Path | None = None,
-    orchestrator: Orchestrator | None = None,
+    orchestration: Orchestration | None = None,
 ) -> FastAPI:
     """The HTTP server over what the composition built, with the lifecycle's gate for a worker
     in a process of its own and its health, and neorc's manager mounted on it when there is an
@@ -180,10 +181,11 @@ def build_app(
         secret_for=secret_for,
         config=composed.config,
         ui_dir=ui_dir,
-        flows_url=None if orchestrator is None else UI_URL,
+        flows_url=None if orchestration is None else UI_URL,
+        flows=None if orchestration is None else orchestration.flows,
     )
-    if orchestrator is not None:
-        app.mount(MOUNT, orchestrator.mounted)
+    if orchestration is not None:
+        app.mount(MOUNT, orchestration.embedded.mounted)
     return app
 
 
@@ -253,7 +255,7 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         config, secret_for, sign_in = serving(
             tables, os.environ, host=host, dev_no_sign_in=dev_no_sign_in
         )
-        orchestrator = orchestrator_of(
+        orchestration = orchestrator_of(
             os.environ,
             config,
             default_code=REPO / "orchestration",
@@ -284,7 +286,7 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         sign_in=sign_in,
         secret_for=secret_for,
         ui_dir=ui_dir,
-        orchestrator=orchestrator,
+        orchestration=orchestration,
     )
     config = uvicorn.Config(
         app,
@@ -293,7 +295,7 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
         timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
         timeout_keep_alive=SERVER_KEEP_ALIVE_SECONDS,
     )
-    server = Server(config, lifecycle, orchestrator)
+    server = Server(config, lifecycle, None if orchestration is None else orchestration.embedded)
     try:
         asyncio.run(serve(server, lifecycle), loop_factory=config.get_loop_factory())
     except (ControllerError, WorkerStartError, OrchestrationStartError) as refused:

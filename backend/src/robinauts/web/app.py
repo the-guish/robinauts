@@ -60,6 +60,12 @@ from robinauts.controller.contract.domain import (
     User,
 )
 from robinauts.controller.contract.ports import Controller, Credentials
+from robinauts.orchestrator.contract.domain import (
+    FlowForm,
+    Flows,
+    InvalidInputsError,
+    NoSuchFlowError,
+)
 from robinauts.shared_domain.domain import (
     Config,
     ControllerError,
@@ -389,6 +395,66 @@ class ModelListResponse(BaseModel):
     items: list[ModelSummary]
 
 
+class FlowOptionSummary(BaseModel):
+    value: str
+    label: str
+
+
+class FlowInputSummary(BaseModel):
+    name: str
+    label: str
+    type: str
+    """The type the flow declares: ``string``, ``number``, ``boolean`` or ``datetime``."""
+    lov: str | None = None
+    """The list of values it takes its value from: ``repo_branch``, ``model`` or ``agent``."""
+    options: list[FlowOptionSummary] | None = None
+    """The values it may take, when it has a list of values."""
+
+
+class FlowSummary(BaseModel):
+    name: str
+    title: str
+    has_form: bool
+    """Whether the flows folder holds a form for it; without one, every input is a plain
+    field."""
+    inputs: list[FlowInputSummary]
+
+
+class FlowListResponse(BaseModel):
+    items: list[FlowSummary]
+
+
+class StartFlowRunRequest(BaseModel):
+    inputs: dict[str, Any] = Field(default_factory=dict)
+
+
+class FlowRunStarted(BaseModel):
+    id: str
+    """The run's id at the orchestrator, which ``flows_url`` shows it under."""
+
+
+def flow_summary(form: FlowForm) -> FlowSummary:
+    return FlowSummary(
+        name=form.name,
+        title=form.title,
+        has_form=form.has_form,
+        inputs=[
+            FlowInputSummary(
+                name=field.name,
+                label=field.label,
+                type=field.type,
+                lov=None if field.lov is None else str(field.lov),
+                options=(
+                    None
+                    if field.options is None
+                    else [FlowOptionSummary(value=o.value, label=o.label) for o in field.options]
+                ),
+            )
+            for field in form.inputs
+        ],
+    )
+
+
 class AppSummary(BaseModel):
     id: str
     """``<server>/<tool>``."""
@@ -661,6 +727,7 @@ def create_app(
     config: Config,
     ui_dir: Path | None = None,
     flows_url: str | None = None,
+    flows: Flows | None = None,
     feed: FeedGate | None = None,
 ) -> FastAPI:
     """The HTTP server alone. Whoever runs it opens the controller and starts the worker before
@@ -670,9 +737,9 @@ def create_app(
     heard from, for ``/health``. ``sign_in`` is ``None`` in the local development mode.
     ``config`` names the agents' tool servers, whose secrets ``secret_for`` reads too.
     ``flows_url`` is where whoever runs the app mounts an orchestrator's page on it, if
-    anywhere: the session says so, and the interface frames it. The app knows nothing else of
-    it. ``feed`` ends the waits of ``GET /api/changes`` once it is closed, by whoever stops the
-    server."""
+    anywhere: the session says so, and the interface frames it. ``flows`` are its flows as
+    forms, which ``/api/flows`` lists and starts: none without an orchestrator. ``feed`` ends
+    the waits of ``GET /api/changes`` once it is closed, by whoever stops the server."""
     gate = FeedGate() if feed is None else feed
     exchange: Exchange | None = None
     flow: SignIn | None = None
@@ -827,6 +894,14 @@ def create_app(
     @app.exception_handler(UnansweredCallError)
     async def unanswered(request: Request, exc: UnansweredCallError) -> JSONResponse:
         return JSONResponse({"error": "BadGateway", "detail": str(exc)}, status_code=502)
+
+    @app.exception_handler(NoSuchFlowError)
+    async def no_such_flow(request: Request, exc: NoSuchFlowError) -> JSONResponse:
+        return JSONResponse({"error": "NotFound", "detail": str(exc)}, status_code=404)
+
+    @app.exception_handler(InvalidInputsError)
+    async def invalid_inputs(request: Request, exc: InvalidInputsError) -> JSONResponse:
+        return JSONResponse({"error": "InvalidInputs", "detail": str(exc)}, status_code=422)
 
     @app.exception_handler(ControllerError)
     async def refused(request: Request, exc: ControllerError) -> JSONResponse:
@@ -1064,6 +1139,19 @@ def create_app(
     async def list_models() -> ModelListResponse:
         models = await controller.list_models()
         return ModelListResponse(items=[ModelSummary(id=m.id, title=m.title) for m in models])
+
+    # --- flows, as forms: the orchestrator's (orchestrator/) ---------------------
+
+    @app.get("/api/flows", dependencies=[asking])
+    async def list_flows() -> FlowListResponse:
+        forms = () if flows is None else await flows.forms()
+        return FlowListResponse(items=[flow_summary(form) for form in forms])
+
+    @app.post("/api/flows/{flow}/runs", status_code=201, dependencies=[asking])
+    async def start_flow_run(flow: str, body: StartFlowRunRequest) -> FlowRunStarted:
+        if flows is None:
+            raise NoSuchFlowError(f"no flow {flow!r}: this server runs no orchestrator")
+        return FlowRunStarted(id=await flows.start(flow, body.inputs))
 
     # --- MCP apps, for the side panel: web/apps.py -------------------------------
 

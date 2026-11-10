@@ -52,9 +52,11 @@ application -> contract, ports, core
 ## Inside orchestrator
 
 contract -> nothing from robinauts
-core -> contract, controller.contract; pure functions, no I/O
-adapters -> contract, controller.contract, shared_domain
+ports -> contract
+core -> contract, ports, controller.contract, shared_domain; pure functions, no I/O
+adapters -> contract, ports, controller.contract, shared_domain
 adapters.neorc -> the one place neorc is imported
+application -> contract, ports, core, controller.contract, shared_domain
 
 ## Inside web
 

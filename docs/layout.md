@@ -26,8 +26,9 @@ robinauts/
                         core/, ports/, application/,
                         adapters/{in_process,postgres}/
       orchestrator/     flows and their runs, a sibling of the controller that
-                        sees its contract alone: contract/, core/,
-                        adapters/neorc/ (the one place neorc is imported)
+                        sees its contract alone: contract/, ports/, core/,
+                        application/, adapters/ (adapters/neorc/ is the one
+                        place neorc is imported)
       worker/           runs the turns; of the controller it sees
                         contract/broker/ alone
       web/              the HTTP server and sign-in

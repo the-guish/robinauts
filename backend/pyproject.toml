@@ -391,8 +391,10 @@ forbidden_modules = [
     "robinauts.controller.ports",
     "robinauts.controller.adapters",
     "robinauts.controller.application",
+    "robinauts.orchestrator.ports",
     "robinauts.orchestrator.core",
     "robinauts.orchestrator.adapters",
+    "robinauts.orchestrator.application",
     "robinauts.agent_engines",
     "robinauts.tools",
     "robinauts.worker",
@@ -423,8 +425,10 @@ forbidden_modules = [
     "robinauts.controller.core",
     "robinauts.controller.adapters",
     "robinauts.controller.application",
+    "robinauts.orchestrator.ports",
     "robinauts.orchestrator.core",
     "robinauts.orchestrator.adapters",
+    "robinauts.orchestrator.application",
     "robinauts.cli",
     "robinauts.agent_engines",
     "robinauts.tools",
@@ -500,25 +504,51 @@ type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts.orchestrator.contract"]
 forbidden_modules = [
+    "robinauts.orchestrator.ports",
     "robinauts.orchestrator.core",
     "robinauts.orchestrator.adapters",
+    "robinauts.orchestrator.application",
     "robinauts.controller",
     "robinauts.shared_domain",
 ]
 
 [[tool.importlinter.contracts]]
-name = "orchestrator.core imports the contracts alone"
+name = "orchestrator.ports imports only the orchestrator's contract"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.orchestrator.ports"]
+forbidden_modules = [
+    "robinauts.orchestrator.core",
+    "robinauts.orchestrator.adapters",
+    "robinauts.orchestrator.application",
+]
+
+[[tool.importlinter.contracts]]
+name = "orchestrator.core imports the contracts and the ports"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts.orchestrator.core"]
-forbidden_modules = ["robinauts.orchestrator.adapters"]
+forbidden_modules = [
+    "robinauts.orchestrator.adapters",
+    "robinauts.orchestrator.application",
+]
 
 [[tool.importlinter.contracts]]
-name = "orchestrator.adapters imports the contracts alone"
+name = "orchestrator.adapters imports the contracts and the ports"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts.orchestrator.adapters"]
-forbidden_modules = ["robinauts.orchestrator.core"]
+forbidden_modules = [
+    "robinauts.orchestrator.core",
+    "robinauts.orchestrator.application",
+]
+
+[[tool.importlinter.contracts]]
+name = "orchestrator.application imports the contracts, the ports and the core"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["robinauts.orchestrator.application"]
+forbidden_modules = ["robinauts.orchestrator.adapters"]
 
 # --- cli -----------------------------------------------------------------------
 # What runs Robinauts: it builds the parts with composition and runs web over them.
@@ -533,8 +563,10 @@ forbidden_modules = [
     "robinauts.controller.core",
     "robinauts.controller.adapters",
     "robinauts.controller.application",
+    "robinauts.orchestrator.ports",
     "robinauts.orchestrator.core",
     "robinauts.orchestrator.adapters",
+    "robinauts.orchestrator.application",
     "robinauts.agent_engines",
     "robinauts.tools",
     "robinauts.worker",

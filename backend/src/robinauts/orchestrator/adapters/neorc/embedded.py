@@ -41,8 +41,14 @@ from pathlib import Path
 from typing import Any
 
 from neorc.manager import create_app
-from neorc_core import Manager, NeorcError, Scheduler
-from neorc_core.flows import read_flows
+from neorc_core import (
+    FlowNotFoundError,
+    InvalidValueError,
+    Manager,
+    NeorcError,
+    Scheduler,
+)
+from neorc_core.flows import flow_files, load_flow_yaml, read_flows
 from neorc_core.local import DirectManagerClient, MemoryStore, MemoryTaskNotifier
 
 from robinauts.orchestrator.contract.domain import (
@@ -50,10 +56,13 @@ from robinauts.orchestrator.contract.domain import (
     MOUNT,
     SETTINGS_FILE,
     ASGIApp,
+    InvalidInputsError,
+    NoSuchFlowError,
     OrchestrationConfig,
     OrchestrationStartError,
     Orchestrator,
 )
+from robinauts.orchestrator.ports.engine import FlowEngine
 from robinauts.shared_domain.domain import Config
 
 _log = logging.getLogger(__name__)
@@ -82,6 +91,36 @@ kills or cancels them."""
 def neorc_command() -> tuple[str, ...]:
     """neorc's own command, as installed beside this interpreter with neorc."""
     return (str(Path(sys.executable).with_name("neorc")),)
+
+
+def declared_inputs(folder: Path) -> dict[str, dict[str, str]]:
+    """By flow name, the inputs each flow file in ``folder`` declares and their types, in the
+    file's order. A file neorc would refuse is left out: the upload refuses it, with neorc's
+    reason, before anything starts."""
+    declared = {}
+    for path in flow_files(folder):
+        try:
+            definition = load_flow_yaml(path.read_text(encoding="utf-8"))
+        except (OSError, NeorcError):
+            continue
+        declared[definition.name] = {name: str(kind) for name, kind in definition.inputs.items()}
+    return declared
+
+
+class NeorcFlowEngine(FlowEngine):
+    """Runs started on the manager in this process, as its own API would start them."""
+
+    def __init__(self, manager: Manager) -> None:
+        self._client = DirectManagerClient(manager)
+
+    async def start_run(self, flow: str, inputs: Mapping[str, Any]) -> str:
+        try:
+            run = await self._client.start_run(flow, inputs)
+        except FlowNotFoundError as error:
+            raise NoSuchFlowError(str(error)) from error
+        except InvalidValueError as error:
+            raise InvalidInputsError(str(error)) from error
+        return str(run.id)
 
 
 def check_ready(
@@ -235,6 +274,11 @@ class EmbeddedNeorc(Orchestrator):
     @property
     def mounted(self) -> ASGIApp:
         return self._mounted
+
+    @property
+    def engine(self) -> FlowEngine:
+        """Where the flows' runs start: this manager."""
+        return NeorcFlowEngine(self.manager)
 
     def _on_postgres(self, database_url: str) -> Manager:
         from neorc.postgres import PostgresStore, PostgresTaskNotifier, create_schema

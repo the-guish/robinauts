@@ -213,6 +213,106 @@ def test_a_flows_toml_that_is_not_toml_is_refused_before_it_binds(tmp_path: Path
     assert b"flows.toml: not TOML" in refused.stderr, refused.stderr
 
 
+PROBE_FLOW = """
+name: intake_probe
+version: 0.1.0
+inputs:
+  task: string
+  repo_branch: string
+  model: string
+  agent: string
+output: tasks.pick
+steps:
+  pick:
+    queue: default
+    handler: robinauts_tasks:pick_number
+"""
+PROBE_FORM = """
+title = "Probe"
+[inputs.repo_branch]
+label = "Repository"
+lov = "repo_branch"
+[inputs.model]
+lov = "model"
+[inputs.agent]
+lov = "agent"
+"""
+PROBE_SETTINGS = """
+[repositories.app]
+url = "https://git.example/app"
+branches = ["main", "next"]
+"""
+
+
+def probe_folder(tmp_path: Path, form: str = PROBE_FORM) -> Path:
+    """A flows folder of one flow with four string inputs, three of them from lists of values."""
+    flows = tmp_path / "flows"
+    flows.mkdir()
+    (flows / "intake_probe.yaml").write_text(PROBE_FLOW)
+    (flows / "intake_probe.form.toml").write_text(form)
+    (flows / "flows.toml").write_text(PROBE_SETTINGS)
+    return flows
+
+
+def test_a_flow_with_a_form_is_listed_with_its_values_and_started_with_them(
+    tmp_path: Path,
+) -> None:
+    """The form's lists come from the flows folder's repositories and the agents'
+    configuration; a run starts once its inputs fit them, with them as they came."""
+    config = tmp_path / "robinauts.toml"
+    config.write_text(CONFIG)
+    inputs = {
+        "task": "Fix the bug",
+        "repo_branch": "https://git.example/app@next",
+        "model": "haiku",
+        "agent": "echo",
+    }
+    with started(config, environment_for(config, probe_folder(tmp_path))) as (url, _):
+        with httpx.Client(base_url=url, timeout=30.0, headers={"origin": url}) as api:
+            listed = api.get("/api/flows").json()["items"]
+            wrong = api.post(
+                "/api/flows/intake_probe/runs", json={"inputs": {**inputs, "model": "gpt"}}
+            )
+            missing = api.post("/api/flows/intake_probe/runs", json={"inputs": {"task": "x"}})
+            unknown = api.post("/api/flows/nothing/runs", json={"inputs": {}})
+            begun = api.post("/api/flows/intake_probe/runs", json={"inputs": inputs})
+            assert begun.status_code == 201, begun.text
+            run = api.get(f"/neorc/runs/{begun.json()['id']}").json()
+    [probe] = listed
+    assert (probe["name"], probe["title"], probe["has_form"]) == ("intake_probe", "Probe", True)
+    fields = {field["name"]: field for field in probe["inputs"]}
+    assert list(fields) == ["repo_branch", "model", "agent", "task"]
+    assert fields["repo_branch"]["options"] == [
+        {"value": "https://git.example/app@main", "label": "app · main"},
+        {"value": "https://git.example/app@next", "label": "app · next"},
+    ]
+    assert fields["model"]["options"] == [{"value": "haiku", "label": "Echo Haiku"}]
+    assert fields["agent"]["options"] == [{"value": "echo", "label": "Echo · default"}]
+    assert fields["task"] == {
+        "name": "task",
+        "label": "task",
+        "type": "string",
+        "lov": None,
+        "options": None,
+    }
+    assert wrong.status_code == 422
+    assert "'gpt' is not one of its model values" in wrong.json()["detail"]
+    assert missing.status_code == 422
+    assert unknown.status_code == 404
+    assert run["inputs"] == inputs
+
+
+def test_a_form_that_does_not_fit_its_flow_is_refused_before_it_binds(tmp_path: Path) -> None:
+    config = tmp_path / "robinauts.toml"
+    config.write_text(CONFIG)
+    flows = probe_folder(tmp_path, form='[inputs.colour]\nlov = "model"\n')
+    start = [str(stack.ROBINAUTS), "start", "--dev-no-sign-in", "--port", str(stack.free_port())]
+    environment = environment_for(config, flows)
+    refused = subprocess.run(start, env=environment, capture_output=True, timeout=30)
+    assert refused.returncode == 1
+    assert b"intake_probe declares no input 'colour'" in refused.stderr, refused.stderr
+
+
 def test_the_flows_settings_in_the_agents_file_are_refused_with_where_they_went(
     tmp_path: Path,
 ) -> None:

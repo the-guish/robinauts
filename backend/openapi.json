@@ -507,6 +507,132 @@
         "title": "ErrorResponse",
         "type": "object"
       },
+      "FlowInputSummary": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "lov": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lov"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FlowOptionSummary"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "type"
+        ],
+        "title": "FlowInputSummary",
+        "type": "object"
+      },
+      "FlowListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FlowSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "FlowListResponse",
+        "type": "object"
+      },
+      "FlowOptionSummary": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "title": "FlowOptionSummary",
+        "type": "object"
+      },
+      "FlowRunStarted": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "FlowRunStarted",
+        "type": "object"
+      },
+      "FlowSummary": {
+        "properties": {
+          "has_form": {
+            "title": "Has Form",
+            "type": "boolean"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/FlowInputSummary"
+            },
+            "title": "Inputs",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "title",
+          "has_form",
+          "inputs"
+        ],
+        "title": "FlowSummary",
+        "type": "object"
+      },
       "ForkRequest": {
         "properties": {
           "at_message": {
@@ -951,6 +1077,17 @@
           "model_id"
         ],
         "title": "SetModelRequest",
+        "type": "object"
+      },
+      "StartFlowRunRequest": {
+        "properties": {
+          "inputs": {
+            "additionalProperties": true,
+            "title": "Inputs",
+            "type": "object"
+          }
+        },
+        "title": "StartFlowRunRequest",
         "type": "object"
       },
       "TextContent": {
@@ -1694,6 +1831,83 @@
           }
         },
         "summary": "Cancel Turn"
+      }
+    },
+    "/api/flows": {
+      "get": {
+        "operationId": "list_flows_api_flows_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "List Flows"
+      }
+    },
+    "/api/flows/{flow}/runs": {
+      "post": {
+        "operationId": "start_flow_run_api_flows__flow__runs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "flow",
+            "required": true,
+            "schema": {
+              "title": "Flow",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartFlowRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowRunStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "Start Flow Run"
       }
     },
     "/api/models": {
