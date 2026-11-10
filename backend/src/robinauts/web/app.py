@@ -548,6 +548,8 @@ class MessageView(BaseModel):
     provenance: ProvenanceView | None
     failed: bool = False
     """An answer whose turn failed: what it streamed before the failure."""
+    task_payload: dict[str, Any] | None = None
+    """A question's structured data beside its text, as it was asked with it."""
 
 
 class ResumeView(BaseModel):
@@ -585,10 +587,16 @@ class NewChatRequest(BaseModel):
     agent_id: str
     model_id: str | None = None
     text: str
+    task_payload: dict[str, Any] | None = None
+    """Structured data beside the text, for the engine: a JSON object whose ``task_key`` names
+    the kind of task (``docs/specs/wire.md``, "Task payloads")."""
 
 
 class TurnRequest(BaseModel):
     text: str | None = None
+    task_payload: dict[str, Any] | None = None
+    """With a new question or an edit: as ``NewChatRequest``'s. An edit without one keeps the
+    edited question's."""
     parent_id: uuid.UUID | None = None
     edit: uuid.UUID | None = None
     regenerate: uuid.UUID | None = None
@@ -671,6 +679,7 @@ def message_view(message: Message, session: Session) -> MessageView:
         parts=[content(p) for p in message.parts if not isinstance(p, ReasoningPart)],
         provenance=provenance,
         failed=message.failed,
+        task_payload=None if message.task_payload is None else dict(message.task_payload),
     )
 
 
@@ -1251,7 +1260,11 @@ def create_app(
     async def start_session(body: NewChatRequest, user: User = asking) -> StreamingResponse:
         model = body.model_id or await default_model(body.agent_id)
         started = await controller.start_session(
-            user, agent=body.agent_id, model=model, text=body.text
+            user,
+            agent=body.agent_id,
+            model=model,
+            text=body.text,
+            task_payload=body.task_payload,
         )
         return await stream_turn(user, started.session_id, started.turn_id, 0)
 
@@ -1261,6 +1274,10 @@ def create_app(
     ) -> StreamingResponse:
         opened = await controller.open_session(user, conversation_id)
         model = body.model_id or model_of(opened, await default_model(opened.session.agent))
+        again = (body.regenerate, body.retry, body.resume) != (None, None, None)
+        if body.task_payload is not None and again:
+            # A regeneration, a retry or a resume answers the question as it was asked.
+            raise InvalidValueError("a task_payload goes with a new question or an edit")
         if body.regenerate is not None:
             # The frontend names the answer to produce again; the controller, its question.
             at = next((i for i, m in enumerate(opened.messages) if m.id == body.regenerate), None)
@@ -1280,11 +1297,21 @@ def create_app(
             )
         elif body.edit is not None:
             started = await controller.edit_message(
-                user, conversation_id, message_id=body.edit, model=model, text=body.text
+                user,
+                conversation_id,
+                message_id=body.edit,
+                model=model,
+                text=body.text,
+                task_payload=body.task_payload,
             )
         elif body.parent_id is not None:
             started = await controller.send_message(
-                user, conversation_id, parent_id=body.parent_id, model=model, text=body.text
+                user,
+                conversation_id,
+                parent_id=body.parent_id,
+                model=model,
+                text=body.text,
+                task_payload=body.task_payload,
             )
         else:
             raise InvalidValueError("a message names the parent_id it answers, or the one it edits")

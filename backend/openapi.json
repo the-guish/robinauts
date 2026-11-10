@@ -750,6 +750,18 @@
             ],
             "title": "Role",
             "type": "string"
+          },
+          "task_payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Payload"
           }
         },
         "required": [

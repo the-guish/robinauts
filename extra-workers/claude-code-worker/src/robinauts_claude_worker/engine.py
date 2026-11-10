@@ -25,7 +25,7 @@ import logging
 import os
 import shutil
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -218,7 +218,9 @@ class ClaudeCodeEngine(AgentEngine):
         checkpoint_id: str | None,
         timeout_seconds: float,
         resume: bool = False,
+        task_payload: Mapping[str, Any] | None = None,
     ) -> AsyncGenerator[Event, None]:
+        # A task payload is not read yet: every turn runs on the prompt, as without one.
         return self._stream(session_id, agent, prompt, model, checkpoint_id, timeout_seconds)
 
     async def _stream(

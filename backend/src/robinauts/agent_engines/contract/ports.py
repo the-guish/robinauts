@@ -87,6 +87,7 @@ class AgentEngine(ABC):
         checkpoint_id: str | None,
         timeout_seconds: float,
         resume: bool = False,
+        task_payload: Mapping[str, Any] | None = None,
     ) -> AsyncGenerator[Event, None]:
         """Not a coroutine: everything, the refusals included, happens inside the generator.
 
@@ -96,6 +97,12 @@ class AgentEngine(ABC):
         Raised where iterated: ``SessionNotFoundError`` for a session not created,
         ``CheckpointNotFoundError`` for a checkpoint not held for it, ``UnknownModelError`` for
         a model the settings do not have.
+
+        ``task_payload`` is the question's structured data beside ``prompt``, for the engine
+        rather than the model: a JSON object whose ``task_key`` names the kind of task, untyped
+        past that. An engine acts on the ``task_key`` values it knows, as it documents them,
+        and runs every other turn on ``prompt`` alone, as without one. It comes with every turn
+        that answers the question: a regeneration, a retry, a resume.
         """
         raise NotImplementedError
 

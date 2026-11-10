@@ -183,6 +183,11 @@ CALLS: dict[Script, tuple[str, dict[str, Any]]] = {
 """What a script's model calls, as CALL_ID, before it answers: the tool's name and arguments."""
 
 
+def without_done(events: list[Event]) -> list[Event]:
+    """The events of a turn but its ``Done``, whose checkpoint id is new at every turn."""
+    return [event for event in events if not isinstance(event, Done)]
+
+
 class EngineTurnContract:
     MODEL = "m"
 
@@ -192,7 +197,12 @@ class EngineTurnContract:
     async def release(self) -> None:
         """Let go of what the engines of this test held; nothing by default."""
 
-    async def turn(self, script: Script, timeout_seconds: float = 10.0) -> list[Event]:
+    async def turn(
+        self,
+        script: Script,
+        timeout_seconds: float = 10.0,
+        task_payload: Mapping[str, Any] | None = None,
+    ) -> list[Event]:
         engine = await self.new_engine(script)
         session = uuid.uuid4()
         await engine.create(session)
@@ -203,8 +213,21 @@ class EngineTurnContract:
             model=self.MODEL,
             checkpoint_id=None,
             timeout_seconds=timeout_seconds,
+            task_payload=task_payload,
         )
         return [event async for event in stream]
+
+    @engine_test
+    async def test_a_task_payload_it_does_not_know_changes_nothing(self) -> None:
+        """An engine acts on the task keys it knows, and runs every other turn on the prompt
+        alone: these engines know none."""
+        plain = await self.turn(Script.TOOL_ROUND)
+        with_payload = await self.turn(
+            Script.TOOL_ROUND, task_payload={"task_key": "unknown/1", "branch": "develop"}
+        )
+        assert without_done(with_payload) == without_done(plain)
+        assert isinstance(with_payload[-1], Done)
+        assert with_payload[-1].text == plain[-1].text
 
     @engine_test
     async def test_a_streamed_answer_is_its_pieces_and_done_once_last(self) -> None:

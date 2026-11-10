@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from datetime import datetime
+from typing import Any
 
 from robinauts.controller.contract.domain import (
     AgentListing,
@@ -89,8 +90,19 @@ class Controller(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def start_session(self, user: User, *, agent: str, model: str, text: str) -> TurnStarted:
-        """``UnknownAgentError``, ``UnknownModelError``; ``InvalidValueError`` for empty text."""
+    async def start_session(
+        self,
+        user: User,
+        *,
+        agent: str,
+        model: str,
+        text: str,
+        task_payload: Mapping[str, Any] | None = None,
+    ) -> TurnStarted:
+        """``UnknownAgentError``, ``UnknownModelError``; ``InvalidValueError`` for empty text,
+        or a ``task_payload`` that is not a JSON object with a ``task_key``, or too large. The
+        payload is kept on the question, and every turn that answers it hands it to the
+        engine."""
         raise NotImplementedError
 
     @abstractmethod
@@ -102,10 +114,11 @@ class Controller(ABC):
         parent_id: uuid.UUID,
         model: str,
         text: str,
+        task_payload: Mapping[str, Any] | None = None,
     ) -> TurnStarted:
         """``SessionNotFoundError``, ``MessageNotFoundError`` for the parent,
         ``UnknownModelError``, ``TurnActiveError`` while a turn runs, ``InvalidValueError``
-        for empty text."""
+        for empty text or a ``task_payload`` as ``start_session`` refuses it."""
         raise NotImplementedError
 
     @abstractmethod
@@ -117,13 +130,16 @@ class Controller(ABC):
         message_id: uuid.UUID,
         model: str,
         text: str,
+        task_payload: Mapping[str, Any] | None = None,
     ) -> TurnStarted:
         """A new version of a question: a message under the edited one's parent (none for
         the first question), which the visible thread then goes through.
 
         ``SessionNotFoundError``, ``MessageNotFoundError`` for a message that is not a
         question of this session, ``UnknownModelError``, ``TurnActiveError`` while a turn
-        runs, ``InvalidValueError`` for empty text."""
+        runs, ``InvalidValueError`` for empty text or a ``task_payload`` as ``start_session``
+        refuses it. The new version keeps the edited question's task payload, unless
+        ``task_payload`` gives another."""
         raise NotImplementedError
 
     @abstractmethod

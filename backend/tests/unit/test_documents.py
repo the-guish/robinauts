@@ -96,6 +96,15 @@ def test_failed_is_written_only_when_set(failed: bool, written: dict[str, bool])
     assert message_from_document(document) == message
 
 
+def test_a_task_payload_is_written_only_when_set_and_round_trips() -> None:
+    payload = {"task_key": "code_task/1", "repositories": {"app": {"branch": "develop"}}}
+    asked = dataclasses.replace(answer(), task_payload=payload)
+    document = message_to_document(asked)
+    assert document["task_payload"] == payload
+    assert message_from_document(document) == asked
+    assert "task_payload" not in message_to_document(answer())
+
+
 def test_a_question_has_every_field_with_nulls_where_nothing_applies() -> None:
     question = Message(
         QUESTION, SESSION, parent_id=None, role=Role.USER, parts=(TextPart("hi"),), created_at=NOW
@@ -187,6 +196,8 @@ def test_a_number_json_cannot_write_is_refused() -> None:
         (lambda d: d.update(role="system"), "role is not a role"),
         (lambda d: d["parts"][0].pop("text"), "lacks a key: text"),
         (lambda d: d.update(failed="yes"), "failed is not true or false"),
+        (lambda d: d.update(task_payload=["x"]), "task_payload is not an object"),
+        (lambda d: d.update(task_payload={"branch": "x"}), "task_payload has no task_key"),
     ],
 )
 def test_a_message_document_is_refused_by_name(change: object, said: str) -> None:

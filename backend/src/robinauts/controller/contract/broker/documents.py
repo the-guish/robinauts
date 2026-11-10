@@ -23,6 +23,7 @@ from typing import Any
 from robinauts.controller.contract.broker.domain import StoredMessage
 from robinauts.controller.contract.domain import InvalidValueError, NumberedEvent
 from robinauts.shared_domain.domain import (
+    TASK_KEY,
     ArgumentsPiece,
     CallCompleted,
     CallStarted,
@@ -70,7 +71,7 @@ MESSAGE_KEYS = frozenset(
     }
 )
 
-MESSAGE_OPTIONAL_KEYS = frozenset({"failed"})
+MESSAGE_OPTIONAL_KEYS = frozenset({"failed", "task_payload"})
 """Written only when set, so that the messages stored before them read the same."""
 PART_KEYS: Mapping[str, frozenset[str]] = {
     "text": frozenset({"kind", "text"}),
@@ -252,22 +253,32 @@ def part_from_document(document: object) -> MessagePart:
 
 def message_to_document(message: Message) -> dict[str, Any]:
     """The whole message, ``v`` first."""
-    return {
-        "v": VERSION,
-        "id": str(message.id),
-        "session_id": str(message.session_id),
-        "parent_id": None if message.parent_id is None else str(message.parent_id),
-        "role": message.role.value,
-        "created_at": _write_time(message.created_at, "a message's created_at"),
-        "agent": None if message.agent is None else clean_text(message.agent),
-        "engine": None if message.engine is None else clean_text(message.engine),
-        "model": None if message.model is None else clean_text(message.model),
-        "checkpoint_id": (
-            None if message.checkpoint_id is None else clean_text(message.checkpoint_id)
-        ),
-        "turn_id": None if message.turn_id is None else str(message.turn_id),
-        "parts": [part_to_document(part) for part in message.parts],
-    } | ({"failed": True} if message.failed else {})
+    return (
+        {
+            "v": VERSION,
+            "id": str(message.id),
+            "session_id": str(message.session_id),
+            "parent_id": None if message.parent_id is None else str(message.parent_id),
+            "role": message.role.value,
+            "created_at": _write_time(message.created_at, "a message's created_at"),
+            "agent": None if message.agent is None else clean_text(message.agent),
+            "engine": None if message.engine is None else clean_text(message.engine),
+            "model": None if message.model is None else clean_text(message.model),
+            "checkpoint_id": (
+                None if message.checkpoint_id is None else clean_text(message.checkpoint_id)
+            ),
+            "turn_id": None if message.turn_id is None else str(message.turn_id),
+            "parts": [part_to_document(part) for part in message.parts],
+        }
+        | ({"failed": True} if message.failed else {})
+        | (
+            {}
+            if message.task_payload is None
+            else {
+                "task_payload": clean_json(dict(message.task_payload), "a message's task_payload")
+            }
+        )
+    )
 
 
 def message_from_document(document: object) -> Message:
@@ -294,7 +305,19 @@ def message_from_document(document: object) -> Message:
         checkpoint_id=_read_optional_text(read["checkpoint_id"], "a message's checkpoint_id"),
         turn_id=_read_optional_id(read["turn_id"], "a message's turn_id"),
         failed=_read_failed(read.get("failed", False)),
+        task_payload=_read_task_payload(read.get("task_payload")),
     )
+
+
+def _read_task_payload(value: object) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise InvalidValueError(f"a message's task_payload is not an object: {value!r}")
+    key = value.get(TASK_KEY)
+    if not isinstance(key, str) or not key:
+        raise InvalidValueError(f"a message's task_payload has no {TASK_KEY}")
+    return dict(value)
 
 
 def _read_failed(value: object) -> bool:

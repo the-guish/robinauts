@@ -212,10 +212,13 @@ same write. The decoder reads the document alone.
 | `checkpoint_id` | `null` | the engine's checkpoint after this answer; `null` on a failed one |
 | `turn_id` | `null` | the turn that produced it, which web shows as the run id |
 | `failed` | absent | `true` on an answer whose turn failed; absent otherwise |
+| `task_payload` | the JSON object it was asked with beside its text, whose `task_key` names the kind of task; absent when none | absent |
 
-Every field but `failed` is present on every message; one that does not apply is
-`null`. `failed` is written only when it is `true`, so the messages stored before it
-read the same. `tool` is a reserved role: no message has it yet.
+Every field but `failed` and `task_payload` is present on every message; one that does
+not apply is `null`. `failed` is written only when it is `true`, and `task_payload` only
+when a question has one, so the messages stored before them read the same. A
+`task_payload` without its `task_key` string is refused, as any document that does not
+read. `tool` is a reserved role: no message has it yet.
 
 ### Parts
 
