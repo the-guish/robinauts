@@ -123,8 +123,16 @@ anything else.
 - **stream** a turn: the session id, the agent definition, the question, the
   model, the checkpoint id to continue from (none for the first turn), a
   timeout in seconds after which the engine ends the turn with an error,
-  and whether to resume. Yields the events as they happen and ends with
-  the answer and a new checkpoint id.
+  whether to resume, and the question's task payload, if it has one. Yields
+  the events as they happen and ends with the answer and a new checkpoint
+  id.
+- **A task payload** is structured data beside the question, for the engine
+  rather than the model: a JSON object whose `task_key` names the kind of
+  task and its version, untyped past that
+  ([wire.md](wire.md), "Task payloads"). An engine acts on the task keys it
+  knows, and documents them; on any other, or without one, it runs the turn
+  on the question alone, exactly as it would have. The caller hands it with
+  every turn that answers the question.
 - **fork** a session into a new one, at a checkpoint of the source. The new
   session has the state as it was at that checkpoint and nothing after it.
   The source's earlier checkpoints stay valid in the fork. From then on the

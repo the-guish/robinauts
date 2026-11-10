@@ -197,6 +197,7 @@ async def run_turn(
             checkpoint_id=checkpoint_id,
             timeout_seconds=remaining,
             resume=resume,
+            task_payload=question.task_payload,
         )
         async with aclosing(stream) as events:
             async for event in events:

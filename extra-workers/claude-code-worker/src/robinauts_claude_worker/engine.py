@@ -25,7 +25,7 @@ import logging
 import os
 import shutil
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +62,7 @@ from robinauts_claude_worker.settings import (
     settings_from,
 )
 from robinauts_worker_common.clone import GitError
+from robinauts_worker_common.tasks import TaskPayloadError, code_task_starts
 from robinauts_worker_common.worktrees import Repositories
 
 _log = logging.getLogger(__name__)
@@ -208,6 +209,16 @@ class ClaudeCodeEngine(AgentEngine):
             **opening,
         )
 
+    def task_starts(self, task_payload: Mapping[str, Any] | None) -> dict[str, str] | None:
+        """The repositories a ``code_task/1`` payload starts the session's worktrees of, each
+        with its branch; ``None`` for any other payload, or none. ``EngineError`` for a code
+        task this worker cannot set up."""
+        known = () if self._repositories is None else self._repositories.repositories
+        try:
+            return code_task_starts(task_payload, known)
+        except TaskPayloadError as refused:
+            raise EngineError(str(refused)) from None
+
     def stream(
         self,
         session_id: uuid.UUID,
@@ -218,8 +229,11 @@ class ClaudeCodeEngine(AgentEngine):
         checkpoint_id: str | None,
         timeout_seconds: float,
         resume: bool = False,
+        task_payload: Mapping[str, Any] | None = None,
     ) -> AsyncGenerator[Event, None]:
-        return self._stream(session_id, agent, prompt, model, checkpoint_id, timeout_seconds)
+        return self._stream(
+            session_id, agent, prompt, model, checkpoint_id, timeout_seconds, task_payload
+        )
 
     async def _stream(
         self,
@@ -229,6 +243,7 @@ class ClaudeCodeEngine(AgentEngine):
         model: str,
         checkpoint_id: str | None,
         timeout_seconds: float,
+        task_payload: Mapping[str, Any] | None = None,
     ) -> AsyncGenerator[Event, None]:
         workspace = self.workspace(session_id)
         if not workspace.is_dir():
@@ -239,13 +254,17 @@ class ClaudeCodeEngine(AgentEngine):
         provider = self._settings.models.providers[model_config.provider]
         if provider.kind not in self.kinds():
             raise EngineError(f"provider {provider.id!r} is of a kind this mode cannot reach")
+        starts = self.task_starts(task_payload)
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout_seconds
         if self._repositories is not None:
-            # Before the agent: a worktree of each repository, made once, kept between turns.
+            # Before the agent: the session's worktrees, decided at its first turn, kept
+            # between turns: a code task's repositories from its branches, else every one.
             try:
                 async with asyncio.timeout_at(deadline):
-                    await self._repositories.add_worktrees(str(session_id), workspace)
+                    await self._repositories.add_worktrees(
+                        str(session_id), workspace, starts=starts, first=checkpoint_id is None
+                    )
             except GitError as failed:
                 raise EngineError(str(failed)) from None
         environment = subprocess_environment(self._container.auth, provider, self._settings.keys)

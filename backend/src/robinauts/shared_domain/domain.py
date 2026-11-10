@@ -211,6 +211,11 @@ class ToolResultPart:
 MessagePart = TextPart | ReasoningPart | ToolCallPart | ToolResultPart
 
 
+TASK_KEY = "task_key"
+"""The one key a task payload must hold: a string naming what kind of task it is, with its
+version (``code_task/1``), which an engine reads first and acts on only when it knows it."""
+
+
 @dataclass(frozen=True, slots=True)
 class Message:
     id: uuid.UUID
@@ -227,6 +232,10 @@ class Message:
     """The turn that produced an answer, which web shows as the run id; ``None`` on a question."""
     failed: bool = False
     """An answer whose turn failed: what it streamed before it failed, and no checkpoint."""
+    task_payload: Mapping[str, Any] | None = None
+    """A question's structured data beside its text, for the engine rather than the model: a
+    JSON object whose ``task_key`` names the kind of task; untyped past that. ``None`` on an
+    answer, and on a question asked with text alone."""
 
 
 @dataclass(frozen=True, slots=True)

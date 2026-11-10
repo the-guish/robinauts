@@ -12,8 +12,9 @@ from __future__ import annotations
 import asyncio
 import math
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from contextlib import aclosing
+from typing import Any
 
 from pydantic_ai import Agent, AgentRunResult, UsageLimits
 from pydantic_ai.capabilities import ProcessHistory
@@ -91,6 +92,7 @@ class PydanticAIEngine(AgentEngine):
         checkpoint_id: str | None,
         timeout_seconds: float,
         resume: bool = False,
+        task_payload: Mapping[str, Any] | None = None,
     ) -> AsyncGenerator[Event, None]:
         if not await self._session_store.exists(session_id):
             raise SessionNotFoundError(str(session_id))
