@@ -48,6 +48,8 @@ command = [
     "docker", "run", "-i", "--rm", "--network", "host",
     "-e", "ROBINAUTS_CONFIG", "-e", "ROBINAUTS_WORKER_NAME", "-e", "ROBINAUTS_WORKER_BROKER_URL",
     "-e", "ROBINAUTS_CLAUDE_AUTH=deployed", "-e", "ANTHROPIC_API_KEY",
+    "--env-file", "/etc/robinauts/github.env",
+    "-e", "ROBINAUTS_FLOWS_DIR", "-v", "/etc/robinauts/flows:/etc/robinauts/flows:ro",
     "-v", "/etc/robinauts/robinauts.toml:/etc/robinauts/robinauts.toml:ro",
     "-v", "robinauts-claude-sessions:/var/lib/claude",
     "-v", "robinauts-claude-workspaces:/workspace",
@@ -73,6 +75,12 @@ worker adds:
   and the conversations' workspaces. Without them nothing outlives the
   container ("What is kept, and what is lost").
 - Every knob of "Configuration" goes in the same way, `-e NAME=value`.
+- `-e ROBINAUTS_FLOWS_DIR` and `-v /etc/robinauts/flows:/etc/robinauts/flows:ro`,
+  optional: the flows' settings, whose `[repositories]` each session gets a
+  worktree of, in its directory, on the branch `rb/<session id>`, before its
+  agent starts; the clones are under `/workspace/repos`
+  ([../worker-common/README.md](../worker-common/README.md), "Repositories and
+  worktrees").
 - `--env-file /etc/robinauts/github.env`, optional: `GITHUB_TOKEN`, for the
   worker's own clones (`robinauts_worker_common.clone`), checked at the start
   like every extra worker's
