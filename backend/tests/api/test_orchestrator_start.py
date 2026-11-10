@@ -329,6 +329,8 @@ def test_the_shipped_code_and_review_runs_its_form_s_inputs_to_the_implementing_
             run = finished_run(api, begun.json()["id"])
             tasks = api.get(f"/neorc/runs/{run['id']}/tasks").json()["tasks"]
             conversations = api.get("/api/conversations").json()["items"]
+            opened = api.get(f"/api/conversations/{conversations[0]['id']}").json()
+            api_messages = opened["messages"]
     assert form["title"] == "Code and review"
     assert [field["name"] for field in form["inputs"]] == ["task", "repo_branch", "agent", "model"]
     assert run["status"] == "failed", run
@@ -337,6 +339,12 @@ def test_the_shipped_code_and_review_runs_its_form_s_inputs_to_the_implementing_
     assert "names no pull request" in (implement["error"] or ""), implement
     [implementing] = conversations
     assert implementing["agent"] == "echo"
+    # The code task went beside the prompt, for the engine: the echo engine says it back.
+    [question, _] = api_messages
+    assert question["task_payload"] == {
+        "task_key": "code_task/1",
+        "repositories": {"app": {"branch": "main"}},
+    }
 
 
 def test_a_form_that_does_not_fit_its_flow_is_refused_before_it_binds(tmp_path: Path) -> None:

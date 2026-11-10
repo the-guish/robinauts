@@ -178,8 +178,11 @@ say, without spelling it out in words.
   interface edits text alone.
 - **An engine acts on the `task_key` values it knows**, as it documents
   them, and runs every other turn on the text alone, as without one
-  ([agent-engines.md](agent-engines.md)). None of the engines this build
-  ships knows one yet.
+  ([agent-engines.md](agent-engines.md)). The engines in the backend know
+  none; the Claude Code worker knows `code_task/1`, which starts a session's
+  worktrees of the repositories it names from their branches
+  ([extra-workers/worker-common](../../extra-workers/worker-common/README.md),
+  "A code task"). The shipped `code_and_review` flow sends it.
 - A payload that is not an object, has no `task_key` string, or is too large
   is refused before anything is stored (422).
 

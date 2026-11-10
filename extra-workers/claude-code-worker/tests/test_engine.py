@@ -7,7 +7,9 @@ refuses before it runs anything, and what it forgets."""
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
+from collections.abc import Mapping
 from dataclasses import replace
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -198,13 +200,23 @@ class Recorded(Repositories):
     """The sessions' worktrees, recorded rather than made; a failure, or a wait, when told."""
 
     def __init__(self, root: Path, *, fail: bool = False, wait: float = 0.0) -> None:
-        super().__init__(root, [Repository("hello", "https://github.com/octo/hello.git")])
+        hello = Repository("hello", "https://github.com/octo/hello.git", ("main", "dev"))
+        super().__init__(root, [hello])
         self.calls: list[tuple[str, str, Path]] = []
+        self.asked: list[tuple[dict[str, str] | None, bool]] = []
         self._fail = fail
         self._wait = wait
 
-    async def add_worktrees(self, session: str, folder: Path) -> list[Path]:
+    async def add_worktrees(
+        self,
+        session: str,
+        folder: Path,
+        *,
+        starts: Mapping[str, str] | None = None,
+        first: bool = True,
+    ) -> list[Path]:
         self.calls.append(("add", session, folder))
+        self.asked.append((None if starts is None else dict(starts), first))
         await asyncio.sleep(self._wait)
         if self._fail:
             raise WorktreeError("the worktree of hello failed:\nfatal: no")
@@ -238,6 +250,70 @@ def test_the_worktrees_are_made_before_the_agent_starts(tmp_path: Path) -> None:
     assert failing.calls == []
 
 
+CODE_TASK = {"task_key": "code_task/1", "repositories": {"hello": {"branch": "dev"}}}
+
+
+@pytest.mark.parametrize(
+    ("payload", "checkpoint", "asked"),
+    [
+        (None, None, (None, True)),
+        ({"task_key": "other/1", "repositories": {"x": {}}}, None, (None, True)),
+        (CODE_TASK, None, ({"hello": "dev"}, True)),
+        (None, "after-the-first", (None, False)),
+    ],
+)
+def test_a_code_task_decides_the_sessions_worktrees_at_its_first_turn(
+    tmp_path: Path,
+    payload: dict[str, object] | None,
+    checkpoint: str | None,
+    asked: tuple[dict[str, str] | None, bool],
+) -> None:
+    """Its repositories, each from its branch; any other payload, or none, every repository
+    from its default branch; a later turn makes none anew. The agent fails to start here, on
+    the test's machine: what matters is what was asked of the worktrees before it."""
+    session = uuid.uuid4()
+    recorded = Recorded(tmp_path / "repos", fail=True)
+    engine = ClaudeCodeEngine(SETTINGS, container(tmp_path), recorded)
+    asyncio.run(engine.create(session))
+    turn = dict(model="opus", checkpoint_id=checkpoint, timeout_seconds=10.0)
+    with pytest.raises(EngineError):
+        asyncio.run(
+            first(engine.stream(session, AgentDefinition(""), "hi", **turn, task_payload=payload))
+        )
+    assert recorded.asked == [asked]
+
+
+@pytest.mark.parametrize(
+    ("repositories", "said"),
+    [
+        ({"hello": {"branch": "nope"}}, "hello: branch 'nope' is not one it lists (main, dev)"),
+        ({"gone": {"branch": "main"}}, "no repository 'gone' in this worker's flows settings"),
+        ({}, "repositories names the ones it works on"),
+    ],
+)
+def test_a_code_task_this_worker_cannot_set_up_ends_the_turn_before_any_worktree(
+    tmp_path: Path, repositories: dict[str, object], said: str
+) -> None:
+    session = uuid.uuid4()
+    recorded = Recorded(tmp_path / "repos")
+    engine = ClaudeCodeEngine(SETTINGS, container(tmp_path), recorded)
+    asyncio.run(engine.create(session))
+    payload = {"task_key": "code_task/1", "repositories": repositories}
+    turn = dict(model="opus", checkpoint_id=None, timeout_seconds=10.0)
+    with pytest.raises(EngineError, match=re.escape(said)):
+        asyncio.run(
+            first(engine.stream(session, AgentDefinition(""), "hi", **turn, task_payload=payload))
+        )
+    assert recorded.calls == []
+    # A worker without repositories cannot set up any.
+    bare = ClaudeCodeEngine(SETTINGS, container(tmp_path))
+    asyncio.run(bare.create(session := uuid.uuid4()))
+    with pytest.raises(EngineError, match="no repository 'hello'"):
+        asyncio.run(
+            first(bare.stream(session, AgentDefinition(""), "hi", **turn, task_payload=CODE_TASK))
+        )
+
+
 def test_forgetting_a_session_removes_its_worktrees(tmp_path: Path) -> None:
     session = uuid.uuid4()
     for fail in (False, True):
@@ -265,7 +341,9 @@ def test_the_repositories_are_cloned_under_the_workspaces(
     repositories = init_claude_code(SETTINGS, NOTHING).repositories
     assert repositories is not None
     assert repositories.root == tmp_path / "workspaces" / "repos"
-    assert repositories.repositories == (Repository("hello", "https://github.com/octo/hello.git"),)
+    assert repositories.repositories == (
+        Repository("hello", "https://github.com/octo/hello.git", ("main",)),
+    )
 
 
 def test_the_options_claude_code_is_started_with(tmp_path: Path) -> None:

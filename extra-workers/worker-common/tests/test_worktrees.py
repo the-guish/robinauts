@@ -23,6 +23,7 @@ from robinauts_worker_common.github import GitHubError, authorization
 from robinauts_worker_common.worktrees import (
     Repositories,
     Repository,
+    WorktreeError,
     branch_of,
     credential_helper,
     repositories_of,
@@ -190,6 +191,49 @@ def test_a_new_worktree_starts_from_the_default_branch_as_just_fetched(
     assert (tmp_path / "new" / short / "later.txt").exists()
     assert not (tmp_path / "old" / short / "later.txt").exists()
     assert head(tmp_path / "new" / short) == head(server.root / f"{name}.git", "master")
+
+
+@NEEDS_GIT
+def test_a_task_s_worktrees_are_of_its_repositories_from_their_branches(
+    server: Server, tmp_path: Path
+) -> None:
+    """A code task's first turn: the repositories it names, each from its branch; the others
+    get none, at that turn or a later one."""
+    named, other = _name(), _name()
+    repository(server, named)
+    repository(server, other)
+    commit(server, named, "later.txt", "later\n")  # main moves on; the branch other does not
+    repos = repositories(server, tmp_path / "repos", named, other)
+    short = named.split("/")[1]
+    session = tmp_path / "task"
+    made = asyncio.run(repos.add_worktrees("task", session, starts={short: "other"}))
+    assert made == [session / short]
+    assert head(session / short) == head(server.root / f"{named}.git", "other")
+    assert not (session / short / "later.txt").exists()
+    assert git("branch", "--show-current", cwd=session / short).strip() == "rb/task"
+    # A later turn keeps what the first decided, and makes none of the others.
+    again = asyncio.run(repos.add_worktrees("task", session, first=False))
+    assert again == [session / short]
+    assert not (session / other.split("/")[1]).exists()
+
+
+@NEEDS_GIT
+def test_a_later_turn_brings_a_lost_worktree_back_and_makes_no_new_one(
+    server: Server, tmp_path: Path
+) -> None:
+    name = _name()
+    repository(server, name)
+    repos = repositories(server, tmp_path / "repos", name)
+    assert asyncio.run(repos.add_worktrees("late", tmp_path / "late", first=False)) == []
+    (worktree,) = asyncio.run(repos.add_worktrees("s", tmp_path / "s"))
+    shutil.rmtree(worktree)
+    assert asyncio.run(repos.add_worktrees("s", tmp_path / "s", first=False)) == [worktree]
+
+
+def test_a_task_naming_a_repository_this_worker_has_not_is_refused(tmp_path: Path) -> None:
+    repos = Repositories(tmp_path / "repos", [Repository("app", "https://github.com/o/a.git")])
+    with pytest.raises(WorktreeError, match="no repository web to make a worktree of"):
+        asyncio.run(repos.add_worktrees("s", tmp_path / "s", starts={"web": "main"}))
 
 
 @NEEDS_GIT

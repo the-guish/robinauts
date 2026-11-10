@@ -70,8 +70,9 @@ handed the token by `--env-file`
 **Contents: Read and write** to push and **Pull requests: Read and write** to
 open the pull request.
 
-The worktree starts from the repository's default branch; the agent is told
-to move it to the branch chosen in the form before it starts.
+The handlers send a `code_task/1` task payload beside the prompt, so the
+worker starts the worktree from the branch chosen in the form ("A code task"
+in that README); that branch must be one of the repository's `branches`.
 
 Then **New run**, **Code and review**: the task in words, the repository and
 branch, the agent and the model. The run's output is the review's verdict and
