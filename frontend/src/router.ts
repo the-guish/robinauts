@@ -20,14 +20,16 @@
  *     #/devices     "Linked devices": the phones and the API tokens
  *     #/link        what a phone's camera app opens a pairing code at
  *     #/flows       the orchestrator's runs, when the server has one
- *     #/flows/new   its flows, each with the form that starts a run
+ *     #/flows/new   its flows, to pick one to start
+ *     #/flows/new/<name>  the form that starts a run of that flow
  *     #/flows/runs/<id>   that run
  *     #/flows/flow/<name> that flow
  *
- * The flows routes frame the orchestrator's page, which the session names
- * (`flows_url`), and are what the panel's "Flows" section links to. Inside
- * the frame the orchestrator keeps a hash of its own, which
- * `./flows/orchestrator.ts` translates both ways.
+ * The flows routes are what the panel's "Flows" section links to. The two
+ * that start a run are this interface's own pages, over `/api/flows`
+ * (`./flows/NewRunPage.tsx`); the others frame the orchestrator's page, which
+ * the session names (`flows_url`). Inside the frame the orchestrator keeps a
+ * hash of its own, which `./flows/orchestrator.ts` translates both ways.
  *
  * `#/link?v=1&c=…` is the URL inside a pairing QR
  * (`docs/architecture/device-pairing.md`). Its query is cut off like any
@@ -52,12 +54,18 @@ export type Route =
   | { readonly kind: "link" }
   | { readonly kind: "flows"; readonly view: FlowsView };
 
-/** Which of the orchestrator's pages the flows routes show. */
+/** Which of the flows pages the flows routes show. */
 export type FlowsView =
   | { readonly at: "runs" }
   | { readonly at: "new" }
+  | { readonly at: "start"; readonly flow: string }
   | { readonly at: "run"; readonly run: string }
   | { readonly at: "flow"; readonly flow: string };
+
+/** Whether a view is one of this interface's own pages, not the frame's. */
+export function isOwnFlowsPage(view: FlowsView): boolean {
+  return view.at === "new" || view.at === "start";
+}
 
 /** The empty chat: the route of a page that has been told nothing else. */
 export const NEW_CHAT: Route = { kind: "new" };
@@ -71,7 +79,7 @@ export const LINK: Route = { kind: "link" };
 /** The orchestrator's runs. */
 export const FLOWS: Route = { kind: "flows", view: { at: "runs" } };
 
-/** The orchestrator's flows, where a run is started. */
+/** The flows, where one is picked to start a run of. */
 export const NEW_RUN: Route = { kind: "flows", view: { at: "new" } };
 
 /**
@@ -141,6 +149,9 @@ export function parseRoute(hash: string): Route {
     if (parts[2] === "flow" && isFlowName(name)) {
       return { kind: "flows", view: { at: "flow", flow: name } };
     }
+    if (parts[2] === "new" && isFlowName(name)) {
+      return { kind: "flows", view: { at: "start", flow: name } };
+    }
   }
   const id = parts[2];
   if (
@@ -182,6 +193,8 @@ function formatFlowsView(view: FlowsView): string {
   switch (view.at) {
     case "new":
       return "#/flows/new";
+    case "start":
+      return isFlowName(view.flow) ? `#/flows/new/${view.flow}` : "#/flows/new";
     case "run":
       return isUuid(view.run) ? `#/flows/runs/${view.run}` : "#/flows";
     case "flow":

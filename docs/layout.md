@@ -32,9 +32,10 @@ robinauts/
       worker/           runs the turns; of the controller it sees
                         contract/broker/ alone
       web/              the HTTP server and sign-in
-      cli/              the robinauts command: builds the controller, the worker
-                        and the orchestrator (composition.py), and starts and
-                        stops them and the HTTP server
+      cli/              the robinauts command: builds the controller and the
+                        worker (composition.py) and the orchestrator
+                        (orchestration.py), and starts and stops them and the
+                        HTTP server
     tests/              unit/, fast/, api/, adapters_free/, adapters_metered/,
                         e2e/, tooling/, util/
 ```

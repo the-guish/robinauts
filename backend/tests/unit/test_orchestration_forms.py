@@ -149,9 +149,9 @@ def test_a_form_is_checked_against_the_inputs_its_flow_declares(
         (
             LovKind.REPO_BRANCH,
             (
-                Option("https://git.example/app@main", "app · main"),
-                Option("https://git.example/app@next", "app · next"),
-                Option("git@git.example:docs.git@main", "docs · main"),
+                Option("app@main", "app · main"),
+                Option("app@next", "app · next"),
+                Option("docs@main", "docs · main"),
             ),
         ),
         (LovKind.MODEL, (Option("opus", "Opus"), Option("local", "local"))),
@@ -191,7 +191,7 @@ def test_every_flow_is_a_form_with_its_form_s_inputs_first() -> None:
 
 
 VALID = {
-    "repo_branch": "https://git.example/app@next",
+    "repo_branch": "app@next",
     "model": "opus",
     "task": "Fix the bug",
     "tries": 3,
@@ -204,7 +204,7 @@ VALID = {
         ({}, []),
         ({"model": "gpt"}, ["input 'model': 'gpt' is not one of its model values"]),
         ({"model": ["opus"]}, ["input 'model': ['opus'] is not one of its model values"]),
-        ({"repo_branch": "app@main"}, ["input 'repo_branch': 'app@main' is not one of its"]),
+        ({"repo_branch": "app@dev"}, ["input 'repo_branch': 'app@dev' is not one of its"]),
         ({"colour": "red"}, ["code has no input 'colour'"]),
         ({"task": None}, ["missing input 'task'"]),
     ],

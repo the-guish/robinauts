@@ -571,8 +571,25 @@ forbidden_modules = [
     "robinauts.tools",
     "robinauts.worker",
 ]
-# cli.composition builds every part, so it imports what the rest of cli may not.
-ignore_imports = ["robinauts.cli.composition -> robinauts.**"]
+# cli.composition builds every part, so it imports what the rest of cli may not;
+# cli.orchestration builds the orchestrator, apart from it (the contract below).
+ignore_imports = [
+    "robinauts.cli.composition -> robinauts.**",
+    "robinauts.cli.orchestration -> robinauts.orchestrator.**",
+]
+
+[[tool.importlinter.contracts]]
+name = "nothing a worker in a process of its own imports reaches neorc"
+type = "forbidden"
+# Indirect imports count: the extra workers' images leave neorc out. They also read the
+# flows' settings with the orchestrator's own parser (extra-workers/worker-common).
+source_modules = [
+    "robinauts.cli.worker_process",
+    "robinauts.cli.composition",
+    "robinauts.orchestrator.contract",
+    "robinauts.orchestrator.core.config",
+]
+forbidden_modules = ["neorc", "neorc_core", "neorc_ui"]
 
 [[tool.importlinter.contracts]]
 name = "nothing imports cli"

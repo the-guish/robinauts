@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+#
+# The form that starts code_and_review.yaml (docs/architecture/orchestration.md, "Flows as
+# forms").
+title = "Code and review"
+
+[inputs.task]
+label = "Task"
+
+[inputs.repo_branch]
+label = "Repository and branch"
+lov = "repo_branch"
+
+[inputs.agent]
+label = "Agent"
+lov = "agent"
+
+[inputs.model]
+label = "Model"
+lov = "model"
