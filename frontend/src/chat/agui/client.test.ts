@@ -101,6 +101,20 @@ test("no model chosen is said as null: the agent's default", async () => {
   });
 });
 
+test("a project chosen goes with the first message, and none is left out", async () => {
+  const fetch = answering([
+    () =>
+      streamed([finished(9)], { headers: streamHeaders(RUN, CONVERSATION) }),
+  ]);
+  await startNewConversation("helper", null, "hello", {}, "p-1");
+  expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toEqual({
+    agent_id: "helper",
+    model_id: null,
+    text: "hello",
+    project_id: "p-1",
+  });
+});
+
 test("the two shapes of a turn in a conversation that exists", async () => {
   const fetch = answering([
     () =>

@@ -219,3 +219,80 @@
     color: var(--ink);
   }
 }
+
+/*
+ * A project: a heading that folds it away and opens it again, a "+" for a
+ * new chat in it, and its conversations under it (`./HistoryList.tsx`).
+ */
+.history-project {
+  display: flex;
+  flex-direction: column;
+}
+
+.history-project + .history-project {
+  margin-top: 0.25rem;
+}
+
+.history-project-head {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding-right: 0.25rem;
+}
+
+.history-project-toggle {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: var(--radius);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  line-height: calc(1 / 0.75);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.history-project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-project-count {
+  margin-left: auto;
+  font-weight: 400;
+}
+
+.history-chevron {
+  flex: none;
+  transition: transform 150ms ease;
+}
+
+.history-project[data-folded="true"] .history-chevron {
+  transform: rotate(-90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .history-chevron {
+    transition: none;
+  }
+}
+
+.history-project-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.history-project-list[hidden] {
+  display: none;
+}
+
+@media (hover: hover) {
+  .history-project-toggle:hover {
+    background-color: var(--hover);
+    color: var(--ink);
+  }
+}

@@ -23,7 +23,10 @@ from robinauts.controller.contract.broker.domain import RUN_TURN, Task, TaskStat
 from robinauts.controller.contract.domain import TurnActiveError, User
 from robinauts.controller.ports.store import Store, StoredEvent, StoredMessage
 from robinauts.shared_domain.domain import (
+    DEFAULT_PROJECT,
     DEFAULT_WORKER,
+    Project,
+    ProjectNotFoundError,
     Role,
     Session,
     SessionNotFoundError,
@@ -41,8 +44,25 @@ def user(subject: str = "me") -> User:
     return User(uuid.uuid4(), "local", subject, created_at=NOW)
 
 
+def project_of(owner: uuid.UUID) -> uuid.UUID:
+    """The id the contract gives each owner's ``Default`` project, so that ``session`` needs
+    no store to name it."""
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"robinauts-test-project:{owner}")
+
+
+def default_project(owner: uuid.UUID) -> Project:
+    return Project(project_of(owner), owner, DEFAULT_PROJECT, NOW)
+
+
+async def add_user(store: Store, who: User) -> User:
+    """The user stored, with the ``Default`` project its sessions go in."""
+    stored = await store.add_or_refresh_user(who)
+    await store.ensure_project(default_project(stored.id))
+    return stored
+
+
 def session(owner: uuid.UUID, updated_at: datetime = NOW) -> Session:
-    return Session(uuid.uuid4(), owner, "a", "echo", NOW, updated_at)
+    return Session(uuid.uuid4(), owner, "a", "echo", NOW, updated_at, project_id=project_of(owner))
 
 
 def question(session_id: uuid.UUID, text: str = "hi") -> StoredMessage:
@@ -108,7 +128,7 @@ class StoreContract:
     async def start_first_turn(self, store: Store) -> tuple[User, Session, StoredMessage, Turn]:
         """A session with its first question and a running turn."""
         me = user()
-        await store.add_or_refresh_user(me)
+        await add_user(store, me)
         one = session(me.id)
         await store.add_session(one)
         asked = question(one.id)
@@ -190,8 +210,8 @@ class StoreContract:
     async def test_sessions_page_newest_first_and_the_next_page_follows_the_cursor(
         self, store: Store
     ) -> None:
-        me = await store.add_or_refresh_user(user())
-        you = await store.add_or_refresh_user(user("you"))
+        me = await add_user(store, user())
+        you = await add_user(store, user("you"))
         first = session(me.id, NOW)
         second = session(me.id, NOW + MINUTE)
         third = session(me.id, NOW + 2 * MINUTE)
@@ -204,10 +224,46 @@ class StoreContract:
         assert rest == [first]
         assert await store.sessions_of(me.id, 2, (first.updated_at, first.id)) == []
 
+    # --- projects -----------------------------------------------------------
+
+    @store_test
+    async def test_a_project_of_a_name_the_owner_has_is_the_one_there(self, store: Store) -> None:
+        me = await store.add_or_refresh_user(user())
+        you = await store.add_or_refresh_user(user("you"))
+        first = Project(uuid.uuid4(), me.id, "Work", NOW)
+        assert await store.ensure_project(first) == first
+        again = Project(uuid.uuid4(), me.id, "Work", NOW + MINUTE)
+        assert await store.ensure_project(again) == first
+        yours = Project(uuid.uuid4(), you.id, "Work", NOW)
+        assert await store.ensure_project(yours) == yours
+        later = Project(uuid.uuid4(), me.id, DEFAULT_PROJECT, NOW + MINUTE)
+        await store.ensure_project(later)
+        assert await store.projects_of(me.id) == [first, later]
+        assert await store.get_project(me.id, first.id) == first
+        with pytest.raises(ProjectNotFoundError):
+            await store.get_project(me.id, yours.id)
+        with pytest.raises(ProjectNotFoundError):
+            await store.get_project(me.id, uuid.uuid4())
+
+    @store_test
+    async def test_a_session_is_in_a_project_of_its_owner(self, store: Store) -> None:
+        me = await add_user(store, user())
+        you = await add_user(store, user("you"))
+        work = await store.ensure_project(Project(uuid.uuid4(), me.id, "Work", NOW))
+        one = dataclasses.replace(session(me.id), project_id=work.id)
+        await store.add_session(one)
+        assert (await store.get_session(me.id, one.id)).project_id == work.id
+        assert [s.project_id for s in await store.sessions_of(me.id, 10, None)] == [work.id]
+        with pytest.raises(ProjectNotFoundError):
+            await store.add_session(dataclasses.replace(session(you.id), project_id=work.id))
+        with pytest.raises(ProjectNotFoundError):
+            await store.add_session(dataclasses.replace(session(me.id), project_id=uuid.uuid4()))
+        assert await store.sessions_of(you.id, 10, None) == []
+
     @store_test
     async def test_a_renamed_session_reads_back(self, store: Store) -> None:
         me, one, _, _ = await self.start_first_turn(store)
-        renamed = Session(one.id, me.id, one.agent, one.engine, one.created_at, one.updated_at, "T")
+        renamed = dataclasses.replace(one, title="T")
         await store.update_session(renamed)
         assert await store.get_session(me.id, one.id) == renamed
 
@@ -308,7 +364,7 @@ class StoreContract:
 
     @store_test
     async def test_an_append_or_a_finish_past_the_lease_is_refused(self, store: Store) -> None:
-        me = await store.add_or_refresh_user(user())
+        me = await add_user(store, user())
         one = session(me.id)
         await store.add_session(one)
         asked = question(one.id)
@@ -328,7 +384,7 @@ class StoreContract:
     async def test_end_expired_turn_ends_only_a_turn_whose_lease_has_passed(
         self, store: Store
     ) -> None:
-        me = await store.add_or_refresh_user(user())
+        me = await add_user(store, user())
         one = session(me.id)
         await store.add_session(one)
         asked = question(one.id)
@@ -351,7 +407,7 @@ class StoreContract:
     async def test_a_start_and_a_hide_succeed_after_an_expired_turn_is_ended(
         self, store: Store
     ) -> None:
-        me = await store.add_or_refresh_user(user())
+        me = await add_user(store, user())
         one = session(me.id)
         await store.add_session(one)
         asked = question(one.id)
@@ -381,7 +437,7 @@ class StoreContract:
     @store_test
     async def test_a_queued_task_is_claimed_by_its_worker_alone(self, store: Store) -> None:
         me = user()
-        await store.add_or_refresh_user(me)
+        await add_user(store, me)
         tasks = {
             worker: await self.queue_for(store, me, worker)
             for worker in (DEFAULT_WORKER, "special")
@@ -402,7 +458,7 @@ class StoreContract:
     @store_test
     async def test_a_wait_for_queued_ends_on_a_task_of_its_worker_alone(self, store: Store) -> None:
         me = user()
-        await store.add_or_refresh_user(me)
+        await add_user(store, me)
 
         async def soon(worker: str) -> None:
             await asyncio.sleep(0.05)
@@ -445,6 +501,10 @@ class StoreContract:
         for each in (me, other):
             await store.add_or_refresh_user(each)
         assert await store.wait_for_changes(me.id, None, 0) == 0
+        await store.ensure_project(default_project(me.id))
+        # A project found rather than stored changes nothing.
+        await store.ensure_project(Project(uuid.uuid4(), me.id, DEFAULT_PROJECT, NOW))
+        assert await store.wait_for_changes(me.id, None, 0) == 1
         one = session(me.id)
         await store.add_session(one)
         await store.update_session(dataclasses.replace(one, title="renamed"))
@@ -454,13 +514,13 @@ class StoreContract:
         assert await store.running_sessions(me.id, [one.id]) == {one.id}
         assert await store.running_sessions(other.id, [one.id]) == frozenset()
         await self.append(store, me, one, running, piece(1))
-        assert await store.wait_for_changes(me.id, None, 0) == 3
+        assert await store.wait_for_changes(me.id, None, 0) == 4
         await store.finish_turn(
             me.id, one.id, running.id, TurnState.FINISHED, NOW, None, None, [piece(2)], NOW
         )
         assert await store.running_sessions(me.id, [one.id]) == frozenset()
         await store.hide_session(me.id, one.id, NOW)
-        assert await store.wait_for_changes(me.id, None, 0) == 5
+        assert await store.wait_for_changes(me.id, None, 0) == 6
         assert await store.wait_for_changes(other.id, None, 0) == 0
 
     @store_test
@@ -469,17 +529,17 @@ class StoreContract:
     ) -> None:
         me, other = user(), user("other")
         for each in (me, other):
-            await store.add_or_refresh_user(each)
+            await add_user(store, each)
 
         async def soon(owner: User) -> None:
             await asyncio.sleep(0.05)
             await store.add_session(session(owner.id))
 
         adding = asyncio.create_task(soon(other))
-        assert await store.wait_for_changes(me.id, 0, 0.5) == 0
+        assert await store.wait_for_changes(me.id, 1, 0.5) == 1
         await adding
         adding = asyncio.create_task(soon(me))
-        assert await store.wait_for_changes(me.id, 0, 5.0) == 1
+        assert await store.wait_for_changes(me.id, 1, 5.0) == 2
         await adding
         # A version the caller is ahead of, or behind, is answered at once.
-        assert await store.wait_for_changes(me.id, 7, 5.0) == 1
+        assert await store.wait_for_changes(me.id, 7, 5.0) == 2

@@ -78,7 +78,7 @@ documented here, which is what "documented with the API" means for them.
 
 | method and path | body | answers |
 |---|---|---|
-| `POST /api/turns` | `{"agent_id": str, "model_id": str\|null, "text": str, "task_payload": object\|null}` | the stream of the turn answering the first question of a **new** conversation |
+| `POST /api/turns` | `{"agent_id": str, "model_id": str\|null, "text": str, "task_payload": object\|null, "project_id": uuid\|null}` | the stream of the turn answering the first question of a **new** conversation, in that project of the user's, or in their `Default` one when `project_id` is left out or null; a project that is not theirs is refused (404) |
 | `POST /api/conversations/{id}/turns` | `{"text": str, "parent_id": uuid, "model_id": str\|null, "task_payload": object\|null}` **or** `{"text": str, "edit": uuid, "model_id": str\|null, "task_payload": object\|null}` **or** `{"regenerate": uuid, "model_id": str\|null}` **or** `{"retry": uuid, "model_id": str\|null}` **or** `{"resume": uuid, "model_id": str\|null}` | the stream of the turn it began |
 | `GET /api/conversations/{id}/runs/{run_id}/events?after=<position>` | — | the stream of that turn from `after`; `Last-Event-ID` says the same thing, and is read when `after` is absent; a run that is not in that conversation answers 404, as one in somebody else's does |
 | `POST /api/conversations/{id}/runs/{run_id}/cancel` | — | 204; the turn ends as cancelled, at once or soon after |

@@ -8,8 +8,12 @@
 - **The panel is ours**, and not part of the chat window
   ([ADR 0006](../adr/0006-chat-ui-on-react-alone.md)). Top to
   bottom: the collapse button and the brand; "new chat"; the conversation
-  history; projects, once they exist; and, pinned to the bottom, the
-  profile block with sign-out. Collapsed, it becomes an icon rail. The state is remembered
+  history, a project at a time; and, pinned to the bottom, the
+  profile block with sign-out. Each project is a heading that folds its
+  conversations away and opens them again, which is remembered per
+  browser, with a "+" that starts a conversation in it; "New project" beside
+  the history's heading makes another. The empty chat has a project picker
+  beside the agent's, on "Default" until another is picked. Collapsed, it becomes an icon rail. The state is remembered
   per browser.
 - The application opens on an empty chat, ready for a first message, with
   the agent to talk to and the model selectable side by side. The model

@@ -18,7 +18,8 @@ agent to another engine, and what its sessions then do, is stage two.
 | record | key | holds | document |
 |---|---|---|---|
 | user | `id` | `provider` and `subject` (unique together), `name`, `email`, `created_at`, `hosted_domain`, `groups`, `change_version` | no |
-| session | `id` | `owner_id`, `agent`, `engine`, `title`, `created_at`, `updated_at`, `deleted_at` | no |
+| project | `id` | `owner_id`, `name` (unique per owner), `created_at` | no |
+| session | `id` | `owner_id`, `project_id`, `agent`, `engine`, `title`, `created_at`, `updated_at`, `deleted_at` | no |
 | message | `id` | `session_id`, `parent_id`, `role`, `created_at` | **yes** |
 | turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `retries_message_id`, `task_id` | no |
 | task | `id` | `task_name`, `payload`, `state`, `created_at`, `lease_until`, `claimed_at`, `cancel_requested_at` | no |
@@ -45,6 +46,7 @@ inside it.
 ## Relationships
 
 ```
+user 1 ── N project 1 ── N session (same owner)
 user 1 ── N session 1 ── N message ── parent_id ──► message (same session)
                     │
                     └─ N turn ── follows ──► message (the question, same session)
@@ -54,6 +56,12 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
 
 - **A user owns sessions.** Deleting a user deletes their sessions, after their
   sessions have been purged, which calls each engine's `forget`.
+- **A user owns projects, and every session is in one of its owner's.** Each user
+  has a project named `Default`, made the first time it is needed: when their
+  projects are listed, or a session is started without naming one. A session that
+  names no project goes in it. Names are unique per owner, so making a project by a
+  name the owner already has finds that one. Projects are not shared with other
+  people yet, and cannot be renamed or deleted.
 - **A session's messages are a tree.** `parent_id` is a message of the same session,
   or nothing for the first question. An edit is a new message under an earlier parent.
   The visible thread is the path from the root to the newest message.

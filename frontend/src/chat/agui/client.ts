@@ -108,18 +108,26 @@ const sleep = (ms: number) =>
  * Begin a conversation with an agent, and watch the run answering it.
  *
  * `modelId` is the model the conversation runs on; `null` is the agent's
- * default, which the backend copies in (`docs/specs/wire.md`).
+ * default, which the backend copies in (`docs/specs/wire.md`). `projectId`
+ * is the project it goes in; `null` leaves it out, and the backend puts the
+ * conversation in the user's "Default" one.
  */
 export async function startNewConversation(
   agentId: string,
   modelId: string | null,
   text: string,
   watching: Watching = {},
+  projectId: string | null = null,
 ): Promise<Attached> {
   return attachTo(
     await post(
       "/api/turns",
-      { agent_id: agentId, model_id: modelId, text },
+      {
+        agent_id: agentId,
+        model_id: modelId,
+        text,
+        ...(projectId === null ? {} : { project_id: projectId }),
+      },
       watching,
     ),
     0,

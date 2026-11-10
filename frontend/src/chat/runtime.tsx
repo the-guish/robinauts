@@ -878,6 +878,7 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     }
     dispatch({ kind: "asked", id: unsent(), after: parentId, text });
     const { agentId, modelId } = props;
+    const projectId = props.projectId ?? null;
     if (agentId === null) {
       dispatch({ kind: "lost", detail: NO_AGENT });
       return;
@@ -886,9 +887,13 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
       async (signal) => {
         // The model goes with the first message and never again: every later
         // turn runs on the conversation's, which the server reads.
-        const attached = await startNewConversation(agentId, modelId, text, {
-          signal,
-        });
+        const attached = await startNewConversation(
+          agentId,
+          modelId,
+          text,
+          { signal },
+          projectId,
+        );
         // **Only if this page is still the empty chat.** Somebody who opened
         // another conversation while the request was in the air is not to be
         // taken to this one instead, and claiming it as ours would stop the

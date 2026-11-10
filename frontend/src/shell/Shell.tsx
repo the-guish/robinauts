@@ -49,6 +49,13 @@ import {
   useModels,
 } from "./ModelPicker";
 import { PANEL_ID, Panel } from "./Panel";
+import { ProjectPicker } from "./ProjectPicker";
+import {
+  createProject,
+  useChosenProject,
+  useFolded,
+  useProjects,
+} from "../projects/projects";
 import { remember, remembered } from "./storage";
 import "./shell.css";
 
@@ -190,6 +197,21 @@ export function Shell({
     refreshHistory();
     setChanges((count) => count + 1);
   }, [refreshHistory]);
+  // The projects, asked for again with everything else that changes, and
+  // after one is made here; the one a first message goes in; and which are
+  // folded away in the panel (`../projects/projects.ts`).
+  const [projectsRound, setProjectsRound] = useState(0);
+  const projects = useProjects(changes + projectsRound);
+  const [projectId, chooseProject] = useChosenProject(projects);
+  const folded = useFolded();
+  const newProject = useCallback(
+    async (name: string) => {
+      const made = await createProject(name);
+      chooseProject(made.id);
+      setProjectsRound((round) => round + 1);
+    },
+    [chooseProject],
+  );
   useChanges(changed);
   // "New chat" pressed while the empty chat is already up changes no hash
   // and so re-renders nothing; the count is what remounts the area, so
@@ -324,6 +346,11 @@ export function Shell({
   );
   const welcome = (
     <div className="shell-welcome">
+      <ProjectPicker
+        projects={projects}
+        chosen={projectId}
+        onChoose={chooseProject}
+      />
       <AgentPicker agents={agents} chosen={agentId} onChoose={chooseAgent} />
       {/* Only once there is an agent to talk to: with none, the agent
           picker's sentence is the whole of what there is to say. */}
@@ -390,6 +417,14 @@ export function Shell({
         user={session.user ?? null}
         history={history}
         current={current}
+        projects={projects.status === "ready" ? projects.items : null}
+        folded={folded}
+        onNewChatIn={(project) => {
+          chooseProject(project);
+          navigate(NEW_CHAT);
+          setChat((count) => count + 1);
+        }}
+        onNewProject={newProject}
         onDevices={route.kind === "devices"}
         flowsUrl={flowsUrl}
         flowsView={flowsView}
@@ -514,6 +549,7 @@ export function Shell({
                 key={chat}
                 conversationId={current}
                 agentId={agentId}
+                projectId={projectId}
                 // The model goes with every turn: an open conversation's is the
                 // one its line's picker shows.
                 modelId={current === null ? modelId : conversationModel}

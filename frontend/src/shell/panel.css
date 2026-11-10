@@ -293,3 +293,43 @@
     transition: none;
   }
 }
+
+/* The history's heading, with "New project" beside it, or its name box. */
+.panel-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem;
+  padding-right: 0.25rem;
+}
+
+.panel-project-form {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  padding-inline: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+
+.panel-project-box {
+  min-width: 0;
+  flex: 1;
+  border-radius: var(--radius);
+  border-width: 1px;
+  border-color: var(--edge);
+  background-color: var(--paper);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  line-height: calc(1.25 / 0.875);
+  color: var(--ink);
+}
+
+.panel-project-refused {
+  flex: 1 1 100%;
+  font-size: 0.75rem;
+  line-height: calc(1 / 0.75);
+  color: var(--bad);
+}

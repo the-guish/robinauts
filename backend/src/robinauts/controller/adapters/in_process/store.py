@@ -22,6 +22,8 @@ from robinauts.controller.ports.store import (
     StoredMessage,
 )
 from robinauts.shared_domain.domain import (
+    Project,
+    ProjectNotFoundError,
     Session,
     SessionNotFoundError,
     Turn,
@@ -33,6 +35,7 @@ from robinauts.shared_domain.domain import (
 class InProcessStore(Store):
     def __init__(self) -> None:
         self._users: dict[tuple[str, str], User] = {}
+        self._projects: dict[uuid.UUID, Project] = {}
         self._sessions: dict[uuid.UUID, Session] = {}
         self._hidden: dict[uuid.UUID, datetime] = {}
         self._messages: dict[uuid.UUID, list[StoredMessage]] = {}
@@ -120,9 +123,38 @@ class InProcessStore(Store):
         """Not the port's: whom ``InProcessCredentials`` looks a person up among."""
         return list(self._users.values())
 
+    # --- projects -----------------------------------------------------------
+
+    async def ensure_project(self, project: Project) -> Project:
+        there = next(
+            (
+                p
+                for p in self._projects.values()
+                if p.owner_id == project.owner_id and p.name == project.name
+            ),
+            None,
+        )
+        if there is not None:
+            return there
+        self._projects[project.id] = project
+        self._bump(project.owner_id)
+        await self._notify()
+        return project
+
+    async def get_project(self, owner: uuid.UUID, project: uuid.UUID) -> Project:
+        found = self._projects.get(project)
+        if found is None or found.owner_id != owner:
+            raise ProjectNotFoundError(str(project))
+        return found
+
+    async def projects_of(self, owner: uuid.UUID) -> list[Project]:
+        owned = [p for p in self._projects.values() if p.owner_id == owner]
+        return sorted(owned, key=lambda p: (p.created_at, p.id))
+
     # --- sessions -----------------------------------------------------------
 
     async def add_session(self, session: Session) -> None:
+        await self.get_project(session.owner_id, session.project_id)
         self._sessions[session.id] = session
         self._messages[session.id] = []
         self._bump(session.owner_id)

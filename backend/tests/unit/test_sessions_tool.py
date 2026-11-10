@@ -32,6 +32,7 @@ from util.aio import asyncio_test
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
 OWNER = uuid.uuid4()
+PROJECT = uuid.uuid4()
 
 
 class Data(ScopedData):
@@ -46,7 +47,7 @@ class Data(ScopedData):
         self, title: str, *texts: str | Sequence[MessagePart], role: Role = Role.USER
     ) -> uuid.UUID:
         at = START + timedelta(hours=len(self.sessions_by_id))
-        session = Session(uuid.uuid4(), OWNER, "keeper", "echo", at, at, title)
+        session = Session(uuid.uuid4(), OWNER, "keeper", "echo", at, at, title, project_id=PROJECT)
         self.sessions_by_id[session.id] = session
         self.messages_of[session.id] = [
             Message(

@@ -29,7 +29,7 @@ from robinauts.controller.contract.domain import (
     User,
     UserSession,
 )
-from robinauts.shared_domain.domain import Session, TurnStarted
+from robinauts.shared_domain.domain import Project, Session, TurnStarted
 
 
 class Controller(ABC):
@@ -90,6 +90,18 @@ class Controller(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def list_projects(self, user: User) -> tuple[Project, ...]:
+        """The user's projects, oldest first: the ``DEFAULT_PROJECT`` one always among them,
+        made if the user had none."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def create_project(self, user: User, name: str) -> Project:
+        """The user's project of that name, made if there was none. ``InvalidValueError`` for
+        a name empty or out of bounds."""
+        raise NotImplementedError
+
+    @abstractmethod
     async def start_session(
         self,
         user: User,
@@ -97,12 +109,14 @@ class Controller(ABC):
         agent: str,
         model: str,
         text: str,
+        project: uuid.UUID | None = None,
         task_payload: Mapping[str, Any] | None = None,
     ) -> TurnStarted:
         """``UnknownAgentError``, ``UnknownModelError``; ``InvalidValueError`` for empty text,
-        or a ``task_payload`` that is not a JSON object with a ``task_key``, or too large. The
-        payload is kept on the question, and every turn that answers it hands it to the
-        engine."""
+        or a ``task_payload`` that is not a JSON object with a ``task_key``, or too large;
+        ``ProjectNotFoundError`` for a project the user does not have. With no ``project``
+        the session is in the user's ``DEFAULT_PROJECT`` one. The payload is kept on the
+        question, and every turn that answers it hands it to the engine."""
         raise NotImplementedError
 
     @abstractmethod

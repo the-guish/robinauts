@@ -478,6 +478,7 @@ test("the seam is a component and ten names, and nothing of a library", () => {
     conversationId: ConversationId | null;
     agentId: AgentId | null;
     modelId: ModelId | null;
+    projectId?: string | null;
     onConversationStarted: (id: ConversationId) => void;
     onConversationOpened?: (conversation: Conversation) => void;
     onTurnEnded?: () => void;
