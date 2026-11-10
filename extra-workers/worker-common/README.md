@@ -10,7 +10,8 @@ repository's own.
 | --- | --- |
 | `robinauts_worker_common.__main__` | the shared start, `python -m robinauts_worker_common`: checks what every extra worker checks, then runs `robinauts.cli.worker_process`. The base worker's command. A worker with a start of its own calls `problems_of` beside its own checks, as the Claude Code worker does |
 | `robinauts_worker_common.github` | the GitHub token a worker may be handed: the variable, its checks, the header git sends it in |
-| `robinauts_worker_common.clone` | cloning a GitHub repository inside the container, with that token |
+| `robinauts_worker_common.clone` | cloning a GitHub repository inside the container, with that token; `run_git`, every other git command the same way |
+| `robinauts_worker_common.worktrees` | the repositories of the flows' settings: one shared clone of each, and a worktree of each per session, on `rb/<session id>` |
 
 ## Using it from a worker
 
@@ -46,7 +47,7 @@ name, checks what it holds, and hands it to git, and to nothing else.
 | Variable | `GITHUB_TOKEN` |
 | What it is | A [fine-grained personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token), or a GitHub App's installation token |
 | Who makes it | The operator, or the person running their own instance, on GitHub: Settings, Developer settings, Personal access tokens, Fine-grained tokens |
-| What it needs | The repositories the worker clones, alone, with **Contents: Read-only**. Nothing more is needed to clone |
+| What it needs | The repositories the worker clones, alone, with **Contents: Read and write**, since agents push their branches; add **Pull requests: Read and write** if they open pull requests. To clone alone, **Contents: Read-only** is enough |
 | Where it goes | A file of the worker's own, `github.env`, named by `--env-file` in the worker's command |
 | Optional | Without it, public repositories alone are cloned |
 
@@ -81,8 +82,10 @@ Where the token goes, and where it does not:
   clone's `.git/config`, where it would outlive the clone.
 - **To the agents that run commands, by inheritance.** A subprocess that runs
   an agent's own commands inherits the worker's environment, `GITHUB_TOKEN`
-  included: Claude Code's `Bash` and `git` can use it. That is allowed; see
-  "Enhancements".
+  included: Claude Code's `Bash` and `git` can use it. A clone's
+  configuration holds a credential helper that reads the variable when the
+  agent's git asks, so the agent pushes with it; the configuration holds the
+  variable's name, never its value. That is allowed; see "Enhancements".
 - **Not to logs.** A failed clone says what git said, with the token taken out.
 
 When it expires or is revoked, the clone fails with GitHub's refusal. Make a
@@ -121,8 +124,84 @@ docker run --rm --env-file /etc/robinauts/github.env robinauts-base-worker \
 - `GitHubError` is a refusal before git ran, and `CloneError` a clone that
   failed. Neither ever holds the token.
 
+## Repositories and worktrees
+
+Agents that run at once each work in a copy of their own of every repository,
+so that none sees another's changes. The repositories are the one list every
+worker reads, `[repositories]` of the flows' settings: `flows.toml` in the
+folder `ROBINAUTS_FLOWS_DIR` names, the file the server's flows read too
+([docs/architecture/orchestration.md](../../docs/architecture/orchestration.md)).
+
+```toml
+[repositories.robinauts]
+url = "https://github.com/the-guish/robinauts"
+branches = ["main"]
+```
+
+The worker's command passes the variable on and mounts the folder, read-only,
+at the same path:
+
+```toml
+"-e", "ROBINAUTS_FLOWS_DIR",
+"-v", "/etc/robinauts/flows:/etc/robinauts/flows:ro",
+```
+
+Without the variable, or without a `flows.toml`, there are no repositories,
+and a session's directory starts empty. A repository that is not on the GitHub
+server, or whose id cannot name a folder, stops the worker's start, with every
+other problem of the shared start.
+
+On disk, with the Claude Code worker's volume:
+
+```
+/workspace/
+    repos/
+        <repository id>/            one clone of each, on its default branch
+    <session id>/                   a session's directory, the agent's working directory
+        <repository id>/            a worktree of that clone, on the branch rb/<session id>
+```
+
+- **A clone** is made the first time a session needs it, and fetched before
+  each new worktree of it. It is the remote's default branch, `origin/HEAD`,
+  whatever it is called. Nothing works in it: it holds the worktrees' history.
+- **A session's worktrees** are made before its first turn starts the agent,
+  one per repository, from the default branch as just fetched, on a branch of
+  the session's own, `rb/<session id>`: git checks a branch out in one
+  worktree at most. They stay between the session's turns, as the agent left
+  them. One lost is made again on its branch, its commits kept.
+- **The agent pushes** its branch with a plain `git push`, which creates
+  `rb/<session id>` on GitHub (`push.autoSetupRemote`), with the token in its
+  environment, through the clone's credential helper. Its commits are by
+  `Robinauts <robinauts@localhost>`, unless the worker's environment names
+  someone with git's own `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`,
+  `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL`, in the same env file as the
+  token.
+- **A deleted session** takes its worktrees and its branch with it, unpushed
+  work included. What it pushed stays on GitHub.
+- **At once**: a lock per repository keeps one fetch or worktree change on a
+  clone at a time; sessions on different repositories go on together. How many
+  turns run at once is the worker's limit, `[work] max_running_tasks_per_worker`
+  in the agents' configuration: a worker claims a turn only when it runs fewer
+  than that, so a turn it holds always has its slot before the agent starts.
+
+```python
+from robinauts_worker_common.worktrees import Repositories
+
+repositories = Repositories.from_environ(workspaces / "repos")   # None without any
+worktrees = await repositories.add_worktrees(session_id, workspaces / session_id)
+...
+await repositories.remove_worktrees(session_id, workspaces / session_id)
+```
+
+`WorktreeError`, a `GitError` like `CloneError`, is a clone, a fetch or a
+worktree that failed; it never holds the token.
+
 ## Enhancements
 
+- **Clone ahead of the first turn.** A repository is cloned when a session
+  first needs it, so the first turn after a start waits for the clone, under
+  its deadline. The worker could warm the clones up in the background once it
+  has said `ready`; not before, since the server waits a minute for it.
 - **Keep the token from the agents.** Today an agent whose commands run in a
   subprocess that inherits the worker's environment, such as Claude Code's
   `Bash`, can read `GITHUB_TOKEN`, and so can use it with `git` and `gh`. That
@@ -140,7 +219,9 @@ docker run --rm --env-file /etc/robinauts/github.env robinauts-base-worker \
 
 `tests/test_github.py` checks the pure parts: the token, the server, the
 repository names, git's command line and environment. `tests/test_clone.py`
-clones with the real git from a local stand-in for GitHub: git's own
-`http-backend` behind HTTPS, with a certificate made for the test, which asks
-for the token when it is told to. It is skipped where git or openssl is
-missing.
+and `tests/test_worktrees.py` run the real git against a local stand-in for
+GitHub, `tests/github_stand_in.py`: git's own `http-backend` behind HTTPS, with
+a certificate made for the test, which asks for the token when it is told to
+and takes pushes. They clone, fetch, make worktrees for sessions at once, push
+an agent's branch with the token from its environment, and remove a session's
+worktrees. They are skipped where git or openssl is missing.
