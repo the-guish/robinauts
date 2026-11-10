@@ -76,9 +76,9 @@ worker adds:
 - `--env-file /etc/robinauts/github.env`, optional: `GITHUB_TOKEN`, for the
   worker's own clones (`robinauts_worker_common.clone`), checked at the start
   like every extra worker's
-  ([../worker-common/README.md](../worker-common/README.md)). Claude Code is
-  handed it emptied: its `Bash` and its `git` are the agent's, and the agent
-  never reads the token.
+  ([../worker-common/README.md](../worker-common/README.md)). Claude Code
+  inherits it, so the agent's `Bash` and `git` can use it too; keeping it from
+  the agent is listed under that README's "Enhancements".
 - Not passed, and not to be: `ROBINAUTS_DATABASE_URL`. The worker refuses to
   start with it.
 

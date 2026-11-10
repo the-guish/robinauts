@@ -109,10 +109,7 @@ run as before.
    what your engine needs in the environment, together with
    `robinauts_worker_common.__main__.problems_of`, and then calls
    `robinauts.cli.worker_process.main()`.
-5. If your engine runs the agent's own commands in a subprocess, lay
-   `robinauts_worker_common.github.HIDDEN_FROM_AGENTS` over that subprocess's
-   environment, so the agent never reads the GitHub token.
-6. Say in the README who makes which credential and where it goes. Robinauts
+5. Say in the README who makes which credential and where it goes. Robinauts
    makes none.
 
 `scripts/check-extra-workers.sh` runs the folder's lint, tests and image build.

@@ -79,10 +79,10 @@ Where the token goes, and where it does not:
   configuration in git's environment, scoped to `https://github.com/`. It is
   never on a command line, where any process could read it, and never in the
   clone's `.git/config`, where it would outlive the clone.
-- **Not to the agents.** A subprocess that runs an agent's own commands, such as
-  Claude Code's `Bash` tool, is handed `GITHUB_TOKEN` emptied
-  (`github.HIDDEN_FROM_AGENTS`). The model steers the agent, and a prompt in a
-  repository or on a web page must not get it to send the token anywhere.
+- **To the agents that run commands, by inheritance.** A subprocess that runs
+  an agent's own commands inherits the worker's environment, `GITHUB_TOKEN`
+  included: Claude Code's `Bash` and `git` can use it. That is allowed; see
+  "Enhancements".
 - **Not to logs.** A failed clone says what git said, with the token taken out.
 
 When it expires or is revoked, the clone fails with GitHub's refusal. Make a
@@ -120,6 +120,21 @@ docker run --rm --env-file /etc/robinauts/github.env robinauts-base-worker \
   the cancellation goes on.
 - `GitHubError` is a refusal before git ran, and `CloneError` a clone that
   failed. Neither ever holds the token.
+
+## Enhancements
+
+- **Keep the token from the agents.** Today an agent whose commands run in a
+  subprocess that inherits the worker's environment, such as Claude Code's
+  `Bash`, can read `GITHUB_TOKEN`, and so can use it with `git` and `gh`. That
+  is accepted for now. The risk is that the model steers the agent, and a
+  prompt in a repository, an issue or a web page could get it to send the
+  token elsewhere. The hardening: the engine lays `GITHUB_TOKEN=""` over the
+  environment it hands that subprocess (for the Claude Code worker,
+  `ClaudeAgentOptions.env`, built in `credentials.subprocess_environment`), so
+  that the worker's own clones keep the token and the agent does not. If the
+  agent must push or open pull requests, a second, narrower token for it alone
+  (one repository, the permissions it needs, a short expiry) keeps the two
+  apart.
 
 ## The tests
 

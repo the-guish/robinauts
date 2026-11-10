@@ -36,8 +36,8 @@ What they have in common, and what a new one keeps:
   the person or the operator does, with the vendor's own tools, and the
   worker's documentation says who makes which credential and where it goes.
   A GitHub token, the one credential every worker may be handed, comes from
-  a file the command names with `--env-file`, and is handed to git alone,
-  never to an agent ([worker-common/](worker-common/README.md)).
+  a file the command names with `--env-file`, and is handed to git as a
+  header scoped to the GitHub server ([worker-common/](worker-common/README.md)).
 - **It is checked like the rest of the repository**: SPDX headers on every
   file, its lock under the licence gate (`scripts/check-licences.sh`), ruff and
   black under the backend's rules, its own tests, and the image built in CI.

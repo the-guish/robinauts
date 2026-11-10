@@ -8,7 +8,9 @@ The person or the operator makes a token on GitHub and puts it in a file of the 
 which the worker's command names with ``docker run --env-file`` (README.md). This module reads
 the *name* of the variable, checks that what it holds can be a token, and turns it into the one
 header git sends to the GitHub server, and nowhere else. The value is never logged, never
-written to disk, never put on a command line and never handed to an agent.
+written to disk and never put on a command line. An agent whose own commands run in a
+subprocess that inherits the worker's environment, as Claude Code's ``Bash`` does, can read it
+there: that is allowed (README.md, "Enhancements").
 """
 
 from __future__ import annotations
@@ -21,12 +23,6 @@ from urllib.parse import urlsplit
 TOKEN_VARIABLE = "GITHUB_TOKEN"
 """A GitHub token: a fine-grained personal access token, or an app's installation token. It is
 optional: without it, public repositories alone can be cloned."""
-
-HIDDEN_FROM_AGENTS = {TOKEN_VARIABLE: ""}
-"""What a worker lays over the environment a subprocess inherits when that subprocess runs an
-agent's own commands, as Claude Code runs its ``Bash`` tool: the token, emptied. The worker's
-code clones with it (clone.py); an agent the model steers never reads it, so a prompt in a
-repository or a web page cannot make it send the token anywhere."""
 
 SERVER = "https://github.com"
 """The GitHub server a token is sent to, and the only one a repository is cloned from. A GitHub
