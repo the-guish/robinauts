@@ -26,7 +26,25 @@ The handlers carry each answer from one conversation to the other as it is. The 
 they add is ``"here is the guess: "`` before a guess they hand the game. A turn is waited for
 by reading its stream to the end; its answer is then read from the conversation.
 
-neorc delivers a task at least once: a task that runs again sends its message again.
+The code and review (``flows/code_and_review.yaml``) is two conversations on the agent and
+the model the run was started with:
+
+- **implement**: the agent does the task in its session's worktree of the chosen repository,
+  from the chosen branch, pushes the session's branch and opens a pull request against the
+  chosen branch;
+- **review**: a second conversation reads that pull request in its own worktree, against the
+  task, and changes nothing.
+
+Each ends its answer with one ``RESULT`` line of JSON, which the handler reads: the pull
+request's URL, then the review's verdict. An answer without one, or with one that is not what
+was asked, fails the task with what it said. The worktrees, their branches and the push are
+the extra worker's, from the same ``[repositories]`` of ``flows.toml`` the form offers
+(``extra-workers/worker-common/README.md``, "Repositories and worktrees"); the agent reaches
+GitHub with the token its worker was given. The handlers hold none, and name the repository
+by its id there, which is the folder of its worktree.
+
+neorc delivers a task at least once: a task that runs again sends its message again. For the
+code and review, that is a second pull request.
 """
 
 from __future__ import annotations
@@ -61,6 +79,59 @@ GUESS_PREFIX = "here is the guess: "
 HIT = re.compile(r"\bHIT\b", re.IGNORECASE)
 """How a verdict that ends the game is told apart from TOO LOW and TOO HIGH."""
 
+RESULT = "RESULT"
+"""What the line an answer ends with starts with, before its JSON."""
+
+PULL_REQUEST = re.compile(r"https://[^/\s]+/[^/\s]+/[^/\s]+/pull/[0-9]+")
+"""A pull request's URL, on GitHub or a GitHub Enterprise Server."""
+
+VERDICTS = frozenset({"approve", "request_changes"})
+"""What a review may conclude."""
+
+IMPLEMENT_PROMPT = """\
+Work on the repository {repo}, from its branch {base}. Your working directory holds a worktree
+of it, the folder `{repo}`, on a branch of this conversation's own: work there, on that branch.
+
+The task:
+
+{task}
+
+Do it from start to finish:
+
+1. In `{repo}`, start from {base}: `git fetch origin {base}`, then
+   `git reset --hard origin/{base}`. Stay on the branch the worktree is on; make no other.
+2. Do the task. Run the project's own checks for what you changed, and fix what fails.
+3. Commit, and push with a plain `git push`, which creates the branch on GitHub with the
+   token in your environment.
+4. Open a pull request of that branch against {base}, with a title and a description that
+   say what changed and why: a POST to `https://api.github.com/repos/<owner>/<name>/pulls`
+   with the header `Authorization: Bearer $GITHUB_TOKEN`, where `<owner>/<name>` is the
+   repository of `git remote get-url origin`.
+
+End your answer with exactly one line, and nothing after it:
+
+{result} {{"pr_url": "<the pull request's URL>", "branch": "<the branch you pushed>"}}
+"""
+"""What opens the implementing conversation. The worktree, its branch and the push are the
+extra worker's (``extra-workers/worker-common/README.md``, "Repositories and worktrees")."""
+
+REVIEW_PROMPT = """\
+Review the pull request {pr_url}, which was opened to do this task on the repository {repo}:
+
+{task}
+
+Your working directory holds a worktree of {repo}, the folder `{repo}`. Read the pull
+request's changes there without checking its branch out: `git fetch origin`, then
+`git diff origin/{base}...origin/{branch}`. Judge whether it does the task, whether it is
+correct, and whether it is safe to merge. Change nothing, commit nothing, push nothing, and
+post nothing.
+
+End your answer with exactly one line, and nothing after it:
+
+{result} {{"verdict": "approve" or "request_changes", "summary": "<two or three sentences>"}}
+"""
+"""What opens the reviewing conversation."""
+
 TIMEOUT_SECONDS = 30.0
 """Per read: a turn's stream says something at least every few seconds while it runs."""
 
@@ -85,6 +156,31 @@ def _request(path: str, body: dict[str, Any] | None = None) -> urllib.request.Re
 def _get(path: str) -> Any:
     with urllib.request.urlopen(_request(path), timeout=TIMEOUT_SECONDS) as answer:
         return json.load(answer)
+
+
+def split_repo_branch(value: str) -> tuple[str, str]:
+    """A repository's id and its branch, as a form's list of values gives them:
+    ``<id>@<branch>``. A branch name holds no ``@``."""
+    repo, at, branch = value.rpartition("@")
+    if not at or not repo or not branch:
+        raise RuntimeError(f"{value!r} is not a repository and a branch, <id>@<branch>")
+    return repo, branch
+
+
+def result_of(answer: str) -> dict[str, Any]:
+    """The JSON object of the last line of ``answer`` that starts with ``RESULT``."""
+    for line in reversed(answer.splitlines()):
+        stripped = line.strip().strip("`").strip()
+        if not stripped.startswith(RESULT):
+            continue
+        try:
+            found = json.loads(stripped.removeprefix(RESULT).strip())
+        except ValueError:
+            break
+        if isinstance(found, dict):
+            return found
+        break
+    raise RuntimeError(f"the answer ends with no {RESULT} line of JSON: {answer[-300:]!r}")
 
 
 def _first_agent() -> str:
@@ -140,9 +236,10 @@ def _say(conversation: str, text: str) -> str:
     return _latest_answer(conversation)[1]
 
 
-def _open(text: str, *, model: str | None = None) -> dict[str, str]:
-    """Start a conversation with the first agent and ``text``, and wait for its first answer."""
-    agent = _first_agent()
+def _open(text: str, *, model: str | None = None, agent: str | None = None) -> dict[str, str]:
+    """Start a conversation with ``agent``, else the first agent, and ``text``, and wait for its
+    first answer."""
+    agent = agent or _first_agent()
     body: dict[str, Any] = {"agent_id": agent, "text": text}
     if model is not None:
         body["model_id"] = model
@@ -211,4 +308,56 @@ def summarize(number: int, judged: list[dict[str, Any]]) -> dict[str, Any]:
         "won": bool(judged[-1]["hit"]),
         "tries": len(judged),
         "rounds": judged,
+    }
+
+
+def implement(task: str, repo_branch: str, model: str, agent: str) -> dict[str, Any]:
+    """Have ``agent``, on ``model``, do ``task`` in its worktree of the repository and open a
+    pull request against the branch; return the pull request, its branch and the
+    conversation."""
+    repo, base = split_repo_branch(repo_branch)
+    prompt = IMPLEMENT_PROMPT.format(repo=repo, base=base, task=task, result=RESULT)
+    opened = _open(prompt, model=model, agent=agent)
+    found = result_of(opened["answer"])
+    pr_url = found.get("pr_url")
+    branch = found.get("branch")
+    if not isinstance(pr_url, str) or not PULL_REQUEST.fullmatch(pr_url):
+        raise RuntimeError(
+            f"conversation {opened['conversation_id']} names no pull request: {found!r}"
+        )
+    if not isinstance(branch, str) or not branch:
+        raise RuntimeError(f"conversation {opened['conversation_id']} names no branch: {found!r}")
+    return {
+        "task": task,
+        "repository": repo,
+        "base": base,
+        "pr_url": pr_url,
+        "branch": branch,
+        "conversation_id": opened["conversation_id"],
+    }
+
+
+def review(implemented: dict[str, Any], model: str, agent: str) -> dict[str, Any]:
+    """Have ``agent``, on ``model``, review the pull request ``implement`` opened, against the
+    task; return its verdict and summary, with both conversations."""
+    prompt = REVIEW_PROMPT.format(
+        pr_url=implemented["pr_url"],
+        repo=implemented["repository"],
+        task=implemented["task"],
+        branch=implemented["branch"],
+        base=implemented["base"],
+        result=RESULT,
+    )
+    opened = _open(prompt, model=model, agent=agent)
+    found = result_of(opened["answer"])
+    verdict = found.get("verdict")
+    if verdict not in VERDICTS:
+        raise RuntimeError(f"conversation {opened['conversation_id']} gives no verdict: {found!r}")
+    summary = found.get("summary")
+    return {
+        "pr_url": implemented["pr_url"],
+        "verdict": verdict,
+        "summary": summary if isinstance(summary, str) else "",
+        "implemented_in": implemented["conversation_id"],
+        "reviewed_in": opened["conversation_id"],
     }

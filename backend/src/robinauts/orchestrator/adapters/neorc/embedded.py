@@ -2,7 +2,7 @@
 # Copyright The Robinauts Authors
 
 """neorc, embedded in this server (``docs/architecture/orchestration.md``). This package is the
-one place in Robinauts that imports neorc: take it and its wiring in ``cli.composition`` out and
+one place in Robinauts that imports neorc: take it and its wiring in ``cli.orchestration`` out and
 the server is what it was without a flows folder.
 
 - neorc's **manager** is an application inside this server's, mounted at ``/neorc`` with its UI

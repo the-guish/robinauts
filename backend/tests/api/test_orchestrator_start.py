@@ -263,7 +263,7 @@ def test_a_flow_with_a_form_is_listed_with_its_values_and_started_with_them(
     config.write_text(CONFIG)
     inputs = {
         "task": "Fix the bug",
-        "repo_branch": "https://git.example/app@next",
+        "repo_branch": "app@next",
         "model": "haiku",
         "agent": "echo",
     }
@@ -283,8 +283,8 @@ def test_a_flow_with_a_form_is_listed_with_its_values_and_started_with_them(
     fields = {field["name"]: field for field in probe["inputs"]}
     assert list(fields) == ["repo_branch", "model", "agent", "task"]
     assert fields["repo_branch"]["options"] == [
-        {"value": "https://git.example/app@main", "label": "app · main"},
-        {"value": "https://git.example/app@next", "label": "app · next"},
+        {"value": "app@main", "label": "app · main"},
+        {"value": "app@next", "label": "app · next"},
     ]
     assert fields["model"]["options"] == [{"value": "haiku", "label": "Echo Haiku"}]
     assert fields["agent"]["options"] == [{"value": "echo", "label": "Echo · default"}]
@@ -300,6 +300,43 @@ def test_a_flow_with_a_form_is_listed_with_its_values_and_started_with_them(
     assert missing.status_code == 422
     assert unknown.status_code == 404
     assert run["inputs"] == inputs
+
+
+def test_the_shipped_code_and_review_runs_its_form_s_inputs_to_the_implementing_agent(
+    tmp_path: Path,
+) -> None:
+    """On the echo engine, whose answer is no pull request: the run starts from the form with
+    the chosen agent and model, the implementing conversation opens on them, and the run fails
+    there, saying why. A real agent's run is for the metered tests."""
+    flows = tmp_path / "flows"
+    flows.mkdir()
+    for name in ("code_and_review.yaml", "code_and_review.form.toml"):
+        (flows / name).write_text((SHIPPED / name).read_text())
+    (flows / "flows.toml").write_text(PROBE_SETTINGS)
+    config = tmp_path / "robinauts.toml"
+    config.write_text(CONFIG)
+    inputs = {
+        "task": "Fix the bug",
+        "repo_branch": "app@main",
+        "model": "haiku",
+        "agent": "echo",
+    }
+    with started(config, environment_for(config, flows)) as (url, _):
+        with httpx.Client(base_url=url, timeout=30.0, headers={"origin": url}) as api:
+            [form] = api.get("/api/flows").json()["items"]
+            begun = api.post("/api/flows/code_and_review/runs", json={"inputs": inputs})
+            assert begun.status_code == 201, begun.text
+            run = finished_run(api, begun.json()["id"])
+            tasks = api.get(f"/neorc/runs/{run['id']}/tasks").json()["tasks"]
+            conversations = api.get("/api/conversations").json()["items"]
+    assert form["title"] == "Code and review"
+    assert [field["name"] for field in form["inputs"]] == ["task", "repo_branch", "agent", "model"]
+    assert run["status"] == "failed", run
+    [implement] = tasks
+    assert implement["handler"] == "robinauts_tasks:implement"
+    assert "names no pull request" in (implement["error"] or ""), implement
+    [implementing] = conversations
+    assert implementing["agent"] == "echo"
 
 
 def test_a_form_that_does_not_fit_its_flow_is_refused_before_it_binds(tmp_path: Path) -> None:

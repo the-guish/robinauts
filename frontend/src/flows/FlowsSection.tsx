@@ -44,7 +44,7 @@ export function FlowsSection({
         href={formatRoute(NEW_RUN)}
         title="New run"
         aria-label="New run"
-        aria-current={at("new")}
+        aria-current={at("new") ?? at("start")}
         onClick={onOpened}
         className="flows-link"
       >

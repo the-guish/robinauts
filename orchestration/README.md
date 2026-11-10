@@ -27,13 +27,53 @@ ROBINAUTS_FLOWS_DIR=orchestration/flows robinauts start --dev-no-sign-in
 ```
 
 Use the **Flows** section of the left panel, below the history: **New run**,
-then `guess_number`, starts a run from neorc's own form, framed where the chat
-would be. Or start one from a shell through the server's port:
+then `guess_number`, then **Start run**, starts a run from its form, and the
+run opens where the chat would be. Or start one from a shell through the
+server's port:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/neorc/flows/guess_number/runs -H 'content-type: application/json' -d '{"inputs": {}}'
+curl -X POST http://127.0.0.1:8000/api/flows/guess_number/runs -H 'content-type: application/json' -H 'origin: http://127.0.0.1:8000' -d '{"inputs": {}}'
 ```
 
 It plays the guessing game between two conversations, which show up in the
 history, and needs a model whose id or title holds `haiku`. The run then
 updates live in the frame and in the panel's recent runs.
+
+## Code and review
+
+`code_and_review` has an agent do a task on a repository and open a pull
+request, and a second conversation review it. Its form offers the repositories
+of the flows folder's `flows.toml`, which the shipped folder has none of: use a
+folder of your own, with the two files of the flow and the repositories it may
+work on.
+
+```bash
+mkdir -p ~/robinauts/flows
+cp orchestration/flows/code_and_review.* ~/robinauts/flows/
+cat > ~/robinauts/flows/flows.toml <<'TOML'
+[repositories.robinauts]
+url = "https://github.com/<owner>/<name>"
+branches = ["main"]
+TOML
+ROBINAUTS_FLOWS_DIR=~/robinauts/flows robinauts start --dev-no-sign-in
+```
+
+The agent works in a worktree of the repository, which the extra worker makes
+for each conversation from those same `[repositories]`, on a branch of the
+conversation's own, and pushes it with the worker's GitHub token: an agent of
+the Claude Code worker
+([extra-workers/claude-code-worker](../extra-workers/claude-code-worker/README.md)),
+whose command passes `ROBINAUTS_FLOWS_DIR` on and mounts the folder, and is
+handed the token by `--env-file`
+([extra-workers/worker-common](../extra-workers/worker-common/README.md),
+"Repositories and worktrees"). The token needs, on those repositories alone,
+**Contents: Read and write** to push and **Pull requests: Read and write** to
+open the pull request.
+
+The worktree starts from the repository's default branch; the agent is told
+to move it to the branch chosen in the form before it starts.
+
+Then **New run**, **Code and review**: the task in words, the repository and
+branch, the agent and the model. The run's output is the review's verdict and
+summary, with the pull request's URL and both conversations, which are in the
+history.

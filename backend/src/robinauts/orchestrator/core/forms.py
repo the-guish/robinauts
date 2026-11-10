@@ -91,7 +91,7 @@ def options_of(
     """The values a list of values offers, in the order their configuration gives them."""
     if kind is LovKind.REPO_BRANCH:
         return tuple(
-            Option(value=f"{r.url}@{branch}", label=f"{r.id} · {branch}")
+            Option(value=f"{r.id}@{branch}", label=f"{r.id} · {branch}")
             for r in repositories
             for branch in r.branches
         )

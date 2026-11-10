@@ -114,7 +114,7 @@ There are three lists of values:
 
 | `lov` | the values | the value sent |
 |---|---|---|
-| `repo_branch` | each branch of each repository of `flows.toml` | `<url>@<branch>` |
+| `repo_branch` | each branch of each repository of `flows.toml` | `<id>@<branch>`, the repository by its id there |
 | `model` | the models of the agents' configuration | the model's id |
 | `agent` | its agents, each labelled with the worker it runs on | the agent's id |
 
@@ -159,19 +159,29 @@ API, one level above `flows_url`, and reads them again whenever neorc records
 an event, which it long-polls for (`frontend/src/flows/orchestrator.ts`). In
 the rail, New run and Runs stay as icons.
 
-Each page is a route of the shell's, translated to neorc's own hash in the
-frame:
+Starting a run is the interface's own: **New run** lists the flows, and each
+flow's form is a page of its own, over `/api/flows` ([Flows as
+forms](#flows-as-forms), `frontend/src/flows/NewRunPage.tsx`). A choice from
+its list for an input with one, a field of its type for any other, every
+input required. Once the run starts, the interface goes to it, in the frame.
 
-| route | neorc's page |
+The other pages are neorc's, framed; each is a route of the shell's,
+translated to neorc's own hash in the frame:
+
+| route | page |
 |---|---|
-| `#/flows` | `#/runs` |
-| `#/flows/new` | `#/flows` |
-| `#/flows/runs/<id>` | `#/runs/<id>` |
-| `#/flows/flow/<name>` | `#/flows/<name>` |
+| `#/flows` | neorc's `#/runs` |
+| `#/flows/new` | the interface's list of flows |
+| `#/flows/new/<name>` | the interface's form of that flow |
+| `#/flows/runs/<id>` | neorc's `#/runs/<id>` |
+| `#/flows/flow/<name>` | neorc's `#/flows/<name>` |
+
+A move inside the frame to neorc's own list of flows, `#/flows`, is the
+interface's `#/flows/new`: a run is started from the interface's forms.
 
 The frame is loaded once and then moved by its hash, both ways: a route of the
 shell's replaces the frame's hash, and a move inside the frame, such as a run
-started from its form, replaces the shell's route, so the address bar and the
+opened from the list, replaces the shell's route, so the address bar and the
 panel say where the frame is and Back undoes both at once. neorc's UI is built
 to work under any prefix: it finds its API one level above its page, and
 routes by its hash.
@@ -186,11 +196,19 @@ answer under `/neorc` carries this server's headers, `DENY` included.
 In `orchestrator/adapters/neorc/` alone (an import-linter contract in
 `backend/pyproject.toml`, and [rules.md](rules.md)). The orchestrator is a
 sibling of the controller: it may see the controller's contract, and the
-controller sees nothing of it. `cli/composition.py` builds the neorc adapter;
-`cli/main.py` sees the orchestrator's contract alone, an `Orchestrator` to
-mount, start and stop. `web/` knows a URL to put in the session and nothing
-else. Taking neorc out is taking out that package and its wiring in
-`cli/composition.py`.
+controller sees nothing of it. `cli/orchestration.py` builds it, and
+`cli/main.py` alone imports that module; `cli/main.py` otherwise sees the
+orchestrator's contract alone, an `Orchestrator` to mount, start and stop, and
+the `Flows` that `web/` serves. `web/` sees that contract and nothing else.
+Taking neorc out is taking out that package and `cli/orchestration.py`.
+
+`cli/orchestration.py` is apart from `cli/composition.py` because a worker in
+a process of its own imports the composition, and the extra workers' images
+leave neorc out. The extra workers also read `[repositories]` of `flows.toml`
+with the orchestrator's own parser, `orchestrator/core/config.py`. A contract
+keeps all of it so: nothing `cli/worker_process.py`, `cli/composition.py`,
+`orchestrator/contract/` or `orchestrator/core/config.py` imports may reach
+neorc, even through another module.
 
 ### Installing neorc
 
@@ -233,3 +251,15 @@ neither neorc nor Robinauts.
 
 - `guess_number`: a guessing game between two conversations with the first
   agent the server offers.
+- `code_and_review`: a task done on a repository and reviewed, from a form
+  (`code_and_review.form.toml`): the chosen agent, on the chosen model, does
+  the task in its session's worktree of the chosen repository, from the chosen
+  branch, pushes the session's branch and opens a pull request against the
+  chosen branch; a second conversation reads the pull request in its own
+  worktree and reviews it against the task. Each answer ends with a `RESULT`
+  line of JSON the handler reads: the pull request's URL and branch, then the
+  verdict, `approve` or `request_changes`, which is the run's output. The
+  worktrees, their branches and the push are the extra worker's, from the same
+  `[repositories]` the form offers
+  ([extra-workers/worker-common](../../extra-workers/worker-common/README.md),
+  "Repositories and worktrees"); the handlers hold no credential.

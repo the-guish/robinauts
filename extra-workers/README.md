@@ -20,7 +20,9 @@ What they have in common, and what a new one keeps:
   database's URL is not passed on: the worker reaches the core over HTTP alone.
 - **What more than one worker needs is in [worker-common/](worker-common/README.md)**,
   a library each worker lists as a dependency and its image copies, never in
-  a copy per worker: the shared start, the GitHub token, cloning a repository.
+  a copy per worker: the shared start, the GitHub token, cloning a repository,
+  and the repositories of the flows' settings, one clone each and a worktree
+  of each per session.
 - **It runs `robinauts.cli.worker_process`**, the backend's own worker module,
   with any engine of its own installed beside the `robinauts` package and
   registered under the `robinauts.engines` entry-point group. Leases,

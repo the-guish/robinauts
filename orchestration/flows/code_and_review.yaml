@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+#
+# A task done on a repository and reviewed (robinauts_tasks.py): one conversation has the
+# agent clone the repository at the chosen branch, do the task on a branch of its own and open
+# a pull request; a second reviews that pull request against the task. Both run on the agent
+# and the model the run was started with. The run's output is the review's verdict.
+#
+# Its form is code_and_review.form.toml. The repositories its form offers are the flows
+# folder's, in flows.toml.
+name: code_and_review
+version: 0.1.0
+
+inputs:
+  task: string
+  repo_branch: string
+  model: string
+  agent: string
+
+output: tasks.review
+
+steps:
+  implement:
+    queue: default
+    handler: robinauts_tasks:implement
+    params:
+      task: inputs.task
+      repo_branch: inputs.repo_branch
+      model: inputs.model
+      agent: inputs.agent
+
+  review:
+    queue: default
+    handler: robinauts_tasks:review
+    params:
+      implemented: tasks.implement
+      model: inputs.model
+      agent: inputs.agent

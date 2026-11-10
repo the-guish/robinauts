@@ -50,7 +50,8 @@ class LovKind(StrEnum):
     """A list of values an input of a form may take its value from."""
 
     REPO_BRANCH = "repo_branch"
-    """A branch of a repository the flows' settings name: ``<url>@<branch>``."""
+    """A branch of a repository the flows' settings name: ``<id>@<branch>``, by the repository's
+    id there, which is also the folder of its worktree in an extra worker's session."""
     MODEL = "model"
     """A model of the agents' configuration, by its id."""
     AGENT = "agent"
