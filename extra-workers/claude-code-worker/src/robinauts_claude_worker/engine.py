@@ -61,6 +61,8 @@ from robinauts_claude_worker.settings import (
     SystemPromptMode,
     settings_from,
 )
+from robinauts_worker_common.clone import GitError
+from robinauts_worker_common.worktrees import Repositories
 
 _log = logging.getLogger(__name__)
 
@@ -68,6 +70,9 @@ ENGINE = "claude-code"
 """The engine's name in a configuration: ``[agents.<id>] engine = "claude-code"``."""
 
 CONFIG_DIR_VARIABLE = "CLAUDE_CONFIG_DIR"
+REPOSITORIES_FOLDER = "repos"
+"""Where the clones of the flows' repositories are, under the workspaces: beside the sessions'
+directories, whose names are ids and never this."""
 INTERRUPT_SECONDS = 5.0
 """How long a cancelled or timed-out turn waits for Claude Code to stop before it is dropped."""
 
@@ -82,14 +87,29 @@ def config_dir(environ: dict[str, str] | os._Environ[str] = os.environ) -> Path:
 def init_claude_code(settings: EngineSettings, storage: StorageConfig) -> AgentEngine:
     """The engine, with the worker's own settings read from the environment: the entry point
     the worker module calls. ``SettingsError`` for an environment that is not this worker's,
-    which ``__main__`` has refused before the worker starts."""
-    return ClaudeCodeEngine(settings, settings_from(os.environ))
+    which ``__main__`` has refused before the worker starts. The repositories of the flows'
+    settings, when ``ROBINAUTS_FLOWS_DIR`` names them, are cloned under the workspaces."""
+    container = settings_from(os.environ)
+    root = container.workspaces / REPOSITORIES_FOLDER
+    return ClaudeCodeEngine(settings, container, Repositories.from_environ(root))
 
 
 class ClaudeCodeEngine(AgentEngine):
-    def __init__(self, settings: EngineSettings, container: Settings) -> None:
+    def __init__(
+        self,
+        settings: EngineSettings,
+        container: Settings,
+        repositories: Repositories | None = None,
+    ) -> None:
+        """``repositories``: the clones a session gets a worktree of each of, in its directory,
+        before its agent starts; none, a session's directory starts empty."""
         self._settings = settings
         self._container = container
+        self._repositories = repositories
+
+    @property
+    def repositories(self) -> Repositories | None:
+        return self._repositories
 
     def kinds(self) -> frozenset[ProviderKind]:
         if self._container.auth is AuthMode.PERSONAL:
@@ -219,6 +239,15 @@ class ClaudeCodeEngine(AgentEngine):
         provider = self._settings.models.providers[model_config.provider]
         if provider.kind not in self.kinds():
             raise EngineError(f"provider {provider.id!r} is of a kind this mode cannot reach")
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_seconds
+        if self._repositories is not None:
+            # Before the agent: a worktree of each repository, made once, kept between turns.
+            try:
+                async with asyncio.timeout_at(deadline):
+                    await self._repositories.add_worktrees(str(session_id), workspace)
+            except GitError as failed:
+                raise EngineError(str(failed)) from None
         environment = subprocess_environment(self._container.auth, provider, self._settings.keys)
         opening = self.plan(workspace, checkpoint_id)
         options = self.options(workspace, agent, model_config.name, environment, opening)
@@ -227,8 +256,6 @@ class ClaudeCodeEngine(AgentEngine):
         # as one interrupt, however the consumer of these events is placed.
         queue: asyncio.Queue[object] = asyncio.Queue()
         pump = asyncio.create_task(self._pump(options, prompt, translation, queue))
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout_seconds
         try:
             while True:
                 remaining = deadline - loop.time()
@@ -307,6 +334,12 @@ class ClaudeCodeEngine(AgentEngine):
 
     async def forget(self, session_id: uuid.UUID) -> None:
         workspace = self.workspace(session_id)
+        if self._repositories is not None:
+            try:
+                await self._repositories.remove_worktrees(str(session_id), workspace)
+            except GitError as failed:
+                # The folder goes all the same; the clone prunes the worktree at its next fetch.
+                _log.warning("the worktrees of session %s were not removed: %s", session_id, failed)
         transcripts = config_dir() / "projects" / project_key_for_directory(str(workspace))
         shutil.rmtree(transcripts, ignore_errors=True)
         shutil.rmtree(workspace, ignore_errors=True)

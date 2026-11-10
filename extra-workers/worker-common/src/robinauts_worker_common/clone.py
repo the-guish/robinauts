@@ -61,8 +61,12 @@ PASSED_ON = (
 how this network reaches the server. Nothing else, the worker's other secrets least of all."""
 
 
-class CloneError(Exception):
-    """A clone that was refused or failed, said in a few lines that never hold the token."""
+class GitError(Exception):
+    """A git command that failed, said in a few lines that never hold the token."""
+
+
+class CloneError(GitError):
+    """A clone that failed."""
 
 
 def repository_url(source: str, server: str = SERVER) -> str:
@@ -136,9 +140,10 @@ REFUSED = ("could not read Username", "Authentication failed", "Invalid username
 it is not allowed to ask for."""
 
 
-def failure(stderr: str, token: str | None) -> str:
-    """What git said, as a ``CloneError`` says it: its last lines, with the token and its header
-    taken out, and a word on the token: that there was none, or that it was refused."""
+def failure(stderr: str, token: str | None, what: str = "the clone") -> str:
+    """What git said, as a ``GitError`` says it: ``what`` failed, git's last lines, with the
+    token and its header taken out, and a word on the token: that there was none, or that it
+    was refused."""
     if token is not None:
         stderr = stderr.replace(authorization(token), "***").replace(token, "***")
     lines = [line for line in stderr.strip().splitlines() if line.strip()][-5:]
@@ -151,7 +156,7 @@ def failure(stderr: str, token: str | None) -> str:
             " revoked, or not reach this repository. Make a new one on GitHub and replace the"
             " value; Robinauts never makes one)"
         )
-    return f"the clone failed:\n{said}"
+    return f"{what} failed:\n{said}"
 
 
 async def clone(
@@ -177,26 +182,57 @@ async def clone(
     command = clone_command(url, target, branch, depth)
     if target.exists() and (not target.is_dir() or any(target.iterdir())):
         raise GitHubError(f"{target} already holds something: a clone goes into a new directory")
+    await run_git(
+        command[1:],
+        environ=environ,
+        server=server,
+        timeout=timeout,
+        what=f"the clone of {url}",
+        error=CloneError,
+    )
+    return target
+
+
+async def run_git(
+    arguments: Sequence[str],
+    *,
+    environ: Mapping[str, str] | None = None,
+    server: str = SERVER,
+    cwd: str | os.PathLike[str] | None = None,
+    timeout: float = TIMEOUT,
+    what: str = "git",
+    error: type[GitError] = GitError,
+) -> str:
+    """Run ``git`` with ``arguments`` in ``cwd``, in the environment of ``git_environment`` and
+    with the token in ``environ`` (the process's own when left out), and return what it wrote on
+    its standard output.
+
+    ``error`` for git ending on a failure or taking longer than ``timeout`` seconds, said as
+    ``what`` failed; ``GitHubError`` for a token that is not well formed. git is stopped when
+    this is cancelled, and the cancellation goes on."""
+    environ = os.environ if environ is None else environ
     token = token_of(environ)
     process = await asyncio.create_subprocess_exec(
-        *command,
+        "git",
+        *arguments,
+        cwd=cwd,
         env=git_environment(environ, token, server),
         stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
     try:
         async with asyncio.timeout(timeout):
-            _, stderr = await process.communicate()
+            stdout, stderr = await process.communicate()
     except TimeoutError:
-        raise CloneError(f"the clone of {url} took longer than {timeout:g} seconds") from None
+        raise error(f"{what} took longer than {timeout:g} seconds") from None
     finally:
         if process.returncode is None:
             process.kill()
             await process.wait()
     if process.returncode != 0:
-        raise CloneError(failure(stderr.decode(errors="replace"), token))
-    return target
+        raise error(failure(stderr.decode(errors="replace"), token, what))
+    return stdout.decode(errors="replace")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
