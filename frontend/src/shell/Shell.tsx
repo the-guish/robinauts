@@ -23,9 +23,10 @@ import { Chat } from "../chat";
 import { useChanges } from "../changes/changes";
 import { DevicesPage } from "../devices/DevicesPage";
 import { FlowsPage } from "../flows/FlowsPage";
+import { NewRunPage } from "../flows/NewRunPage";
 import { conversationIn, useHistory } from "../history/history";
 import { MenuIcon, PanelRightIcon } from "../icons";
-import { navigate, NEW_CHAT, useRoute } from "../router";
+import { isOwnFlowsPage, navigate, NEW_CHAT, useRoute } from "../router";
 import type { Session } from "../session/session";
 import { signOut as endSession } from "../session/session";
 import { shownTitle } from "../conversation/conversation";
@@ -471,6 +472,10 @@ export function Shell({
               the page stands where the chat would be. */}
           {route.kind === "devices" ? (
             <DevicesPage session={session} />
+          ) : flowsView !== null && isOwnFlowsPage(flowsView) ? (
+            <NewRunPage
+              flow={flowsView.at === "start" ? flowsView.flow : null}
+            />
           ) : flowsUrl !== null && flowsView !== null ? (
             <FlowsPage url={flowsUrl} view={flowsView} />
           ) : (

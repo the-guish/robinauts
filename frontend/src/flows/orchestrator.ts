@@ -31,6 +31,10 @@ export function framedHash(view: FlowsView): string {
   switch (view.at) {
     case "new":
       return "#/flows";
+    case "start":
+      // Not framed: the interface's own form. Its flow's page, should a
+      // frame ever be asked for it.
+      return isFlowName(view.flow) ? `#/flows/${view.flow}` : "#/flows";
     case "run":
       return isUuid(view.run) ? `#/runs/${view.run}` : "#/runs";
     case "flow":

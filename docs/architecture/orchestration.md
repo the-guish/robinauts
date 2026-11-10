@@ -159,19 +159,29 @@ API, one level above `flows_url`, and reads them again whenever neorc records
 an event, which it long-polls for (`frontend/src/flows/orchestrator.ts`). In
 the rail, New run and Runs stay as icons.
 
-Each page is a route of the shell's, translated to neorc's own hash in the
-frame:
+Starting a run is the interface's own: **New run** lists the flows, and each
+flow's form is a page of its own, over `/api/flows` ([Flows as
+forms](#flows-as-forms), `frontend/src/flows/NewRunPage.tsx`). A choice from
+its list for an input with one, a field of its type for any other, every
+input required. Once the run starts, the interface goes to it, in the frame.
 
-| route | neorc's page |
+The other pages are neorc's, framed; each is a route of the shell's,
+translated to neorc's own hash in the frame:
+
+| route | page |
 |---|---|
-| `#/flows` | `#/runs` |
-| `#/flows/new` | `#/flows` |
-| `#/flows/runs/<id>` | `#/runs/<id>` |
-| `#/flows/flow/<name>` | `#/flows/<name>` |
+| `#/flows` | neorc's `#/runs` |
+| `#/flows/new` | the interface's list of flows |
+| `#/flows/new/<name>` | the interface's form of that flow |
+| `#/flows/runs/<id>` | neorc's `#/runs/<id>` |
+| `#/flows/flow/<name>` | neorc's `#/flows/<name>` |
+
+A move inside the frame to neorc's own list of flows, `#/flows`, is the
+interface's `#/flows/new`: a run is started from the interface's forms.
 
 The frame is loaded once and then moved by its hash, both ways: a route of the
 shell's replaces the frame's hash, and a move inside the frame, such as a run
-started from its form, replaces the shell's route, so the address bar and the
+opened from the list, replaces the shell's route, so the address bar and the
 panel say where the frame is and Back undoes both at once. neorc's UI is built
 to work under any prefix: it finds its API one level above its page, and
 routes by its hash.

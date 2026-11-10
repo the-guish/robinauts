@@ -27,11 +27,12 @@ ROBINAUTS_FLOWS_DIR=orchestration/flows robinauts start --dev-no-sign-in
 ```
 
 Use the **Flows** section of the left panel, below the history: **New run**,
-then `guess_number`, starts a run from neorc's own form, framed where the chat
-would be. Or start one from a shell through the server's port:
+then `guess_number`, then **Start run**, starts a run from its form, and the
+run opens where the chat would be. Or start one from a shell through the
+server's port:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/neorc/flows/guess_number/runs -H 'content-type: application/json' -d '{"inputs": {}}'
+curl -X POST http://127.0.0.1:8000/api/flows/guess_number/runs -H 'content-type: application/json' -H 'origin: http://127.0.0.1:8000' -d '{"inputs": {}}'
 ```
 
 It plays the guessing game between two conversations, which show up in the

@@ -57,6 +57,10 @@ test("the orchestrator's pages are read out of the hash", () => {
     view: { at: "runs" },
   });
   expect(parseRoute("#/flows/new")).toEqual(NEW_RUN);
+  expect(parseRoute("#/flows/new/code_review")).toEqual({
+    kind: "flows",
+    view: { at: "start", flow: "code_review" },
+  });
   expect(parseRoute(`#/flows/runs/${ID}`)).toEqual({
     kind: "flows",
     view: { at: "run", run: ID },
@@ -73,12 +77,14 @@ test("the orchestrator's pages are written back the same way, round trip include
     NEW_RUN,
     { kind: "flows", view: { at: "run", run: ID } },
     { kind: "flows", view: { at: "flow", flow: "guess_number" } },
+    { kind: "flows", view: { at: "start", flow: "guess_number" } },
   ];
   expect(routes.map(formatRoute)).toEqual([
     "#/flows",
     "#/flows/new",
     `#/flows/runs/${ID}`,
     "#/flows/flow/guess_number",
+    "#/flows/new/guess_number",
   ]);
   for (const route of routes) {
     expect(parseRoute(formatRoute(route))).toEqual(route);
@@ -87,6 +93,9 @@ test("the orchestrator's pages are written back the same way, round trip include
   expect(
     formatRoute({ kind: "flows", view: { at: "run", run: "../elsewhere" } }),
   ).toBe("#/flows");
+  expect(
+    formatRoute({ kind: "flows", view: { at: "start", flow: "a/b" } }),
+  ).toBe("#/flows/new");
   expect(
     formatRoute({ kind: "flows", view: { at: "flow", flow: "a/b" } }),
   ).toBe("#/flows");
@@ -134,7 +143,8 @@ test("every other hash is the empty chat", () => {
     `#/flows/runs/${ID}/x`,
     "#/flows/runs/nope",
     `#/flows/run/${ID}`,
-    "#/flows/new/x",
+    "#/flows/new/1x",
+    "#/flows/new/",
     "#/flows/flow/",
     "#/flows/flow/1abc",
     "#/flows/flow/a-b",

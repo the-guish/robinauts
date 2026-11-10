@@ -9,6 +9,10 @@
  * A run's status is its dot: hollow while it runs, the link colour; full when
  * it succeeded; the refusal colour when it failed; the edge colour, hollow,
  * when it was cancelled. The words are in the link's title.
+ *
+ * "New run" (`./NewRunPage.tsx`) is a page of its own in that column, drawn
+ * as "Linked devices" is: a column that scrolls, the flows as cards, and one
+ * flow's form as labelled fields, one under the other.
  */
 
 .flows {
@@ -112,9 +116,150 @@
   background-color: var(--bad);
 }
 
+.flows-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.flows-page {
+  margin-inline: auto;
+  display: flex;
+  width: 100%;
+  max-width: 48rem;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1rem 1.5rem 3rem;
+}
+
+.flows-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.flows-title {
+  font-size: 1.25rem;
+  line-height: calc(1.75 / 1.25);
+  font-weight: 600;
+}
+
+.flows-aside {
+  font-size: 0.875rem;
+  color: var(--link);
+}
+
+.flows-note {
+  color: var(--muted);
+}
+
+.flows-refused {
+  font-size: 0.875rem;
+  line-height: calc(1.25 / 0.875);
+  color: var(--bad);
+}
+
+.flows-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.flows-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  border-radius: var(--radius-card);
+  border-width: 1px;
+  border-color: var(--line);
+  background-color: var(--paper);
+  padding: 0.75rem 1rem;
+}
+
+.flows-card-title {
+  font-weight: 600;
+}
+
+.flows-card-detail {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.flows-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.flows-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.flows-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.flows-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.flows-input {
+  width: 100%;
+  border-radius: var(--radius);
+  border-width: 1px;
+  border-color: var(--edge);
+  background-color: var(--paper);
+  padding: 0.375rem 0.5rem;
+}
+
+.flows-text {
+  resize: vertical;
+}
+
+.flows-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* A plain button, and the primary one: the accent, as "New chat" is. */
+.flows-button {
+  display: inline-block;
+  border-radius: var(--radius);
+  border-width: 1px;
+  border-color: var(--edge);
+  background-color: var(--paper);
+  padding: 0.375rem 0.75rem;
+  text-align: center;
+}
+
+.flows-primary {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  font-weight: 600;
+  color: var(--on-accent);
+}
+
+.flows-button[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: default;
+}
+
 @media (hover: hover) {
   .flows-link:hover,
-  .flows-item:hover {
+  .flows-item:hover,
+  .flows-card:hover {
     background-color: var(--hover);
+  }
+
+  .flows-primary:not([aria-disabled="true"]):hover {
+    opacity: 0.9;
   }
 }

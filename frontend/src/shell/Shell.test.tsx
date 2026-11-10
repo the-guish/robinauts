@@ -1215,6 +1215,43 @@ test("#/flows frames the orchestrator's runs, embedded, where the chat would be"
   ).toBeNull();
 });
 
+test("New run is the interface's own page, not the frame, and a flow's form keeps it current", async () => {
+  location.hash = "#/flows/new";
+  await shell(
+    undefined,
+    (call) =>
+      call.url === "/api/flows"
+        ? json({
+            items: [
+              {
+                name: "guess_number",
+                title: "guess_number",
+                has_form: false,
+                inputs: [],
+              },
+            ],
+          })
+        : orchestrator(call),
+    WITH_FLOWS,
+  );
+  expect(await screen.findByRole("heading", { name: "New run" })).toBeVisible();
+  expect(frameOrNull()).toBeNull();
+  const link = within(
+    screen.getByRole("list", { name: "Flows to start" }),
+  ).getByRole("link");
+  expect(link).toHaveAttribute("href", "#/flows/new/guess_number");
+  act(() => {
+    location.hash = "#/flows/new/guess_number";
+  });
+  expect(
+    await screen.findByRole("form", { name: "Start guess_number" }),
+  ).toBeVisible();
+  expect(frameOrNull()).toBeNull();
+  expect(
+    within(flowsSection()).getByRole("link", { name: "New run" }),
+  ).toHaveAttribute("aria-current", "page");
+});
+
 test("a run's route opens that run in the frame, and its link says so", async () => {
   location.hash = `#/flows/runs/${RUN}`;
   await shell(undefined, orchestrator, WITH_FLOWS);
