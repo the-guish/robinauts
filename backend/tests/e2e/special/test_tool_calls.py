@@ -2,14 +2,16 @@
 # Copyright The Robinauts Authors
 
 """Tool calls in the interface, through each engine and a real MCP server: a tool round that
-answers, and one whose turn fails after the tool ran.
+answers, one whose turn fails after the tool ran, and two rounds in one answer.
 
 ``ToolEchoModel`` calls the MCP server's ``shout`` with the question, then answers with what it
-said; a question starting with ``poison`` fails once the tool has run.
+said; a question starting with ``poison`` fails once the tool has run, and ``<a> then <b>`` makes
+one round per piece. ``shout("hold")`` waits until the test releases it.
 """
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 from typing import Any
 
@@ -27,9 +29,9 @@ pytestmark = [pytest.mark.io, pytest.mark.database]
 POISON_CALL = '- shout({"text": "poison pill"}) -> result, tool output: "POISON PILL"'
 
 
-def shout(text: str) -> str:
-    """The text, in capitals."""
-    return text.upper()
+@pytest.fixture
+def release() -> threading.Event:
+    return threading.Event()
 
 
 @pytest.fixture
@@ -38,7 +40,13 @@ def fake_model() -> FakeModel:
 
 
 @pytest.fixture
-def tools_url() -> Iterator[str]:
+def tools_url(release: threading.Event) -> Iterator[str]:
+    def shout(text: str) -> str:
+        """The text, in capitals."""
+        if text == "hold":
+            release.wait(30)
+        return text.upper()
+
     with mcp_server(shout) as url:
         yield url
 
@@ -47,15 +55,18 @@ def last_user_text(request: dict[str, Any]) -> str:
     return text_of(next(m for m in reversed(request["messages"]) if m["role"] == "user"))
 
 
-def expect_shout_used(answer: Locator) -> None:
-    """The answer's calls are folded under "1 tool call"; unfolded, one is "Used tool: shout"."""
-    answer.get_by_role("button", name="1 tool call").click()
-    expect(answer.locator('[data-slot="tool-fallback-trigger"]')).to_contain_text(
-        "Used tool: shout"
+def expect_shout_used(answer: Locator, calls: int = 1) -> None:
+    """The answer's calls are folded under "N tool call(s)"; unfolded, each is "Used tool:
+    shout"."""
+    answer.get_by_role("button", name=f"{calls} tool call{'s' if calls > 1 else ''}").click()
+    expect(answer.locator('[data-slot="tool-fallback-trigger"]')).to_have_text(
+        ["Used tool: shout"] * calls
     )
 
 
-def aux_tool_calls(agent: str, server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+def aux_tool_calls(
+    agent: str, server: str, page: Page, local_gpt: FakeLocalGPTServer, release: threading.Event
+) -> None:
     calls = local_gpt.received
     answers = page.locator('[data-role="assistant"]')
 
@@ -109,10 +120,30 @@ def aux_tool_calls(agent: str, server: str, page: Page, local_gpt: FakeLocalGPTS
     assert retry.startswith("poison pill"), retry
     assert POISON_CALL in retry, retry
 
+    # 6. Send "hello then hold": two rounds in one answer. The second call shows while its tool
+    #    still runs, beside the first and its result; then the answer ends on what it returned.
+    send(page, "hello then hold")
+    try:
+        expect(answers).to_have_count(3)
+        expect(answers.last.get_by_role("button", name="2 tool calls")).to_be_visible()
+    finally:
+        release.set()
+    expect(answers.last).to_contain_text("The tool said: HOLD")
+    expect_shout_used(answers.last, calls=2)
 
-def test_pydantic_ai_tool_calls(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
-    aux_tool_calls("pydantic_ai", server, page, local_gpt)
+    # 7. Reload: both calls were stored on the one answer.
+    page.reload()
+    expect(answers.last).to_contain_text("The tool said: HOLD")
+    expect_shout_used(answers.last, calls=2)
 
 
-def test_langchain_tool_calls(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
-    aux_tool_calls("langchain", server, page, local_gpt)
+def test_pydantic_ai_tool_calls(
+    server: str, page: Page, local_gpt: FakeLocalGPTServer, release: threading.Event
+) -> None:
+    aux_tool_calls("pydantic_ai", server, page, local_gpt, release)
+
+
+def test_langchain_tool_calls(
+    server: str, page: Page, local_gpt: FakeLocalGPTServer, release: threading.Event
+) -> None:
+    aux_tool_calls("langchain", server, page, local_gpt, release)
