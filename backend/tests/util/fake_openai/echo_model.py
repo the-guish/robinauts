@@ -61,7 +61,8 @@ class ToolEchoModel:
     then answer "The tool said: <its result>".
 
     A question starting with ``poison`` fails after the tool round, when the model is sent the
-    result: a turn that failed with a tool call made.
+    result: a turn that failed with a tool call made. A question whose last line is
+    ``<a> then <b>`` makes one round per piece, in order, and answers with the last result.
     """
 
     def __init__(self, tool: str) -> None:
@@ -69,8 +70,16 @@ class ToolEchoModel:
 
     def reply(self, messages: list[dict[str, Any]]) -> str | CallTool:
         question = last_question(messages)
-        if messages[-1]["role"] != "tool":
-            return CallTool(self.tool, {"text": question})
+        last_line = question.splitlines()[-1]
+        rounds = last_line.split(" then ") if " then " in last_line else [question]
+        made = 0
+        for message in reversed(messages):
+            if message["role"] == "user":
+                break
+            made += message["role"] == "tool"
+        if made < len(rounds):
+            call_id = "call_fake" if made == 0 else f"call_fake_{made}"
+            return CallTool(self.tool, {"text": rounds[made]}, call_id)
         if question.startswith("poison"):
             raise RuntimeError("the message is poisoned")
         return f"The tool said: {text_of(messages[-1])}"

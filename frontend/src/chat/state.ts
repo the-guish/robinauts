@@ -591,11 +591,10 @@ function applied(state: ChatState, event: AguiEvent): ChatState {
       // Not held: the no-op for an end a re-attach derived for a message this
       // client never had open.
       if (ending?.state !== "running") return state;
-      // **An answer that asked for tools is not over when its text is.** The
-      // backend completes it before it runs the calls, and their results
-      // land on it afterwards: it stays running until the last one has,
-      // so that the calls are drawn as in progress and a run that ends
-      // before that marks them as it marks any answer left open.
+      // **An answer that asked for tools is not over when its text is.** A
+      // result may land on it after its end: it stays running until the
+      // last one has, so that the calls are drawn as in progress and a run
+      // that ends before that marks them as it marks any answer left open.
       return {
         ...state,
         messages: state.messages.map((message) =>
@@ -719,11 +718,10 @@ function applied(state: ChatState, event: AguiEvent): ChatState {
     }
 
     case "TOOL_CALL_RESULT": {
-      // Drawn on the call that made it, wherever that is: the answer is
-      // complete by the time a result lands, so it is not the message being
-      // written. One result per call (`docs/specs/wire.md`), so a result for
-      // a call that has one is a repeat. The tool message it is part of is
-      // what the next message hangs under (`resultsId`).
+      // Drawn on the call that made it, wherever that is. One result per
+      // call (`docs/specs/wire.md`), so a result for a call that has one is
+      // a repeat. The tool message it is part of is what the next message
+      // hangs under (`resultsId`).
       const holder = holding(state, event.toolCallId);
       if (holder === null) return state;
       if (callOf(holder, event.toolCallId)?.result !== undefined) return state;
@@ -733,9 +731,14 @@ function applied(state: ChatState, event: AguiEvent): ChatState {
             ? { ...part, result: event.content, isError: event.isError }
             : part,
         );
-        // The last result of the batch is what ends the answer's running.
+        // **The last result ends the answer's running only once its text has
+        // ended.** The backend keeps one answer open for the whole turn, so
+        // the model may call another tool after this result, on the same
+        // answer.
         const answered = { ...message, resultsId: event.messageId, parts };
-        return message.state === "running" && !unanswered(answered)
+        return message.state === "running" &&
+          state.writing !== message.id &&
+          !unanswered(answered)
           ? { ...answered, state: "stored" }
           : answered;
       });
