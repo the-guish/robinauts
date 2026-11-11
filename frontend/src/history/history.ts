@@ -60,6 +60,11 @@ export interface History {
    * the row it was asked from: that is where it has to be shown.
    */
   rename: (id: ConversationId, title: string) => Promise<void>;
+  /**
+   * Take it off the list, and ask again. It keeps everything, and its next
+   * message brings it back.
+   */
+  archive: (id: ConversationId) => Promise<void>;
   /** Delete it for good -- there is no trash in this version -- and ask again. */
   remove: (id: ConversationId) => Promise<void>;
 }
@@ -197,6 +202,16 @@ export function useHistory(): History {
     [load],
   );
 
+  const archive = useCallback(
+    async (id: ConversationId): Promise<void> => {
+      await request("post", "/api/conversations/{conversation_id}/archive", {
+        path: { conversation_id: id },
+      });
+      await load(null);
+    },
+    [load],
+  );
+
   const remove = useCallback(
     async (id: ConversationId): Promise<void> => {
       await request("delete", "/api/conversations/{conversation_id}", {
@@ -217,6 +232,7 @@ export function useHistory(): History {
     refresh,
     loadMore,
     rename,
+    archive,
     remove,
   };
 }

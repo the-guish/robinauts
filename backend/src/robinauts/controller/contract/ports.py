@@ -78,6 +78,12 @@ class Controller(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def archive_session(self, user: User, session_id: uuid.UUID) -> None:
+        """``SessionNotFoundError``. The session leaves the listing and keeps everything else,
+        a running turn included. Its next turn unarchives it."""
+        raise NotImplementedError
+
+    @abstractmethod
     async def delete_session(self, user: User, session_id: uuid.UUID) -> None:
         """``SessionNotFoundError``. The engine's state goes with the records."""
         raise NotImplementedError

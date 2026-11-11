@@ -9,13 +9,18 @@
  * the way to it is an `<a href>`: it can be opened in a new tab, copied, and
  * the browser's own "you are here" is `aria-current="page"`.
  *
+ * Archiving is one click on the row's archive button, with no question: it
+ * takes the conversation off the list and keeps everything, and the next
+ * message sent in it brings it back.
+ *
  * Renaming and deleting are inline, in the row. No `window.confirm`, which
  * is the browser's dialogue rather than this interface's and which a person
  * cannot read the title of the thing they are deleting in; a "Delete?
  * Yes / No" in the row says what is about to go and can be left alone.
  *
  * Everything here is reachable with a keyboard alone: the actions button is
- * always drawn rather than appearing on hover, Escape closes what is open
+ * always drawn rather than appearing on hover, the archive button shows
+ * while the row has the focus, Escape closes what is open
  * and puts the focus back on the button that opened it, and the focus
  * follows into the rename box and onto "No".
  *
@@ -42,6 +47,7 @@ import type { ConversationId } from "../chat";
 import type { ListedConversation } from "../conversation/conversation";
 import { shownTitle } from "../conversation/conversation";
 import {
+  ArchiveIcon,
   CheckIcon,
   ChevronDownIcon,
   EllipsisIcon,
@@ -397,6 +403,23 @@ function HistoryItem({
     }
   };
 
+  const archive = async () => {
+    if (busy) return;
+    setBusy(true);
+    setRefused(null);
+    // The focus is on the archive button, which goes with the row.
+    returning.current = true;
+    try {
+      await history.archive(conversation.id);
+      // The page was showing what the list no longer holds.
+      if (isCurrent) navigate(NEW_CHAT);
+    } catch (failure) {
+      setRefused(detailOf(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const remove = async () => {
     if (busy) return;
     setBusy(true);
@@ -503,6 +526,18 @@ function HistoryItem({
               className="history-running"
             />
           )}
+          {/* Drawn on hover, or while the row has the focus, where there is
+              a hover; always, where there is none (history.css). */}
+          <button
+            type="button"
+            title="Archive"
+            aria-label={`Archive ${label}`}
+            aria-disabled={busy}
+            onClick={() => void archive()}
+            className="history-tool history-archive"
+          >
+            <ArchiveIcon className="history-icon" />
+          </button>
           <button
             ref={actions}
             type="button"

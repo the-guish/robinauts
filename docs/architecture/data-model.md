@@ -19,7 +19,7 @@ agent to another engine, and what its sessions then do, is stage two.
 |---|---|---|---|
 | user | `id` | `provider` and `subject` (unique together), `name`, `email`, `created_at`, `hosted_domain`, `groups`, `change_version` | no |
 | project | `id` | `owner_id`, `name` (unique per owner), `created_at` | no |
-| session | `id` | `owner_id`, `project_id`, `agent`, `engine`, `title`, `created_at`, `updated_at`, `deleted_at` | no |
+| session | `id` | `owner_id`, `project_id`, `agent`, `engine`, `title`, `created_at`, `updated_at`, `deleted_at`, `archived_at` | no |
 | message | `id` | `session_id`, `parent_id`, `role`, `created_at` | **yes** |
 | turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `retries_message_id`, `task_id` | no |
 | task | `id` | `task_name`, `payload`, `state`, `created_at`, `lease_until`, `claimed_at`, `cancel_requested_at` | no |
@@ -113,6 +113,8 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   in another process finds its next write refused. The records and the engine's state
   stay. The purge, which calls `forget` and deletes the records, is deferred to a
   background task.
+- **Archiving keeps.** `archived_at` takes a session off the listing. The session still
+  opens, its turns run, and nothing is purged. Queuing a turn clears it.
 - **A cancel goes through the store.** It ends a turn whose task is queued as
   `cancelled` at once, and the task as `done`. It sets `cancel_requested_at` on a
   running task and announces it. The process that runs the task cancels it. A missed
@@ -138,7 +140,7 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   turn whether or not a reader has found it: every write names its time, and the store
   refuses one past the lease.
 - **A user's `change_version` counts the changes worth knowing.** The store adds
-  one to it in the same operation as each: a session added, renamed or hidden,
+  one to it in the same operation as each: a session added, renamed, archived or hidden,
   `queue_turn`, `finish_turn`, `end_expired_turn`, and a cancel that ends a queued
   turn. Each bump wakes every process that waits on that user's version
   (`docs/specs/wire.md`, "The change feed"). A store without transactions

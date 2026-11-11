@@ -155,6 +155,11 @@ class RobinautsController(Controller):
         await self._store.update_session(renamed)
         return renamed
 
+    async def archive_session(self, user: User, session_id: uuid.UUID) -> None:
+        session = await self._store.get_session(user.id, session_id)
+        if session.archived_at is None:
+            await self._store.update_session(dataclasses.replace(session, archived_at=self._now()))
+
     async def delete_session(self, user: User, session_id: uuid.UUID) -> None:
         session = await self._store.get_session(user.id, session_id)
         await self._end_expired(session)
@@ -376,6 +381,8 @@ class RobinautsController(Controller):
         if model_config is None:
             raise UnknownModelError(model)
         await self._end_expired(session)
+        if session.archived_at is not None:
+            await self._store.update_session(dataclasses.replace(session, archived_at=None))
         now = self._now()
         turn_id = uuid.uuid4()
         payload: dict[str, object] = {"turn_id": str(turn_id), "create_session": create_session}

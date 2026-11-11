@@ -269,6 +269,9 @@ class Session:
     title: str = ""
     project_id: uuid.UUID = field(kw_only=True)
     """The owner's project the session is in: ``DEFAULT_PROJECT`` unless another was chosen."""
+    archived_at: datetime | None = field(default=None, kw_only=True)
+    """When the owner archived it, or ``None``. An archived session is left out of the listing,
+    and keeps everything else. Its next turn unarchives it."""
 
 
 class TurnState(StrEnum):

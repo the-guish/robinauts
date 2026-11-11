@@ -1768,6 +1768,39 @@
         "summary": "Rename Session"
       }
     },
+    "/api/conversations/{conversation_id}/archive": {
+      "post": {
+        "operationId": "archive_session_api_conversations__conversation_id__archive_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "Archive Session"
+      }
+    },
     "/api/conversations/{conversation_id}/fork": {
       "post": {
         "operationId": "fork_session_api_conversations__conversation_id__fork_post",

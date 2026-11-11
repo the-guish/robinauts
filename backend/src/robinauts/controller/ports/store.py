@@ -77,14 +77,15 @@ class Store(ABC):
 
     @abstractmethod
     async def update_session(self, session: Session) -> None:
-        """Its title and ``updated_at`` replaced: a rename."""
+        """Its title, ``updated_at`` and ``archived_at`` replaced: a rename, an archive or an
+        unarchive."""
 
     @abstractmethod
     async def sessions_of(
         self, owner: uuid.UUID, limit: int, before: Cursor | None
     ) -> list[Session]:
-        """A page of the owner's visible sessions, most recently updated first, ties broken
-        by id, past ``before``."""
+        """A page of the owner's visible sessions that are not archived, most recently updated
+        first, ties broken by id, past ``before``."""
 
     @abstractmethod
     async def hide_session(self, owner: uuid.UUID, session: uuid.UUID, at: datetime) -> None:

@@ -82,6 +82,12 @@ def open_conversation(page: Page, title: str) -> None:
     history(page).filter(has_text=title).click()
 
 
+def archive(page: Page, title: str) -> None:
+    """Hover that conversation's row, which shows its archive button, and press it."""
+    history(page).filter(has_text=title).hover()
+    page.get_by_role("button", name=f"Archive {title}").click()
+
+
 def conversation_action(page: Page, title: str, action: str) -> None:
     """Open that conversation's actions and press one of them: "Rename" or "Delete"."""
     page.get_by_role("button", name=f"Actions for {title}").click()

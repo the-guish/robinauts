@@ -1270,6 +1270,10 @@ def create_app(
         renamed = await controller.rename_session(user, conversation_id, body.title)
         return summary(renamed, await default_model(renamed.agent))
 
+    @app.post("/api/conversations/{conversation_id}/archive", status_code=204)
+    async def archive_session(conversation_id: uuid.UUID, user: User = asking) -> None:
+        await controller.archive_session(user, conversation_id)
+
     @app.delete("/api/conversations/{conversation_id}", status_code=204)
     async def delete_session(conversation_id: uuid.UUID, user: User = asking) -> None:
         await controller.delete_session(user, conversation_id)
