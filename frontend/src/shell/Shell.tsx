@@ -26,7 +26,15 @@ import { FlowsPage } from "../flows/FlowsPage";
 import { NewRunPage } from "../flows/NewRunPage";
 import { conversationIn, useHistory } from "../history/history";
 import { MenuIcon, PanelRightIcon } from "../icons";
-import { isOwnFlowsPage, navigate, NEW_CHAT, useRoute } from "../router";
+import {
+  FLOWS,
+  formatRoute,
+  isOwnFlowsPage,
+  navigate,
+  NEW_CHAT,
+  type Route,
+  useRoute,
+} from "../router";
 import type { Session } from "../session/session";
 import { signOut as endSession } from "../session/session";
 import { shownTitle } from "../conversation/conversation";
@@ -48,7 +56,7 @@ import {
   useChosenModel,
   useModels,
 } from "./ModelPicker";
-import { PANEL_ID, Panel } from "./Panel";
+import { PANEL_ID, Panel, type PanelTab } from "./Panel";
 import { ProjectPicker } from "./ProjectPicker";
 import {
   createProject,
@@ -187,6 +195,14 @@ export function Shell({
     route.kind === "flows" && flowsUrl !== null ? route.view : null;
   // The pages that are not about a conversation: no side panel there.
   const aPage = route.kind === "devices" || flowsView !== null;
+  // The panel's tab this page belongs to, if either.
+  const pageTab: PanelTab | null =
+    route.kind === "new" || route.kind === "conversation"
+      ? "sessions"
+      : flowsView !== null
+        ? "flows"
+        : null;
+  const lastPages = useLastPages(route, pageTab);
   const history = useHistory();
   // Something of this user changed in another tab or client: the list is
   // asked for again, and the chat reads its conversation again
@@ -428,6 +444,11 @@ export function Shell({
         onDevices={route.kind === "devices"}
         flowsUrl={flowsUrl}
         flowsView={flowsView}
+        pageTab={pageTab}
+        onTab={(tab) => {
+          const to = lastPages[tab];
+          if (formatRoute(to) !== formatRoute(route)) navigate(to);
+        }}
         collapsed={collapsed}
         onCollapse={setCollapsed}
         drawer={drawer}
@@ -581,4 +602,27 @@ export function Shell({
       )}
     </div>
   );
+}
+
+/**
+ * The page last open under each of the panel's tabs, so choosing a tab goes
+ * back to it: a conversation or the empty chat under Sessions, an
+ * orchestrator's page under Flows. Until one has been open, the empty chat
+ * and the runs. Kept while the page is, not remembered by the browser.
+ *
+ * Followed while rendering, as the panel follows the tab: the page is known
+ * by its route, which is one object per address (`../router.ts`).
+ */
+function useLastPages(
+  route: Route,
+  tab: PanelTab | null,
+): Readonly<Record<PanelTab, Route>> {
+  const [last, setLast] = useState<Readonly<Record<PanelTab, Route>>>({
+    sessions: NEW_CHAT,
+    flows: FLOWS,
+  });
+  if (tab !== null && last[tab] !== route) {
+    setLast({ ...last, [tab]: route });
+  }
+  return tab === null ? last : { ...last, [tab]: route };
 }

@@ -20,13 +20,16 @@
   the switch and the profile block: Sessions is "new chat" and the history,
   with no heading of its own; Flows is the orchestrator's navigation, with
   "New run" where "new chat" was. One at a time, each with the whole height,
-  so a long history never squeezes the runs, nor they it. The tab follows
-  the page -- a flows page shows Flows, opening a conversation shows
-  Sessions -- and switching it changes only the panel, never the page. A
-  switch loses nothing: the tab not shown is hidden, not dropped, so the
-  history keeps its scroll and what was typed in it, and the Flows lists
-  stay up to date. The last tab shown is remembered per browser. In the rail the switch is the
-  two icons, one above the other. With no orchestrator there is no switch.
+  so a long history never squeezes the runs, nor they it. The tab and the
+  page agree: a flows page shows Flows, a conversation or the empty chat
+  shows Sessions, and choosing a tab goes back to the page last open under
+  it -- under Sessions the conversation last open, or the empty chat; under
+  Flows the flows page last open, or the runs. A page of neither, such as
+  "Linked devices", keeps the tab shown last, which is remembered per
+  browser. A switch loses nothing: the tab not shown is hidden, not
+  dropped, so the history keeps its scroll and what was typed in it, and
+  the Flows lists stay up to date. In the rail the switch is the two icons,
+  one above the other. With no orchestrator there is no switch.
 - The application opens on an empty chat, ready for a first message, with
   the agent to talk to and the model selectable side by side. The model
   picker lists the operator's models, with no "default" entry: until one is
