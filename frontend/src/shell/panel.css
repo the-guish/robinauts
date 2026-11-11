@@ -107,13 +107,21 @@
   color: var(--ink);
 }
 
-/* What the shown tab holds: everything between the switch and the foot. */
+/*
+ * What a tab holds: everything between the switch and the foot. The tab not
+ * shown stays in the page, hidden; `hidden` alone would lose to the
+ * `display` above.
+ */
 .panel-view {
   display: flex;
   min-height: 0;
   flex: 1;
   flex-direction: column;
   gap: 0.25rem;
+}
+
+.panel-view[hidden] {
+  display: none;
 }
 
 /* "New chat", and "New run" in its place on the Flows tab. */

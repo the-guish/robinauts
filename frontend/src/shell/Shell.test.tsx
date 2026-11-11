@@ -1235,6 +1235,32 @@ test("Sessions and Flows are two tabs, and each takes the whole of the panel's m
   expect(screen.queryByRole("navigation", { name: "Flows" })).toBeNull();
 });
 
+test("switching tabs keeps both in place: no reload of the flows, nothing typed lost", async () => {
+  const { fetch } = await shell(undefined, orchestrator, WITH_FLOWS);
+  fireEvent.click(tab("Flows"));
+  await within(flowsSection()).findByRole("list", { name: "Workflows" });
+  const read = callsTo(fetch, "/neorc/flows").length;
+
+  // Half a name for a new project, typed on Sessions.
+  fireEvent.click(tab("Sessions"));
+  fireEvent.click(screen.getByRole("button", { name: "New project" }));
+  fireEvent.change(screen.getByLabelText("Project name"), {
+    target: { value: "Half a na" },
+  });
+
+  // To Flows and back: its lists are there at once, read no more.
+  fireEvent.click(tab("Flows"));
+  expect(
+    within(flowsSection()).getByRole("list", { name: "Workflows" }),
+  ).toBeVisible();
+  expect(
+    within(flowsSection()).getByRole("list", { name: "Recent runs" }),
+  ).toBeVisible();
+  expect(callsTo(fetch, "/neorc/flows")).toHaveLength(read);
+  fireEvent.click(tab("Sessions"));
+  expect(screen.getByLabelText("Project name")).toHaveValue("Half a na");
+});
+
 test("the arrow keys move between the tabs, and show the one they land on", async () => {
   await shell(undefined, orchestrator, WITH_FLOWS);
   // One tab stop for the pair: the shown tab.

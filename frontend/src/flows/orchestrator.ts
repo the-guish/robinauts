@@ -80,7 +80,7 @@ export interface RecentRun {
   readonly status: string;
 }
 
-/** What the panel's section shows: the flows, and the latest runs. */
+/** What the panel's Flows tab shows: the flows, and the latest runs. */
 export interface Menu {
   readonly flows: readonly string[];
   readonly runs: readonly RecentRun[];

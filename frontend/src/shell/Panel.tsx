@@ -13,15 +13,16 @@
  * so a long history and a long list of runs never squeeze each other. The
  * tab follows the page: a flows page shows Flows, a conversation Sessions;
  * the reader may switch without leaving the page, and the browser remembers
- * the last choice. With no orchestrator there is no switch.
+ * the last choice. Both tabs stay mounted, the one not shown hidden. With no
+ * orchestrator there is no switch.
  *
  * **The panel is ours** (ADR 0001, kept by ADR 0006): it reads the API
  * directly and knows nothing of what draws the chat, and nothing here ever
  * will.
  *
  * **The history is drawn a project at a time** (`../projects/`): each
- * project folds away under its heading, and "New project" beside the
- * history's heading makes another. Projects are the user's own; sharing one
+ * project folds away under its heading, and "New project", at the head of
+ * the history, makes another. Projects are the user's own; sharing one
  * with other people is not there yet.
  *
  * The shape is neorc's, written again for this project; recorded in
@@ -90,8 +91,8 @@ export interface PanelProps {
   /** Whether the page is "Linked devices", so its link can say so. */
   onDevices?: boolean;
   /**
-   * Where the server serves an orchestrator's page, which the "Flows"
-   * section opens; with none, there is no "Flows" (`../flows/`).
+   * Where the server serves an orchestrator's page, which the "Flows" tab
+   * opens; with none, there is no "Flows" (`../flows/`).
    */
   flowsUrl?: string | null;
   /** Which of its pages is up, if one is, so its link can say so. */
@@ -187,57 +188,59 @@ export function Panel({
 
       {hasFlows && <PanelTabs shown={shown} onShow={setTab} />}
 
-      <PanelView tab={shown} framed={hasFlows}>
-        {shown === "sessions" ? (
-          <>
-            <button
-              type="button"
-              title="New chat"
-              onClick={onNewChat}
-              className="panel-new"
-            >
-              <PlusIcon className="panel-icon" />
-              <span className="panel-wide">New chat</span>
-            </button>
+      {/* Both tabs stay mounted and the one not shown is hidden, so a
+          switch costs nothing and loses nothing: the history keeps where it
+          was scrolled to and what was typed into it, and the Flows lists are
+          there at once, kept up to date all along, as when they sat under
+          the history. */}
+      <PanelView tab="sessions" shown={shown} framed={hasFlows}>
+        <button
+          type="button"
+          title="New chat"
+          onClick={onNewChat}
+          className="panel-new"
+        >
+          <PlusIcon className="panel-icon" />
+          <span className="panel-wide">New chat</span>
+        </button>
 
-            {/* The one part of the panel that scrolls: a long history must
+        {/* The one part of the panel that scrolls: a long history must
                 not push the profile block off the bottom of the screen. It
                 has no heading: the tab above it says what it is. */}
-            <nav aria-label="History" className="panel-history panel-wide">
-              {onNewProject !== undefined && (
-                <div className="panel-history-head">
-                  <NewProject onNewProject={onNewProject} />
-                </div>
-              )}
-              <HistoryList
-                history={history}
-                current={current}
-                onOpened={onCloseDrawer}
-                projects={projects}
-                {...(folded === undefined ? {} : { folded })}
-                {...(onNewChatIn === undefined
-                  ? {}
-                  : {
-                      onNewChatIn: (project: string) => {
-                        onNewChatIn(project);
-                        onCloseDrawer();
-                      },
-                    })}
-              />
-            </nav>
-          </>
-        ) : (
-          flowsUrl !== null && (
-            // The orchestrator's navigation, which its framed page leaves
-            // out, so there is one panel and one menu button.
-            <FlowsSection
-              url={flowsUrl}
-              view={flowsView}
-              onOpened={onCloseDrawer}
-            />
-          )
-        )}
+        <nav aria-label="History" className="panel-history panel-wide">
+          {onNewProject !== undefined && (
+            <div className="panel-history-head">
+              <NewProject onNewProject={onNewProject} />
+            </div>
+          )}
+          <HistoryList
+            history={history}
+            current={current}
+            onOpened={onCloseDrawer}
+            projects={projects}
+            {...(folded === undefined ? {} : { folded })}
+            {...(onNewChatIn === undefined
+              ? {}
+              : {
+                  onNewChatIn: (project: string) => {
+                    onNewChatIn(project);
+                    onCloseDrawer();
+                  },
+                })}
+          />
+        </nav>
       </PanelView>
+      {flowsUrl !== null && (
+        // The orchestrator's navigation, which its framed page leaves out,
+        // so there is one panel and one menu button.
+        <PanelView tab="flows" shown={shown} framed>
+          <FlowsSection
+            url={flowsUrl}
+            view={flowsView}
+            onOpened={onCloseDrawer}
+          />
+        </PanelView>
+      )}
 
       {/* Everything that is not the history sits at the foot of the panel,
           because `docs/specs/frontend.md` leaves no top bar to put it in.
@@ -310,7 +313,7 @@ const TABS: readonly {
 
 /** The id of a tab, and of the tab panel it controls. */
 const tabId = (tab: PanelTab) => `${PANEL_ID}-tab-${tab}`;
-const viewId = `${PANEL_ID}-view`;
+const viewId = (tab: PanelTab) => `${PANEL_ID}-view-${tab}`;
 
 /**
  * The switch: two tabs, the shown one marked. One tab stop for the pair, and
@@ -367,7 +370,7 @@ function PanelTabs({
           role="tab"
           id={tabId(tab)}
           aria-selected={tab === shown}
-          aria-controls={viewId}
+          aria-controls={viewId(tab)}
           tabIndex={tab === shown ? 0 : -1}
           title={label}
           onClick={() => {
@@ -384,24 +387,31 @@ function PanelTabs({
 }
 
 /**
- * What the shown tab holds, between the switch and the foot. Under a switch
- * it is the switch's tab panel; with none it is only the box that lets the
- * history scroll.
+ * What one tab holds, between the switch and the foot: under a switch, that
+ * tab's tab panel, hidden while the other is shown; with none, only the box
+ * that lets the history scroll.
  */
 function PanelView({
   tab,
+  shown,
   framed,
   children,
-}: Readonly<{ tab: PanelTab; framed: boolean; children: ReactNode }>) {
+}: Readonly<{
+  tab: PanelTab;
+  shown: PanelTab;
+  framed: boolean;
+  children: ReactNode;
+}>) {
   return (
     <div
       {...(framed
         ? {
-            id: viewId,
+            id: viewId(tab),
             role: "tabpanel",
             "aria-labelledby": tabId(tab),
           }
         : {})}
+      hidden={tab !== shown}
       className="panel-view"
     >
       {children}
