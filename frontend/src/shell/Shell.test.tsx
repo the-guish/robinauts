@@ -1204,8 +1204,11 @@ test("Sessions and Flows are two tabs, and each takes the whole of the panel's m
   expect(screen.getByRole("tabpanel", { name: "Flows" })).toContainElement(
     section,
   );
-  // The page has not changed: switching is the panel's alone.
-  expect(location.hash).toBe("");
+  // The middle follows: the runs, the first flows page there has been.
+  await waitFor(() => {
+    expect(location.hash).toBe("#/flows");
+  });
+  expect(frame()).toHaveAttribute("src", "/neorc/ui/?embedded#/runs");
   expect(
     within(section).getByRole("link", { name: "New run" }),
   ).toHaveAttribute("href", "#/flows/new");
@@ -1282,40 +1285,70 @@ test("the arrow keys move between the tabs, and show the one they land on", asyn
   expect(tab("Flows")).toHaveAttribute("aria-selected", "true");
 });
 
-test("the tab follows the page, and the browser remembers the last one", async () => {
-  location.hash = "#/flows";
-  const { unmount } = await shell(
+test("choosing a tab goes back to the page last open under it", async () => {
+  location.hash = `#/c/${id(1)}`;
+  await shell(
     undefined,
     (call) => withConversation(call) ?? orchestrator(call),
     WITH_FLOWS,
   );
-  // A flows page shows Flows.
-  expect(tab("Flows")).toHaveAttribute("aria-selected", "true");
-  // The reader may look at the sessions without leaving the page.
-  fireEvent.click(tab("Sessions"));
-  expect(frame()).toBeVisible();
+  // A conversation is a page of the sessions.
   expect(tab("Sessions")).toHaveAttribute("aria-selected", "true");
-  // Another flows page shows Flows again.
+  // Flows, with no flows page open yet: the runs.
+  fireEvent.click(tab("Flows"));
+  expect(tab("Flows")).toHaveAttribute("aria-selected", "true");
+  await waitFor(() => {
+    expect(location.hash).toBe("#/flows");
+  });
+  // A run, from the panel or anywhere else.
   act(() => {
     location.hash = `#/flows/runs/${RUN}`;
   });
-  await waitFor(() => {
-    expect(tab("Flows")).toHaveAttribute("aria-selected", "true");
-  });
-  // Opening a conversation shows the sessions.
-  act(() => {
-    location.hash = `#/c/${id(1)}`;
+  const runs = await within(flowsSection()).findByRole("list", {
+    name: "Recent runs",
   });
   await waitFor(() => {
-    expect(tab("Sessions")).toHaveAttribute("aria-selected", "true");
+    expect(within(runs).getByRole("link")).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
-  expect(localStorage.getItem("robinauts.panel.tab")).toBe("sessions");
-
-  // On a page that says nothing, the last choice comes back.
+  // Sessions: back to the conversation, not a flow under a Sessions tab.
+  fireEvent.click(tab("Sessions"));
+  await waitFor(() => {
+    expect(location.hash).toBe(`#/c/${id(1)}`);
+  });
+  expect(frameOrNull()).toBeNull();
+  // Flows again: back to that run.
   fireEvent.click(tab("Flows"));
-  expect(localStorage.getItem("robinauts.panel.tab")).toBe("flows");
+  await waitFor(() => {
+    expect(location.hash).toBe(`#/flows/runs/${RUN}`);
+  });
+  // The tab already shown goes nowhere.
+  fireEvent.click(tab("Flows"));
+  await settled();
+  expect(location.hash).toBe(`#/flows/runs/${RUN}`);
+  // A page of neither keeps the tab, and leaves by it.
+  act(() => {
+    location.hash = "#/devices";
+  });
+  await screen.findByRole("heading", { level: 1, name: "Linked devices" });
+  expect(tab("Flows")).toHaveAttribute("aria-selected", "true");
+  fireEvent.click(tab("Sessions"));
+  await waitFor(() => {
+    expect(location.hash).toBe(`#/c/${id(1)}`);
+  });
+});
+
+test("the empty chat is a page of the sessions; the browser remembers the tab for the rest", async () => {
+  localStorage.setItem("robinauts.panel.tab", "flows");
+  const { unmount } = await shell(undefined, orchestrator, WITH_FLOWS);
+  // The empty chat, whatever was remembered.
+  expect(tab("Sessions")).toHaveAttribute("aria-selected", "true");
   unmount();
-  location.hash = "";
+  // A page of neither: the tab shown last.
+  localStorage.setItem("robinauts.panel.tab", "flows");
+  location.hash = "#/devices";
   await shell(undefined, orchestrator, WITH_FLOWS);
   expect(tab("Flows")).toHaveAttribute("aria-selected", "true");
   expect(flowsSection()).toBeVisible();

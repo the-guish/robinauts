@@ -11,9 +11,10 @@
  * sessions -- "New chat" and the history -- or the orchestrator's navigation
  * (`../flows/FlowsSection.tsx`). One at a time, each with the whole height,
  * so a long history and a long list of runs never squeeze each other. The
- * tab follows the page: a flows page shows Flows, a conversation Sessions;
- * the reader may switch without leaving the page, and the browser remembers
- * the last choice. Both tabs stay mounted, the one not shown hidden. With no
+ * tab follows the page: a flows page shows Flows, a conversation Sessions.
+ * Choosing a tab goes back to the page last open under it (`onTab`, the
+ * shell's), so the middle of the page always matches the tab; the browser
+ * remembers the last tab shown. Both tabs stay mounted, the one not shown hidden. With no
  * orchestrator there is no switch.
  *
  * **The panel is ours** (ADR 0001, kept by ADR 0006): it reads the API
@@ -97,6 +98,14 @@ export interface PanelProps {
   flowsUrl?: string | null;
   /** Which of its pages is up, if one is, so its link can say so. */
   flowsView?: FlowsView | null;
+  /**
+   * The tab the page belongs to, or null for one that belongs to neither.
+   * Left out, it is worked out from `flowsView` and `current`, which cannot
+   * tell the empty chat from a page of neither.
+   */
+  pageTab?: PanelTab | null;
+  /** A tab was chosen: go to the page last open under it. */
+  onTab?: (tab: PanelTab) => void;
   /** Collapsed to a rail of icons. Only on a screen wide enough for one. */
   collapsed: boolean;
   onCollapse: (collapsed: boolean) => void;
@@ -122,6 +131,8 @@ export function Panel({
   onDevices = false,
   flowsUrl = null,
   flowsView = null,
+  pageTab,
+  onTab,
   collapsed,
   onCollapse,
   drawer,
@@ -140,7 +151,15 @@ export function Panel({
   useTrappedFocus(self, open);
   useLockedScroll(open);
   const hasFlows = flowsUrl !== null;
-  const [tab, setTab] = useShownTab(flowsView, current);
+  const [tab, setTab] = useShownTab(
+    pageTab !== undefined
+      ? pageTab
+      : flowsView !== null
+        ? "flows"
+        : current !== null
+          ? "sessions"
+          : null,
+  );
   const shown: PanelTab = hasFlows ? tab : "sessions";
   return (
     <aside
@@ -186,7 +205,15 @@ export function Panel({
         <span className="panel-brand panel-wide">Robinauts</span>
       </div>
 
-      {hasFlows && <PanelTabs shown={shown} onShow={setTab} />}
+      {hasFlows && (
+        <PanelTabs
+          shown={shown}
+          onShow={(chosen) => {
+            setTab(chosen);
+            onTab?.(chosen);
+          }}
+        />
+      )}
 
       {/* Both tabs stay mounted and the one not shown is hidden, so a
           switch costs nothing and loses nothing: the history keeps where it
@@ -263,38 +290,26 @@ export function Panel({
 }
 
 /**
- * Which tab is shown: the one the browser remembers, until the page says
- * otherwise. Arriving at a flows page shows Flows, opening a conversation
- * shows Sessions; in between, the reader's own choice stands, on any page.
+ * Which tab is shown: the one the page belongs to -- Flows for an
+ * orchestrator's page, Sessions for a conversation or the empty chat -- and,
+ * on a page that belongs to neither, such as "Linked devices", the one shown
+ * last, which the browser remembers.
  *
- * The page is compared by its address, not by the object that describes it,
- * which is a new one at every render and would undo every choice.
+ * A choice is shown at once, before the page it goes to has arrived; a new
+ * page is followed while rendering, so the panel never draws a frame with the
+ * wrong tab.
  */
 function useShownTab(
-  flowsView: FlowsView | null,
-  current: ConversationId | null,
+  pageTab: PanelTab | null,
 ): [PanelTab, (tab: PanelTab) => void] {
-  const flowsPage =
-    flowsView === null ? null : formatRoute({ kind: "flows", view: flowsView });
-  const [tab, setTab] = useState<PanelTab>(() =>
-    flowsPage !== null
-      ? "flows"
-      : current !== null
-        ? "sessions"
-        : remembered(PANEL_TAB_KEY) === "flows"
-          ? "flows"
-          : "sessions",
+  const [tab, setTab] = useState<PanelTab>(
+    () =>
+      pageTab ?? (remembered(PANEL_TAB_KEY) === "flows" ? "flows" : "sessions"),
   );
-  // The page the tab last followed; a new one is followed while rendering,
-  // so the panel never draws a frame with the wrong tab.
-  const [followed, setFollowed] = useState({ flowsPage, current });
-  if (followed.flowsPage !== flowsPage || followed.current !== current) {
-    setFollowed({ flowsPage, current });
-    if (flowsPage !== null && flowsPage !== followed.flowsPage) {
-      setTab("flows");
-    } else if (current !== null && current !== followed.current) {
-      setTab("sessions");
-    }
+  const [followed, setFollowed] = useState(pageTab);
+  if (followed !== pageTab) {
+    setFollowed(pageTab);
+    if (pageTab !== null) setTab(pageTab);
   }
   useEffect(() => {
     remember(PANEL_TAB_KEY, tab);
