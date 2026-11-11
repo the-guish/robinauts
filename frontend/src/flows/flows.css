@@ -3,8 +3,8 @@
 
 /*
  * "Flows": the orchestrator's page in a frame that fills the column the chat
- * would otherwise fill (`./FlowsPage.tsx`), and the panel's section that is
- * its navigation (`./FlowsSection.tsx`), drawn like the rest of the panel.
+ * would otherwise fill (`./FlowsPage.tsx`), and the panel's tab that is its
+ * navigation (`./FlowsSection.tsx`), drawn like the rest of the panel.
  *
  * A run's status is its dot: hollow while it runs, the link colour; full when
  * it succeeded; the refusal colour when it failed; the edge colour, hollow,
@@ -27,16 +27,14 @@
   background-color: var(--ground);
 }
 
+/* The panel's Flows tab: the whole middle of the panel, and it scrolls. */
 .flows-section {
   display: flex;
-  max-height: 45%;
   min-height: 0;
-  flex-shrink: 0;
+  flex: 1;
   flex-direction: column;
   gap: 0.125rem;
   overflow-y: auto;
-  border-top: 1px solid var(--line);
-  padding-top: 0.25rem;
 }
 
 .flows-link,

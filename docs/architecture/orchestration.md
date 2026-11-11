@@ -149,11 +149,11 @@ It costs one process and a long-poll over the loopback interface.
 
 The session (`GET /auth/session`) carries `flows_url`, `/neorc/ui/`, when the
 server mounts neorc, and nothing otherwise. The interface then has one panel
-and one menu button for both: a **Flows** section in its left panel, below the
-history, is neorc's navigation, and neorc's UI, framed where the chat would
-be, is opened with `?embedded`, which leaves out neorc's own sidebar.
+and one menu button for both: the left panel's **Flows** tab, beside its
+**Sessions** tab, is neorc's navigation, and neorc's UI, framed where the chat
+would be, is opened with `?embedded`, which leaves out neorc's own sidebar.
 
-The section holds what neorc's sidebar holds: **New run**, **Runs**, neorc's
+The tab holds what neorc's sidebar holds: **New run**, **Runs**, neorc's
 flows and its six latest runs, each status a dot. It reads them from neorc's
 API, one level above `flows_url`, and reads them again whenever neorc records
 an event, which it long-polls for (`frontend/src/flows/orchestrator.ts`). In

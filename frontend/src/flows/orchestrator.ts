@@ -3,7 +3,7 @@
 
 /**
  * The orchestrator, as the interface sees it: its page, framed, and the
- * little of its API the panel's "Flows" section reads
+ * little of its API the panel's "Flows" tab reads
  * (`docs/architecture/orchestration.md`).
  *
  * The session names the page (`flows_url`, `/neorc/ui/`); the API is one

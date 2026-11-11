@@ -86,6 +86,8 @@ def test_a_flow_is_started_from_its_form_and_the_interface_goes_to_its_run(
     server: str, page: Page
 ) -> None:
     page.goto(f"{server}/ui/")
+    # The panel opens on the sessions; the orchestrator's navigation is its other tab.
+    page.get_by_role("tab", name="Flows").click()
     flows = page.get_by_role("navigation", name="Flows")
     flows.get_by_role("link", name="New run").click()
     page.get_by_role("list", name="Flows to start").get_by_role("link").click()
