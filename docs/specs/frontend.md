@@ -7,14 +7,26 @@
   top bar.
 - **The panel is ours**, and not part of the chat window
   ([ADR 0006](../adr/0006-chat-ui-on-react-alone.md)). Top to
-  bottom: the collapse button and the brand; "new chat"; the conversation
-  history, a project at a time; and, pinned to the bottom, the
-  profile block with sign-out. Each project is a heading that folds its
+  bottom: the collapse button and the brand; when the server has an
+  orchestrator, a switch of two tabs, **Sessions** and **Flows**; "new chat"
+  and the conversation history, a project at a time; and, pinned to the
+  bottom, the profile block with sign-out. Each project is a heading that folds its
   conversations away and opens them again, which is remembered per
-  browser, with a "+" that starts a conversation in it; "New project" beside
-  the history's heading makes another. The empty chat has a project picker
+  browser, with a "+" that starts a conversation in it; "New project", at the
+  head of the history, makes another. The empty chat has a project picker
   beside the agent's, on "Default" until another is picked. Collapsed, it becomes an icon rail. The state is remembered
   per browser.
+- **Sessions or Flows.** The two tabs choose what the panel holds between
+  the switch and the profile block: Sessions is "new chat" and the history,
+  with no heading of its own; Flows is the orchestrator's navigation, with
+  "New run" where "new chat" was. One at a time, each with the whole height,
+  so a long history never squeezes the runs, nor they it. The tab follows
+  the page -- a flows page shows Flows, opening a conversation shows
+  Sessions -- and switching it changes only the panel, never the page. A
+  switch loses nothing: the tab not shown is hidden, not dropped, so the
+  history keeps its scroll and what was typed in it, and the Flows lists
+  stay up to date. The last tab shown is remembered per browser. In the rail the switch is the
+  two icons, one above the other. With no orchestrator there is no switch.
 - The application opens on an empty chat, ready for a first message, with
   the agent to talk to and the model selectable side by side. The model
   picker lists the operator's models, with no "default" entry: until one is

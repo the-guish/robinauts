@@ -26,9 +26,9 @@ schema `neorc`:
 ROBINAUTS_FLOWS_DIR=orchestration/flows robinauts start --dev-no-sign-in
 ```
 
-Use the **Flows** section of the left panel, below the history: **New run**,
-then `guess_number`, then **Start run**, starts a run from its form, and the
-run opens where the chat would be. Or start one from a shell through the
+Open the **Flows** tab at the top of the left panel: **New run**, then
+`guess_number`, then **Start run**, starts a run from its form, and the run
+opens where the chat would be. Or start one from a shell through the
 server's port:
 
 ```bash

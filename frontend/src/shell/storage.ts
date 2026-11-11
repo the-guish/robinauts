@@ -2,8 +2,9 @@
 // Copyright The Robinauts Authors
 
 /**
- * What this browser remembers about the interface: the rail, the theme, the
- * agent last talked to and the model last picked.
+ * What this browser remembers about the interface: the rail, the panel's
+ * tab (Sessions or Flows), the theme, the agent last talked to and the model
+ * last picked.
  *
  * Per browser, never per account: it is a preference about this window, not
  * something the backend is told. Keys are namespaced, because the deployment

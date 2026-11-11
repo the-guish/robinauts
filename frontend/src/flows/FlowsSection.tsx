@@ -2,14 +2,16 @@
 // Copyright The Robinauts Authors
 
 /**
- * The panel's "Flows" section, below the history: the orchestrator's
- * navigation, which its framed page leaves out (`./FlowsPage.tsx`), so the
- * interface has one panel and one menu button.
+ * The panel's "Flows" tab: the orchestrator's navigation, which its framed
+ * page leaves out (`./FlowsPage.tsx`), so the interface has one panel and one
+ * menu button. It takes the panel's middle in place of the sessions
+ * (`../shell/Panel.tsx`), and scrolls as the history does.
  *
- * It holds what the orchestrator's own sidebar holds: a way to a new run, the
- * runs, its flows and its latest runs, each status a dot, kept up to date as
- * the orchestrator records events (`./orchestrator.ts`). In the rail, "New
- * run" and "Runs" stay as their icons and the lists go, as the history does.
+ * It holds what the orchestrator's own sidebar holds: "New run", drawn where
+ * and as "New chat" is, the runs, its flows and its latest runs, each status a
+ * dot, kept up to date as the orchestrator records events
+ * (`./orchestrator.ts`). In the rail, "New run" and "Runs" stay as their
+ * icons and the lists go, as the history does.
  * Each link is a route of the shell's, so opened from the drawer it closes the
  * drawer, as a conversation does.
  */
@@ -39,14 +41,13 @@ export function FlowsSection({
       : undefined;
   return (
     <nav aria-label="Flows" className="flows-section">
-      <h2 className="panel-heading panel-wide">Flows</h2>
       <a
         href={formatRoute(NEW_RUN)}
         title="New run"
         aria-label="New run"
         aria-current={at("new") ?? at("start")}
         onClick={onOpened}
-        className="flows-link"
+        className="panel-new"
       >
         <PlayIcon className="panel-icon" />
         <span className="panel-wide">New run</span>
@@ -63,29 +64,32 @@ export function FlowsSection({
         <span className="panel-wide">Runs</span>
       </a>
       {menu !== null && menu.flows.length > 0 && (
-        <ul aria-label="Workflows" className="flows-list panel-wide">
-          {menu.flows.map((flow) => (
-            <li key={flow}>
-              <a
-                href={formatRoute({
-                  kind: "flows",
-                  view: { at: "flow", flow },
-                })}
-                title={flow}
-                aria-current={at("flow", flow)}
-                onClick={onOpened}
-                className="flows-item"
-              >
-                <span aria-hidden="true" className="flows-dot" />
-                <span className="flows-name">{flow}</span>
-              </a>
-            </li>
-          ))}
-        </ul>
+        <>
+          <h2 className="flows-heading panel-wide">Workflows</h2>
+          <ul aria-label="Workflows" className="flows-list panel-wide">
+            {menu.flows.map((flow) => (
+              <li key={flow}>
+                <a
+                  href={formatRoute({
+                    kind: "flows",
+                    view: { at: "flow", flow },
+                  })}
+                  title={flow}
+                  aria-current={at("flow", flow)}
+                  onClick={onOpened}
+                  className="flows-item"
+                >
+                  <span aria-hidden="true" className="flows-dot" />
+                  <span className="flows-name">{flow}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
       {menu !== null && menu.runs.length > 0 && (
         <>
-          <h3 className="flows-heading panel-wide">Recent runs</h3>
+          <h2 className="flows-heading panel-wide">Recent runs</h2>
           <ul aria-label="Recent runs" className="flows-list panel-wide">
             {menu.runs.map((run) => (
               <li key={run.id}>

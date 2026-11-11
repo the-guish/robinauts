@@ -7,7 +7,7 @@
  *
  * The server says where that page is, in the session's `flows_url`, and only
  * when it serves one. It is opened embedded, with no navigation of its own:
- * the panel's "Flows" section is the navigation (`./orchestrator.ts`). The
+ * the panel's "Flows" tab is the navigation (`./orchestrator.ts`). The
  * page is the server's, on its origin, so the frame needs no sandbox
  * attribute to reach its own API, and the server's headers let this page
  * alone frame it.

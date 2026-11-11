@@ -25,7 +25,7 @@
  *     #/flows/runs/<id>   that run
  *     #/flows/flow/<name> that flow
  *
- * The flows routes are what the panel's "Flows" section links to. The two
+ * The flows routes are what the panel's "Flows" tab links to. The two
  * that start a run are this interface's own pages, over `/api/flows`
  * (`./flows/NewRunPage.tsx`); the others frame the orchestrator's page, which
  * the session names (`flows_url`). Inside the frame the orchestrator keeps a

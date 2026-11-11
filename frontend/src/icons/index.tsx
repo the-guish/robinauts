@@ -73,6 +73,7 @@ export const EllipsisIcon = icon("ellipsis");
 export const LoaderIcon = icon("loader");
 export const LogOutIcon = icon("log-out");
 export const MenuIcon = icon("menu");
+export const MessageSquareIcon = icon("message-square");
 export const MonitorIcon = icon("monitor");
 export const MoonIcon = icon("moon");
 export const PanelLeftIcon = icon("panel-left");
