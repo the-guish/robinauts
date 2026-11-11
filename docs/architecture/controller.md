@@ -76,6 +76,8 @@ worker's own, for the engines' tables.
 - `list_sessions`: most recently updated first, a page at a time.
 - `open_session`: one moment of a session, its messages and its active turn if any.
 - `rename_session`
+- `archive_session`: take the session off the listing. Everything else stays, and its next turn
+  brings it back.
 - `delete_session`: hide the session, after stopping a running turn. A soft delete: the records
   and the engine's state stay.
 - `fork_session`: a new session from a message of another, independent from then on.

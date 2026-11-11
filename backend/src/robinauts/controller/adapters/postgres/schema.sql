@@ -161,6 +161,11 @@ CREATE TABLE IF NOT EXISTS projects (
 -- turns with it. Trash, in stage two, is a delay before the
 -- purge, not a change of schema.
 --
+-- `archived_at` takes a session out of the listing alone. It is still read,
+-- turns still run on it, and nothing is purged. A new turn sets it back to
+-- null. The listing's index is not partial on it: an archived session is
+-- skipped like a hidden one.
+--
 -- `owner_id` cascades: a user's sessions are private to them, and there is
 -- nobody else for them to belong to once the user is gone.
 --
@@ -181,6 +186,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     deleted_at timestamptz,
+    archived_at timestamptz,
     CONSTRAINT sessions_project_fkey FOREIGN KEY (owner_id, project_id)
         REFERENCES projects (owner_id, id)
 );

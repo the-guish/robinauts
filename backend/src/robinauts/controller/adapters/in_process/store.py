@@ -179,6 +179,7 @@ class InProcessStore(Store):
             for s in self._sessions.values()
             if s.owner_id == owner
             and s.id not in self._hidden
+            and s.archived_at is None
             and (before is None or (s.updated_at, s.id) < before)
         ]
         owned.sort(key=lambda s: (s.updated_at, s.id), reverse=True)

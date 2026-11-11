@@ -61,6 +61,7 @@ function icon(name: string): (props: Readonly<IconProps>) => ReactNode {
   return Icon;
 }
 
+export const ArchiveIcon = icon("archive");
 export const ArrowDownIcon = icon("arrow-down");
 export const ArrowUpIcon = icon("arrow-up");
 export const BrainIcon = icon("brain");

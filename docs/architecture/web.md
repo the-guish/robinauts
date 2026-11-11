@@ -64,6 +64,7 @@ the engines' alone.
 - `list_sessions`: most recently updated first, a page at a time.
 - `open_session`: one moment of a session, its messages and its active turn if any.
 - `rename_session`
+- `archive_session`
 - `delete_session`
 - `fork_session`: a new session from a message of another, independent from then on.
 

@@ -200,7 +200,7 @@ OpenAPI.
 - **Each user has one change version.** It is an integer that starts at 0 and
   grows by one with each change worth knowing. A store bumps it in the same
   transaction as the change.
-- **These changes bump it:** a conversation created, renamed or deleted; a
+- **These changes bump it:** a conversation created, renamed, archived or deleted; a
   turn started; a turn ended, whichever way it ends. A turn's events do not
   bump it. The turn's stream is what shows them.
 - **The feed only signals.** Its answer holds the version and nothing about

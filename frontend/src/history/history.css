@@ -108,9 +108,24 @@
   color: var(--muted);
 }
 
+.history-actions,
+.history-archive {
+  flex-shrink: 0;
+}
+
 .history-actions {
   margin-right: 0.25rem;
-  flex-shrink: 0;
+}
+
+/*
+ * Archive shows on the row under the pointer, and on the row that has the
+ * focus, so that a Tab from the link reaches it. A screen without a hover
+ * always draws it.
+ */
+@media (hover: hover) {
+  .history-item:not(:hover, :focus-within) .history-archive {
+    display: none;
+  }
 }
 
 .history-icon {

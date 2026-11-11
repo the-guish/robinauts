@@ -70,7 +70,9 @@ POSITION_TAKEN = "turn_events_pkey"
 USER_EXISTS = "users_provider_subject_key"
 PROJECT_OF_ANOTHER = "sessions_project_fkey"
 
-_SESSION_COLUMNS = "id, owner_id, project_id, agent, engine, title, created_at, updated_at"
+_SESSION_COLUMNS = (
+    "id, owner_id, project_id, agent, engine, title, created_at, updated_at, archived_at"
+)
 _PROJECT_COLUMNS = "id, owner_id, name, created_at"
 _TURN_COLUMNS = (
     "id, session_id, follows, model, state, started_at, ended_at, error, retries_message_id,"
@@ -135,6 +137,7 @@ def _session(row: asyncpg.Record) -> Session:
         row["updated_at"],
         row["title"],
         project_id=row["project_id"],
+        archived_at=row["archived_at"],
     )
 
 
@@ -310,7 +313,7 @@ class PostgresStore(Store):
             try:
                 await connection.execute(
                     f"INSERT INTO sessions ({_SESSION_COLUMNS})"
-                    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
                     session.id,
                     session.owner_id,
                     session.project_id,
@@ -319,6 +322,7 @@ class PostgresStore(Store):
                     session.title,
                     session.created_at,
                     session.updated_at,
+                    session.archived_at,
                 )
             except asyncpg.exceptions.ForeignKeyViolationError as violated:
                 if violated.constraint_name == PROJECT_OF_ANOTHER:
@@ -340,11 +344,13 @@ class PostgresStore(Store):
     async def update_session(self, session: Session) -> None:
         async with self._pool.acquire() as connection, connection.transaction():
             status = await connection.execute(
-                "UPDATE sessions SET title = $2, updated_at = $3 WHERE id = $1 AND owner_id = $4",
+                "UPDATE sessions SET title = $2, updated_at = $3, archived_at = $5"
+                " WHERE id = $1 AND owner_id = $4",
                 session.id,
                 session.title,
                 session.updated_at,
                 session.owner_id,
+                session.archived_at,
             )
             if _rows(status) > 0:
                 await _bump(connection, session.owner_id)
@@ -355,7 +361,7 @@ class PostgresStore(Store):
         updated_at, session_id = before if before is not None else (None, None)
         rows = await self._pool.fetch(
             f"SELECT {_SESSION_COLUMNS} FROM sessions"
-            " WHERE owner_id = $1 AND deleted_at IS NULL"
+            " WHERE owner_id = $1 AND deleted_at IS NULL AND archived_at IS NULL"
             "   AND ($2::timestamptz IS NULL OR (updated_at, id) < ($2, $3::uuid))"
             " ORDER BY updated_at DESC, id DESC LIMIT $4",
             owner,

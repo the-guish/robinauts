@@ -156,6 +156,28 @@ def aux_master_journey(agent: str, server: str, page: Page, local_gpt: FakeLocal
     expect(page.get_by_role("alert")).to_contain_text("This conversation is not here.")
     assert len(calls) == 8
 
+    # --- Archiving --------------------------------------------------------------------------
+
+    # 14. Archive A from its row (hover it, "Archive"): no question; it leaves "Conversations",
+    #     and the page goes to a new chat. A reload keeps it off the list.
+    browser.open_conversation(page, "Project alpha")
+    browser.archive(page, "Project alpha")
+    expect(history(page)).to_have_count(0)
+    expect(page.get_by_label("Agent")).to_be_visible()
+    page.reload()
+    expect(page.get_by_text("No conversations yet.").first).to_be_visible()
+    expect(history(page)).to_have_count(0)
+
+    # 15. Go to A's address: its title and thread are all there. A message goes on from A's
+    #     history, and brings A back to "Conversations".
+    page.goto(a_url)
+    expect(page.get_by_role("heading", level=1)).to_have_text("Project alpha")
+    expect_thread(page, echoed("alpha one", "alpha TWO", "alpha four"))
+    send(page, "alpha five")
+    expect_thread(page, echoed("alpha one", "alpha TWO", "alpha four", "alpha five"))
+    last_call("fake-gpt", "alpha one", "alpha TWO", "alpha four", "alpha five")
+    expect(history(page)).to_have_text(["Project alpha"])
+
 
 def test_langchain_master_journey(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
     aux_master_journey("langchain", server, page, local_gpt)

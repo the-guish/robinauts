@@ -42,6 +42,10 @@
   six per origin over HTTP/1.1.
 - The history marks a conversation with a running turn, from the list's
   `running` field.
+- **Archiving takes one click.** A row of the history has an archive button.
+  It shows on hover and while the row has the focus, and always on a screen
+  without hover. A click takes the conversation off the list, with no
+  question. Its next message brings it back.
 - On a small screen the panel becomes an overlay drawer opened from a
   button, and the chat is usable on a phone.
 - **The right side panel** is ours too (`src/side/`). It holds tabs
