@@ -53,7 +53,7 @@ import {
   UNKNOWN_MODEL,
 } from "../api/client";
 import { cancelRun, type Opened } from "../conversation/conversation";
-import type { ChatProps } from "./index";
+import type { ChatProps, Drafts } from "./index";
 import {
   attach,
   startNewConversation,
@@ -255,6 +255,18 @@ export function textOf(message: ChatMessage): string {
     .join("\n\n");
 }
 
+/** Keep `text` as the draft of that conversation, or of the empty chat. */
+function keepDraft(
+  drafts: Drafts,
+  conversationId: string | null,
+  text: string,
+  emptyChat: { current: string },
+): void {
+  if (conversationId === null) emptyChat.current = text;
+  else if (text === "") drafts.delete(conversationId);
+  else drafts.set(conversationId, text);
+}
+
 export function useChat(props: ChatProps): Chatting {
   const [state, dispatch] = useReducer(reduce, EMPTY);
 
@@ -318,12 +330,51 @@ export function useChat(props: ChatProps): Chatting {
   // beside it, for the functions below to read: a send reads what the box
   // says at the moment it is pressed, and those functions are made once, so
   // that a keystroke does not hand every message on the screen a new one.
-  const [text, setTextState] = useState("");
+  //
+  // **The main box is the open conversation's** (`ChatProps.drafts`): what is
+  // written in it is kept under the conversation it was written in, and put
+  // back when that conversation is opened again. The empty chat's is kept
+  // for as long as this chat is, since "New chat" makes a new one.
+  const [ownDrafts] = useState<Drafts>(() => new Map());
+  const drafts = props.drafts ?? ownDrafts;
+  const draftOf = useRef(conversationId);
+  const emptyChatDraft = useRef("");
+  const [text, setTextState] = useState(() =>
+    conversationId === null ? "" : (drafts.get(conversationId) ?? ""),
+  );
   const textRef = useRef(text);
-  const setText = useCallback((next: string) => {
-    textRef.current = next;
-    setTextState(next);
-  }, []);
+  const setText = useCallback(
+    (next: string) => {
+      textRef.current = next;
+      keepDraft(drafts, draftOf.current, next, emptyChatDraft);
+      setTextState(next);
+    },
+    [drafts],
+  );
+  // A layout effect, so that the conversation opened never shows, even for a
+  // frame, what was written in the one before.
+  useLayoutEffect(() => {
+    const left = draftOf.current;
+    if (left === conversationId) return;
+    draftOf.current = conversationId;
+    // The empty chat becoming the conversation its first message started is
+    // the same chat: what has been written since goes with it.
+    if (
+      left === null &&
+      conversationId !== null &&
+      turns.began(conversationId)
+    ) {
+      emptyChatDraft.current = "";
+      keepDraft(drafts, conversationId, textRef.current, emptyChatDraft);
+      return;
+    }
+    const kept =
+      conversationId === null
+        ? emptyChatDraft.current
+        : (drafts.get(conversationId) ?? "");
+    textRef.current = kept;
+    setTextState(kept);
+  }, [conversationId, turns, drafts]);
   const [editingState, setEditingState] = useState<Editing | null>(null);
   const editingRef = useRef(editingState);
   const setEditing = useCallback((next: Editing | null) => {

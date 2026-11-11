@@ -27,6 +27,7 @@ import {
   type AgentId,
   type ChatProps,
   type ConversationId,
+  type Drafts,
   type ModelId,
 } from "./index";
 
@@ -469,10 +470,10 @@ test("a conversation that is not here has no thread to draw", async () => {
   expect(screen.queryByRole("textbox", { name: "Message input" })).toBeNull();
 });
 
-test("the seam is a component and ten names, and nothing of a library", () => {
+test("the seam is a component and eleven names, and nothing of a library", () => {
   // **A claim about the types, checked by the type checker.** `tsc -b` reads
-  // this file, so the four assertions below fail the build rather than a
-  // run: the seam is exactly these ten names, they are exactly these types,
+  // this file, so the five assertions below fail the build rather than a
+  // run: the seam is exactly these eleven names, they are exactly these types,
   // and none of them comes from a chat library (ADR 0001, the discard test).
   expectTypeOf<ChatProps>().toEqualTypeOf<{
     conversationId: ConversationId | null;
@@ -486,8 +487,9 @@ test("the seam is a component and ten names, and nothing of a library", () => {
     onModelRefused?: (modelId: ModelId) => void;
     onToolResult?: (name: string) => void;
     welcome?: ReactNode;
+    drafts?: Drafts;
   }>();
-  // An eleventh name does not belong to it, whatever it is called.
+  // A twelfth name does not belong to it, whatever it is called.
   const extra = {
     conversationId: null,
     agentId: null,
@@ -499,10 +501,11 @@ test("the seam is a component and ten names, and nothing of a library", () => {
   } satisfies ChatProps;
   // And `ConversationId`, `AgentId` and `ModelId` are what the rest of the
   // application already calls these, which is a string and not a library's
-  // handle.
+  // handle; `Drafts` is a plain map of them to what was written.
   expectTypeOf<ConversationId>().toEqualTypeOf<string>();
   expectTypeOf<AgentId>().toEqualTypeOf<string>();
   expectTypeOf<ModelId>().toEqualTypeOf<string>();
+  expectTypeOf<Drafts>().toEqualTypeOf<Map<string, string>>();
   expect(typeof Chat).toBe("function");
   expect(extra.conversationId).toBeNull();
 });
