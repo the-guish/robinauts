@@ -203,7 +203,7 @@ def written(text: str, values: dict[str, str], base_url: str, github_env: str) -
         raise SystemExit("the configuration declares no agents")
     tools = ["github"] if github_env else []
     for agent_id, agent in agents.items():
-        said[f"{agent_id}'s model"] = (agent.get("model", ""), ids[0])
+        said[f"{agent_id}'s models"] = (agent.get("models", []), ids)
         said[f"{agent_id}'s tools"] = (agent.get("tools", []), tools)
     servers = tables.get("tool_servers", {})
     if github_env:
