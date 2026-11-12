@@ -53,6 +53,17 @@ export type AgentId = string;
 export type ModelId = string;
 
 /**
+ * What was written in each conversation's box and not sent, by its id.
+ *
+ * Made and held by the application, for as long as somebody is signed in,
+ * and handed to every chat it draws (`ChatProps.drafts`): "New chat" makes a
+ * new chat, and the drafts of the conversations left behind outlive it. Only
+ * in memory, never in the browser's storage, where it would outlive the
+ * person's session.
+ */
+export type Drafts = Map<ConversationId, string>;
+
+/**
  * What the chat is given, and the one thing it says back.
  *
  * `conversationId` is `null` on the empty chat -- the application opens on
@@ -137,4 +148,11 @@ export interface ChatProps {
    * to cross this seam twice.
    */
   welcome?: ReactNode;
+  /**
+   * Where the box keeps what was written and not sent in each conversation
+   * (`Drafts`). Opening another conversation shows that one's draft, and
+   * coming back shows this one's again. Left out, the chat keeps its own,
+   * which go with it.
+   */
+  drafts?: Drafts;
 }

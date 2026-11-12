@@ -1415,6 +1415,59 @@ test("opening a conversation says what the server says it is", async () => {
   expect(openedWith).toHaveBeenCalledWith(conversation(1, "Robins"));
 });
 
+test("what is written and not sent stays with its conversation", async () => {
+  stub((call) => {
+    for (const n of [1, 2]) {
+      if (call.url === `/api/conversations/${id(n)}`) {
+        return json(opened(conversation(n), TREE));
+      }
+    }
+    return undefined;
+  });
+  const drafts = new Map<string, string>();
+  const { result, rerender, started, ended } = chatting({
+    conversationId: id(1),
+    drafts,
+  });
+  const go = async (conversationId: string | null) => {
+    await act(async () => {
+      rerender({
+        conversationId,
+        agentId: "helper",
+        modelId: "sonnet",
+        onConversationStarted: started,
+        onTurnEnded: ended,
+        drafts,
+      });
+      await settle();
+    });
+  };
+  act(() => {
+    result.current.composer.setText("for the first");
+  });
+  await go(id(2));
+  expect(result.current.composer.text).toBe("");
+  act(() => {
+    result.current.composer.setText("for the second");
+  });
+  await go(null);
+  expect(result.current.composer.text).toBe("");
+  act(() => {
+    result.current.composer.setText("for a new one");
+  });
+  await go(id(1));
+  expect(result.current.composer.text).toBe("for the first");
+  await go(null);
+  expect(result.current.composer.text).toBe("for a new one");
+  await go(id(2));
+  expect(result.current.composer.text).toBe("for the second");
+  // Emptied, it is no longer kept.
+  act(() => {
+    result.current.composer.setText("");
+  });
+  expect(drafts).toEqual(new Map([[id(1), "for the first"]]));
+});
+
 test("regenerating names the answer to produce again, and sends no message", async () => {
   const posts: Call[] = [];
   stub((call) => {

@@ -19,7 +19,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { Chat } from "../chat";
+import { Chat, type Drafts } from "../chat";
 import { useChanges } from "../changes/changes";
 import { DevicesPage } from "../devices/DevicesPage";
 import { FlowsPage } from "../flows/FlowsPage";
@@ -233,6 +233,10 @@ export function Shell({
   // and so re-renders nothing; the count is what remounts the area, so
   // nothing typed into it carries over into the next one.
   const [chat, setChat] = useState(0);
+  // What was written and not sent in each conversation, kept across those
+  // remounts, and for as long as somebody is signed in: this shell is
+  // unmounted when they sign out, and the drafts go with it.
+  const [drafts] = useState<Drafts>(() => new Map());
   // Asked for here, not inside the empty chat: that is remounted on every
   // "New chat", and the agents do not change while the server is running.
   // The choice is held here too, because the chat needs it to begin a
@@ -584,6 +588,7 @@ export function Shell({
                 changes={changes}
                 onToolResult={results.publish}
                 welcome={welcome}
+                drafts={drafts}
               />
             </>
           )}
