@@ -22,7 +22,9 @@ import {
   emptyFields,
   inputsOf,
   listFlows,
+  shownInputs,
   startRun,
+  withField,
   type FieldValue,
   type Fields,
   type Flow,
@@ -136,7 +138,7 @@ function RunForm({ flow }: Readonly<{ flow: Flow }>) {
   const [problems, setProblems] = useState<readonly string[]>([]);
   const problemsId = useId();
   const set = (name: string, value: FieldValue) => {
-    setFields((was) => ({ ...was, [name]: value }));
+    setFields((was) => withField(flow, was, name, value));
   };
   const start = async (event: FormEvent) => {
     event.preventDefault();
@@ -180,7 +182,7 @@ function RunForm({ flow }: Readonly<{ flow: Flow }>) {
         {flow.inputs.length === 0 && (
           <p className="flows-note">This flow takes no inputs.</p>
         )}
-        {flow.inputs.map((input) => (
+        {shownInputs(flow, fields).map((input) => (
           <Field
             key={input.name}
             input={input}

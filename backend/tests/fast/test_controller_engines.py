@@ -23,8 +23,8 @@ def config(engine: str, kind: shared.ProviderKind = shared.ProviderKind.ANTHROPI
         providers={"acme": shared.ProviderConfig("acme", kind, "ACME_KEY")},
         models={"m": shared.ModelConfig("m", "acme", "model-1")},
         agents={
-            "a": shared.AgentConfig("a", "A", "", "m", engine),
-            "b": shared.AgentConfig("b", "B", "", "m", engine),
+            "a": shared.AgentConfig("a", "A", "", ("m",), engine),
+            "b": shared.AgentConfig("b", "B", "", ("m",), engine),
         },
     )
 

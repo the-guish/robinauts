@@ -267,7 +267,7 @@ name = "claude-sonnet-5"
 
 [agents.assistant]
 title = "Assistant"
-model = "sonnet"
+models = ["sonnet"]
 engine = "{engine}"
 system_prompt = "Play fair."
 """

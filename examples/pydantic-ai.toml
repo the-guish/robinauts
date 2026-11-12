@@ -14,5 +14,5 @@ max_output_tokens = 1024
 [agents.assistant]
 title = "Assistant"
 system_prompt = "You are a helpful assistant. Answer briefly."
-model = "haiku"
+models = ["haiku"]
 engine = "pydantic-ai"

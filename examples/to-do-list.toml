@@ -23,6 +23,6 @@ auth = "none"
 [agents.planner]
 title = "Planner"
 system_prompt = "You keep the user's to-do list. Show it, add to it and tick items off when asked."
-model = "haiku"
+models = ["haiku"]
 engine = "pydantic-ai"
 tools = ["todo"]

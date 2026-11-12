@@ -22,7 +22,7 @@ HASTY = f"""
 [agents.hasty]
 title = "Hasty"
 system_prompt = "{stack.SYSTEM_PROMPT}"
-model = "local_gpt"
+models = ["local_gpt"]
 engine = "pydantic-ai"
 turn_timeout_seconds = 1
 """

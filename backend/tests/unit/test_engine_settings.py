@@ -21,7 +21,7 @@ CONFIG = shared.Config(
             "c", "https://c.example", "C_KEY", shared.ToolServerAuth.HEADER, header="x-api-key"
         ),
     },
-    agents={"a": shared.AgentConfig("a", "A", "", "m", "echo", ("t",))},
+    agents={"a": shared.AgentConfig("a", "A", "", ("m",), "echo", ("t",))},
 )
 
 

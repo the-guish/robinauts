@@ -41,14 +41,14 @@ name = "gpt-x"
 [agents.coder]
 title = "Coder"
 system_prompt = "You work in this conversation's directory."
-model = "opus"
+models = ["opus"]
 engine = "claude-code"
 worker = "claude"
 
 [agents.helper]
 title = "Helper"
 system_prompt = "You help."
-model = "gpt"
+models = ["gpt"]
 engine = "pydantic-ai"
 
 [workers.claude]

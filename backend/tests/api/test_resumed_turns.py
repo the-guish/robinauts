@@ -46,14 +46,14 @@ auth = "none"
 [agents.langchain_counter]
 title = "LangChain, counting"
 system_prompt = "{system_prompt}"
-model = "local_gpt"
+models = ["local_gpt"]
 engine = "langchain"
 tools = ["counter"]
 
 [agents.pydantic_ai_counter]
 title = "Pydantic AI, counting"
 system_prompt = "{system_prompt}"
-model = "local_gpt"
+models = ["local_gpt"]
 engine = "pydantic-ai"
 tools = ["counter"]
 """

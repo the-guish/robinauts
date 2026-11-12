@@ -39,9 +39,10 @@ until the frontend is revisited.
   browser. This makes our wire a profile of AG-UI, not its stock run input,
   and it is documented with the API.
 - **The model travels with the turn.** Every turn may name the model it
-  runs on, one of those `GET /api/models` lists. Left out, a new conversation
-  runs on its agent's default, and a conversation that exists on the model of
-  its last message. The model is recorded on the messages the turn produces,
+  runs on, one of those its agent lists in `GET /api/agents`. Another model
+  is refused. Left out, a new conversation runs on its agent's default, the
+  first it lists, and a conversation that exists on the model of its last
+  message. The model is recorded on the messages the turn produces,
   so a conversation's model is the one its last answer ran on, and the next
   turn may run on another.
 - **The web shell emits the events.** The controller yields the platform's
@@ -246,6 +247,7 @@ from that field.
 - A conversation has no model of its own: the model travels with each turn,
   above. `PUT /api/conversations/{id}/model` answers the choice back so that
   a client can show it and send it with the next turn; it stores nothing.
+  It refuses a model the conversation's agent does not list.
 - `POST /api/conversations/{id}/fork` makes a new conversation from a message
   of another ([architecture/controller.md](../architecture/controller.md)).
   Planned: it answers 501 until the controller forks.

@@ -104,13 +104,19 @@ class AgentConfig:
     id: str
     title: str
     system_prompt: str
-    model: str
+    # The models its turns may run on, in the configuration's order, its default first.
+    models: tuple[str, ...]
     engine: str
     tools: tuple[str, ...] = ()
     # How long one of its turns may run; left out, ``[work]``'s ``max_turn_seconds``.
     turn_timeout_seconds: float | None = None
     # The worker its turns run on, a process of its own on PostgreSQL; left out, the default.
     worker: str = DEFAULT_WORKER
+
+    @property
+    def model(self) -> str:
+        """Its default model: the first of its models."""
+        return self.models[0]
 
 
 @dataclass(frozen=True, slots=True)

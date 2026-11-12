@@ -37,7 +37,7 @@ CONFIG = Config(
     providers={"echo": ProviderConfig("echo", ProviderKind.ANTHROPIC, "ECHO_API_KEY")},
     models={"echo": ModelConfig("echo", provider="echo", name="echo", title="Echo")},
     agents={
-        "echo": AgentConfig("echo", title="Echo", system_prompt="", model="echo", engine="echo")
+        "echo": AgentConfig("echo", title="Echo", system_prompt="", models=("echo",), engine="echo")
     },
 )
 

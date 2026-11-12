@@ -57,7 +57,7 @@ title = "Local GPT"
 [agents.assistant]
 title = "Assistant"
 system_prompt = "You are a robinaut."
-model = "local_gpt"
+models = ["local_gpt"]
 engine = "{engine}"
 worker = "base"
 

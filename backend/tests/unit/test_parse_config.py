@@ -11,7 +11,7 @@ from robinauts.controller.contract.domain import ConfigError
 from robinauts.controller.core.config import parse_config
 from robinauts.shared_domain.domain import DEFAULT_WORKER, ProviderKind, ToolServerAuth
 
-AGENT = {"title": "A", "system_prompt": "", "model": "fast"}
+AGENT = {"title": "A", "system_prompt": "", "models": ["fast"]}
 
 
 def test_builds_the_config() -> None:
@@ -185,6 +185,35 @@ def test_an_agent_may_set_its_turn_timeout(given: object, parsed: float | str | 
             parse_config(raw)
     else:
         assert parse_config(raw).agents["a"].turn_timeout_seconds == parsed
+
+
+@pytest.mark.parametrize(
+    ("given", "parsed"),
+    [
+        ({"models": ["slow"]}, ("slow", ("slow",))),
+        ({"models": ["big", "fast"]}, ("big", ("big", "fast"))),
+        ({"model": "fast"}, "unknown key(s) model"),
+        ({}, "AgentConfig.__init__() missing 1 required positional argument: 'models'"),
+        ({"models": []}, "models is not a non-empty list of model ids: []"),
+        ({"models": "fast"}, "models is not a non-empty list of model ids: 'fast'"),
+        ({"models": ["fast", "nope"]}, "model 'nope' is not configured"),
+        ({"models": ["fast", "slow", "fast"]}, "model(s) named twice: fast"),
+    ],
+)
+def test_an_agent_lists_its_models_the_first_its_default(
+    given: dict[str, object], parsed: tuple[str, tuple[str, ...]] | str
+) -> None:
+    raw = {
+        "model_providers": {"p": {"kind": "anthropic", "api_key_env": "K"}},
+        "models": {name: {"provider": "p", "name": name} for name in ("fast", "slow", "big")},
+        "agents": {"a": {"title": "A", "system_prompt": "", "engine": "echo", **given}},
+    }
+    if isinstance(parsed, str):
+        with pytest.raises(ConfigError, match=re.escape(f"agents.a: {parsed}")):
+            parse_config(raw)
+    else:
+        config = parse_config(raw)
+        assert (config.agents["a"].model, config.agents["a"].models) == parsed
 
 
 def test_an_agent_names_the_worker_its_turns_run_on() -> None:

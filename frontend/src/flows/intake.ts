@@ -41,6 +41,53 @@ export function emptyFields(flow: Flow): Fields {
   );
 }
 
+/** The models of the agent chosen in the form's one agent field, if any. */
+function agentModels(flow: Flow, fields: Fields): readonly string[] | null {
+  const agents = flow.inputs.filter((input) => input.lov === "agent");
+  const agent = agents.length === 1 ? agents[0] : undefined;
+  if (agent === undefined) return null;
+  const chosen = agent.options?.find((o) => o.value === fields[agent.name]);
+  return chosen?.models ?? null;
+}
+
+/**
+ * The form's inputs as its fields leave them: a model's list holds only the
+ * models of the agent chosen beside it, in that agent's order. The server
+ * refuses any other pair.
+ */
+export function shownInputs(flow: Flow, fields: Fields): FlowInput[] {
+  const allowed = agentModels(flow, fields);
+  return flow.inputs.map((input) => {
+    const options = input.options;
+    if (input.lov !== "model" || allowed === null || !options) return input;
+    const narrowed = allowed.flatMap((id) =>
+      options.filter((option) => option.value === id),
+    );
+    return { ...input, options: narrowed };
+  });
+}
+
+/**
+ * The fields with one changed. A model the chosen agent does not run on gives
+ * way to that agent's default, the first of its models.
+ */
+export function withField(
+  flow: Flow,
+  fields: Fields,
+  name: string,
+  value: FieldValue,
+): Fields {
+  const next: Record<string, FieldValue> = { ...fields, [name]: value };
+  const allowed = agentModels(flow, next);
+  if (allowed === null) return next;
+  for (const input of flow.inputs) {
+    const model = next[input.name];
+    if (input.lov !== "model" || typeof model !== "string") continue;
+    if (!allowed.includes(model)) next[input.name] = allowed[0] ?? "";
+  }
+  return next;
+}
+
 /** What a field is drawn as. */
 export type Control = "select" | "text" | "number" | "checkbox" | "datetime";
 

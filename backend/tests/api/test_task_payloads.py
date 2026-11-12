@@ -35,7 +35,7 @@ name = "echo"
 [agents.echo]
 title = "Echo"
 system_prompt = ""
-model = "echo"
+models = ["echo"]
 engine = "echo"
 """
 

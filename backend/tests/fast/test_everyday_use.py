@@ -145,9 +145,11 @@ async def test_everyday_use(agent: str) -> None:
         assert (session["providers"], session["user"]["provider"]) == ([], LOCAL_IDENTITY.provider)
         assert (await http.get("/auth/login/okta")).status_code == 404
         agents = (await api.get("/api/agents"))["items"]
-        assert [(a["id"], a["title"], a["model"]) for a in agents] == [
-            ("langchain", "LangChain", "local_gpt"),
-            ("pydantic_ai", "Pydantic AI", "local_gpt"),
+        both = ["local_gpt", "local_gpt_2"]
+        assert [(a["id"], a["title"], a["model"], a["models"]) for a in agents] == [
+            ("langchain", "LangChain", "local_gpt", both),
+            ("pydantic_ai", "Pydantic AI", "local_gpt", both),
+            ("pinned", "Pinned to GPT 2", "local_gpt_2", ["local_gpt_2"]),
         ]
         models = (await api.get("/api/models"))["items"]
         assert [(m["id"], m["title"]) for m in models] == [

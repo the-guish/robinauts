@@ -30,14 +30,14 @@ SEARCHING = """
 [agents.langchain_sessions]
 title = "LangChain, with its sessions"
 system_prompt = "{system_prompt}"
-model = "local_gpt"
+models = ["local_gpt"]
 engine = "langchain"
 tools = ["sessions"]
 
 [agents.pydantic_ai_sessions]
 title = "Pydantic AI, with its sessions"
 system_prompt = "{system_prompt}"
-model = "local_gpt"
+models = ["local_gpt"]
 engine = "pydantic-ai"
 tools = ["sessions"]
 """

@@ -45,9 +45,14 @@ CONFIG = Config(
     models={"echo": ModelConfig("echo", provider="echo", name="echo", title="Echo")},
     agents={
         "keeper": AgentConfig(
-            "keeper", "Keeper", system_prompt="", model="echo", engine="echo", tools=("sessions",)
+            "keeper",
+            "Keeper",
+            system_prompt="",
+            models=("echo",),
+            engine="echo",
+            tools=("sessions",),
         ),
-        "other": AgentConfig("other", "Other", system_prompt="", model="echo", engine="echo"),
+        "other": AgentConfig("other", "Other", system_prompt="", models=("echo",), engine="echo"),
     },
 )
 

@@ -46,7 +46,7 @@ title = "Echo Haiku"
 [agents.echo]
 title = "Echo"
 system_prompt = ""
-model = "haiku"
+models = ["haiku"]
 engine = "echo"
 """
 
@@ -283,11 +283,13 @@ def test_a_flow_with_a_form_is_listed_with_its_values_and_started_with_them(
     fields = {field["name"]: field for field in probe["inputs"]}
     assert list(fields) == ["repo_branch", "model", "agent", "task"]
     assert fields["repo_branch"]["options"] == [
-        {"value": "app@main", "label": "app · main"},
-        {"value": "app@next", "label": "app · next"},
+        {"value": "app@main", "label": "app · main", "models": None},
+        {"value": "app@next", "label": "app · next", "models": None},
     ]
-    assert fields["model"]["options"] == [{"value": "haiku", "label": "Echo Haiku"}]
-    assert fields["agent"]["options"] == [{"value": "echo", "label": "Echo · default"}]
+    assert fields["model"]["options"] == [{"value": "haiku", "label": "Echo Haiku", "models": None}]
+    assert fields["agent"]["options"] == [
+        {"value": "echo", "label": "Echo · default", "models": ["haiku"]}
+    ]
     assert fields["task"] == {
         "name": "task",
         "label": "task",

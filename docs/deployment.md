@@ -208,7 +208,8 @@ max_output_tokens = 8192
 
 [agents.assistant]
 title = "Assistant"
-model = "sonnet"
+# The models its turns may run on. The first is its default.
+models = ["sonnet"]
 engine = "langgraph"
 system_prompt = "Play fair."
 # Optional: how long one of its turns may run. Left out, max_turn_seconds.
@@ -698,7 +699,7 @@ name = "claude-sonnet-5"
 
 [agents.assistant]
 title = "Assistant"
-model = "sonnet"
+models = ["sonnet"]
 engine = "pydantic-ai"
 ```
 

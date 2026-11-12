@@ -14,7 +14,7 @@ def test_reads_the_four_tables(tmp_path: Path) -> None:
         '[model_providers.p]\nkind = "anthropic"\n'
         '[models.m]\nprovider = "p"\n'
         '[tool_servers.t]\nurl = "https://t"\n'
-        '[agents.a]\nmodel = "m"\n'
+        '[agents.a]\nmodels = ["m"]\n'
     )
     raw = read_config(path)
     assert {table: list(ids) for table, ids in raw.items()} == {

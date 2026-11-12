@@ -27,7 +27,7 @@ life for `/health`; and sends it SIGTERM at the stop.
 [agents.assistant]
 title = "Assistant"
 system_prompt = "You are a robinaut."
-model = "gpt"                # a model of a provider whose key the worker is handed
+models = ["gpt"]                # a model of a provider whose key the worker is handed
 engine = "pydantic-ai"       # or "langchain": both are in the image
 worker = "base"
 

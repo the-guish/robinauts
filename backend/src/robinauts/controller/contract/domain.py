@@ -198,6 +198,8 @@ class AgentListing:
     id: str
     title: str
     default_model: str
+    models: tuple[str, ...]
+    """The models its turns may run on, in order, its default first."""
 
 
 @dataclass(frozen=True, slots=True)
