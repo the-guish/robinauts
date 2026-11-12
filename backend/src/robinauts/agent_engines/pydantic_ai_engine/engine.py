@@ -130,9 +130,10 @@ class PydanticAIEngine(AgentEngine):
                     *toolsets_for(agent, self._settings),
                     *function_toolsets(agent.functions),
                 ],
+                # In order: the window measures the history the model will be sent.
                 capabilities=[
-                    ProcessHistory(within(window)),
                     *([ProcessHistory(signed_thinking_only)] if client.system == ANTHROPIC else []),
+                    ProcessHistory(within(window)),
                 ],
             )
             # The deadline bounds the run, not the caller's handling of what is yielded.
