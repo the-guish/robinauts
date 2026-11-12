@@ -57,6 +57,7 @@ from robinauts.agent_engines.pydantic_ai_engine.clients import (
 )
 from robinauts.agent_engines.pydantic_ai_engine.context import within
 from robinauts.agent_engines.pydantic_ai_engine.session_store import SessionStore
+from robinauts.agent_engines.pydantic_ai_engine.thinking import ANTHROPIC, signed_thinking_only
 from robinauts.agent_engines.pydantic_ai_engine.tools import function_toolsets, toolsets_for
 
 FASTEST_MODEL_CALL = 1.0
@@ -129,7 +130,11 @@ class PydanticAIEngine(AgentEngine):
                     *toolsets_for(agent, self._settings),
                     *function_toolsets(agent.functions),
                 ],
-                capabilities=[ProcessHistory(within(window))],
+                # In order: the window measures the history the model will be sent.
+                capabilities=[
+                    *([ProcessHistory(signed_thinking_only)] if client.system == ANTHROPIC else []),
+                    ProcessHistory(within(window)),
+                ],
             )
             # The deadline bounds the run, not the caller's handling of what is yielded.
             deadline = asyncio.get_running_loop().time() + timeout_seconds
