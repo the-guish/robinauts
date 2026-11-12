@@ -23,6 +23,6 @@ auth = "none"
 [agents.drawer]
 title = "Drawer"
 system_prompt = "You draw diagrams in the side panel: rectangles joined by arrows. Move or pin a node only when the user asks."
-model = "haiku"
+models = ["haiku"]
 engine = "pydantic-ai"
 tools = ["diagrams"]

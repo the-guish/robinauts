@@ -58,13 +58,19 @@ title = "Local GPT 2"
 [agents.langchain]
 title = "LangChain"
 system_prompt = "{system_prompt}"
-model = "local_gpt"
+models = ["local_gpt", "local_gpt_2"]
 engine = "langchain"
 
 [agents.pydantic_ai]
 title = "Pydantic AI"
 system_prompt = "{system_prompt}"
-model = "local_gpt"
+models = ["local_gpt", "local_gpt_2"]
+engine = "pydantic-ai"
+
+[agents.pinned]
+title = "Pinned to GPT 2"
+system_prompt = "{system_prompt}"
+models = ["local_gpt_2"]
 engine = "pydantic-ai"
 """
 
@@ -76,14 +82,14 @@ auth = "none"
 [agents.langchain_tools]
 title = "LangChain with tools"
 system_prompt = "{system_prompt}"
-model = "local_gpt"
+models = ["local_gpt"]
 engine = "langchain"
 tools = ["tools"]
 
 [agents.pydantic_ai_tools]
 title = "Pydantic AI with tools"
 system_prompt = "{system_prompt}"
-model = "local_gpt"
+models = ["local_gpt"]
 engine = "pydantic-ai"
 tools = ["tools"]
 """

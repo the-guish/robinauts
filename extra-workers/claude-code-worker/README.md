@@ -39,7 +39,7 @@ title = "Claude Opus 5.5"
 [agents.coder]
 title = "Claude Code"
 system_prompt = "You work in this conversation's own directory. Say what you did."
-model = "opus"
+models = ["opus"]
 engine = "claude-code"       # an engine the server does not have: allowed on a worker with a command
 worker = "claude"
 

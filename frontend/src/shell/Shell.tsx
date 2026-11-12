@@ -53,6 +53,7 @@ import { LocalModeBanner } from "./LocalModeBanner";
 import {
   ConversationModel,
   ModelPicker,
+  modelsOf,
   useChosenModel,
   useModels,
 } from "./ModelPicker";
@@ -83,6 +84,12 @@ export function agentTitle(agents: Agents, id: string): string | null {
   if (agents.status === "loading") return null;
   if (agents.status === "failed") return id;
   return agents.items.find((agent) => agent.id === id)?.title ?? id;
+}
+
+/** The models that agent lists; `null` while the agents are not known. */
+function listedModels(agents: Agents, id: string | null): string[] | null {
+  if (agents.status !== "ready" || id === null) return null;
+  return agents.items.find((agent) => agent.id === id)?.models ?? null;
 }
 
 /** What the shell holds about the conversation on the screen. */
@@ -257,8 +264,13 @@ export function Shell({
     agents.status === "ready"
       ? (agents.items.find((agent) => agent.id === agentId)?.model ?? null)
       : null;
+  // Only the chosen agent's models: the backend refuses any other.
+  const agentModels = useMemo(
+    () => modelsOf(models, listedModels(agents, agentId)),
+    [models, agents, agentId],
+  );
   const [modelId, chooseModel, forgetChosenModel] = useChosenModel(
-    models,
+    agentModels,
     agentDefault,
   );
   const forgetModel = useCallback(
@@ -323,6 +335,10 @@ export function Shell({
   const conversationAgent = listed?.agent ?? about?.agent ?? null;
   const withAgent =
     conversationAgent === null ? null : agentTitle(agents, conversationAgent);
+  const conversationModels = useMemo(
+    () => modelsOf(models, listedModels(agents, conversationAgent)),
+    [models, agents, conversationAgent],
+  );
   // Held rather than made at every render: the React Compiler takes a
   // value made from the panel's row by a call of ours for one that may be
   // changed later, and then gives up on every callback below.
@@ -375,7 +391,11 @@ export function Shell({
       {/* Only once there is an agent to talk to: with none, the agent
           picker's sentence is the whole of what there is to say. */}
       {agentId !== null && (
-        <ModelPicker models={models} chosen={modelId} onChoose={chooseModel} />
+        <ModelPicker
+          models={agentModels}
+          chosen={modelId}
+          onChoose={chooseModel}
+        />
       )}
     </div>
   );
@@ -561,7 +581,7 @@ export function Shell({
                   {current !== null && conversationModel !== null && (
                     <ConversationModel
                       key={current}
-                      models={models}
+                      models={conversationModels}
                       conversationId={current}
                       model={conversationModel}
                       onMoved={modelMoved}

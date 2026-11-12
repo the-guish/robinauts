@@ -108,14 +108,14 @@ auth = "none"
 [agents.with_apps]
 title = "With apps"
 system_prompt = "{system_prompt}"
-model = "local_gpt"
+models = ["local_gpt"]
 engine = "langchain"
 tools = ["locked", "gone", "board", "plain", "sessions"]
 
 [agents.elsewhere]
 title = "Elsewhere"
 system_prompt = "{system_prompt}"
-model = "local_gpt"
+models = ["local_gpt"]
 engine = "langchain"
 tools = ["elsewhere"]
 """

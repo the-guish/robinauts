@@ -36,14 +36,14 @@ auth = "none"
 [agents.langchain_naps]
 title = "LangChain, napping"
 system_prompt = "{{system_prompt}}"
-model = "local_gpt"
+models = ["local_gpt"]
 engine = "langchain"
 tools = ["naps"]
 
 [agents.pydantic_ai_naps]
 title = "Pydantic AI, napping"
 system_prompt = "{{system_prompt}}"
-model = "local_gpt"
+models = ["local_gpt"]
 engine = "pydantic-ai"
 tools = ["naps"]
 """

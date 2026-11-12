@@ -41,7 +41,13 @@ function otherwise(call: Call): Response {
   if (call.url.startsWith("/api/agents")) {
     return json({
       items: [
-        { id: "helper", title: "Helper", engine: "langgraph", model: "sonnet" },
+        {
+          id: "helper",
+          title: "Helper",
+          engine: "langgraph",
+          model: "sonnet",
+          models: ["sonnet", "opus"],
+        },
       ],
     });
   }

@@ -5,8 +5,8 @@
 
 A flows folder holds one flow and its form: a repository's branch, a model and an agent from
 lists of values, and a task in words. "New run" in the panel lists the flow; its form offers
-the folder's branches and the agents' configuration's models and agents; filled in, it starts
-a run, and the interface goes to that run, in the orchestrator's frame.
+the folder's branches, the configuration's agents and the chosen agent's models; filled in, it
+starts a run, and the interface goes to that run, in the orchestrator's frame.
 
 neorc is the real one, embedded, on the test's PostgreSQL in its schema ``neorc``, which the
 test drops when it ends.
@@ -97,8 +97,14 @@ def test_a_flow_is_started_from_its_form_and_the_interface_goes_to_its_run(
     repository = form.get_by_label("Repository")
     expect(repository.get_by_role("option")).to_have_text(["Choose…", "app · main", "app · next"])
     repository.select_option(label="app · next")
-    form.get_by_label("Model").select_option(index=1)
-    form.get_by_label("Agent").select_option(index=1)
+    # The models are the chosen agent's, its default picked; one it also runs on stays.
+    model, agent = form.get_by_label("Model"), form.get_by_label("Agent")
+    agent.select_option("pinned")
+    expect(model.get_by_role("option")).to_have_text(["Choose…", "Local GPT 2"])
+    expect(model).to_have_value("local_gpt_2")
+    agent.select_option("langchain")
+    expect(model.get_by_role("option")).to_have_text(["Choose…", "Local GPT", "Local GPT 2"])
+    expect(model).to_have_value("local_gpt_2")
     # Started with a field left empty: the form says so, and nothing is sent.
     form.get_by_role("button", name="Start run").click()
     expect(form.get_by_role("alert")).to_have_text("Task needs a value.")

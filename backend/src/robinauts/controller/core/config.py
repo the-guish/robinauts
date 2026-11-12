@@ -45,6 +45,12 @@ def _names(value: Any) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _model_ids(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list) or not value or not all(isinstance(m, str) for m in value):
+        raise ValueError(f"models is not a non-empty list of model ids: {value!r}")
+    return tuple(value)
+
+
 def _command(value: Any) -> tuple[str, ...]:
     if (
         not isinstance(value, list)
@@ -102,7 +108,12 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
     models = build("models", ModelConfig)
     tool_servers = build("tool_servers", ToolServerConfig, auth=ToolServerAuth, exclude=_names)
     agents = build(
-        "agents", AgentConfig, tools=tuple, turn_timeout_seconds=_seconds, worker=_worker
+        "agents",
+        AgentConfig,
+        tools=tuple,
+        turn_timeout_seconds=_seconds,
+        worker=_worker,
+        models=_model_ids,
     )
     workers = build("workers", _WorkerTable, command=_command)
 
@@ -153,8 +164,11 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
         if table.id not in named:
             problems.append(f"workers.{table.id}: no agent names this worker")
     for agent in agents.values():
-        if agent.model not in models:
-            problems.append(f"agents.{agent.id}: model {agent.model!r} is not configured")
+        for model in dict.fromkeys(agent.models):
+            if model not in models:
+                problems.append(f"agents.{agent.id}: model {model!r} is not configured")
+        if twice := sorted({m for m in agent.models if agent.models.count(m) > 1}):
+            problems.append(f"agents.{agent.id}: model(s) named twice: {', '.join(twice)}")
         for tool in agent.tools:
             if tool not in tool_servers and tool not in tools:
                 problems.append(

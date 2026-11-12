@@ -51,11 +51,11 @@ async def build_engines(
             await engine.setup()
         engines[agent.engine] = engine
     for agent in config.agents.values():
-        model = config.models[agent.model]
-        kind = config.providers[model.provider].kind
-        if engine_domain.ProviderKind(kind.value) not in engines[agent.engine].kinds():
-            raise shared.UnreachableProviderError(
-                f"agent {agent.id!r} runs on model {agent.model!r}, of kind {kind.value!r},"
-                f" which engine {agent.engine!r} cannot reach"
-            )
+        for model_id in agent.models:
+            kind = config.providers[config.models[model_id].provider].kind
+            if engine_domain.ProviderKind(kind.value) not in engines[agent.engine].kinds():
+                raise shared.UnreachableProviderError(
+                    f"agent {agent.id!r} runs on model {model_id!r}, of kind {kind.value!r},"
+                    f" which engine {agent.engine!r} cannot reach"
+                )
     return engines

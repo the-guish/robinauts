@@ -98,7 +98,8 @@ def options_of(
     if kind is LovKind.MODEL:
         return tuple(Option(value=m.id, label=m.title or m.id) for m in config.models.values())
     return tuple(
-        Option(value=a.id, label=f"{a.title or a.id} · {a.worker}") for a in config.agents.values()
+        Option(value=a.id, label=f"{a.title or a.id} · {a.worker}", models=a.models)
+        for a in config.agents.values()
     )
 
 
@@ -151,4 +152,18 @@ def check_inputs(form: FlowForm, inputs: Mapping[str, Any]) -> list[str]:
         # A list, not a set: a value a client sent may be one no set can hold.
         if value not in [option.value for option in field.options]:
             problems.append(f"input {field.name!r}: {value!r} is not one of its {field.lov} values")
+    agent = _chosen(form, inputs, LovKind.AGENT)
+    model = _chosen(form, inputs, LovKind.MODEL)
+    if agent is not None and agent.models is not None and model is not None:
+        if model.value not in agent.models:
+            problems.append(f"model {model.value!r} is not one of agent {agent.value!r}'s models")
     return problems
+
+
+def _chosen(form: FlowForm, inputs: Mapping[str, Any], lov: LovKind) -> Option | None:
+    """The option chosen for the form's one input with that list of values, if it has one."""
+    fields = [f for f in form.inputs if f.lov is lov and f.options is not None]
+    if len(fields) != 1 or fields[0].name not in inputs:
+        return None
+    options = fields[0].options or ()
+    return next((o for o in options if o.value == inputs[fields[0].name]), None)

@@ -58,7 +58,7 @@ title = "Local Claude"
 [agents.coder]
 title = "Coder"
 system_prompt = "You are a robinaut."
-model = "local_claude"
+models = ["local_claude"]
 engine = "claude-code"
 worker = "claude"
 

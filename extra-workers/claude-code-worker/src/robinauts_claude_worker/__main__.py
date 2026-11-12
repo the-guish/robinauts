@@ -68,7 +68,8 @@ def providers_of(name: str, config: Config) -> list[ModelProviderConfig]:
     """The providers this worker's agents' models are on, as the engines see them."""
     models = engine_settings(config, {}.get).models
     mine = config.for_worker(name)
-    ids = sorted({config.models[agent.model].provider for agent in mine.agents.values()})
+    agents = mine.agents.values()
+    ids = sorted({config.models[m].provider for agent in agents for m in agent.models})
     return [models.providers[provider_id] for provider_id in ids]
 
 

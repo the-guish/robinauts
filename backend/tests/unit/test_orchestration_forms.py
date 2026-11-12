@@ -45,8 +45,8 @@ CONFIG = Config(
         "local": ModelConfig("local", "openai", "local-model"),
     },
     agents={
-        "coder": AgentConfig("coder", "Coder", "", "opus", "claude-code", worker="claude"),
-        "chat": AgentConfig("chat", "", "", "local", "pydantic_ai"),
+        "coder": AgentConfig("coder", "Coder", "", ("opus",), "claude-code", worker="claude"),
+        "chat": AgentConfig("chat", "", "", ("local", "opus"), "pydantic_ai"),
     },
 )
 DECLARED = {
@@ -155,7 +155,13 @@ def test_a_form_is_checked_against_the_inputs_its_flow_declares(
             ),
         ),
         (LovKind.MODEL, (Option("opus", "Opus"), Option("local", "local"))),
-        (LovKind.AGENT, (Option("coder", "Coder · claude"), Option("chat", "chat · default"))),
+        (
+            LovKind.AGENT,
+            (
+                Option("coder", "Coder · claude", models=("opus",)),
+                Option("chat", "chat · default", models=("local", "opus")),
+            ),
+        ),
     ],
 )
 def test_each_list_of_values_comes_from_its_configuration(
@@ -217,3 +223,35 @@ def test_inputs_are_checked_against_the_form(change: dict[str, Any], problems: l
     assert len(found) == len(problems)
     for got, expected in zip(found, problems, strict=True):
         assert got.startswith(expected)
+
+
+PAIRED = build_forms(
+    {"pair": {"agent": "string", "model": "string"}},
+    {
+        "pair": FormSpec(
+            "Pair",
+            {
+                "agent": InputSpec("Agent", LovKind.AGENT),
+                "model": InputSpec("Model", LovKind.MODEL),
+            },
+        )
+    },
+    repositories=(),
+    config=CONFIG,
+)[0]
+
+
+@pytest.mark.parametrize(
+    ("agent", "model", "problems"),
+    [
+        ("coder", "opus", []),
+        ("coder", "local", ["model 'local' is not one of agent 'coder''s models"]),
+        ("chat", "local", []),
+        ("chat", "opus", []),
+        ("nobody", "opus", ["input 'agent': 'nobody' is not one of its agent values"]),
+    ],
+)
+def test_a_model_is_checked_against_the_agent_chosen_beside_it(
+    agent: str, model: str, problems: list[str]
+) -> None:
+    assert check_inputs(PAIRED, {"agent": agent, "model": model}) == problems

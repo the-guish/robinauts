@@ -41,14 +41,14 @@ name = "gpt-x"
 [agents.coder]
 title = "Coder"
 system_prompt = "You work in this conversation's directory."
-model = "opus"
+models = ["opus"]
 engine = "claude-code"
 worker = "claude"
 
 [agents.helper]
 title = "Helper"
 system_prompt = "You help."
-model = "gpt"
+models = ["gpt"]
 engine = "pydantic-ai"
 
 [workers.claude]
@@ -93,6 +93,9 @@ def test_the_configuration_must_give_this_worker_its_agents() -> None:
 def test_the_providers_of_this_workers_agents_alone() -> None:
     assert [provider.id for provider in providers_of("claude", parsed())] == ["anthropic"]
     assert [provider.id for provider in providers_of("default", parsed())] == ["openai"]
+    # Every model the agent lists, not its default alone.
+    both = parsed(CONFIG.replace('models = ["opus"]', 'models = ["opus", "gpt"]'))
+    assert [provider.id for provider in providers_of("claude", both)] == ["anthropic", "openai"]
 
 
 def test_everything_is_checked_in_order(tmp_path: Path) -> None:

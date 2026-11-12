@@ -112,7 +112,8 @@ class RobinautsController(Controller):
 
     async def list_agents(self) -> tuple[AgentListing, ...]:
         return tuple(
-            AgentListing(a.id, a.title, default_model=a.model) for a in self._config.agents.values()
+            AgentListing(a.id, a.title, default_model=a.model, models=a.models)
+            for a in self._config.agents.values()
         )
 
     async def list_models(self) -> tuple[ModelListing, ...]:
@@ -201,6 +202,8 @@ class RobinautsController(Controller):
     ) -> TurnStarted:
         payload = check_task_payload(task_payload)
         agent_config = self._config.agents[agent]
+        # Before the session is stored, so that a refused model leaves no empty conversation.
+        self._check_model(agent, model)
         if project is None:
             project = (await self._default_project(user)).id
         else:
@@ -365,6 +368,14 @@ class RobinautsController(Controller):
         and announces a running one to the worker that runs it."""
         await self._store.request_cancel(user.id, turn.session_id, turn.id, self._now())
 
+    def _check_model(self, agent: str, model: str) -> None:
+        """``UnknownModelError`` for a model not configured, or not one the agent lists."""
+        if model not in self._config.models:
+            raise UnknownModelError(model)
+        listed = self._config.agents[agent].models if agent in self._config.agents else ()
+        if model not in listed:
+            raise UnknownModelError(f"{model} is not one of agent {agent}'s models")
+
     async def _queue_turn(
         self,
         user: User,
@@ -377,9 +388,7 @@ class RobinautsController(Controller):
         create_session: bool = False,
         resume: bool = False,
     ) -> Turn:
-        model_config = self._config.models.get(model)
-        if model_config is None:
-            raise UnknownModelError(model)
+        self._check_model(session.agent, model)
         await self._end_expired(session)
         if session.archived_at is not None:
             await self._store.update_session(dataclasses.replace(session, archived_at=None))

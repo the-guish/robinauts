@@ -34,7 +34,7 @@ SPECIAL = """
 [agents.special_one]
 title = "Special one"
 system_prompt = "{system_prompt}"
-model = "local_gpt"
+models = ["local_gpt"]
 engine = "pydantic-ai"
 worker = "special"
 """

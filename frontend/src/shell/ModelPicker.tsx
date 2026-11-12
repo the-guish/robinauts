@@ -45,6 +45,21 @@ export function useModels(round = 0): Models {
   return useOffered(askModels, round);
 }
 
+/**
+ * The models an agent's turns may run on, in the agent's order: the backend
+ * refuses any other. The whole list while the agent is not known.
+ */
+export function modelsOf(
+  models: Models,
+  listed: readonly string[] | null,
+): Models {
+  if (models.status !== "ready" || listed === null) return models;
+  const items = listed.flatMap((id) =>
+    models.items.filter((model) => model.id === id),
+  );
+  return { status: "ready", items };
+}
+
 /** What a model is called in a list that no longer has it. */
 export function unoffered(id: string): string {
   return `${id} (no longer offered)`;

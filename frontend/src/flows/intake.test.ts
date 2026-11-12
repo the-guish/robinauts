@@ -2,7 +2,14 @@
 // Copyright The Robinauts Authors
 import { expect, test } from "vitest";
 
-import { controlOf, emptyFields, inputsOf, type Flow } from "./intake";
+import {
+  controlOf,
+  emptyFields,
+  inputsOf,
+  shownInputs,
+  withField,
+  type Flow,
+} from "./intake";
 
 const FLOW: Flow = {
   name: "code_review",
@@ -93,3 +100,52 @@ test("every input is required, and each field that is not one says why", () => {
     ],
   });
 });
+
+const PAIRED: Flow = {
+  name: "pair",
+  title: "Pair",
+  has_form: true,
+  inputs: [
+    {
+      name: "agent",
+      label: "Agent",
+      type: "string",
+      lov: "agent",
+      options: [
+        { value: "coder", label: "Coder", models: ["big", "small"] },
+        { value: "chat", label: "Chat", models: ["small", "fast", "big"] },
+      ],
+    },
+    {
+      name: "model",
+      label: "Model",
+      type: "string",
+      lov: "model",
+      options: ["fast", "small", "big"].map((id) => ({ value: id, label: id })),
+    },
+  ],
+};
+
+test.each([
+  ["", ["fast", "small", "big"]],
+  ["coder", ["big", "small"]],
+  ["chat", ["small", "fast", "big"]],
+])("with agent %j chosen, the model list is %j", (agent, models) => {
+  const shown = shownInputs(PAIRED, { agent, model: "" });
+  expect(shown[1]?.options?.map((option) => option.value)).toEqual(models);
+});
+
+test.each([
+  // [model before, agent chosen, model after]
+  ["", "coder", "big"],
+  ["small", "coder", "small"],
+  ["fast", "coder", "big"],
+  ["fast", "chat", "fast"],
+  ["fast", "", "fast"],
+])(
+  "a model %j stays or gives way when agent %j is chosen: %j",
+  (model, agent, after) => {
+    const fields = withField(PAIRED, { agent: "", model }, "agent", agent);
+    expect(fields).toEqual({ agent, model: after });
+  },
+);

@@ -208,7 +208,8 @@ max_output_tokens = 8192
 
 [agents.assistant]
 title = "Assistant"
-model = "sonnet"
+# The models its turns may run on. The first is its default.
+models = ["sonnet"]
 engine = "langgraph"
 system_prompt = "Play fair."
 # Optional: how long one of its turns may run. Left out, max_turn_seconds.
@@ -279,7 +280,8 @@ Notes on what is and is not there:
   `client_secret_post`.
 - **Titles.** An agent's or a model's `title` is the name a person picks it
   by. It is optional, and left out it is the table's id.
-- **An agent's `model` is its default.** It is copied into a conversation
+- **An agent's first model is its default.** An agent's `models` are the
+  models its turns may run on. The default is copied into a conversation
   when the conversation starts, so changing it reaches new conversations
   only. Removing a model that conversations are using refuses their next
   turn, saying the conversation's model is no longer offered, rather than
@@ -698,7 +700,7 @@ name = "claude-sonnet-5"
 
 [agents.assistant]
 title = "Assistant"
-model = "sonnet"
+models = ["sonnet"]
 engine = "pydantic-ai"
 ```
 

@@ -55,14 +55,14 @@ title = "@MODEL_3_TITLE@"
 # point during a conversation, and either engine runs any of the three.
 [agents.assistant-langgraph]
 title = "Assistant (LangGraph)"
-model = "@MODEL_ID@"
+models = ["@MODEL_ID@", "@MODEL_2_ID@", "@MODEL_3_ID@"]
 engine = "langchain"
 system_prompt = "You are the Robinauts demo assistant. Answer briefly, and play fair."
 @TOOLS@
 
 [agents.assistant-pydantic-ai]
 title = "Assistant (Pydantic AI)"
-model = "@MODEL_ID@"
+models = ["@MODEL_ID@", "@MODEL_2_ID@", "@MODEL_3_ID@"]
 engine = "pydantic-ai"
 system_prompt = "You are the Robinauts demo assistant. Answer briefly, and play fair."
 @TOOLS@

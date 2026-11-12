@@ -31,6 +31,13 @@
             "title": "Model",
             "type": "string"
           },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -40,7 +47,8 @@
           "id",
           "title",
           "engine",
-          "model"
+          "model",
+          "models"
         ],
         "title": "AgentSummary",
         "type": "object"
@@ -582,6 +590,20 @@
           "label": {
             "title": "Label",
             "type": "string"
+          },
+          "models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Models"
           },
           "value": {
             "title": "Value",

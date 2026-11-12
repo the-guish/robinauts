@@ -45,14 +45,14 @@ auth = "none"
 [agents.langchain_pages]
 title = "LangChain, reading"
 system_prompt = "{{system_prompt}}"
-model = "small_gpt"
+models = ["small_gpt"]
 engine = "langchain"
 tools = ["pages"]
 
 [agents.pydantic_ai_pages]
 title = "Pydantic AI, reading"
 system_prompt = "{{system_prompt}}"
-model = "small_gpt"
+models = ["small_gpt"]
 engine = "pydantic-ai"
 tools = ["pages"]
 """

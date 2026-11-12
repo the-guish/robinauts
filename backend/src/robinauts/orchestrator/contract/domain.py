@@ -89,6 +89,8 @@ class Option:
 
     value: str
     label: str
+    models: tuple[str, ...] | None = None
+    """An agent's: the models its turns may run on, in order, its default first."""
 
 
 @dataclass(frozen=True, slots=True)

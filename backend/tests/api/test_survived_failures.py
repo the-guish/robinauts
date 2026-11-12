@@ -40,14 +40,14 @@ timeout_seconds = 1
 [agents.langchain_flaky]
 title = "LangChain, flaky tools"
 system_prompt = "{system_prompt}"
-model = "local_gpt"
+models = ["local_gpt"]
 engine = "langchain"
 tools = ["flaky"]
 
 [agents.pydantic_ai_flaky]
 title = "Pydantic AI, flaky tools"
 system_prompt = "{system_prompt}"
-model = "local_gpt"
+models = ["local_gpt"]
 engine = "pydantic-ai"
 tools = ["flaky"]
 """

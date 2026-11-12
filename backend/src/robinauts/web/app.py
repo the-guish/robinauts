@@ -383,6 +383,9 @@ class AgentSummary(BaseModel):
     title: str
     engine: str
     model: str
+    """Its default model."""
+    models: list[str]
+    """The models its turns may run on, in order, its default first."""
 
 
 class AgentListResponse(BaseModel):
@@ -401,6 +404,8 @@ class ModelListResponse(BaseModel):
 class FlowOptionSummary(BaseModel):
     value: str
     label: str
+    models: list[str] | None = None
+    """An agent's: the models its turns may run on, in order, its default first."""
 
 
 class FlowInputSummary(BaseModel):
@@ -450,7 +455,14 @@ def flow_summary(form: FlowForm) -> FlowSummary:
                 options=(
                     None
                     if field.options is None
-                    else [FlowOptionSummary(value=o.value, label=o.label) for o in field.options]
+                    else [
+                        FlowOptionSummary(
+                            value=o.value,
+                            label=o.label,
+                            models=None if o.models is None else list(o.models),
+                        )
+                        for o in field.options
+                    ]
                 ),
             )
             for field in form.inputs
@@ -1165,7 +1177,9 @@ def create_app(
         agents = await controller.list_agents()
         return AgentListResponse(
             items=[
-                AgentSummary(id=a.id, title=a.title, engine="", model=a.default_model)
+                AgentSummary(
+                    id=a.id, title=a.title, engine="", model=a.default_model, models=list(a.models)
+                )
                 for a in agents
             ]
         )
@@ -1285,6 +1299,10 @@ def create_app(
         # The model goes with each turn now: this stores nothing, and answers the
         # conversation as the picker will send its next turn.
         opened = await controller.open_session(user, conversation_id)
+        agent = opened.session.agent
+        listed = next((a.models for a in await controller.list_agents() if a.id == agent), ())
+        if body.model_id not in listed:
+            raise UnknownModelError(f"{body.model_id} is not one of agent {agent}'s models")
         moved = summary(opened.session, body.model_id)
         moved.updated_at = datetime.now(UTC)
         return moved
