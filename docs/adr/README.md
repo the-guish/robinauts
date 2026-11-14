@@ -18,3 +18,4 @@ history only. Skip it unless you need that history.
 | [0005](0005-the-framework-owns-the-loop-and-the-memory.md) | The framework owns the loop, the context and the model's memory; the platform keeps the transcript. Supersedes 0002 and 0004 |
 | [0006](0006-chat-ui-on-react-alone.md) | The chat window on React alone: our own components, Markdown renderer and icons, on plain CSS over the tokens, behind the same seam. Supersedes 0001 |
 | [0007](0007-mcp-apps-in-the-side-panel.md) | MCP apps in the side panel: the view served from our origin, sandboxed under a policy of its own; the backend relays the view's tool calls |
+| [0008](0008-a-shell-of-apps-in-a-repository-of-its-own.md) | Proposed. A shell of apps, one same-origin frame each; the shell, sign-in, sessions, tokens and roles in a repository of their own, built in Robinauts first |
