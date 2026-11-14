@@ -46,8 +46,9 @@ dependencies = [
     # application mounted at /neorc and its UI, `postgres` for its store on
     # asyncpg. neorc-from-source: neorc publishes no wheels yet, so the sources
     # below pin a commit of open-shipyard/neorc's main (the asyncpg port, #78,
-    # the UI's embedded mode, #82, and the flow and loop graphs, #83 and #84),
-    # and uv builds it from there.
+    # the UI's embedded mode, #82, the flow and loop graphs, #83 and #84, and
+    # forms, task completion and queue pages, #85 to #87), and uv builds it
+    # from there.
     "neorc[http,manager,postgres]",
     "neorc-core",
     "neorc-ui",
@@ -118,9 +119,9 @@ environments = [
 ]
 
 [tool.uv.sources]
-neorc = { git = "https://github.com/open-shipyard/neorc", rev = "6fea69b17f7cc7ed3897d5c3d8a1b8b0ecf5e15b", subdirectory = "python/neorc" }
-neorc-core = { git = "https://github.com/open-shipyard/neorc", rev = "6fea69b17f7cc7ed3897d5c3d8a1b8b0ecf5e15b", subdirectory = "python/neorc-core" }
-neorc-ui = { git = "https://github.com/open-shipyard/neorc", rev = "6fea69b17f7cc7ed3897d5c3d8a1b8b0ecf5e15b", subdirectory = "python/neorc-ui" }
+neorc = { git = "https://github.com/open-shipyard/neorc", rev = "26a30a0d6c3fa9521157f6ac6a038ca5603f1e87", subdirectory = "python/neorc" }
+neorc-core = { git = "https://github.com/open-shipyard/neorc", rev = "26a30a0d6c3fa9521157f6ac6a038ca5603f1e87", subdirectory = "python/neorc-core" }
+neorc-ui = { git = "https://github.com/open-shipyard/neorc", rev = "26a30a0d6c3fa9521157f6ac6a038ca5603f1e87", subdirectory = "python/neorc-ui" }
 
 [project.scripts]
 robinauts = "robinauts.cli.main:run"

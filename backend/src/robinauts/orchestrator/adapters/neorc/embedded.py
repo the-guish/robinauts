@@ -10,7 +10,8 @@ the server is what it was without a flows folder.
   ``Origin`` rules reach it as they reach every path. It has no authentication of its own, as
   that mode has none. Its storage follows this server's: in this process without
   ``ROBINAUTS_DATABASE_URL``, else on that PostgreSQL, in a schema of its own, ``neorc``.
-- the flows in ``flows`` are **uploaded** to it at every start;
+- the flows in ``flows`` are **uploaded** to it at every start, after the ``default`` queue is
+  declared as a worker queue;
 - its **scheduler** runs in this process, on the manager directly;
 - one **worker**, on the ``default`` queue, runs in a process of its own, with neorc's own
   command, against ``http://127.0.0.1:<port>/neorc``, and with the handlers at
@@ -46,6 +47,7 @@ from neorc_core import (
     InvalidValueError,
     Manager,
     NeorcError,
+    QueueKind,
     Scheduler,
 )
 from neorc_core.flows import flow_files, load_flow_yaml, read_flows
@@ -323,8 +325,13 @@ class EmbeddedNeorc(Orchestrator):
         )
 
     async def _upload(self) -> None:
+        """Declare the worker's queue, then upload the flows. neorc refuses a flow on a queue
+        nobody declared. This server is the operator here, and declares only the queue its
+        worker serves. A kind already declared on the PostgreSQL is kept."""
         flows = self.orchestration.flows
         try:
+            if await self.manager.queue_kind(DEFAULT_QUEUE) is None:
+                await self.manager.declare_queue(DEFAULT_QUEUE, QueueKind.WORKER)
             stored = await DirectManagerClient(self.manager).upload_flows(read_flows(flows))
         except (OSError, NeorcError) as error:
             raise OrchestrationStartError(f"neorc refused the flows in {flows}: {error}") from error

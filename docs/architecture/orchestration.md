@@ -28,7 +28,9 @@ its own port
    `ROBINAUTS_DATABASE_URL`, gone at the stop; on that PostgreSQL with it, in a
    schema of its own, `neorc`, made at the start if it is not there. Its tables
    are named `neorc_*` besides, so none meets one of this server's;
-3. the flows in the flows folder are **uploaded**, at every start;
+3. the flows in the flows folder are **uploaded**, at every start. The
+   `default` queue is declared as a worker queue first. A flow on any other
+   queue is refused;
 4. its **scheduler** runs in this process, on the manager directly;
 5. one **worker**, on the `default` queue, with the handlers in
    `code_location`, runs in a process of its own: neorc's own command, as
