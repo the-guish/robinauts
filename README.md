@@ -58,8 +58,9 @@ with no licence to renegotiate.
 embed in a commercial product. Every dependency, direct or transitive and
 including the browser JavaScript, is checked against an allow list modelled
 on the Apache Software Foundation's rules; GPL, AGPL, LGPL, SSPL, "no
-commercial use" and unlicensed packages break the build. Every file states its licence, and
-every commit is signed off under the Developer Certificate of Origin.
+commercial use" and unlicensed packages break the build. Every file states
+its licence, and every commit is signed off under the Developer Certificate
+of Origin.
 
 **Supply chain.** Known vulnerabilities are checked on every change, for
 both Python and JavaScript, and npm package signatures are verified. All
