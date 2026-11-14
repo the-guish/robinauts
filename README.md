@@ -54,14 +54,12 @@ with no licence to renegotiate.
 
 ## Built for security and platform teams
 
-**Licence safety.** Everything is Apache-2.0, safe to run internally and
-safe to embed in a commercial product. Every dependency, including the
-dependencies of dependencies, is checked against a strict allow list
-modelled on the Apache Software Foundation's rules. GPL, AGPL, LGPL, SSPL,
-"no commercial use" licences and packages with no licence at all break the
-build. The same check covers the JavaScript that ships to the browser.
-Every file in the repository states its licence, and every commit is
-signed off by its author under the Developer Certificate of Origin.
+**Licence safety.** Everything is Apache-2.0, safe to run internally or
+embed in a commercial product. Every dependency, direct or transitive and
+including the browser JavaScript, is checked against an allow list modelled
+on the Apache Software Foundation's rules; copyleft, "no commercial use" and
+unlicensed packages break the build. Every file states its licence, and
+every commit is signed off under the Developer Certificate of Origin.
 
 **Supply chain.** Known vulnerabilities are checked on every change, for
 both Python and JavaScript, and npm package signatures are verified. All
