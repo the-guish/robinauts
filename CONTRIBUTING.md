@@ -210,7 +210,8 @@ Every edit to that file updates the `SCHEMA_SHA256` pinned in
 both. That pin is the only thing standing where a migration would otherwise
 be; freezing the released schema comes with the migrations work. After
 pulling a schema change, drop your local database and run
-`robinauts db init` again. If you forget, the server and the command refuse
+`robinauts db init` again. oneberth's store, which holds the sign-in, is made by
+`robinauts store init` (oneberth's admin scripts). If you forget, the server and the command refuse
 the database, saying it was made from an older `schema.sql`: `db init`
 records the file's hash in the version row and both compare it, since the
 version alone says nothing about which edit a database was made from. The
@@ -228,7 +229,7 @@ name. Renaming one means changing the store too.
 schema on SQLite, for local storage. It follows the same rules: one definition
 edited in place, `SCHEMA_VERSION` at 1, and a `SCHEMA_SHA256` pinned in
 `controller/adapters/sqlite/schema.py` that a test enforces. It holds the
-store's tables alone, and sign-in's stay on PostgreSQL. The server applies it
+same tables as the PostgreSQL schema. The server applies it
 to a new file itself, and refuses a file made from another edit. After pulling
 a change to it, move the data directory's `robinauts.db` away.
 

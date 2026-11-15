@@ -82,9 +82,10 @@ Someone who can no longer sign in, or who was purged:
 
 ## Where it is enforced
 
-Authorization here is mostly ownership and membership, not roles. The
-controller decides it, and its tests prove it on the in-process store and on
-PostgreSQL. Roles are deferred ([sign-in.md](sign-in.md)).
+Authorization here is mostly ownership and membership. The controller decides
+it, and its tests prove it on the in-process store and on PostgreSQL. oneberth
+checks each route's permission first, from the roles Robinauts declares
+([sign-in.md](sign-in.md)).
 
 ## Open
 

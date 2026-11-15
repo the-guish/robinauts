@@ -20,7 +20,7 @@ the step says so.
 
 ### 1. The UI sends the turn
 
-The frontend's AG-UI client sends `POST /api/conversations/{id}/turns` with
+The frontend's AG-UI client sends `POST /robinauts/api/conversations/{id}/turns` with
 `{text, parent_id, model_id}`, and a flow may add a `task_payload` beside the text
 ([wire.md](../specs/wire.md), "Task payloads"). The response is the turn's stream.
 

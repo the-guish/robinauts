@@ -31,11 +31,12 @@ robinauts/
                         place neorc is imported)
       worker/           runs the turns; of the controller it sees
                         contract/broker/ alone
-      web/              the HTTP server and sign-in
+      web/              Robinauts' component for oneberth: its routes, its
+                        roles (roles.py) and the workers' routes
       cli/              the robinauts command: builds the controller and the
                         worker (composition.py) and the orchestrator
-                        (orchestration.py), and starts and stops them and the
-                        HTTP server
+                        (orchestration.py), composes Robinauts' component with
+                        neorc's on oneberth, and starts and stops them
     tests/              unit/, fast/, api/, adapters_free/, adapters_metered/,
                         e2e/, tooling/, util/
 ```

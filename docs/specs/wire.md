@@ -39,7 +39,7 @@ until the frontend is revisited.
   browser. This makes our wire a profile of AG-UI, not its stock run input,
   and it is documented with the API.
 - **The model travels with the turn.** Every turn may name the model it
-  runs on, one of those its agent lists in `GET /api/agents`. Another model
+  runs on, one of those its agent lists in `GET /robinauts/api/agents`. Another model
   is refused. Left out, a new conversation runs on its agent's default, the
   first it lists, and a conversation that exists on the model of its last
   message. The model is recorded on the messages the turn produces,
@@ -79,10 +79,10 @@ documented here, which is what "documented with the API" means for them.
 
 | method and path | body | answers |
 |---|---|---|
-| `POST /api/turns` | `{"agent_id": str, "model_id": str\|null, "text": str, "task_payload": object\|null, "project_id": uuid\|null}` | the stream of the turn answering the first question of a **new** conversation, in that project of the user's, or in their `Default` one when `project_id` is left out or null; a project that is not theirs is refused (404) |
-| `POST /api/conversations/{id}/turns` | `{"text": str, "parent_id": uuid, "model_id": str\|null, "task_payload": object\|null}` **or** `{"text": str, "edit": uuid, "model_id": str\|null, "task_payload": object\|null}` **or** `{"regenerate": uuid, "model_id": str\|null}` **or** `{"retry": uuid, "model_id": str\|null}` **or** `{"resume": uuid, "model_id": str\|null}` | the stream of the turn it began |
-| `GET /api/conversations/{id}/runs/{run_id}/events?after=<position>` | — | the stream of that turn from `after`; `Last-Event-ID` says the same thing, and is read when `after` is absent; a run that is not in that conversation answers 404, as one in somebody else's does |
-| `POST /api/conversations/{id}/runs/{run_id}/cancel` | — | 204; the turn ends as cancelled, at once or soon after |
+| `POST /robinauts/api/turns` | `{"agent_id": str, "model_id": str\|null, "text": str, "task_payload": object\|null, "project_id": uuid\|null}` | the stream of the turn answering the first question of a **new** conversation, in that project of the user's, or in their `Default` one when `project_id` is left out or null; a project that is not theirs is refused (404) |
+| `POST /robinauts/api/conversations/{id}/turns` | `{"text": str, "parent_id": uuid, "model_id": str\|null, "task_payload": object\|null}` **or** `{"text": str, "edit": uuid, "model_id": str\|null, "task_payload": object\|null}` **or** `{"regenerate": uuid, "model_id": str\|null}` **or** `{"retry": uuid, "model_id": str\|null}` **or** `{"resume": uuid, "model_id": str\|null}` | the stream of the turn it began |
+| `GET /robinauts/api/conversations/{id}/runs/{run_id}/events?after=<position>` | — | the stream of that turn from `after`; `Last-Event-ID` says the same thing, and is read when `after` is absent; a run that is not in that conversation answers 404, as one in somebody else's does |
+| `POST /robinauts/api/conversations/{id}/runs/{run_id}/cancel` | `{}`: a write is `application/json` | 204; the turn ends as cancelled, at once or soon after |
 
 - `parent_id` is the message a reply hangs under. `edit` is the question a
   new version replaces: the backend hangs the new one under that question's
@@ -196,7 +196,7 @@ OpenAPI.
 
 | method and path | answers |
 |---|---|
-| `GET /api/changes?after=<version>&timeout=<seconds>` | `{"version": int}`: the user's change version |
+| `GET /robinauts/api/changes?after=<version>&timeout=<seconds>` | `{"version": int}`: the user's change version |
 
 - **Each user has one change version.** It is an integer that starts at 0 and
   grows by one with each change worth knowing. A store bumps it in the same
@@ -229,7 +229,7 @@ OpenAPI.
   ([core.md](core.md), "Planned") will bump the version when it starts
   waiting for a person. The feed needs no change for it.
 
-`GET /api/conversations` lists each conversation with `running`, true while it
+`GET /robinauts/api/conversations` lists each conversation with `running`, true while it
 has an active turn. A client shows activity in conversations off the screen
 from that field.
 
@@ -243,12 +243,12 @@ from that field.
 - Conversations, projects, sharing, session, audit: a plain JSON API,
   described by OpenAPI. The OpenAPI document is committed as a snapshot,
   and the frontend's typed client is generated from it. The agents and the
-  models a turn can run on are `GET /api/agents` and `GET /api/models`.
+  models a turn can run on are `GET /robinauts/api/agents` and `GET /robinauts/api/models`.
 - A conversation has no model of its own: the model travels with each turn,
-  above. `PUT /api/conversations/{id}/model` answers the choice back so that
+  above. `PUT /robinauts/api/conversations/{id}/model` answers the choice back so that
   a client can show it and send it with the next turn; it stores nothing.
   It refuses a model the conversation's agent does not list.
-- `POST /api/conversations/{id}/fork` makes a new conversation from a message
+- `POST /robinauts/api/conversations/{id}/fork` makes a new conversation from a message
   of another ([architecture/controller.md](../architecture/controller.md)).
   Planned: it answers 501 until the controller forks.
 

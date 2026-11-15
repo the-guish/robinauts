@@ -13,37 +13,35 @@ On dev mode or desktop application, Robinauts starts a local instance of Neorc t
 On a cluster Neorc would be started on its own and connected to a running instance of Robinauts, creating sessions with a system user provided by Robinauts.
 
 
-## Local development: neorc inside `robinauts start`
+## neorc composed into the backend
 
-A flows folder turns it on (below, [Two configurations](#two-configurations-agents-and-flows)).
-`robinauts start --dev-no-sign-in` then embeds neorc in its own process and on
-its own port
-([orchestrator/adapters/neorc/embedded.py](../../backend/src/robinauts/orchestrator/adapters/neorc/embedded.py)):
+Robinauts' backend is a oneberth composition of two components: Robinauts' own and neorc's
+manager (oneberth's `docs/specs/neorc-in-robinauts.md`, "Composed";
+[orchestrator/adapters/neorc/composed.py](../../backend/src/robinauts/orchestrator/adapters/neorc/composed.py)):
 
-1. neorc's **manager** is an application mounted at `/neorc`, its UI at
-   `/neorc/ui/`, with no authentication of its own, as the local development
-   mode has none. Every request to it passes this server's checks first: the
-   mode's `Host` and `Origin` rules reach `/neorc` as they reach every path;
-2. its **storage** follows this server's: in this process without
-   `ROBINAUTS_DATABASE_URL`, gone at the stop, and so on local storage, since
-   neorc has no store on SQLite here yet; on that PostgreSQL with it, in a
-   schema of its own, `neorc`, made at the start if it is not there. Its tables
-   are named `neorc_*` besides, so none meets one of this server's;
-3. the flows in the flows folder are **uploaded**, at every start;
-4. its **scheduler** runs in this process, on the manager directly;
-5. one **worker**, on the `default` queue, with the handlers in
-   `code_location`, runs in a process of its own: neorc's own command, as
-   installed with it, against `http://127.0.0.1:<port>/neorc`. It waits for the
-   server to listen, as a neorc worker waits for any manager.
+1. neorc's **manager** is the component named `neorc`, from neorc's `new_manager_webapp`,
+   served under `/neorc/`. oneberth checks every request to it for its credential and its
+   neorc permission, as it checks Robinauts' routes. neorc's worker routes are on the worker
+   listener.
+2. its **storage** follows this server's: in this process without a database; the file
+   `neorc.db` in `ROBINAUTS_DATA_DIR`, with its notifications in memory; on the PostgreSQL of
+   `ROBINAUTS_DATABASE_URL`, in a schema of its own, `neorc`, made at the start if it is not
+   there. Robinauts' component opens it before neorc's component starts, and closes it after.
+3. its **scheduler** runs in this process, a part of neorc's component.
 
-All of it starts after the server's own workers and before the server
-listens, and stops before the server stops listening: the worker with SIGTERM,
-killed after fifteen seconds, then the scheduler, then the storage. If the
-storage does not open, the flows are refused or the worker cannot be started,
-the start is refused and nothing listens.
+A flows folder adds the rest (below, [Two configurations](#two-configurations-agents-and-flows)).
+Once the backend serves:
 
-With sign-in on, a flows folder is refused for now: neorc's manager would be
-served with no authentication. On a cluster neorc is started on its own.
+4. the `default` queue is declared as a worker queue on the manager, and the flows in the flows
+   folder are **uploaded**, with a service token of `neorc/ci`, through the backend's own
+   front listener in this process;
+5. one **worker**, on the `default` queue, with the handlers in `code_location`, runs in a
+   process of its own: neorc's own command, as installed with it, against the worker listener.
+
+The server says `ready` once these have started. If the flows are refused or the worker cannot
+be started, the server stops and exits 1. At a stop, the worker stops first, with SIGTERM and
+killed after fifteen seconds, while the listeners still serve; then the scheduler, then the
+storage.
 
 ### Two configurations: agents and flows
 
@@ -51,11 +49,11 @@ The agents and the flows are configured apart, each in a place of its own:
 
 | | named by | holds |
 |---|---|---|
-| **agents** | `ROBINAUTS_CONFIG`, a TOML file | model providers, models, tool servers, agents, workers, sign-in: everything Robinauts has without neorc |
+| **agents** | `ROBINAUTS_CONFIG`, a TOML file | model providers, models, tool servers, agents, workers: everything Robinauts has without neorc |
 | **flows** | `ROBINAUTS_FLOWS_DIR`, a folder | the flow files (`*.yaml`, `*.yml`), uploaded to neorc as they are; their forms, `<flow>.form.toml`; and `flows.toml`, their settings and repositories |
 
-Without `ROBINAUTS_FLOWS_DIR` there is no orchestrator. The agents' file knows
-nothing of the flows: an `[orchestration]` table in it, where the flows'
+Without `ROBINAUTS_FLOWS_DIR`, neorc's manager serves no flow of Robinauts', and no worker of
+neorc's runs. The agents' file knows nothing of the flows: an `[orchestration]` table in it, where the flows'
 settings were before they had a folder, is refused with where they went.
 
 `flows.toml` is optional; these are its keys and their defaults (and its
@@ -63,7 +61,6 @@ settings were before they had a folder, is refused with where they went.
 
 ```toml
 code_location = "handlers"   # the handlers; default: this checkout's orchestration/
-ui = true                    # serve neorc's UI at /neorc/ui/; the default
 ```
 
 A relative `code_location` starts at the flows folder. A folder of a person's
@@ -71,22 +68,24 @@ own flows, anywhere, may call the handlers Robinauts ships, which are the
 default:
 
 ```bash
-ROBINAUTS_FLOWS_DIR=~/robinauts/flows robinauts start --dev-no-sign-in
+ROBINAUTS_FLOWS_DIR=~/robinauts/flows robinauts start --local
 ```
 
 ### Flows as forms
 
-The interface starts a flow from a form of its own, not from neorc's: the
-server lists every flow of the flows folder with its inputs, and the values
-each may take, and starts a run once the inputs fit
+The server lists every flow of the flows folder with its inputs, and the values each may
+take, and starts a run once the inputs fit
 ([orchestrator/application/flows.py](../../backend/src/robinauts/orchestrator/application/flows.py)).
 The inputs go to neorc as they came: neorc knows nothing of the forms, and its
 flow files are plain neorc flows.
 
 | route | answer |
 |---|---|
-| `GET /api/flows` | every flow, with its inputs: a label, the type the flow declares, and the values a list of values offers |
-| `POST /api/flows/<name>/runs` | `{"inputs": {...}}`; 201 with the run's id, 404 for a flow the folder does not hold, 422 for inputs that do not fit |
+| `GET /robinauts/api/flows` | every flow, with its inputs: a label, the type the flow declares, and the values a list of values offers |
+| `POST /robinauts/api/flows/<name>/runs` | `{"inputs": {...}}`; 201 with the run's id, 404 for a flow the folder does not hold, 422 for inputs that do not fit |
+
+The start is sent to neorc's API with the person's own credential, so the run is theirs at
+neorc too (oneberth's `docs/specs/neorc-in-robinauts.md`, "Requests of the backend's own").
 
 A flow's form is `<flow name>.form.toml`, beside it in the flows folder. It is
 optional: without one, every input is a plain field.
@@ -146,51 +145,27 @@ things put it outside the server's process:
 
 It costs one process and a long-poll over the loopback interface.
 
-### The Flows pages
+### Whose a run is
 
-The session (`GET /auth/session`) carries `flows_url`, `/neorc/ui/`, when the
-server mounts neorc, and nothing otherwise. The interface then has one panel
-and one menu button for both: the left panel's **Flows** tab, beside its
-**Sessions** tab, is neorc's navigation, and neorc's UI, framed where the chat
-would be, is opened with `?embedded`, which leaves out neorc's own sidebar.
+A run a person starts through `POST /robinauts/api/flows/<name>/runs` is that person's, and so
+are the conversations its handlers open for it.
 
-The tab holds what neorc's sidebar holds: **New run**, **Runs**, neorc's
-flows and its six latest runs, each status a dot. It reads them from neorc's
-API, one level above `flows_url`, and reads them again whenever neorc records
-an event, which it long-polls for (`frontend/src/flows/orchestrator.ts`). In
-the rail, New run and Runs stay as icons.
+- The server keeps who started each run it started, in its own process: neorc records no
+  starter of a run yet.
+- The handlers hold a service token of `robinauts/handler`, and each request names its run in
+  `X-Robinauts-Run`, from the step's `run: neorc.flow_run_id`. The server acts for the person
+  who started that run.
+- In the local mode, a run started on neorc's own API, as neorc's form starts one, is the one
+  person's.
+- Any other run, or a request without one, is refused with 403. A run this server started
+  before it restarted is refused too.
 
-Starting a run is the interface's own: **New run** lists the flows, and each
-flow's form is a page of its own, over `/api/flows` ([Flows as
-forms](#flows-as-forms), `frontend/src/flows/NewRunPage.tsx`). A choice from
-its list for an input with one, a field of its type for any other, every
-input required. Once the run starts, the interface goes to it, in the frame.
+### The interface
 
-The other pages are neorc's, framed; each is a route of the shell's,
-translated to neorc's own hash in the frame:
-
-| route | page |
-|---|---|
-| `#/flows` | neorc's `#/runs` |
-| `#/flows/new` | the interface's list of flows |
-| `#/flows/new/<name>` | the interface's form of that flow |
-| `#/flows/runs/<id>` | neorc's `#/runs/<id>` |
-| `#/flows/flow/<name>` | neorc's `#/flows/<name>` |
-
-A move inside the frame to neorc's own list of flows, `#/flows`, is the
-interface's `#/flows/new`: a run is started from the interface's forms.
-
-The frame is loaded once and then moved by its hash, both ways: a route of the
-shell's replaces the frame's hash, and a move inside the frame, such as a run
-opened from the list, replaces the shell's route, so the address bar and the
-panel say where the frame is and Back undoes both at once. neorc's UI is built
-to work under any prefix: it finds its API one level above its page, and
-routes by its hash.
-
-The UI's answers say `frame-ancestors 'self'` and `x-frame-options:
-SAMEORIGIN` in the place of neorc's `'none'`, so the interface, and nothing on
-another origin, may frame it; the rest of neorc's policy is kept. Every other
-answer under `/neorc` carries this server's headers, `DENY` included.
+neorc's interface is composed into Robinauts' at build time, from neorc's node package, and
+reaches neorc's API at `/neorc/` (oneberth's `docs/specs/shell.md`). The backend serves no
+frame of neorc's: neorc's own built interface is not served, and the session has no
+`flows_url`.
 
 ### Where neorc may be imported
 
@@ -199,8 +174,8 @@ In `orchestrator/adapters/neorc/` alone (an import-linter contract in
 sibling of the controller: it may see the controller's contract, and the
 controller sees nothing of it. `cli/orchestration.py` builds it, and
 `cli/main.py` alone imports that module; `cli/main.py` otherwise sees the
-orchestrator's contract alone, an `Orchestrator` to mount, start and stop, and
-the `Flows` that `web/` serves. `web/` sees that contract and nothing else.
+orchestrator's contract alone, an `Orchestrator` whose component it composes, which it opens,
+starts and stops, and the `Flows` that `web/` serves. `web/` sees that contract and nothing else.
 Taking neorc out is taking out that package and `cli/orchestration.py`.
 
 `cli/orchestration.py` is apart from `cli/composition.py` because a worker in
@@ -213,20 +188,19 @@ neorc, even through another module.
 
 ### Installing neorc
 
-Robinauts depends on `neorc[http,manager,postgres]`, `neorc-core` and
-`neorc-ui`. neorc publishes no wheels yet. Robinauts builds them from a commit
-of open-shipyard/neorc's `main`, named in `[tool.uv.sources]` in
-`backend/pyproject.toml`.
+Robinauts depends on `neorc[http,manager,postgres]`, `neorc-core` and `oneberth`. Neither
+publishes wheels yet. Robinauts builds them from commits of the-guish/neorc and
+the-guish/oneberth, named in `[tool.uv.sources]` in `backend/pyproject.toml`. The oneberth
+commit is the one the neorc commit pins, so the lock holds one oneberth.
 
-uv builds these three packages from that commit. Every other package stays under
-`--no-build`. The build needs Node.js, at the version `frontend/.nvmrc` names.
-`scripts/neorc-from-source.sh` builds the wheels of a release, and refuses a
-commit outside neorc's `main`. The extra workers' images leave neorc out.
+uv builds these packages from those commits. Every other package stays under `--no-build`.
+`scripts/neorc-from-source.sh` builds the wheels of a release, and refuses a commit outside
+neorc's `main`. The extra workers' images leave neorc out.
 
-When neorc publishes wheels, take this step out:
+When neorc and oneberth publish wheels, take this step out:
 
 1. `git grep neorc-from-source` lists every part of it. Remove each one.
-2. Point the three dependencies at the published wheels.
+2. Point the dependencies at the published wheels.
 3. Run `uv lock` in `backend/` and in each extra worker.
 
 neorc's PostgreSQL adapter is on asyncpg: psycopg is LGPL-3.0, which
@@ -234,15 +208,19 @@ neorc's PostgreSQL adapter is on asyncpg: psycopg is LGPL-3.0, which
 
 ### What the worker is handed
 
-The worker is handed the server's URL in `ROBINAUTS_API_URL`, which is how a
-task reaches this server's API, and no credential, whatever the shell held in
-`ROBINAUTS_API_TOKEN`: the local development mode has no sign-in, every request
-is its one user's, and what a flow starts is the developer's, as what the
-browser starts is.
+The server mints two service tokens for neorc's worker at each start: in the local mode with
+the launch secret, in the backend's memory alone; otherwise as the operator, revoked at the
+stop.
+
+| variable | holds |
+|---|---|
+| `NEORC_API_TOKEN` | a token of `neorc/worker`, bound to the queue `default`: what the worker sends to the manager |
+| `ROBINAUTS_API_URL` | Robinauts' API on the front listener: `http://<host>:<port>/robinauts` |
+| `ROBINAUTS_API_TOKEN` | a token of `robinauts/handler`: what the handlers send to Robinauts ([Whose a run is](#whose-a-run-is)) |
 
 neorc's worker is not handed what the agents' configuration keeps from
 everything but the server: the model providers' keys, the tool servers'
-secrets, `ROBINAUTS_DATABASE_URL` and `ROBINAUTS_CONFIG`.
+secrets, `ROBINAUTS_DATABASE_URL`, `ROBINAUTS_CONFIG` and `ONEBERTH_CONFIG`.
 
 ### The flows Robinauts ships
 

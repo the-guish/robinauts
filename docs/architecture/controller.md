@@ -65,8 +65,9 @@ the worker's folder, `workers/<worker name>/` in the data directory (`worker_fol
 
 ## Users
 
-- `ensure_user`: the user for an identity, created on first sight. Web passes the provider and
-  the subject; a terminal passes the operating system's user.
+- `ensure_user`: Robinauts' row of a person oneberth holds, under oneberth's id for them,
+  created on first sight. Web passes what oneberth says of the person: the provider, the
+  subject, the name and the email.
 
 ## Catalogue
 

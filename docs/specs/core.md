@@ -143,12 +143,15 @@ topic documents listed under [Documents](#documents).
 ## The system in one page
 
 - **Shape.** One Python backend that also serves the built frontend, one
-  PostgreSQL database. Delivered as one Python wheel.
-  [frontend.md](frontend.md), [operations.md](operations.md).
-- **Sign-in.** Google and Okta over OpenID Connect, the way neorc does it;
-  an allow list decides who gets in. Two roles, user and admin.
-  API tokens, minted by a signed-in person, reach the API without a browser.
-  [sign-in.md](sign-in.md).
+  PostgreSQL database, or SQLite files in a data directory on the desktop.
+  The backend is a oneberth composition of Robinauts' component and neorc's
+  manager. Delivered as one Python wheel.
+  [frontend.md](frontend.md), [operations.md](operations.md),
+  [web.md](../architecture/web.md).
+- **Sign-in.** oneberth's: Google and Okta over OpenID Connect, an allow list,
+  personal tokens, linked devices and service tokens; on the desktop, the one
+  person signs in locally. Robinauts declares its roles: user, admin, worker
+  and handler. [sign-in.md](sign-in.md).
 - **Interface.** neorc's layout: a collapsible left navigation panel that
   this project owns, and the chat in the middle; the application opens on
   an empty chat. [frontend.md](frontend.md).

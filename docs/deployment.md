@@ -116,27 +116,29 @@ when its last write still lands. Otherwise it ends as interrupted once
 its lease passes. To find the cause, look in `pg_stat_activity` for long
 transactions and for queries waiting on a lock.
 
-## 4. The configuration file
+## 4. The configuration files
 
-One TOML file describes the deployment: the sign-in half and the model
-half ([specs/sign-in.md](specs/sign-in.md)). `ROBINAUTS_CONFIG` names it. It holds
-**no secret**: a secret is always the *name* of an environment variable.
-Unknown keys are errors and every problem is reported at once.
+Two TOML files describe the deployment. **oneberth's** holds the sign-in, and
+`ONEBERTH_CONFIG` names it (oneberth's `docs/specs/identity.md`, "Configuration";
+[specs/sign-in.md](specs/sign-in.md)). **Robinauts'** holds the models, the agents, the tool
+servers and the workers, and `ROBINAUTS_CONFIG` names it. Neither holds a **secret**: a secret
+is always the *name* of an environment variable. Unknown keys are errors and every problem is
+reported at once.
 
-Write it as `/etc/robinauts/robinauts.toml`, owned by root, readable by
-the service user:
+Write oneberth's as `/etc/robinauts/oneberth.toml`, owned by root, readable by the service
+user:
 
 ```toml
-# The origin this deployment is served at, exactly as a browser writes it:
+# How long a session lasts. There is no renewal; the allow list is checked
+# again when a credential is used, at most once a minute.
+session_hours = 12
+
+# The origin this backend is served at, exactly as a browser writes it:
 # scheme, host, optional port, and no path. It drives the redirect URI, the
 # cookie prefix and the origin check on every write, so it must be the
 # public name -- not the address the proxy reaches the backend on.
+[apps.robinauts]
 public_url = "https://robinauts.example.com"
-
-# How long a session lasts. There is no renewal, and the allow list is
-# evaluated at sign-in: this is the control over somebody removed at the
-# identity provider.
-session_hours = 12
 
 [providers.google]
 title = "Google"
@@ -155,9 +157,8 @@ scopes = ["openid", "email", "profile", "groups"]
 groups_claim = "groups"
 
 # Who may sign in. Each entry names a provider and exactly one matcher:
-# everyone, subject, email, email_domain, hosted_domain or group. With
-# providers configured and no entry at all, start-up fails -- nobody could
-# sign in, and that is a mistake rather than a policy.
+# everyone, subject, email, email_domain, hosted_domain or group. It gives
+# robinauts/user and neorc/user.
 [[allow]]
 provider = "google"
 hosted_domain = "example.com"
@@ -166,10 +167,17 @@ hosted_domain = "example.com"
 provider = "okta"
 group = "robinauts-users"
 
-[[allow]]
+# One more role, with the same matchers.
+[[grant]]
 provider = "okta"
-email = "contractor@partner.example"
+group = "robinauts-admins"
+roles = ["robinauts/admin", "oneberth/admin"]
+```
 
+Write Robinauts' as `/etc/robinauts/robinauts.toml`, beside it. A sign-in key in it is
+refused, with where it went:
+
+```toml
 [model_providers.anthropic]
 kind = "anthropic"
 api_key_env = "ROBINAUTS_ANTHROPIC_KEY"
@@ -357,20 +365,23 @@ Four kinds of variable, and three of them are secrets. Put them in
 `/etc/robinauts/environment`, owned by root, mode `0600`:
 
     ROBINAUTS_CONFIG=/etc/robinauts/robinauts.toml
+    ONEBERTH_CONFIG=/etc/robinauts/oneberth.toml
     ROBINAUTS_DATABASE_URL=postgresql://robinauts:...@127.0.0.1:5432/robinauts
     ROBINAUTS_GOOGLE_SECRET=...
     ROBINAUTS_OKTA_SECRET=...
     ROBINAUTS_ANTHROPIC_KEY=...
 
-`ROBINAUTS_AUTH_CONFIG` is the old name of `ROBINAUTS_CONFIG`. It is still
-read, with a warning at start-up; if both are set the new one wins and the
-log says so. Rename it.
-
-Now create the schema, with that file:
+Now create Robinauts' schema and oneberth's store, with that file:
 
     sudo systemd-run --pipe --wait --uid=robinauts \
         --property=EnvironmentFile=/etc/robinauts/environment \
         /var/lib/robinauts/venv/bin/robinauts db init
+    sudo systemd-run --pipe --wait --uid=robinauts \
+        --property=EnvironmentFile=/etc/robinauts/environment \
+        /var/lib/robinauts/venv/bin/robinauts store init
+
+`store init` makes oneberth's tables in the schema `oneberth`. neorc's tables are made in the
+schema `neorc` at the server's first start.
 
 It prints `the database is at schema version N (schema.sql …)` whether it
 created the schema or found it already there. It works on an **empty**
@@ -379,9 +390,9 @@ database made from another `schema.sql` is refused and made again rather
 than upgraded. The command records
 the file's hash in the database, and the server checks it at every start.
 
-The local development mode has **no** variable: it is asked for on the
-command line and nowhere else, so nothing a process inherits can turn
-sign-in off in a deployment.
+The local mode has **no** variable: it is asked for on the command line, `--local`, and
+nowhere else, so nothing a process inherits can turn sign-in through providers off in a
+deployment.
 
 `/etc/systemd/system/robinauts.service`:
 
@@ -483,8 +494,9 @@ root of the origin. Three things matter:
   run for 600 s by default. Every stream also carries
   `X-Accel-Buffering: no`, which nginx obeys — the setting below is there
   for the proxies that do not.
-- The paths are `/ui/` (the interface), `/api/` (the API and the streams),
-  `/auth/` (the sign-in navigations), `/health` and `/openapi.json`. All
+- The paths are `/ui/` (the interface), `/robinauts/` (Robinauts' API and its streams),
+  `/neorc/` (neorc's), `/auth/` (sign-in), `/health` and each component's
+  `/<name>/openapi.json`. All
   of them are under `/`, so one location is enough.
 
 nginx:
@@ -588,8 +600,8 @@ complete", "Uvicorn running on http://127.0.0.1:8000". The log goes to
 platform's paths carries an authorization code in one.
 
 `no [agents] table …` is an `info` line saying the picker will be empty.
-`SIGN-IN IS OFF …` is a warning, and means the local development mode was
-asked for — which is never right in a deployment.
+`oneberth's local mode: …` is a warning, and means `--local` was asked for — which is never
+right in a deployment.
 
 A start-up **refusal** prints the problems, one per line, with no
 traceback, and exits 2. Every problem it can see is in that one list: an
@@ -628,7 +640,7 @@ command could not do what it was asked.
    are, but this deployment does not let that account in. Ask whoever runs
    it." The provider's own words go to the log.
 5. Hold a conversation. Ask the first person for the id in their address
-   bar and fetch it as the second: `GET /api/conversations/<id>` answers
+   bar and fetch it as the second: `GET /robinauts/api/conversations/<id>` answers
    `404`. A conversation is private to its author and there is no other
    way to see one.
 6. Close the tab in the middle of an answer and reopen the conversation.
@@ -680,14 +692,18 @@ without:
 - **Draining runs on shutdown.** A restart interrupts them.
 - **A container image**, an SBOM and signed releases.
 
-## The local development mode
+## The local mode
 
-`robinauts start --dev-no-sign-in` runs with no identity provider at all,
-as one fixed local user, on the loopback interface only — for developing
-on one's own machine. It refuses any bind address that is not loopback, it
-logs a warning at start-up, and the interface shows a permanent banner.
-It may be given a configuration file, and then only its model tables are
-read; a file that also holds sign-in tables is a start-up refusal.
+`robinauts start --local` is oneberth's local mode: no identity provider, one person, the one
+at the machine, on the loopback interface only. It refuses any bind address that is not
+loopback, and a oneberth file. The person signs in with a ticket: a launcher writes a launch
+secret on the server's standard input and asks for the ticket; a start by hand prints
+`open http://127.0.0.1:8000/auth/local?ticket=…` after `ready`, and that address signs the
+person in once, within a minute.
+
+```sh
+ROBINAUTS_CONFIG=robinauts.toml ROBINAUTS_DATA_DIR=~/.robinauts robinauts start --local
+```
 
 ```toml
 [model_providers.anthropic]
@@ -704,15 +720,13 @@ models = ["sonnet"]
 engine = "pydantic-ai"
 ```
 
-The mode keeps the controller's records in the server's process, gone at the
-stop, or in the PostgreSQL `ROBINAUTS_DATABASE_URL` names. With
-`ROBINAUTS_DATA_DIR`, it keeps them in the file `robinauts.db` in that folder,
-which the server makes. Each worker keeps its engines' state in
-`workers/<worker name>/` in that folder, one file per engine. A conversation
-from before a restart takes new turns
-([specs/operations.md](specs/operations.md)).
+The mode keeps the records in the server's process, gone at the stop, or in the PostgreSQL
+`ROBINAUTS_DATABASE_URL` names. With `ROBINAUTS_DATA_DIR`, it keeps them in files in that
+folder, which the server makes: `robinauts.db`, `oneberth.db` and `neorc.db`. Each worker keeps
+its engines' state in `workers/<worker name>/` in that folder, one file per engine. A
+conversation from before a restart takes new turns ([specs/operations.md](specs/operations.md)).
 
-**It is not a way to deploy.** Nothing in this guide uses it.
+It is the desktop's mode, and the mode for development. Nothing else in this guide uses it.
 
 ## What can go wrong
 
@@ -731,8 +745,7 @@ from before a restart takes new turns
 | every turn on one OpenAI model fails, and the vendor's message says the model is not supported on this endpoint, or to use the Responses API | OpenAI serves some models (several `-pro` and agentic ones) only over the Responses API, and this build speaks Chat Completions for both OpenAI kinds | pick a model whose page on OpenAI's site lists `v1/chat/completions` |
 | a turn with tools on GPT-6 Sol, GPT-6 Luna or GPT-5.6 Sol is refused by OpenAI (for GPT-5.6 Sol, "Function tools with reasoning_effort are not supported … in /v1/chat/completions"), and the same model answers without tools | OpenAI documents function calling over Chat Completions on GPT-6 Sol and Luna only with reasoning off, OpenAI Support reported the GPT-5.6 Sol refusal (2026-09-07), and the other GPT-5.6 models reason by default and are untried; the engines do not turn reasoning off (not yet seen in a live turn here) | use another model for an agent with tools |
 | `agents.<id>.engine: one of langgraph, pydantic-ai, not '…'` | a misspelt engine | `langgraph` or `pydantic-ai`; both are wired in this build |
-| `admin: roles are not in this release …` | an `[[admin]]` table | remove it; roles are deferred |
-| `allow: no entry, so nobody could sign in` | providers configured, allow list empty | add at least one `[[allow]]` |
+| `admin: sign-in is oneberth's …` | a sign-in key in Robinauts' file | move it to oneberth's file; an admin is a `[[grant]]` of `robinauts/admin` there |
 | `allow N: group needs providers.<id>.groups_claim …` | a `group` entry with no claim named | add `groups_claim`, and the `groups` scope |
 | `no database: set ROBINAUTS_DATABASE_URL …` | the variable is unset | set it; the url is never a command-line flag |
 | `the database could not be opened: …` | no server there, no such database, credentials refused | the driver's own sentence says which; the url is never echoed |

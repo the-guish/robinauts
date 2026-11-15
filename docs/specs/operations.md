@@ -9,24 +9,28 @@ What an internal platform team deploys and controls.
 - Installed from one Python wheel. A container image is planned.
 - A deployment requires PostgreSQL. A documented one-command local Postgres
   covers development and demos.
-- A local development mode runs without sign-in, on the loopback interface
-  only ([sign-in.md](sign-in.md)). It is not a way to deploy.
-- The local development mode also runs on local storage. The controller's
-  records are then in the file `robinauts.db` in the data directory, which
-  `ROBINAUTS_DATA_DIR` names. The server makes the file at its first start,
-  and refuses a file of another schema version.
-- Local storage serves the local development mode alone. Sign-in's records
-  have no store on SQLite until oneberth's store holds them, and a start with
-  sign-in on local storage is refused. The mode keeps its tokens and linked
-  devices in the server's process.
+- The backend is a oneberth composition of Robinauts' component and neorc's
+  manager ([architecture/web.md](../architecture/web.md)). It has a front
+  listener, `--host` and `--port`, and a worker listener, `--worker-host` and
+  `--worker-port`, the front's port plus one by default.
+- oneberth's local mode, `--local`, signs the one person at the machine in
+  with a ticket, on the loopback interface only ([sign-in.md](sign-in.md)).
+  It is the desktop's mode and the mode for development.
+- Local storage: the records are then in files of the data directory, which
+  `ROBINAUTS_DATA_DIR` names: Robinauts' in `robinauts.db`, oneberth's in
+  `oneberth.db` and neorc's in `neorc.db`. The server makes them at its first
+  start, and refuses a file of another schema version. Local storage serves
+  both sign-in modes.
 - On local storage each worker keeps its engines' state in a folder of its
   own, `workers/<worker name>/` in the data directory. Each engine has one
   file there: `langchain.db`, `pydantic-ai.db`. An engine makes its file at
   its first start, and refuses a file of another schema version. A
   conversation from before a restart takes new turns.
-- On local storage the embedded neorc's records are kept in the server's
-  process.
-- Served at the root of an origin, over https. `public_url` is mandatory
+- On PostgreSQL, oneberth's store is the schema `oneberth` and neorc's the
+  schema `neorc`, beside Robinauts' tables. `robinauts db init` makes
+  Robinauts' tables, and `robinauts store init` oneberth's.
+- Served at the root of an origin, over https, behind sign-in through
+  identity providers. `public_url` is mandatory, in oneberth's file
   ([sign-in.md](sign-in.md)).
 - Upgrades: install the new wheel, bring the schema up to date, restart.
   Until the first release the schema is edited in place and the database
@@ -81,20 +85,18 @@ What an internal platform team deploys and controls.
 
 - Files, version-controllable, with no secret in them: a secret is always
   given as the *name* of an environment variable.
-- **One file names the deployment**, and `ROBINAUTS_CONFIG` names the file.
-  It was `ROBINAUTS_AUTH_CONFIG` while sign-in was all the file held; that
-  name is still read, with a warning at start-up, and is deprecated. If both
-  are set, `ROBINAUTS_CONFIG` is what is read and the start-up log says so.
-  That file is the **agents'** configuration. The **flows'** is a folder of
+- **Two files configure the backend.** `ROBINAUTS_CONFIG` names Robinauts'
+  own: the **agents'** configuration. `ONEBERTH_CONFIG` names oneberth's: the
+  sign-in, which every backend of the deployment reads
+  ([sign-in.md](sign-in.md)). The local mode reads no oneberth file. The **flows'** is a folder of
   its own, apart from it, which `ROBINAUTS_FLOWS_DIR` names: the flow files
   and their settings, `flows.toml`; without it there is no orchestrator
   ([architecture/orchestration.md](../architecture/orchestration.md)).
-- What the operator configures: sign-in providers, the allow list and the
-  admins ([sign-in.md](sign-in.md)); model providers, models, agents and
-  the MCP tool servers agents may use; limits and retention (below).
-- The **local development mode** ([sign-in.md](sign-in.md)) may be given the
-  same file and reads only its model tables; a file that also holds sign-in
-  tables is a start-up refusal there.
+- What the operator configures: in oneberth's file, the sign-in providers,
+  the allow list and the grants ([sign-in.md](sign-in.md)); in Robinauts',
+  model providers, models, agents and the MCP tool servers agents may use;
+  limits and retention (below). A sign-in key in Robinauts' file is refused,
+  with where it went.
 - Unknown keys are errors, and all problems are reported at once, at
   start-up.
 
@@ -210,12 +212,10 @@ is settled:
 
 - Whether the configuration is one file or several, and the key names.
   Sketches are in [sign-in.md](sign-in.md).
-- The `robinauts` command: `start`, `db init`, `version`, later
-  `db migrate`, and what else it needs. `start` runs uvicorn with
-  `--proxy-headers` on and `--forwarded-allow-ips` naming the reverse proxy
-  in front, since that is where the scheme and the client address of a
-  request come from; `--dev-no-sign-in` is the local development mode and
-  refuses any bind address that is not loopback.
+- The `robinauts` command: `start`, `db init`, `version`, oneberth's
+  `store`, `tokens`, `sessions` and `devices`, later `db migrate`, and what
+  else it needs. `start` serves with oneberth's server; `--local` is
+  oneberth's local mode and refuses any bind address that is not loopback.
 - `--uds` binds a unix socket instead of an address, for a reverse proxy on
   the same machine. A socket is a file, so it is on no network at all — and
   **who on this machine may open it is the file's mode and its directory's**,
