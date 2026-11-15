@@ -243,6 +243,9 @@ def desktop_application(
     }
     workers = []
     for name in config.workers():
+        if name in config.externals:
+            # Started elsewhere: the backend lets it in by its own token, as every worker.
+            continue
         container = config.containers.get(name)
         run: Run = (
             worker_container(config, name, container, environ)

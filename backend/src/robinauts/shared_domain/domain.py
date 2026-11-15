@@ -158,6 +158,11 @@ class Config:
     """By worker, the container it runs in on the desktop, for the workers whose
     ``[workers.<name>]`` table names an ``image``. A server starts such a worker with its
     ``command`` alone."""
+    externals: frozenset[str] = frozenset()
+    """The workers whose ``[workers.<name>]`` table says ``external = true``. Something else
+    starts them, such as a container of their own, with a token of ``robinauts/worker`` bound to
+    their name that the operator created. Neither a server nor the desktop's launcher starts
+    them, and the backend lets each in by that token."""
 
     def workers(self) -> tuple[str, ...]:
         """Every worker the agents name: the default first, which always runs, then the
@@ -183,6 +188,7 @@ class Config:
             self.work,
             self.commands,
             self.containers,
+            self.externals,
         )
 
     def command_of(self, worker: str) -> tuple[str, ...] | None:

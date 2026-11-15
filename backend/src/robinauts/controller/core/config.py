@@ -82,6 +82,12 @@ def _variables(value: Any) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _flag(value: Any) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"external is not true or false: {value!r}")
+    return value
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class _WorkerTable:
     """A ``[workers.<name>]`` table: what a worker is beside the agents that name it."""
@@ -90,6 +96,7 @@ class _WorkerTable:
     command: tuple[str, ...] = ()
     image: str = ""
     environment: tuple[str, ...] = ()
+    external: bool = False
 
 
 _MAX_TASKS = "max_running_tasks_per_worker"
@@ -136,7 +143,14 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
         worker=_worker,
         models=_model_ids,
     )
-    workers = build("workers", _WorkerTable, command=_command, image=_image, environment=_variables)
+    workers = build(
+        "workers",
+        _WorkerTable,
+        command=_command,
+        image=_image,
+        environment=_variables,
+        external=_flag,
+    )
 
     work = WorkConfig()
     given = dict(raw.get("work", {}))
@@ -180,10 +194,15 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
             _worker(table.id)
         except ValueError as error:
             problems.append(f"workers.{table.id}: {error}")
-        if not table.command and not table.image:
+        if table.external and (table.command or table.image):
             problems.append(
-                f"workers.{table.id}: needs `command`, the command that starts it, or `image`,"
-                " the image of its container on the desktop"
+                f"workers.{table.id}: `external` is a worker started elsewhere, without"
+                " `command` or `image`"
+            )
+        elif not table.external and not table.command and not table.image:
+            problems.append(
+                f"workers.{table.id}: needs `command`, the command that starts it, `image`,"
+                " the image of its container on the desktop, or `external = true`"
             )
         if table.environment and not table.image:
             problems.append(
@@ -218,4 +237,5 @@ def parse_config(raw: Mapping[str, Any], tools: Collection[str] = ()) -> Config:
         for table in workers.values()
         if table.image
     }
-    return Config(providers, models, tool_servers, agents, work, commands, containers)
+    externals = frozenset(table.id for table in workers.values() if table.external)
+    return Config(providers, models, tool_servers, agents, work, commands, containers, externals)

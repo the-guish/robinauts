@@ -337,6 +337,16 @@ def test_the_default_worker_may_start_with_a_command_too() -> None:
     assert config.command_of(DEFAULT_WORKER) == ("worker",)
 
 
+def test_an_external_worker_is_started_elsewhere_and_may_run_an_engine_this_build_lacks() -> None:
+    agents = {"c": {**AGENT, "engine": "claude-code", "worker": "claude"}}
+    raw = {**WORKERS, "agents": {**WORKERS["agents"], **agents}}
+    config = parse_config({**raw, "workers": {"claude": {"external": True}}})
+    assert config.externals == {"claude"}
+    assert config.commands == {}
+    assert config.for_worker("claude").externals == {"claude"}
+    assert parse_config(WORKERS).externals == frozenset()
+
+
 def test_an_engine_this_build_lacks_runs_on_a_worker_with_a_command_alone() -> None:
     agents = {"c": {**AGENT, "engine": "claude-code", "worker": "claude"}}
     raw = {**WORKERS, "agents": {**WORKERS["agents"], **agents}}
@@ -355,6 +365,17 @@ def test_an_engine_this_build_lacks_runs_on_a_worker_with_a_command_alone() -> N
         ({"special": {"command": ["docker", 1]}}, "workers.special: command is not a list"),
         ({"special": {"command": ["docker", ""]}}, "workers.special: command is not a list"),
         ({"special": {"command": ["x"], "kind": "external"}}, "workers.special: unknown key"),
+        ({"special": {"external": False}}, "workers.special: needs `command`"),
+        ({"special": {"external": "yes"}}, "workers.special: external is not true or false"),
+        (
+            {"special": {"external": True, "command": ["x"]}},
+            "workers.special: `external` is a worker started elsewhere",
+        ),
+        (
+            {"special": {"external": True, "image": "i"}},
+            "workers.special: `external` is a worker started elsewhere",
+        ),
+        ({"nobody": {"external": True}}, "workers.nobody: no agent names this worker"),
         ({"nobody": {"command": ["x"]}}, "workers.nobody: no agent names this worker"),
         ({"Bad Name": {"command": ["x"]}}, "workers.Bad Name: worker 'Bad Name' is not"),
         ({"special": {"image": ""}}, "workers.special: image is not the name of an image"),

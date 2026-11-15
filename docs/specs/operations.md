@@ -180,7 +180,7 @@ What an internal platform team deploys and controls.
   since that worker runs it: one a package registers under the `robinauts.engines`
   entry-point group, beside the `robinauts` package the worker module comes from
   ([extra-workers/](../../extra-workers/README.md)). Refused at start-up: a table without
-  `command`, one no agent names, and a command that cannot be started or ends without saying
+  `command`, `image` or `external`, one no agent names, and a command that cannot be started or ends without saying
   `ready`.
 - A `[workers.<name>]` table may name an **image** in the place of a command, or beside it.
   On the desktop, the worker then runs in a container of that image ("The desktop"). Its
@@ -192,6 +192,25 @@ What an internal platform team deploys and controls.
   [workers.claude]
   image = "robinauts-claude-code-worker"
   environment = ["ROBINAUTS_CLAUDE_AUTH", "CLAUDE_CODE_OAUTH_TOKEN"]
+  ```
+
+- A `[workers.<name>]` table may say `external = true` in the place of a command or an image.
+  Something else starts that worker, such as a container of its own or a pod. The server
+  starts none, and lets it in by a token of `robinauts/worker` bound to its name, which the
+  operator creates on the store:
+
+  ```sh
+  robinauts tokens create claude-worker --role robinauts/worker --resource claude
+  ```
+
+  The worker reads that token from the file `ONEBERTH_TOKEN_FILE` names, or from its
+  standard input. It reaches the worker listener at `ROBINAUTS_WORKER_BROKER_URL`, the
+  component's address, `http://<worker listener>/robinauts`, and names itself in
+  `ROBINAUTS_WORKER_NAME`. The desktop's launcher does not start it either.
+
+  ```toml
+  [workers.claude]
+  external = true
   ```
 
 - `max_running_tasks_per_worker` is per worker: each runs that many turns at once.

@@ -435,13 +435,15 @@ def start(
     else:
         for name, command in config.commands.items():
             log.info("worker %r starts with the command: %s", name, shlex.join(command))
+        for name in sorted(config.externals):
+            log.info("worker %r is started elsewhere, with a token the operator created", name)
     lifecycle = Lifecycle(
         composed,
         broker_url=f"{local_url(worker_host, worker_port)}/{NAME}",
         # A store in this process is this process's alone, and so is a SQLite file: its workers
         # run here, but for one that starts with a command of its own.
         in_process=storage.kind is not StorageKind.POSTGRES,
-        outside=composed.workers if supervised else (),
+        outside=composed.workers if supervised else config.externals,
     )
     try:
         backend = Backend(

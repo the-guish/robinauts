@@ -164,6 +164,12 @@ def test_without_a_flows_folder_neorc_s_worker_is_not_a_part() -> None:
     assert application.window == launcher.Window()
 
 
+def test_an_external_worker_is_not_a_part() -> None:
+    config = shared.Config(agents=CONFIG.agents, externals=frozenset({"gpu"}))
+    application = desktop_application(config, data_dir=DATA, config_file=CONFIG_FILE)
+    assert [w.name for w in application.workers] == ["default", "claude"]
+
+
 def test_a_worker_named_as_a_part_of_the_launcher_is_refused() -> None:
     config = shared.Config(agents={"a": agent("a", "backend")})
     with pytest.raises(launcher.LauncherError, match="'backend'"):
