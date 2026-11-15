@@ -11,10 +11,12 @@ What they have in common, and what a new one keeps:
   that sets it apart ([docs/specs/operations.md](../docs/specs/operations.md),
   "Workers"). The server runs the command in place of its own worker module,
   with the same environment plus `ROBINAUTS_WORKER_NAME`,
-  `ROBINAUTS_WORKER_BROKER_URL` and `ROBINAUTS_WORKER_PARENT`; writes the
-  worker's secret on its standard input and closes it; waits for the line
-  `ready` on its standard output; sends it SIGTERM at the stop; and reads its
-  requests as its signs of life for `/health`. So an extra worker is a command,
+  `ROBINAUTS_WORKER_BROKER_URL` and `ROBINAUTS_WORKER_PARENT`. The broker URL is
+  the server's worker listener (`--worker-host`, `--worker-port`). The server
+  writes the worker's token on its standard input and closes it: a oneberth
+  service token of `robinauts/worker`, bound to the worker's name, that ends
+  when the server stops. The server waits for the line `ready` on the worker's
+  standard output, sends it SIGTERM at the stop, and reads its requests as its signs of life for `/health`. So an extra worker is a command,
   `docker run -i` of its image, that carries those streams, that signal and the
   variables its `-e` flags name, and a mount of the configuration file. The
   database's URL is not passed on: the worker reaches the core over HTTP alone.

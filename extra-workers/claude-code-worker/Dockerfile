@@ -39,9 +39,9 @@ COPY extra-workers/claude-code-worker/src extra-workers/claude-code-worker/src
 # What the extra workers share, installed editable from where the worker's lock says it is.
 COPY extra-workers/worker-common/pyproject.toml extra-workers/worker-common/
 COPY extra-workers/worker-common/src extra-workers/worker-common/src
-# neorc-from-source: the worker never imports neorc, and this image has no Node.js to build it.
+# neorc-from-source: the worker imports neither neorc nor oneberth, which uv would build from git.
 RUN cd extra-workers/claude-code-worker && uv sync --locked --no-dev \
-    --no-install-package neorc --no-install-package neorc-core --no-install-package neorc-ui
+    --no-install-package neorc --no-install-package neorc-core --no-install-package oneberth
 
 # Nothing runs as root. The transcripts and the workspaces are the two volumes it writes.
 RUN useradd --system --create-home --home-dir /var/lib/robinauts --shell /usr/sbin/nologin \

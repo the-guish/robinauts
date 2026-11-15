@@ -19,7 +19,7 @@ that command, in place of its own worker module, and treats it like every other
 worker ([docs/specs/operations.md](../../docs/specs/operations.md), "Workers").
 It runs the command with its own environment plus `ROBINAUTS_WORKER_NAME`,
 `ROBINAUTS_WORKER_BROKER_URL` and `ROBINAUTS_WORKER_PARENT`; writes the
-worker's secret on its standard input and closes it; waits for the line
+worker's token on its standard input and closes it; waits for the line
 `ready` on its standard output; counts the worker's requests as its signs of
 life for `/health`; and sends it SIGTERM at the stop.
 
@@ -45,12 +45,13 @@ command = [
 What each part of the command is for:
 
 - `-i` connects the container's standard input and output to the server's
-  hand-off: the secret goes in, `ready` comes out. `--rm` leaves nothing behind
+  hand-off: the token goes in, `ready` comes out. `--rm` leaves nothing behind
   when the server stops it.
-- `--network host` lets the container reach the server at the loopback address
-  `ROBINAUTS_WORKER_BROKER_URL` names, on Linux. Docker Desktop has no host
-  network: set the variable yourself, `-e ROBINAUTS_WORKER_BROKER_URL=http://host.docker.internal:8000`,
-  and make the server listen on an address the containers reach.
+- `--network host` lets the container reach the server's worker listener at the
+  loopback address `ROBINAUTS_WORKER_BROKER_URL` names, on Linux. Docker Desktop
+  has no host network: set the variable yourself,
+  `-e ROBINAUTS_WORKER_BROKER_URL=http://host.docker.internal:8001/robinauts`, and make
+  the worker listener listen on an address the containers reach (`--worker-host`).
 - `-e ROBINAUTS_CONFIG` with the `-v` mount hands the worker the server's
   configuration file, at the same path: the worker reads the same file the
   server does, and builds the engines of its own agents from it.
