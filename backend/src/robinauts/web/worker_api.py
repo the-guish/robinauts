@@ -9,8 +9,10 @@ There is one such worker per worker the configuration names (``AgentConfig.worke
 holds a oneberth service token of ``robinauts/worker``, bound to its name: the server mints it
 at the worker's start and hands it over on the worker's standard input
 (``cli/lifecycle.py``). oneberth checks the token and its permission before a route runs, and
-serves these routes on the worker listener, where they are the only ones. The name the token
-is bound to says which worker asks, and each is served through its own broker: a worker claims
+serves these routes on the worker listener, where they are the only ones. No route names a
+worker in its path: each declares its permit ``bound``, and acts on the worker the token is
+bound to, which ``Access.bound_resource`` reads from the grant. That name says which worker
+asks, and each is served through its own broker: a worker claims
 and waits for the tasks of its own agents, and no other worker's, whatever it sends. They
 answer only while the workers run: 404 while none does. The cancels a worker hears are
 numbered here as they come, every worker's alike, and it polls past the last it saw; one it
@@ -185,26 +187,26 @@ def worker_router(brokers: Mapping[str, TurnBroker], access: WorkerAccess) -> AP
 
     router = APIRouter(prefix=PREFIX, route_class=_Refusing, include_in_schema=False)
 
-    @router.post("/tasks/claim", dependencies=[permit(roles.TASKS_WORK)])
+    @router.post("/tasks/claim", dependencies=[permit(roles.TASKS_WORK, bound=True)])
     async def claim_tasks(body: ClaimRequest, broker: TurnBroker = working) -> TasksResponse:
         tasks = await broker.claim_tasks(body.now, body.until, body.limit)
         return TasksResponse(tasks=tasks)
 
-    @router.post("/tasks/wait", dependencies=[permit(roles.TASKS_WORK)])
+    @router.post("/tasks/wait", dependencies=[permit(roles.TASKS_WORK, bound=True)])
     async def wait_for_queued(body: WaitRequest, broker: TurnBroker = working) -> WaitResponse:
         queued = await access.unless_closed(broker.wait_for_queued(body.now, body.timeout), False)
         return WaitResponse(queued=queued)
 
-    @router.post("/tasks/renew", dependencies=[permit(roles.TASKS_WORK)])
+    @router.post("/tasks/renew", dependencies=[permit(roles.TASKS_WORK, bound=True)])
     async def renew_leases(body: RenewRequest, broker: TurnBroker = working) -> RenewResponse:
         return RenewResponse(stop=await broker.renew_leases(body.tasks, body.now, body.until))
 
-    @router.get("/tasks/{task_id}", dependencies=[permit(roles.TASKS_WORK)])
+    @router.get("/tasks/{task_id}", dependencies=[permit(roles.TASKS_WORK, bound=True)])
     async def get_task(task_id: uuid.UUID, broker: TurnBroker = working) -> TaskResponse:
         task = await broker.get_task(task_id)
         return TaskResponse(task=task)
 
-    @router.get("/cancels", dependencies=[permit(roles.TASKS_WORK)])
+    @router.get("/cancels", dependencies=[permit(roles.TASKS_WORK, bound=True)])
     async def cancels(
         after: Annotated[int | None, Query(ge=0)] = None,
         timeout: Annotated[float, Query(ge=0, le=MAX_WAIT_SECONDS)] = 0.0,
@@ -213,7 +215,7 @@ def worker_router(brokers: Mapping[str, TurnBroker], access: WorkerAccess) -> AP
         cursor, tasks = await access.cancels_after(after, timeout)
         return CancelsResponse(cursor=cursor, tasks=tasks)
 
-    @router.get("/turns/{turn_id}", dependencies=[permit(roles.TASKS_WORK)])
+    @router.get("/turns/{turn_id}", dependencies=[permit(roles.TASKS_WORK, bound=True)])
     async def find_turn(turn_id: uuid.UUID, broker: TurnBroker = working) -> FoundTurnResponse:
         found = await broker.find_turn(turn_id)
         if found is None:
@@ -221,7 +223,7 @@ def worker_router(brokers: Mapping[str, TurnBroker], access: WorkerAccess) -> AP
         owner, turn = found
         return FoundTurnResponse(owner=owner, turn=turn)
 
-    @router.get("/users/{owner}/sessions", dependencies=[permit(roles.SESSIONS_READ)])
+    @router.get("/users/{owner}/sessions", dependencies=[permit(roles.SESSIONS_READ, bound=True)])
     async def sessions_of(
         owner: uuid.UUID,
         limit: Annotated[int, Query(ge=1, le=1000)],
@@ -237,7 +239,7 @@ def worker_router(brokers: Mapping[str, TurnBroker], access: WorkerAccess) -> AP
 
     @router.get(
         "/users/{owner}/sessions/{session_id}",
-        dependencies=[permit(roles.SESSIONS_READ)],
+        dependencies=[permit(roles.SESSIONS_READ, bound=True)],
     )
     async def get_session(
         owner: uuid.UUID, session_id: uuid.UUID, broker: TurnBroker = reading
@@ -246,7 +248,7 @@ def worker_router(brokers: Mapping[str, TurnBroker], access: WorkerAccess) -> AP
 
     @router.get(
         "/users/{owner}/sessions/{session_id}/messages",
-        dependencies=[permit(roles.SESSIONS_READ)],
+        dependencies=[permit(roles.SESSIONS_READ, bound=True)],
     )
     async def messages_of(
         owner: uuid.UUID, session_id: uuid.UUID, broker: TurnBroker = reading
@@ -257,7 +259,7 @@ def worker_router(brokers: Mapping[str, TurnBroker], access: WorkerAccess) -> AP
     @router.put(
         "/users/{owner}/sessions/{session_id}/turns/{turn_id}/events/{position}",
         status_code=204,
-        dependencies=[permit(roles.TURNS_WRITE)],
+        dependencies=[permit(roles.TURNS_WRITE, bound=True)],
     )
     async def append_event(
         owner: uuid.UUID,
@@ -280,7 +282,7 @@ def worker_router(brokers: Mapping[str, TurnBroker], access: WorkerAccess) -> AP
     @router.post(
         "/users/{owner}/sessions/{session_id}/turns/{turn_id}/finish",
         status_code=204,
-        dependencies=[permit(roles.TURNS_WRITE)],
+        dependencies=[permit(roles.TURNS_WRITE, bound=True)],
     )
     async def finish_turn(
         owner: uuid.UUID,

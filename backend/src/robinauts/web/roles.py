@@ -12,7 +12,8 @@ this is, stay in the controller.
 - ``robinauts/admin`` is for the people the configuration names. It holds what a person holds:
   no route is an admin's alone yet.
 - ``robinauts/worker`` is a service token's, bound to one worker name. It holds the routes of
-  ``/internal/worker`` and nothing else, so they are served on the worker listener.
+  ``/internal/worker`` and nothing else, so they are served on the worker listener. Those
+  routes name no worker: each declares its permit ``bound``, and acts on the token's worker.
 - ``robinauts/handler`` is a service token's: the handlers of the flows Robinauts ships hold
   it. They act for the person who started their run, whom a header names.
 """

@@ -47,6 +47,10 @@ page that says the interface is not built, and the log says to run `npm run buil
 Robinauts declares its roles as data in `web/roles.py`. Every route declares one permission,
 and oneberth refuses a principal that does not hold it with 403.
 
+A worker's grant is bound to the worker's name. The worker routes name no worker in their
+path: each declares `permit(…, bound=True)` and acts on the worker the token is bound to.
+Every other route names its resource or serves every one, and refuses a bound grant.
+
 | role | given to | resource | holds |
 |---|---|---|---|
 | `robinauts/user` | every person who may sign in | none | every permission of `/api/` |
@@ -159,7 +163,8 @@ interface's and are not in the OpenAPI document.
   `http://<worker listener>/robinauts`. The launcher names the listener in
   `ONEBERTH_WORKER_URL`, and a server names the whole address in `ROBINAUTS_WORKER_BROKER_URL`.
 - Every route needs one of the three worker permissions, and a person or another service is
-  403. With no worker process of that name running, the routes answer 404. Each admitted
+  403. Each route is bound: it reads the worker's name from the token's grant
+  (`Access.bound_resource`). With no worker process of that name running, the routes answer 404. Each admitted
   request is a sign of life for `/health`, which hears a worker in a process of its own
   through nothing else.
 - The worker name the token is bound to says which worker asks, and each is served over a

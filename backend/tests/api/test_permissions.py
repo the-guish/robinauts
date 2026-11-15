@@ -97,10 +97,14 @@ PERMISSION_OF: dict[tuple[str, str], str] = {
 """Every route of the component, by method and path below ``/robinauts``, and the permission
 it declares."""
 
+BOUND = frozenset(route for route in PERMISSION_OF if route[1].startswith(W))
+"""The routes that act on the worker a token is bound to, and name none in their path: each
+declares its permit ``bound``. Every other route names its resource, or serves every one."""
 
-def declared() -> dict[tuple[str, str], list[str]]:
+
+def declared() -> dict[tuple[str, str], list[tuple[str, bool]]]:
     """The permissions each route of the component declares, with those of the routers above
-    it, as oneberth reads them."""
+    it, as oneberth reads them, each with whether it is bound."""
     composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get)
     component = new_robinauts_webapp(
         composed.controller,
@@ -111,17 +115,17 @@ def declared() -> dict[tuple[str, str], list[str]]:
     )
     app = FastAPI()
     app.include_router(component.router)
-    found: dict[tuple[str, str], list[str]] = {}
+    found: dict[tuple[str, str], list[tuple[str, bool]]] = {}
     for route in fastapi.routing.iter_route_contexts(app.routes):
         if not isinstance(getattr(route, "original_route", route), APIRoute):
             continue
-        permits: list[str] = []
+        permits: list[tuple[str, bool]] = []
         stack = [route.dependant]
         while stack:
             current = stack.pop()
             permit = getattr(current.call, "__oneberth_permit__", None)
             if permit is not None:
-                permits.append(permit.permission)
+                permits.append((permit.permission, permit.bound))
             stack.extend(current.dependencies)
         for method in route.methods:
             found[(method, route.path)] = permits
@@ -137,7 +141,8 @@ def test_every_route_is_in_the_table() -> None:
 
 @pytest.mark.parametrize(("method", "path"), sorted(PERMISSION_OF))
 def test_a_route_declares_its_one_permission(method: str, path: str) -> None:
-    assert DECLARED.get((method, path)) == [PERMISSION_OF[(method, path)]]
+    route = (method, path)
+    assert DECLARED.get(route) == [(PERMISSION_OF[route], route in BOUND)]
 
 
 @pytest.mark.parametrize("permission", sorted(roles.PERSON_PERMISSIONS))
@@ -202,6 +207,19 @@ async def test_a_principal_without_the_permission_is_refused(method: str, path: 
             else:
                 as_worker = await call(client, method, path, **testing.bearer(worker))
                 assert as_worker.status_code == 403, as_worker.text
+
+
+@pytest.mark.parametrize(("method", "path"), sorted(BOUND))
+@asyncio_test
+async def test_a_worker_s_token_passes_the_permit_of_each_worker_route(
+    method: str, path: str
+) -> None:
+    async with composed_backend() as backend:
+        composition = backend.composition
+        worker = await testing.service_token(composition, roles.WORKER_ROLE, "default")
+        async with testing.client_of(composition, worker=True) as listener:
+            answer = await call(listener, method, path, **testing.bearer(worker))
+        assert answer.status_code != 403, answer.text
 
 
 @asyncio_test
