@@ -101,10 +101,8 @@ tools = ["tools"]
 
 API_KEY = {"LOCAL_GPT_KEY": "not-a-real-key"}
 
-STOP_SECONDS = 30
-"""How long a stop may take. oneberth's server gives the answers in progress ten seconds, and
-a long poll of neorc's whose browser has gone holds on until then: neorc's wait does not end
-when its client leaves."""
+STOP_SECONDS = 10
+"""How long a stop may take. A long poll, Robinauts' or neorc's, ends when the backend stops."""
 
 HEALTHY = {"status": "ok", "components": {"robinauts": "ok", "neorc": "ok"}}
 """What ``/health`` answers while every worker is heard from."""
