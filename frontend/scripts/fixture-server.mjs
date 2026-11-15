@@ -117,7 +117,12 @@ const NOT_OFFERED = "body.model_id: is not a model this deployment offers";
 const NO_LONGER_OFFERED =
   "this conversation's model is no longer offered here; move the conversation to another";
 
-/** oneberth's session (`GET /auth/session`), with that principal. */
+/**
+ * oneberth's session (`GET /auth/session`), with that principal.
+ *
+ * @param {Record<string, unknown> | null} principal
+ * @param {"providers" | "local"} mode
+ */
 function session(principal, mode = "providers") {
   return {
     mode,
