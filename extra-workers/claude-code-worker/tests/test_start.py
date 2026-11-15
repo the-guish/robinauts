@@ -17,6 +17,7 @@ from robinauts.cli.composition import configure
 from robinauts_claude_worker.__main__ import (
     configuration_problems,
     environment_problems,
+    launched_state,
     problems_of,
     providers_of,
 )
@@ -76,6 +77,47 @@ def test_the_servers_variables_are_needed() -> None:
     assert len(problems) == 2
     assert problems[0].startswith("ROBINAUTS_CONFIG is not set")
     assert problems[1].startswith("ROBINAUTS_WORKER_BROKER_URL is not set")
+
+
+LAUNCHED = {
+    "ROBINAUTS_CONFIG": "/data/workers/claude/robinauts.toml",
+    "ROBINAUTS_DATA_DIR": "/data",
+    "ONEBERTH_WORKER_NAME": "claude",
+    "ONEBERTH_WORKER_URL": "http://172.18.0.2:8421",
+}
+"""What the desktop's launcher gives the worker's container."""
+
+
+def test_the_launchers_variables_will_do_in_the_place_of_the_servers() -> None:
+    assert environment_problems(LAUNCHED) == []
+
+
+@pytest.mark.parametrize(
+    ("environ", "state"),
+    [
+        (
+            LAUNCHED,
+            {
+                "CLAUDE_CONFIG_DIR": "/data/workers/claude/claude",
+                "ROBINAUTS_CLAUDE_WORKSPACES": "/data/workers/claude/workspaces",
+            },
+        ),
+        (
+            {**LAUNCHED, "ROBINAUTS_DATA_DIR": "", "ONEBERTH_DATA_DIR": "/home/ada/robinauts"},
+            {
+                "CLAUDE_CONFIG_DIR": "/home/ada/robinauts/workers/claude/claude",
+                "ROBINAUTS_CLAUDE_WORKSPACES": "/home/ada/robinauts/workers/claude/workspaces",
+            },
+        ),
+        ({**LAUNCHED, "ROBINAUTS_DATA_DIR": ""}, {}),
+        (SERVER, {}),
+        ({**SERVER, "ROBINAUTS_DATA_DIR": "/data"}, {}),
+    ],
+)
+def test_under_the_launcher_the_state_is_in_the_workers_folder(
+    environ: dict[str, str], state: dict[str, str]
+) -> None:
+    assert launched_state(environ) == state
 
 
 def test_the_configuration_must_give_this_worker_its_agents() -> None:

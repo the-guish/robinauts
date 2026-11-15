@@ -9,8 +9,29 @@ may be handed, and it carries git, to clone repositories with that token
 ([../worker-common/README.md](../worker-common/README.md)). It is the base of every other extra worker: copy
 the folder, add the package that brings your engine, keep the rest.
 
-It reaches the core over HTTP alone and opens no database. The engines keep
-their state in the container's memory.
+It reaches the core over HTTP alone and opens no database. Started by a
+server, the engines keep their state in the container's memory. Started by the
+desktop's launcher, they keep it in the worker's folder of the data directory.
+
+## How the desktop starts it
+
+On the desktop, the worker's table names the image, and `robinauts desktop`
+runs it as a container of oneberth's launcher
+([docs/deployment.md](../../docs/deployment.md), "The desktop with Docker"):
+
+```toml
+[workers.base]
+image = "robinauts-base-worker"
+environment = ["GITHUB_TOKEN"]   # optional: the token to clone private repositories with
+```
+
+The launcher writes the worker's token on its standard input and closes it,
+names the worker listener in `ONEBERTH_WORKER_URL` and the worker in
+`ONEBERTH_WORKER_NAME`, waits for the line `ready`, and stops it with SIGTERM.
+The container joins the `app` network, which reaches the model providers. It
+sees its folder of the data directory, `workers/<name>`, and reads the copy of
+the configuration there. It gets the keys of its agents' providers and the
+variables `environment` names, and nothing else.
 
 ## How the server starts it
 
@@ -88,8 +109,9 @@ handshake yet. Rebuild it when the server is rebuilt.
 
 ## State
 
-The engines' state is in the worker's memory, as it is for every worker that is
-handed no database: a conversation's checkpoints live as long as the container.
+On the desktop, the engines' state is in the worker's folder of the data
+directory, and outlives the container. Started by a server, it is in the
+worker's memory, as it is for every worker that is handed no database: a conversation's checkpoints live as long as the container.
 After the container is replaced, the next turn of a conversation that started
 before it fails, since the engine no longer has that session; the conversation
 itself, every message of it, is the server's and is kept. New conversations
@@ -119,5 +141,6 @@ run as before.
 
 `tests/test_conversation.py` starts a server with no database, a worker from the
 image, and a model server of its own, and holds a two-turn conversation on each
-engine. It needs Docker on Linux and is skipped elsewhere; it builds the image
+engine. The backend's `tests/api/test_desktop_docker.py` starts the image on the
+desktop, as a container of the launcher. It needs Docker on Linux and is skipped elsewhere; it builds the image
 unless `ROBINAUTS_BASE_WORKER_IMAGE` names one already built.

@@ -138,6 +138,23 @@ with `ROBINAUTS_CLAUDE_AUTH`, `ROBINAUTS_CLAUDE_WORKSPACES` somewhere of
 yours, and `ROBINAUTS_CLAUDE_CLI_PATH` pointing at your `claude` if you prefer
 it to the bundled one, exported where the server starts. The same rules apply.
 
+### On the desktop, with Docker
+
+`robinauts desktop` starts the worker as a container of oneberth's launcher
+when its table names the image ([docs/deployment.md](../../docs/deployment.md),
+"The desktop with Docker"). The table names the variables the container gets:
+
+```toml
+[workers.claude]
+image = "robinauts-claude-code-worker"
+environment = ["ROBINAUTS_CLAUDE_AUTH", "CLAUDE_CODE_OAUTH_TOKEN"]
+```
+
+Export both where you run `robinauts desktop`. The container sees the worker's
+folder of the data directory, `workers/claude`, and keeps Claude Code's
+transcripts in `claude/` there and the workspaces in `workspaces/`. Both
+outlive the container.
+
 ## A deployment
 
 An instance with sign-in, several people, run as
@@ -218,10 +235,11 @@ channel for Claude Code's questions through the chat is later work.
   The answer the person reads, and every tool call shown in the chat, are in
   the server's database as for any engine.
 - **Workspaces**: `/workspace/<conversation id>`, the files the agent made.
-- Both are volumes in the command above. They outlive the container, which
-  `--rm` removes at every stop, and an image rebuild; they do not outlive
-  `docker volume rm`, and a command without them keeps nothing past the
-  container. A conversation whose transcripts are gone refuses its next turn,
+- On a server, both are volumes in the command above. On the desktop, both are
+  in the worker's folder of the data directory.
+- The volumes outlive the container, which `--rm` removes at every stop, and
+  an image rebuild; they do not outlive `docker volume rm`, and a command
+  without them keeps nothing past the container. A conversation whose transcripts are gone refuses its next turn,
   saying so, and a new conversation starts from nothing. Durable, shared
   transcripts (the SDK's session store on PostgreSQL) are later work.
 
