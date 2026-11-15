@@ -3,8 +3,8 @@
 # Copyright The Robinauts Authors
 #
 # Robinauts' image: the backend with its built interface, oneberth's web application and neorc's
-# manager, the image the cluster runs and the desktop's Docker shape runs the backend from
-# (docs/deployment.md, "The desktop with Docker"). `robinauts desktop` starts it as
+# manager, the image the desktop's Docker shape runs the backend from (docs/deployment.md, "The
+# desktop with Docker"). It serves the desktop alone for now. `robinauts desktop` starts it as
 # `robinauts desktop-backend`, the data directory mounted at /data. Build from the repository
 # root, after scripts/ui-packages-from-source.sh has packed the node packages of neorc and
 # oneberth into frontend/vendor/, which the interface's lock names:
