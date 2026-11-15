@@ -30,3 +30,24 @@ def test_the_first_turn_needs_no_wait_for_the_worker(
         )
         assert started.status_code == 200, started.text
         assert '"RUN_FINISHED"' in started.text
+
+
+def test_a_checkout_whose_interface_is_not_built_serves_the_api_and_says_so_at_ui(
+    local_gpt: FakeLocalGPTServer, tmp_path: Path
+) -> None:
+    """As CI's backend job runs it: ``frontend/dist`` has no ``index.html`` there."""
+    config = tmp_path / "robinauts.toml"
+    config.write_text(stack.config_for(local_gpt.base_url))
+    empty = tmp_path / "dist"
+    empty.mkdir()
+    env = {**stack.API_KEY, "ROBINAUTS_UI_DIR": str(empty)}
+    with (
+        stack.database(config) as url,
+        stack.server(config, url, env=env) as server,
+        stack.client(server) as api,
+    ):
+        listed = api.get("/robinauts/api/conversations")
+        page = api.get("/ui/")
+    assert listed.status_code == 200, listed.text
+    assert page.status_code == 404
+    assert "The interface is not built" in page.text

@@ -141,20 +141,30 @@ LOCAL_STORAGE = (
     " their state in its folder under workers/ there"
 )
 STORE_INIT = "robinauts store init"
+NOT_BUILT = (
+    "the interface is not built in %s: /ui/ says so. Run npm run build in frontend/ and"
+    " start again"
+)
 
 log = logging.getLogger(__name__)
 
 
-def interface() -> Path:
+def interface() -> Path | None:
     """``ROBINAUTS_UI_DIR`` when set; else the build a wheel carries as ``robinauts/ui``;
-    else ``frontend/dist`` of the checkout this runs from."""
+    else ``frontend/dist`` of the checkout this runs from. ``None`` when that directory holds
+    no built interface: a checkout's, before ``npm run build``. The backend then serves its
+    API, and ``/ui/`` answers that the interface is not built. A wheel always holds one."""
     named = os.environ.get("ROBINAUTS_UI_DIR")
     if named:
-        return Path(named)
-    packaged = Path(str(resources.files("robinauts"))) / "ui"
-    if (packaged / "index.html").is_file():
-        return packaged
-    return REPO / "frontend" / "dist"
+        chosen = Path(named)
+    else:
+        chosen = Path(str(resources.files("robinauts"))) / "ui"
+        if not (chosen / "index.html").is_file():
+            chosen = REPO / "frontend" / "dist"
+    if (chosen / "index.html").is_file():
+        return chosen
+    log.warning(NOT_BUILT, chosen)
+    return None
 
 
 def serving(
@@ -437,7 +447,6 @@ async def serve_backend(
 
 
 def start(host: str, port: int, worker_host: str, worker_port: int | None, *, local: bool) -> int:
-    ui_dir = interface()
     config_path = Path(os.environ["ROBINAUTS_CONFIG"])
     tables = read_tables(config_path)
     worker_port = port + WORKER_PORT_OFFSET if worker_port is None else worker_port
@@ -459,6 +468,7 @@ def start(host: str, port: int, worker_host: str, worker_port: int | None, *, lo
     storage = storage_from(os.environ)
     composed = compose(config, storage=storage, secret_for=secret_for)
     logging.basicConfig(level=logging.INFO)
+    ui_dir = interface()
     if local:
         log.warning(LOCAL_MODE)
     if storage.kind is StorageKind.LOCAL:
