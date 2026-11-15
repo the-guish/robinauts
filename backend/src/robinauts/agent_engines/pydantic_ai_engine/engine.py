@@ -180,6 +180,9 @@ class PydanticAIEngine(AgentEngine):
     async def forget(self, session_id: uuid.UUID) -> None:
         await self._session_store.forget(session_id)
 
+    async def close(self) -> None:
+        await self._session_store.close()
+
 
 def _rendered(messages: list[ModelMessage]) -> object:
     return ModelMessagesTypeAdapter.dump_python(messages, mode="json")

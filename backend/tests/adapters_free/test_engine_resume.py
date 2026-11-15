@@ -2,12 +2,14 @@
 # Copyright The Robinauts Authors
 
 """A turn that ended early is resumed from the rounds it saved, in both engines: each on its
-session store on PostgreSQL, a model server over HTTP and a real MCP server."""
+session store on PostgreSQL and on SQLite, a model server over HTTP and a real MCP server."""
 
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -24,22 +26,16 @@ from robinauts.agent_engines.contract.domain import (
     ToolServerConfig,
 )
 from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings
+from robinauts.agent_engines.langchain_engine import session_store as langchain_stores
 from robinauts.agent_engines.langchain_engine.engine import LangChainEngine
-from robinauts.agent_engines.langchain_engine.session_store import (
-    PostgresSessionStore as LangChainSessionStore,
-)
+from robinauts.agent_engines.pydantic_ai_engine import session_store as pydantic_ai_stores
 from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
-from robinauts.agent_engines.pydantic_ai_engine.session_store import (
-    PostgresSessionStore as PydanticAISessionStore,
-)
 from util.aio import asyncio_test
 from util.controller_db import requires_postgres, temporary_schema
 from util.engine_settings import Keys, NoSecrets
 from util.fake_openai import CallTool, FakeLocalGPTServer
 from util.fake_openai.echo_model import last_question, text_of
 from util.mcp_server import mcp_server
-
-pytestmark = requires_postgres
 
 AGENT = AgentDefinition("You are a robinaut.", tools=("t",))
 ROUNDS = 3
@@ -102,13 +98,44 @@ def settings(model_url: str, tools_url: str) -> EngineSettings:
 
 Build = Callable[[EngineSettings, Any], AgentEngine]
 
+
+@asynccontextmanager
+async def on_postgres(_: Path) -> AsyncIterator[Any]:
+    async with temporary_schema(applied=False, size=2) as schema:
+        yield schema.pool
+
+
+@asynccontextmanager
+async def on_sqlite(folder: Path) -> AsyncIterator[Any]:
+    yield folder
+
+
 ENGINES = pytest.mark.parametrize(
-    "build",
+    ("build", "storage"),
     [
-        lambda s, pool: LangChainEngine(s, LangChainSessionStore(pool)),
-        lambda s, pool: PydanticAIEngine(s, PydanticAISessionStore(pool)),
+        pytest.param(
+            lambda s, pool: LangChainEngine(s, langchain_stores.PostgresSessionStore(pool)),
+            on_postgres,
+            id="langchain-postgres",
+            marks=requires_postgres,
+        ),
+        pytest.param(
+            lambda s, pool: PydanticAIEngine(s, pydantic_ai_stores.PostgresSessionStore(pool)),
+            on_postgres,
+            id="pydantic-ai-postgres",
+            marks=requires_postgres,
+        ),
+        pytest.param(
+            lambda s, folder: LangChainEngine(s, langchain_stores.SQLiteSessionStore(folder)),
+            on_sqlite,
+            id="langchain-sqlite",
+        ),
+        pytest.param(
+            lambda s, folder: PydanticAIEngine(s, pydantic_ai_stores.SQLiteSessionStore(folder)),
+            on_sqlite,
+            id="pydantic-ai-sqlite",
+        ),
     ],
-    ids=["langchain", "pydantic-ai"],
 )
 
 
@@ -134,11 +161,15 @@ async def run(
 @ENGINES
 @asyncio_test
 async def test_a_resumed_turn_goes_on_from_the_rounds_it_saved(
-    build: Build, model_server: FakeLocalGPTServer, tools_url: str
+    build: Build,
+    storage: Callable[[Path], Any],
+    model_server: FakeLocalGPTServer,
+    tools_url: str,
+    tmp_path: Path,
 ) -> None:
     model: Any = model_server.model
-    async with temporary_schema(applied=False, size=2) as schema:
-        engine = build(settings(model_server.base_url, tools_url), schema.pool)
+    async with storage(tmp_path) as handle:
+        engine = build(settings(model_server.base_url, tools_url), handle)
         await engine.setup()
         session = uuid.uuid4()
         await engine.create(session)
@@ -175,3 +206,4 @@ async def test_a_resumed_turn_goes_on_from_the_rounds_it_saved(
         started = await run(engine, fresh, "go", None, resume=True)
         assert started[-1] == Done(text="done", checkpoint_id=started[-1].checkpoint_id)
         assert counted == [0, 1, 2]
+        await engine.close()

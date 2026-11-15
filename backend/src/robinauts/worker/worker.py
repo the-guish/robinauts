@@ -11,7 +11,8 @@ worker, whichever process stored it.
 
 It reaches the core through its ``TurnBroker`` alone, never the core's store: in the server's
 process, or over HTTP from a process of its own. The engines keep their state in its
-``AgentEngineStore``.
+``AgentEngineStore``, or on local storage in files of the engines' own, in the worker's folder
+of the data directory (``worker_folder``).
 """
 
 from __future__ import annotations
@@ -134,7 +135,7 @@ class Worker:
         self._engines = await build_engines(
             self._config.for_worker(self.name),
             engine_settings(self._config, self._secret_for),
-            engine_storage(self._storage, self._handle),
+            engine_storage(self._storage, self._handle, self.name),
             self._factories,
             setup=self._sets_up_engines(),
         )
@@ -147,15 +148,17 @@ class Worker:
 
     async def stop(self) -> None:
         """Stop claiming, wait for the turns this process runs, bounded, and interrupt the
-        rest, then let go of the core and of the agent engines' store. The leases are renewed until
-        the last turn has ended."""
+        rest, then let go of the engines, the core and the agent engines' store. The leases are
+        renewed until the last turn has ended."""
         await _cancel_and_wait(self._claiming)
         self._claiming = None
         await self._drain()
         await asyncio.gather(*self._cancelling, return_exceptions=True)
         await _cancel_and_wait(self._heartbeat)
         self._heartbeat = None
-        self._engines = {}
+        engines, self._engines = self._engines, {}
+        for engine in engines.values():
+            await engine.close()
         await self._broker.close()
         if self._agent_engine_store is not None:
             await self._agent_engine_store.close()
@@ -254,7 +257,7 @@ class Worker:
             if factory is None:
                 raise UnknownEngineError(f"engine {name!r}, which this build does not have")
             settings = engine_settings(self._config, self._secret_for)
-            engine = factory(settings, engine_storage(self._storage, self._handle))
+            engine = factory(settings, engine_storage(self._storage, self._handle, self.name))
             if self._sets_up_engines():
                 await engine.setup()
             self._engines[name] = engine

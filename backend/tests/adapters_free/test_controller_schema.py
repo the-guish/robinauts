@@ -40,7 +40,8 @@ async def test_an_empty_schema_gets_the_whole_file_and_a_second_run_changes_noth
         )
         names = sorted(t["tablename"] for t in tables)
         assert names == sorted(SCHEMA_TABLES)
-        assert {"user_sessions", "pending_logins", "api_tokens"} <= set(names)
+        # Sign-in's tables are oneberth's, in a schema of its own.
+        assert not {"user_sessions", "pending_logins", "api_tokens"} & set(names)
         await check_schema(schema.pool)
 
 

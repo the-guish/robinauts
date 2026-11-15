@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from echo_controller import start_echo_controller, wait_for_turn_end
 
@@ -17,7 +19,7 @@ from util.aio import asyncio_test
 async def test_sessions_are_listed_a_page_at_a_time_none_twice() -> None:
     lifecycle = await start_echo_controller()
     controller = lifecycle.composed.controller
-    user = await controller.ensure_user(Identity("local", "me"))
+    user = await controller.ensure_user(Identity("local", "me"), id=uuid.uuid4())
     started = []
     for text in ("one", "two", "three"):
         turn = await controller.start_session(user, agent="echo", model="echo", text=text)
@@ -38,8 +40,8 @@ async def test_sessions_are_listed_a_page_at_a_time_none_twice() -> None:
 async def test_a_session_is_in_the_default_project_unless_another_is_chosen() -> None:
     lifecycle = await start_echo_controller()
     controller = lifecycle.composed.controller
-    user = await controller.ensure_user(Identity("local", "me"))
-    other = await controller.ensure_user(Identity("local", "other"))
+    user = await controller.ensure_user(Identity("local", "me"), id=uuid.uuid4())
+    other = await controller.ensure_user(Identity("local", "other"), id=uuid.uuid4())
     (default,) = await controller.list_projects(user)
     assert default.name == DEFAULT_PROJECT
     work = await controller.create_project(user, "  Work  ")

@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from robinauts.agent_engines.contract.domain import ProviderKind, ToolServerAuth
@@ -54,7 +56,12 @@ POOL = object()
         (
             shared.StorageConfig(shared.StorageKind.LOCAL, path="/d"),
             StorageKind.LOCAL,
-            {"path": "/d"},
+            {"path": Path("/d/workers/w")},
+        ),
+        (
+            shared.StorageConfig(shared.StorageKind.IN_PROCESS),
+            StorageKind.IN_PROCESS,
+            {},
         ),
         (
             shared.StorageConfig(shared.StorageKind.POSTGRES, url="x"),
@@ -66,5 +73,5 @@ POOL = object()
 def test_storage_kinds_map_to_the_engines_options(
     storage: shared.StorageConfig, kind: StorageKind, options: dict[str, object]
 ) -> None:
-    mapped = engine_storage(storage, POOL)
+    mapped = engine_storage(storage, POOL, "w")
     assert (mapped.kind, mapped.options) == (kind, options)

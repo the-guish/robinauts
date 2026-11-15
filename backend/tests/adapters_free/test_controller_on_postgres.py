@@ -6,10 +6,8 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import pathlib
 import uuid
-from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
@@ -17,7 +15,7 @@ import pytest
 from robinauts.cli.composition import SCHEMA_READY, compose, init_database
 from robinauts.cli.lifecycle import Lifecycle
 from robinauts.cli.main import run
-from robinauts.controller.contract.domain import ConfigError, Identity, UserSession
+from robinauts.controller.contract.domain import ConfigError, Identity
 from robinauts.shared_domain.domain import (
     AgentConfig,
     Config,
@@ -65,7 +63,7 @@ async def test_start_refuses_a_database_with_no_schema_and_serves_after_db_init(
 
         lifecycle = Lifecycle(composed)
         await lifecycle.start()
-        user = await controller.ensure_user(Identity("local", "me"))
+        user = await controller.ensure_user(Identity("local", "me"), id=uuid.uuid4())
         started = await controller.start_session(user, agent="echo", model="echo", text="hello")
         async for _ in controller.watch_turn(user, started.session_id, started.turn_id):
             pass
@@ -76,12 +74,6 @@ async def test_start_refuses_a_database_with_no_schema_and_serves_after_db_init(
         page = await controller.list_sessions(user, limit=10)
         assert [s.id for s in page.sessions] == [started.session_id]
 
-        # The credentials are on the pool the controller opened.
-        now = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
-        cookie = hashlib.sha256(b"cookie").hexdigest()
-        signed_in = UserSession(uuid.uuid4(), user.id, cookie, now, now + timedelta(hours=1))
-        await composed.credentials.add_user_session(signed_in)
-        assert await composed.credentials.resolve_user_session(cookie, now) == (user, signed_in)
         await lifecycle.stop()
 
 

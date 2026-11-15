@@ -162,6 +162,9 @@ class LangChainEngine(AgentEngine):
     async def forget(self, session_id: uuid.UUID) -> None:
         await self._session_store.forget(session_id)
 
+    async def close(self) -> None:
+        await self._session_store.close()
+
 
 def middleware_for(
     chat: BaseChatModel, model: str, settings: EngineSettings

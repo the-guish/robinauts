@@ -206,13 +206,7 @@ class PostgresSaver(BaseCheckpointSaver[str]):
             )
 
     def get_next_version(self, current: str | None, channel: None) -> str:
-        if current is None:
-            current_v = 0
-        elif isinstance(current, int):
-            current_v = current
-        else:
-            current_v = int(current.split(".")[0])
-        return f"{current_v + 1:032}.{secrets.randbelow(10**16):016}"
+        return next_version(current)
 
     async def _tuple(self, row: Any) -> CheckpointTuple:
         thread_id, checkpoint_ns = row["thread_id"], row["checkpoint_ns"]
@@ -251,3 +245,14 @@ class PostgresSaver(BaseCheckpointSaver[str]):
                 for w in writes
             ],
         )
+
+
+def next_version(current: str | int | None) -> str:
+    """A channel's version after ``current``: a counter, then a random part, which sort as text."""
+    if current is None:
+        current_v = 0
+    elif isinstance(current, int):
+        current_v = current
+    else:
+        current_v = int(current.split(".")[0])
+    return f"{current_v + 1:032}.{secrets.randbelow(10**16):016}"
