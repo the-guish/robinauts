@@ -33,7 +33,7 @@ async def build(
     config: shared.Config, factories: Mapping[str, EngineFactory]
 ) -> dict[str, AgentEngine]:
     settings = engine_settings(config, {"ACME_KEY": "sk-1"}.get)
-    storage = engine_storage(shared.StorageConfig(shared.StorageKind.IN_PROCESS), None)
+    storage = engine_storage(shared.StorageConfig(shared.StorageKind.IN_PROCESS), None, "w")
     return await build_engines(config, settings, storage, factories)
 
 

@@ -7,7 +7,9 @@ rendering. The in-process store holds the same model. Another store, outside thi
 repository, holds it on AWS serverless.
 
 Engines keep their state apart, in storage of their own, and nothing here references
-it (`docs/specs/agent-engines.md`). The controller keeps only the checkpoint id an
+it (`docs/specs/agent-engines.md`). On PostgreSQL that is tables of each engine's own. On
+local storage it is a file per engine in the worker's folder, `workers/<worker name>/` in the
+data directory. The controller keeps only the checkpoint id an
 engine hands back, on the answer, and the engine's name on the session and on the
 answer. A turn runs on the engine the session records, which holds its state, and the
 purge forgets on it, whatever the agent's configuration names today; the worker

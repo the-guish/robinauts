@@ -50,6 +50,7 @@ from robinauts.cli.composition import (
     CONTROLLER_TABLES,
     DATA_DIR_VARIABLE,
     DATABASE_URL_VARIABLE,
+    ENGINE_REFUSALS,
     Composed,
     SecretLookup,
     compose,
@@ -97,8 +98,9 @@ LOCAL_NEEDS_THE_MODE = (
 )
 TWO_STORAGES = f"{DATABASE_URL_VARIABLE} and {DATA_DIR_VARIABLE} are both set: set one"
 LOCAL_STORAGE = (
-    "the controller's records are in %s; the engines' state and neorc's are kept in this"
-    " process, and end with it"
+    "the controller's records are in %s, and each worker's engines keep their state in"
+    " its folder under workers/ there; neorc's records are kept in this process, and end"
+    " with it"
 )
 
 
@@ -317,10 +319,15 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     server = Server(config, lifecycle, None if orchestration is None else orchestration.embedded)
     try:
         asyncio.run(serve(server, lifecycle), loop_factory=config.get_loop_factory())
-    except (ControllerError, WorkerStartError, OrchestrationStartError) as refused:
-        # A database that will not open or is not this build's, an engine the build lacks or a
-        # secret missing, a worker process or neorc that did not start: said before anything
-        # listens.
+    except (
+        ControllerError,
+        *ENGINE_REFUSALS,
+        WorkerStartError,
+        OrchestrationStartError,
+    ) as refused:
+        # A database or an engine's file that will not open or is not this build's, an engine
+        # the build lacks or a secret missing, a worker process or neorc that did not start:
+        # said before anything listens.
         print(refused, file=sys.stderr)
         return 1
     except KeyboardInterrupt:

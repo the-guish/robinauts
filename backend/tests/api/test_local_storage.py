@@ -2,7 +2,8 @@
 # Copyright The Robinauts Authors
 
 """The local development mode on local storage: the server makes ``robinauts.db`` in the data
-directory, and a second start on that directory finds the conversations of the first."""
+directory, and its worker keeps its engines' state in its folder there. A second start on that
+directory finds the conversations of the first, and each engine remembers them."""
 
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ import httpx
 import pytest
 
 from util import stack
+from util.fake_openai import FakeLocalGPTServer
 
 pytestmark = pytest.mark.io
 
@@ -42,6 +44,7 @@ def api(config: Path, data: Path) -> Iterator[httpx.Client]:
     """A client of a server in the local development mode on ``data``, stopped afterwards."""
     port = stack.free_port()
     environment = {**os.environ, "ROBINAUTS_CONFIG": str(config), "ECHO_API_KEY": "not-a-key"}
+    environment.update(stack.API_KEY)
     environment.pop("ROBINAUTS_DATABASE_URL", None)
     environment["ROBINAUTS_DATA_DIR"] = str(data)
     command = [str(stack.ROBINAUTS), "start", "--dev-no-sign-in", "--port", str(port)]
@@ -79,3 +82,32 @@ def test_a_second_start_on_the_data_directory_finds_the_first_ones_conversations
         another = second.post("/api/turns", json={"agent_id": "echo", "text": "again"})
         assert '"RUN_FINISHED"' in another.text
         assert len(second.get("/api/conversations").json()["items"]) == 2
+
+
+def test_each_engine_remembers_a_conversation_across_a_restart(
+    tmp_path: Path, local_gpt: FakeLocalGPTServer
+) -> None:
+    config = tmp_path / "robinauts.toml"
+    config.write_text(stack.config_for(local_gpt.base_url))
+    data = tmp_path / "data"
+    answers = {}
+    with api(config, data) as first:
+        for agent in stack.AGENTS:
+            started = first.post("/api/turns", json={"agent_id": agent, "text": "hello"})
+            assert '"RUN_FINISHED"' in started.text, started.text
+            cid = started.headers["x-robinauts-conversation-id"]
+            answers[agent] = (cid, first.get(f"/api/conversations/{cid}").json()["messages"][1])
+    folder = data / "workers" / "default"
+    assert sorted(p.name for p in folder.glob("*.db")) == ["langchain.db", "pydantic-ai.db"]
+
+    with api(config, data) as second:
+        for agent, (cid, answer) in answers.items():
+            local_gpt.received.clear()
+            turns = f"/api/conversations/{cid}/turns"
+            again = second.post(turns, json={"parent_id": answer["id"], "text": "again"})
+            assert '"RUN_FINISHED"' in again.text, again.text
+            assert stack.sent(local_gpt.received[-1]) == [
+                ("user", "hello"),
+                ("assistant", "hello"),
+                ("user", "again"),
+            ], agent

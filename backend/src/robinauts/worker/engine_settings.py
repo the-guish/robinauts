@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 from robinauts.agent_engines.contract import domain as engine_domain
 from robinauts.agent_engines.contract.ports import (
@@ -85,11 +86,25 @@ def engine_settings(config: shared.Config, secret_for: SecretLookup) -> EngineSe
     )
 
 
-def engine_storage(storage: shared.StorageConfig, pool: object | None) -> StorageConfig:
-    """The storage asked for, as an engine takes it. A PostgreSQL pool is the worker's own
-    (``AgentEngineStore``), for the engines' tables, never the core's."""
+WORKERS_FOLDER = "workers"
+"""The data directory's folder that holds a folder per worker, for its engines' files."""
+
+
+def worker_folder(data_dir: str | Path, worker: str) -> Path:
+    """Where the engines of ``worker`` keep their files on local storage: a folder named after
+    the worker, which a worker name makes safe, in ``WORKERS_FOLDER`` of the data directory."""
+    return Path(data_dir) / WORKERS_FOLDER / worker
+
+
+def engine_storage(
+    storage: shared.StorageConfig, pool: object | None, worker: str
+) -> StorageConfig:
+    """The storage asked for, as the engines of ``worker`` take it. A PostgreSQL pool is the
+    worker's own (``AgentEngineStore``), for the engines' tables, never the core's. Local
+    storage is the worker's own folder in the data directory."""
     if storage.kind is shared.StorageKind.POSTGRES:
         return StorageConfig(StorageKind.POSTGRES, {"pool": pool})
     if storage.kind is shared.StorageKind.LOCAL:
-        return StorageConfig(StorageKind.LOCAL, {"path": storage.path})
+        assert storage.path is not None
+        return StorageConfig(StorageKind.LOCAL, {"path": worker_folder(storage.path, worker)})
     return StorageConfig(StorageKind.IN_PROCESS, {})

@@ -19,9 +19,13 @@ What an internal platform team deploys and controls.
   have no store on SQLite until oneberth's store holds them, and a start with
   sign-in on local storage is refused. The mode keeps its tokens and linked
   devices in the server's process.
-- On local storage the engines' state and the embedded neorc's are kept in
-  the server's process. A conversation's next turn after a restart fails,
-  since its engine holds nothing of it any more. A new conversation runs.
+- On local storage each worker keeps its engines' state in a folder of its
+  own, `workers/<worker name>/` in the data directory. Each engine has one
+  file there: `langchain.db`, `pydantic-ai.db`. An engine makes its file at
+  its first start, and refuses a file of another schema version. A
+  conversation from before a restart takes new turns.
+- On local storage the embedded neorc's records are kept in the server's
+  process.
 - Served at the root of an origin, over https. `public_url` is mandatory
   ([sign-in.md](sign-in.md)).
 - Upgrades: install the new wheel, bring the schema up to date, restart.

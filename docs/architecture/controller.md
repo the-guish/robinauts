@@ -59,9 +59,9 @@ A worker in the server's process has it over the controller's store
 PostgreSQL spawns, has it over HTTP: the same operations as the API's `/internal/worker/`
 routes (`docs/architecture/web.md`), with the secret its server handed it at its start, which
 tells the server which worker it is. The
-engines keep their state apart, in the worker's `AgentEngineStore`: on PostgreSQL a pool of the
-worker's own, for the engines' tables. No engine has a store on SQLite yet, so on local storage
-the engines keep their state in the worker's process.
+engines keep their state apart. The worker's `AgentEngineStore` holds it on PostgreSQL: a pool of
+the worker's own, for the engines' tables. Each engine keeps a SQLite file on local storage, in
+the worker's folder, `workers/<worker name>/` in the data directory (`worker_folder`).
 
 ## Users
 
