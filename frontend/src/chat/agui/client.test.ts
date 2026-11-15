@@ -69,7 +69,7 @@ test("a new conversation: what is posted, and what comes back", async () => {
   expect(attached.runId).toBe(RUN);
   expect(attached.conversationId).toBe(CONVERSATION);
   const [url, init] = fetch.mock.calls[0] ?? [];
-  expect(url).toBe("/api/turns");
+  expect(url).toBe("/robinauts/api/turns");
   expect(init?.method).toBe("POST");
   // The model goes with the first message; `null` would be the agent's
   // default, which the backend copies in (`docs/specs/wire.md`).
@@ -125,7 +125,7 @@ test("the two shapes of a turn in a conversation that exists", async () => {
   await startTurn(CONVERSATION, { text: "more", parentId: "m" });
   await startTurn(CONVERSATION, { regenerate: "m" });
   expect(fetch.mock.calls[0]?.[0]).toBe(
-    `/api/conversations/${CONVERSATION}/turns`,
+    `/robinauts/api/conversations/${CONVERSATION}/turns`,
   );
   // Neither names a model: a turn runs on the conversation's, which the
   // server reads (`docs/specs/wire.md`).
@@ -216,7 +216,9 @@ test("a dropped connection is picked up with Last-Event-ID", async () => {
     "RUN_FINISHED",
   ]);
   const [url, init] = fetch.mock.calls[1] ?? [];
-  expect(url).toBe(`/api/conversations/${CONVERSATION}/runs/${RUN}/events`);
+  expect(url).toBe(
+    `/robinauts/api/conversations/${CONVERSATION}/runs/${RUN}/events`,
+  );
   expect(init?.method).toBe("GET");
   expect((init?.headers as Record<string, string>)["last-event-id"]).toBe("3");
 });
@@ -354,7 +356,7 @@ test("a deployment that is restarting answers 5xx, and that is tried again", asy
 
 test("requests that never arrive are bounded like streams that drop", async () => {
   const fetch = vi.fn<typeof globalThis.fetch>((input) =>
-    String(input) === "/api/turns"
+    String(input) === "/robinauts/api/turns"
       ? Promise.resolve(
           streamed([], { headers: streamHeaders(RUN, CONVERSATION) }),
         )
@@ -514,7 +516,9 @@ test("attaching asks from where the conversation said to, and says so once", asy
   const attached = await attach(CONVERSATION, RUN, 12);
   expect(attached.runId).toBe(RUN);
   const [url, init] = fetch.mock.calls[0] ?? [];
-  expect(url).toBe(`/api/conversations/${CONVERSATION}/runs/${RUN}/events`);
+  expect(url).toBe(
+    `/robinauts/api/conversations/${CONVERSATION}/runs/${RUN}/events`,
+  );
   const headers = init?.headers as Record<string, string>;
   expect(headers["last-event-id"]).toBe("12");
   // `after` and `Last-Event-ID` are two ways of saying one thing, and the

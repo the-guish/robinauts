@@ -5,10 +5,10 @@
  * What an overlay drawer needs that CSS cannot give it: Tab kept inside it
  * while it is open, and the page behind it held still.
  *
- * Two drawers use it: the left panel (`./Panel.tsx`) and the right side
- * panel (`../side/SidePanel.tsx`), each a drawer below the breakpoint of
- * `./breakpoint.ts`. Escape, the backdrop and where the focus goes on
- * opening and closing are the shell's (`./Shell.tsx`).
+ * The right side panel uses it (`../side/SidePanel.tsx`), a drawer below
+ * the breakpoint of `./breakpoint.ts`; the left panel's drawer is
+ * oneberth's shell's. Escape, the backdrop and where the focus goes on
+ * opening and closing are the application's (`./Workspace.tsx`).
  */
 import { useEffect, type RefObject } from "react";
 
@@ -89,7 +89,7 @@ function stops(node: HTMLElement): HTMLElement[] {
  * nobody can see. The listener is on the document rather than on the panel,
  * because the focus may already be outside it -- on the backdrop's
  * neighbours, or nowhere at all -- and that is the case a trap has to catch.
- * Escape and the backdrop are how it is left (`./Shell.tsx`).
+ * Escape and the backdrop are how it is left (`./Workspace.tsx`).
  */
 export function useTrappedFocus(
   panel: RefObject<HTMLElement | null>,

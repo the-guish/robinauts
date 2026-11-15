@@ -4,35 +4,42 @@ A single-page application: Vite, React, TypeScript, Vitest, ESLint. It is
 served by the backend under `/ui/`, and it ships inside the `robinauts` wheel
 ([../docs/specs/frontend.md](../docs/specs/frontend.md)).
 
-What is here is the whole interface: the design tokens and the plain CSS
-over them, the collapsible panel with the profile block, the session
-and the sign-in page, the theme toggle and the banner of the local
-development mode, the hash routing, the history in the panel with renaming
-and deleting, the agent and model pickers, **"Linked devices"** -- the
-phones and the API tokens, and the "Link a phone" dialog that pairs one
-([../docs/architecture/device-pairing.md](../docs/architecture/device-pairing.md))
--- with the page a pairing code opens in a browser, and **the chat** -- the message
-box, the answer arriving a word at a time, re-attaching to a run that is
-already going, stopping one, editing a question, asking for an answer again,
-and retrying or resuming an answer that failed.
+The interface is oneberth's shell, from `@oneberth/ui`, with two
+applications on its rail: Robinauts and neorc
+(oneberth's `docs/specs/shell.md`). The shell holds the session, the sign-in
+page, the theme toggle, the account button and the account pages: personal
+tokens, linked devices with the "Link a phone" dialog, and service tokens.
+neorc is `@neorc/ui`, given the address of its API and Robinauts' forms to
+start a run (`src/apps.tsx`, `src/flows/forms.ts`).
 
-Everything is this project's own code on React alone: `react` and
-`react-dom` are the only runtime dependencies
+What is here is Robinauts' application: the plain CSS over oneberth's
+tokens, the collapsible panel, the history in it with renaming and deleting,
+the agent and model pickers, the side panel, the page a pairing code opens
+in a browser, and **the chat** -- the message box, the answer arriving a word
+at a time, re-attaching to a run that is already going, stopping one,
+editing a question, asking for an answer again, and retrying or resuming an
+answer that failed.
+
+Robinauts' own code is on React alone
 ([../docs/adr/0006-chat-ui-on-react-alone.md](../docs/adr/0006-chat-ui-on-react-alone.md)).
-The chat is behind `src/chat/index.ts`, and nothing outside `src/chat/` knows
-what draws it.
+The runtime dependencies are `react`, `react-dom`, and the two packages of
+the platform, packed from the neorc commit `backend/pyproject.toml` pins by
+`../scripts/ui-packages-from-source.sh`. The chat is behind
+`src/chat/index.ts`, and nothing outside `src/chat/` knows what draws it.
 
 ## Where things are
 
 ```
 src/
-  tokens.css       the design tokens: the source of every colour, radius and font
-  styles.css       the base reset, the body and the focus outline
-  icons/           the icons, as inline SVG over lucide's path data
-  shell/, history/, session/, api/, conversation/,
-  App.tsx, ErrorBoundary.tsx, main.tsx, router.ts
-                   the shell: the panel, the history, the session, the routes
-  devices/         "Linked devices", the "Link a phone" dialog and devices.css
+  main.tsx, App.tsx    oneberth's shell, and the page a pairing code opens
+  apps.tsx             the two applications of the shell: Robinauts and neorc
+  RobinautsApp.tsx     Robinauts' root component, as the shell loads it
+  router.ts            Robinauts' routes, from the shell's route
+  styles.css           the body, the focus outline and Robinauts' base reset
+  icons/               the icons, as inline SVG over lucide's path data
+  shell/, history/, side/, api/, conversation/, projects/, changes/
+                       the application: the panel, the history, the side panel
+  flows/forms.ts       Robinauts' forms to start a run, as A2UI for neorc
   chat/
     index.ts       the seam: the one file the rest of the application imports
     Chat.tsx       the <Chat> of the seam, over the runtime and the thread
@@ -41,62 +48,60 @@ src/
     agui/          our own AG-UI client, over fetch and a ReadableStream
     thread/        the chat window's components, and thread.css
     markdown/      the Markdown renderer, its parser and markdown.css
+vendor/            @neorc/ui and @oneberth/ui, packed; not committed
 ```
 
 The AG-UI client is ours because the chat is ours, and it adds no dependency
 ([../docs/specs/wire.md](../docs/specs/wire.md), "Details likely to change").
-Nothing here imports a library but React.
 
 ## The routes
 
-Hash routing, written by hand in `src/router.ts`: no router library, and the
+Hash routing. The shell reads the first segment of the hash, and gives the
+rest to the application it names; `src/router.ts` reads Robinauts' part. The
 hash is the one part of a URL no server sees, so the static files need no
-fallback route and nothing depends on the `/ui/` the backend serves them
-under.
+fallback route.
 
-| hash                    | what it is                                                    |
-| ----------------------- | ------------------------------------------------------------- |
-| `#/`                    | the empty chat, with the agent and model pickers              |
-| `#/c/<conversation id>` | that conversation, with its model picker                      |
-| `#/devices`             | "Linked devices": the phones and the API tokens, in the shell |
-| `#/link`                | the page a pairing code opens in a browser, signed in or not  |
-| anything else           | the empty chat, with the hash left as it is                   |
+| hash                              | what it is                                                    |
+| --------------------------------- | ------------------------------------------------------------- |
+| `#/robinauts`                     | the empty chat, with the agent and model pickers              |
+| `#/robinauts/c/<conversation id>` | that conversation, with its model picker                      |
+| `#/neorc/…`                       | neorc's pages                                                 |
+| `#/account/…`                     | oneberth's account pages                                      |
+| `#/link`                          | the page a pairing code opens in a browser, outside the shell |
 
 `#/sign-in?error=<code>` is where the backend sends a failed sign-in; the
-sign-in page reads it for itself, and the router neither claims nor rewrites
-it. `#/link?v=1&c=<code>` is the URL inside a pairing QR
+shell's sign-in page reads it. `#/link?v=1&c=<code>` is the URL inside a
+pairing QR
 ([../docs/architecture/device-pairing.md](../docs/architecture/device-pairing.md));
-the query is cut off, since the code is for the app.
+the query is never read, since the code is for the app.
 
 ## Running it
 
 Node.js at the version in `.nvmrc`; with [nvm](https://github.com/nvm-sh/nvm),
 `nvm use` in this directory.
 
+    ../scripts/ui-packages-from-source.sh   # @neorc/ui and @oneberth/ui
     npm ci                  # never `npm install`, except to change a dependency
     npm run dev             # the dev server, proxying the API to 127.0.0.1:8000
 
-`npm run dev` expects a local `robinauts start` on port 8000: `/api`, `/auth`,
-`/health` and `/openapi.json` are proxied to it, with nothing in the way of a
-run's event stream.
+`npm run dev` expects a local `robinauts start` on port 8000: `/robinauts`,
+`/neorc`, `/auth` and `/health` are proxied to it, with nothing in the way of
+a run's event stream.
 
-The backend to run beside it is the **local development mode**
+The backend to run beside it is oneberth's **local mode**
 ([../docs/specs/sign-in.md](../docs/specs/sign-in.md)): no identity provider
-to register anything with, one fixed local user, loopback only, and the
-interface shows its permanent banner. From `../backend/`:
+to register anything with, one local user, loopback only. From
+`../backend/`:
 
     export ROBINAUTS_DATABASE_URL=postgresql://127.0.0.1/robinauts
     export ROBINAUTS_CONFIG=robinauts.toml   # every start reads one
     uv run robinauts db init          # once, on an empty database
-    uv run robinauts start --dev-no-sign-in
+    uv run robinauts start --local
 
-`--dev-no-sign-in` serves the loopback interface and refuses any other
-`--host`. Only the model tables of `ROBINAUTS_CONFIG` are read, and the
+The start prints a URL with a ticket. Opening it signs the local user in,
+and the cookie it sets serves the dev server on another port of the same
+host too. Only the model tables of `ROBINAUTS_CONFIG` are read, and the
 agents and models it defines are the ones the pickers offer.
-
-Signing in for real needs a `public_url`, a provider registration and the
-redirect URI — that needs a deployment. To see the sign-in page
-itself, use the fixture server below.
 
 ### Looking at the shell without a backend
 
@@ -118,7 +123,7 @@ the process runs. It is a development tool: it is in no check, no bundle and
 no wheel.
 
 Every scene with somebody signed in also answers **"Linked devices"**
-(`#/devices`): two phones and a token, a Remove and a Revoke that really
+(`#/account/devices`, oneberth's page): two phones and a token, a Remove and a Revoke that really
 remove, a New token that really adds one and answers its secret, and a
 "Link a phone" whose code is a hand-drawn picture of a QR. Its poll answers
 `waiting` twice and `claimed` after that; the number the fixture phone
@@ -197,15 +202,16 @@ Two of these are generated and thrown away; one is generated and committed.
   goes there. `eslint.config.js` refuses anything else, and
   `src/test/seam-rule.test.ts` proves the rule still fires. It is what keeps
   the chat window replaceable in one directory.
-- Styling: plain CSS over the design tokens. `src/tokens.css` holds them as
-  CSS custom properties and is the source of truth for every colour, radius
-  and font: a rule writes `var(--panel)`, never a literal colour, and dark
-  mode is the tokens' job, so no stylesheet has a `prefers-color-scheme` rule
-  of its own. `src/styles.css` holds only the base reset, the body and the
-  global `:focus-visible` outline. Each area has **one stylesheet**,
+- Styling: plain CSS over the design tokens. `@oneberth/ui` holds them as
+  CSS custom properties, the source of truth for every colour, radius and
+  font of the shell and both applications: a rule writes `var(--panel)`,
+  never a literal colour, and dark mode is the tokens' job, so no stylesheet
+  has a `prefers-color-scheme` rule of its own. `src/styles.css` holds only
+  the body, the global `:focus-visible` outline and the base reset, which
+  holds inside Robinauts' application. Each area has **one stylesheet**,
   imported by the component that uses it (`import "./thread.css"`), and its
   class names are plain and carry the area's prefix: `shell-`, `panel-`,
-  `history-`, `signin-`, `chat-`, `md-`, and `icon`. A prefix says which
+  `history-`, `side-`, `page-`, `chat-`, `md-`, and `icon`. A prefix says which
   stylesheet a class lives in, which is all a reader needs to find it. There
   are no utility classes, no class-merging helper and no variant helper. A
   `style` attribute is only for a value that is genuinely dynamic. Animations

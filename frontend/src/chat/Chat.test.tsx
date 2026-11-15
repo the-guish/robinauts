@@ -156,7 +156,7 @@ test("the empty chat shows what it is given above the box", async () => {
 
 test("a conversation with nothing in it is not the empty chat", async () => {
   stub((call) =>
-    call.url === `/api/conversations/${CONVERSATION}`
+    call.url === `/robinauts/api/conversations/${CONVERSATION}`
       ? json(opened(conversation(1), []))
       : undefined,
   );
@@ -168,7 +168,7 @@ test("a conversation with nothing in it is not the empty chat", async () => {
 
 test("sending a first message posts a turn and reports the conversation", async () => {
   const fetch = stub((call) => {
-    if (call.url === "/api/turns") {
+    if (call.url === "/robinauts/api/turns") {
       return streamed(
         [
           event(
@@ -187,7 +187,7 @@ test("sending a first message posts a turn and reports the conversation", async 
         { headers: streamHeaders(RUN, CONVERSATION) },
       );
     }
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
     return undefined;
@@ -212,8 +212,8 @@ test("an answer arriving is on the screen before the run has ended", async () =>
     headers: streamHeaders(RUN, CONVERSATION),
   });
   stub((call) => {
-    if (call.url === "/api/turns") return response;
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === "/robinauts/api/turns") return response;
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
     return undefined;
@@ -255,8 +255,8 @@ test("thinking is shown while it arrives, and it is collapsed", async () => {
     headers: streamHeaders(RUN, CONVERSATION),
   });
   stub((call) => {
-    if (call.url === "/api/turns") return response;
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === "/robinauts/api/turns") return response;
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
     return undefined;
@@ -310,7 +310,7 @@ test("the box does not offer stopping before there is a run to stop", async () =
   });
   let arrived: (given: Response) => void = () => undefined;
   const fetch = stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
     return undefined;
@@ -348,7 +348,7 @@ test("the box does not offer stopping before there is a run to stop", async () =
 
 test("the action bar of a finished answer: copy, regenerate and edit", async () => {
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
     return undefined;
@@ -374,7 +374,7 @@ test("the branch picker never renders: there is one thread", async () => {
   // There is one thread (ADR 0003): nothing an edit put aside is here to
   // be a branch, and nothing offers to switch to one.
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
     return undefined;
@@ -396,7 +396,7 @@ test("a message that was not sent says so, where it can be read", async () => {
     headers: streamHeaders(RUN, CONVERSATION),
   });
   const fetch = stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
     return undefined;
@@ -437,7 +437,7 @@ test("a message that was not sent says so, where it can be read", async () => {
 
 test("a run that ended badly says so, and says it once", async () => {
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(
         opened(conversation(1), TREE, {
           ended_badly: {

@@ -15,46 +15,33 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { useRef } from "react";
 import { expect, test, vi } from "vitest";
 
-import type { User } from "../session/session";
 import { Panel } from "../shell/Panel";
 import { callsTo, json, refusal, stubFetch, type Call } from "../test/api";
 import { conversation, id, page } from "../test/conversations";
+import { hashOf, InShell } from "../test/shell";
 import { useHistory } from "./history";
 import { STILL_ANSWERING, TOO_LONG } from "./HistoryList";
 
-const USER: User = {
-  id: "u-1",
-  provider: "google",
-  name: "Ada",
-  email: "ada@x.test",
-};
-
 /** The panel, with the history hook wired to it as the shell wires it. */
-function WithHistory({
-  current = null,
-  onCloseDrawer = () => undefined,
-}: {
-  current?: string | null;
-  onCloseDrawer?: () => void;
-}) {
+function WithHistory({ current = null }: { current?: string | null }) {
+  return (
+    <InShell>
+      <Panelled current={current} />
+    </InShell>
+  );
+}
+
+function Panelled({ current }: { current: string | null }) {
   const history = useHistory();
-  const closer = useRef<HTMLButtonElement>(null);
   return (
     <Panel
-      user={USER}
       history={history}
       current={current}
       collapsed={false}
       onCollapse={() => undefined}
-      drawer={false}
-      onCloseDrawer={onCloseDrawer}
       onNewChat={() => undefined}
-      signOut={() => Promise.resolve()}
-      signInConfigured
-      closeRef={closer}
     />
   );
 }
@@ -77,7 +64,7 @@ test("each conversation is a link to its own hash, and the open one is marked", 
   await panel({ current: id(2) });
 
   const first = screen.getByRole("link", { name: "First" });
-  expect(first).toHaveAttribute("href", `#/c/${id(1)}`);
+  expect(first).toHaveAttribute("href", hashOf(`/c/${id(1)}`));
   expect(first).not.toHaveAttribute("aria-current");
   expect(screen.getByRole("link", { name: "Second" })).toHaveAttribute(
     "aria-current",
@@ -125,7 +112,7 @@ test("a page with a cursor offers the next one", async () => {
   await waitFor(() => {
     expect(rows()).toHaveLength(2);
   });
-  expect(callsTo(fetch, "/api/conversations")[1]?.url).toContain(
+  expect(callsTo(fetch, "/robinauts/api/conversations")[1]?.url).toContain(
     "cursor=cursor-1",
   );
   // The last page hands back no cursor, so the button goes.
@@ -163,13 +150,13 @@ test("renaming is inline: Enter saves it and the list is asked for again", async
 
   expect(asked.filter((call) => call.method === "PATCH")).toEqual([
     {
-      url: `/api/conversations/${id(1)}`,
+      url: `/robinauts/api/conversations/${id(1)}`,
       method: "PATCH",
       body: { title: "Renamed" },
     },
   ]);
   await waitFor(() => {
-    expect(callsTo(fetch, "/api/conversations")).toHaveLength(2);
+    expect(callsTo(fetch, "/robinauts/api/conversations")).toHaveLength(2);
   });
   // The box has gone, and the focus is back where it was opened from.
   expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull();
@@ -276,7 +263,7 @@ test("Yes deletes it, the list is asked for again, and the page leaves it", asyn
     }
     return deleted ? json(page([])) : listing();
   });
-  location.hash = `#/c/${id(1)}`;
+  location.hash = hashOf(`/c/${id(1)}`);
 
   fireEvent.click(screen.getByRole("button", { name: "Delete" }));
   await act(async () => {
@@ -287,14 +274,14 @@ test("Yes deletes it, the list is asked for again, and the page leaves it", asyn
     fetch.mock.calls.filter(
       ([url, init]) =>
         init?.method === "DELETE" &&
-        String(url) === `/api/conversations/${id(1)}`,
+        String(url) === `/robinauts/api/conversations/${id(1)}`,
     ),
   ).toHaveLength(1);
   await waitFor(() => {
     expect(screen.getByText("No conversations yet.")).toBeVisible();
   });
   // It was the conversation the page was on, and there is no trash.
-  expect(location.hash).toBe("#/");
+  expect(location.hash).toBe(hashOf(""));
 });
 
 test("a conversation that is still answering is not deleted, and says so", async () => {
@@ -315,15 +302,7 @@ test("a conversation that is still answering is not deleted, and says so", async
   // The API's own detail names a run and a state, for an operator's log.
   expect(screen.getByRole("alert")).toHaveTextContent(STILL_ANSWERING);
   expect(screen.getByRole("link", { name: "First" })).toBeVisible();
-  expect(callsTo(fetch, "/api/conversations")).toHaveLength(1);
-});
-
-test("opening a conversation closes the drawer it was opened from", async () => {
-  const closed = vi.fn();
-  stubFetch(() => listing());
-  await panel({ onCloseDrawer: closed });
-  fireEvent.click(screen.getByRole("link", { name: "First" }));
-  expect(closed).toHaveBeenCalled();
+  expect(callsTo(fetch, "/robinauts/api/conversations")).toHaveLength(1);
 });
 
 test("the box keeps the focus while a rename is in the air, and Escape stays in the row", async () => {
@@ -428,7 +407,7 @@ test("a title is bounded in code points, as the backend counts them", async () =
   });
   expect(asked.filter((call) => call.method === "PATCH")).toEqual([
     {
-      url: `/api/conversations/${id(1)}`,
+      url: `/robinauts/api/conversations/${id(1)}`,
       method: "PATCH",
       body: { title: emoji },
     },

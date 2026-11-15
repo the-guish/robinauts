@@ -32,7 +32,7 @@ export const FOLDED_KEY = "projects.folded";
 export type Projects = Offered<Project>;
 
 const askProjects = (signal: AbortSignal) =>
-  request("get", "/api/projects", { signal });
+  request("get", "/robinauts/api/projects", { signal });
 
 /** The projects, asked for again each time `round` changes. */
 export function useProjects(round: number): Projects {
@@ -41,7 +41,7 @@ export function useProjects(round: number): Projects {
 
 /** Make a project of that name, or find the one the user already has. */
 export async function createProject(name: string): Promise<Project> {
-  return request("post", "/api/projects", { body: { name } });
+  return request("post", "/robinauts/api/projects", { body: { name } });
 }
 
 /** The project that is "Default", or the first there is. */

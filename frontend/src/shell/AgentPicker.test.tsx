@@ -114,7 +114,7 @@ test("the list is asked for once, and a re-render is not a second ask", async ()
   // chat" -- which remounts the picker -- costs nothing.
   rerender();
   expect(fetch).toHaveBeenCalledTimes(1);
-  expect(fetch.mock.calls[0]?.[0]).toBe("/api/agents");
+  expect(fetch.mock.calls[0]?.[0]).toBe("/robinauts/api/agents");
 });
 
 test("a refusal becomes something to show, not a silence", async () => {

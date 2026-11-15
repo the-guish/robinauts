@@ -46,6 +46,7 @@ fi
 
 # The interface the server serves, built from the lock. CHECK_BUNDLED keeps
 # the build from rewriting bundled-packages.txt.
+"$root/scripts/ui-packages-from-source.sh"
 cd "$root/frontend"
 npm ci --ignore-scripts
 CHECK_BUNDLED=1 npm run build

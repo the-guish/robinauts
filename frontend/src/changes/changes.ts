@@ -7,13 +7,14 @@
  *
  * The feed only says that something of the signed-in user changed. What
  * changed is read again by whoever shows it: the panel's list and the open
- * conversation (`src/shell/Shell.tsx`). The first answer is the version to
+ * conversation (`src/shell/Workspace.tsx`). The first answer is the version to
  * start from, and calls nothing.
  *
- * A hidden tab stops polling. A tab streaming a turn already holds two
- * connections, and a browser allows six per origin over HTTP/1.1. Visible
- * again, it polls at once, and the server answers at once when the version
- * moved in the meantime.
+ * A hidden tab stops polling, and so does Robinauts while oneberth's shell
+ * shows another application (`active`). A tab streaming a turn already holds
+ * two connections, neorc's long poll a third, and a browser allows six per
+ * origin over HTTP/1.1. Shown again, it polls at once, and the server answers
+ * at once when the version moved in the meantime.
  *
  * A poll that fails waits before the next (`retryDelay`), longer after each
  * failure in a row, and the first poll that succeeds starts the count again.
@@ -42,14 +43,21 @@ export function retryDelay(failures: number): number {
 }
 
 /**
- * Poll the feed while this is mounted, and call `onChange` each time the
- * version moves.
+ * Poll the feed while this is mounted and `active`, and call `onChange` each
+ * time the version moves.
  */
-export function useChanges(onChange: () => void): void {
+export function useChanges(onChange: () => void, active = true): void {
   const latest = useRef(onChange);
   useEffect(() => {
     latest.current = onChange;
   }, [onChange]);
+  const shown = useRef(active);
+  /** What the poll below does when the application is hidden or shown. */
+  const toggled = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    shown.current = active;
+    toggled.current?.();
+  }, [active]);
 
   useEffect(() => {
     let stopped = false;
@@ -60,7 +68,8 @@ export function useChanges(onChange: () => void): void {
     /** What ends a wait early: a retry's delay, or a hidden tab's pause. */
     let wake: (() => void) | null = null;
 
-    const hidden = () => document.visibilityState === "hidden";
+    const hidden = () =>
+      document.visibilityState === "hidden" || !shown.current;
 
     function pause(ms: number | null): Promise<void> {
       return new Promise((resolve) => {
@@ -81,7 +90,7 @@ export function useChanges(onChange: () => void): void {
         const control = new AbortController();
         polling = control;
         try {
-          const answer = await request("get", "/api/changes", {
+          const answer = await request("get", "/robinauts/api/changes", {
             query:
               version === null ? {} : { after: version, timeout: POLL_SECONDS },
             signal: control.signal,
@@ -114,9 +123,11 @@ export function useChanges(onChange: () => void): void {
       wake?.();
     };
     document.addEventListener("visibilitychange", onVisibility);
+    toggled.current = onVisibility;
     void poll();
     return () => {
       stopped = true;
+      toggled.current = null;
       document.removeEventListener("visibilitychange", onVisibility);
       polling?.abort();
       wake?.();

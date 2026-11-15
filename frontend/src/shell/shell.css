@@ -2,22 +2,25 @@
 /* Copyright The Robinauts Authors */
 
 /*
- * The shell's frame: the panel beside the page, the column the chat lives
- * in, the conversation's title and the line under it, and the banner of the
- * local development mode (`./Shell.tsx`, `./LocalModeBanner.tsx`).
+ * The application's frame: the panel beside the page, the column the chat
+ * lives in, the conversation's title and the line under it
+ * (`./Workspace.tsx`).
  *
- * **One breakpoint, 48rem**, and it is the number in `./breakpoint.ts` too:
- * below it the panel is a drawer and this column carries the button that
- * opens it; at it and above, the panel stands beside the page and the button
- * is gone. Written in `rem` for the reason that file gives.
+ * **One breakpoint, 48rem**, and it is the number in `./breakpoint.ts` and in
+ * oneberth's shell too: below it the panel is in the shell's drawer, the side
+ * panel is a drawer, and this column carries the button that opens it; at it
+ * and above, both stand beside the page and the button is gone. Written in
+ * `rem` for the reason that file gives.
  *
  * Hover is asked for only where there is a pointer that hovers, so a tap on a
  * touch screen does not leave a control looking hovered after it.
  */
 
+/* The whole of the area oneberth's shell gives the application. */
 .shell {
   display: flex;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
   background-color: var(--ground);
   color: var(--ink);
 }
@@ -98,15 +101,6 @@
   justify-content: center;
   column-gap: 1rem;
   row-gap: 0.5rem;
-}
-
-.banner-local {
-  margin: 0;
-  background-color: var(--warn-bg);
-  padding: 0.375rem 1rem;
-  font-size: 0.875rem;
-  line-height: calc(1.25 / 0.875);
-  color: var(--warn-ink);
 }
 
 @media (hover: hover) {

@@ -27,6 +27,6 @@ test("an app is a tab of kind app, keyed by its server and its tool", () => {
 
 test("the view's address spells each part as a part", () => {
   expect(viewUrl("a&b", APP)).toBe(
-    "/api/apps/my%20server/show%20todos/view?agent=a%26b",
+    "/robinauts/api/apps/my%20server/show%20todos/view?agent=a%26b",
   );
 });

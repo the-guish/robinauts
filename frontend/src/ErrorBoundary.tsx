@@ -15,7 +15,7 @@
  */
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
-import "./session/session.css";
+import "./page.css";
 
 interface Caught {
   failure: Error | null;

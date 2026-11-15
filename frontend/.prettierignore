@@ -5,6 +5,7 @@
 # and reformatting them would make the next tool run a diff.
 dist
 node_modules
+vendor
 package-lock.json
 bundled-packages.txt
 src/api/schema.d.ts

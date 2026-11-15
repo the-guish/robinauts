@@ -303,7 +303,7 @@ test("an ordinary URL is not a module reference", async () => {
   // code that happens to share a constructor, and the API client is full of
   // them; a rule that refused them would be a rule people turn off.
   for (const code of [
-    'void new URL("/api/runs", location.origin);',
+    'void new URL("/robinauts/api/runs", location.origin);',
     'void new URL("https://example.test/x");',
     "declare const base: string;\nvoid new URL(`${base}/runs`);",
     "declare const href: string;\nvoid new URL(href);",

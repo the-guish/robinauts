@@ -642,10 +642,14 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
   ): Promise<void> {
     let opened;
     try {
-      opened = await request("get", "/api/conversations/{conversation_id}", {
-        path: { conversation_id: conversationId },
-        signal,
-      });
+      opened = await request(
+        "get",
+        "/robinauts/api/conversations/{conversation_id}",
+        {
+          path: { conversation_id: conversationId },
+          signal,
+        },
+      );
     } catch (failure) {
       if (signal.aborted) return;
       dispatch({
@@ -729,10 +733,14 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     refreshing = control;
     let opened: Opened;
     try {
-      opened = await request("get", "/api/conversations/{conversation_id}", {
-        path: { conversation_id: conversationId },
-        signal: control.signal,
-      });
+      opened = await request(
+        "get",
+        "/robinauts/api/conversations/{conversation_id}",
+        {
+          path: { conversation_id: conversationId },
+          signal: control.signal,
+        },
+      );
     } catch (failure) {
       if (control.signal.aborted || refreshing !== control) return;
       refreshing = null;

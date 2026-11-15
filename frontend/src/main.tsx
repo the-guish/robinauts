@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright The Robinauts Authors
+import { applyRememberedTheme } from "@oneberth/ui";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
@@ -8,7 +9,6 @@ import { createRoot } from "react-dom/client";
 // rule of a component's wins over it at equal specificity.
 import "./styles.css";
 import { App } from "./App";
-import { applyRememberedTheme } from "./shell/ThemeToggle";
 
 // Before the first paint, so a browser set to dark by hand does not show the
 // light page for a frame first.

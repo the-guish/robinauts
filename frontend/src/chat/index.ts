@@ -47,7 +47,7 @@ export type ConversationId = string;
 export type AgentId = string;
 
 /**
- * A model, as the configuration names it and `GET /api/models` offers it
+ * A model, as the configuration names it and `GET /robinauts/api/models` offers it
  * (`docs/specs/agents.md`). The id alone, like the agent's.
  */
 export type ModelId = string;
@@ -79,7 +79,7 @@ export type Drafts = Map<ConversationId, string>;
  *
  * `onConversationStarted` is the one thing the chat cannot decide for the
  * application: a first message creates a conversation
- * (`POST /api/turns`, `docs/specs/wire.md`), and the interface then has a
+ * (`POST /robinauts/api/turns`, `docs/specs/wire.md`), and the interface then has a
  * conversation to be on -- a route to go to and a row for the panel. The
  * chat reports the id; what to do about it is the application's.
  */
@@ -99,7 +99,7 @@ export interface ChatProps {
    *
    * The shell draws the title and the agent above the chat, and the panel's
    * pages do not hold every conversation a link can open. This is the one
-   * read that always has them (`GET /api/conversations/{id}`).
+   * read that always has them (`GET /robinauts/api/conversations/{id}`).
    */
   onConversationOpened?: (conversation: Conversation) => void;
   /**
@@ -141,8 +141,8 @@ export interface ChatProps {
    * pickers.
    *
    * The agent is a choice only while there is no conversation, and the
-   * pickers are the shell's -- they are over `GET /api/agents` and
-   * `GET /api/models`, they remember what was chosen, and they are what
+   * pickers are the shell's -- they are over `GET /robinauts/api/agents` and
+   * `GET /robinauts/api/models`, they remember what was chosen, and they are what
    * `agentId` and `modelId` above come from. The chat is told
    * where it goes rather than how it is built, so nothing about an agent has
    * to cross this seam twice.

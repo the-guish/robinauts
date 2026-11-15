@@ -16,7 +16,7 @@
  * dropped. An opaque origin has no name to post to, so answers go to `"*"`,
  * and they carry only what the view may see: the theme and what its own
  * server answered. Tool calls go to the backend, which relays them to the
- * server with its credential (`POST /api/apps/<server>/tools/<tool>`).
+ * server with its credential (`POST /robinauts/api/apps/<server>/tools/<tool>`).
  *
  * **Loading.** The view is hidden until the app's own tool has answered,
  * and a view that never starts, or a first call that fails, is said so in
@@ -61,7 +61,7 @@ function systemDark(): boolean {
 }
 
 function subscribeToTheme(changed: () => void): () => void {
-  // The choice is an attribute on <html> (`../shell/ThemeToggle.tsx`); the
+  // The choice is an attribute on <html> (oneberth's theme toggle); the
   // system's is a media query. Either may change the theme on the screen.
   const observer = new MutationObserver(changed);
   observer.observe(document.documentElement, {
@@ -97,7 +97,7 @@ function callTool(
   args: Readonly<Record<string, unknown>>,
   signal: AbortSignal,
 ) {
-  return request("post", "/api/apps/{server}/tools/{tool}", {
+  return request("post", "/robinauts/api/apps/{server}/tools/{tool}", {
     path: { server, tool },
     body: { agent, arguments: { ...args } },
     signal,

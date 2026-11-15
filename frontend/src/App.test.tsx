@@ -1,118 +1,97 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright The Robinauts Authors
-import { act, render, screen } from "@testing-library/react";
-import { expect, test, vi } from "vitest";
+import { resetSession } from "@oneberth/ui";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, expect, test } from "vitest";
 
 import { App } from "./App";
+import { json, stubFetch } from "./test/api";
+import { page } from "./test/conversations";
 
-/** Answers `/auth/session` with this, and `/api/agents` with one agent. */
-function answering(session: unknown, status = 200) {
-  const fetch = vi
-    .fn<typeof globalThis.fetch>()
-    .mockImplementation((input: RequestInfo | URL) => {
-      const path = String(input);
-      const body =
-        path === "/auth/session"
-          ? JSON.stringify(session)
-          : JSON.stringify({
-              items: [{ id: "helper", title: "Helper", engine: "langgraph" }],
-            });
-      return Promise.resolve(
-        new Response(body, {
-          status: path === "/auth/session" ? status : 200,
-          headers: { "content-type": "application/json" },
-        }),
-      );
-    });
-  vi.stubGlobal("fetch", fetch);
-  return fetch;
+const ADA = {
+  kind: "user",
+  id: "u-1",
+  name: "Ada",
+  email: "ada@x.test",
+  provider: "google",
+};
+
+/** oneberth's session, as `GET /auth/session` answers it. */
+function session(principal: unknown) {
+  return {
+    mode: "providers",
+    providers: [{ id: "google", title: "Google" }],
+    principal,
+    roles: principal === null ? [] : ["robinauts/user", "neorc/user"],
+    pairing: null,
+  };
 }
 
-/** Render, and let both calls arrive. */
-async function app() {
+// The session store is oneberth's module state: each test's render asks again.
+afterEach(resetSession);
+
+/** Answers the session with this, and Robinauts' own reads with nothing. */
+async function app(principal: unknown) {
+  const fetch = stubFetch((call) => {
+    if (call.url === "/auth/session") return json(session(principal));
+    if (call.url.startsWith("/robinauts/api/agents")) {
+      return json({ items: [] });
+    }
+    if (call.url.startsWith("/robinauts/api/models")) {
+      return json({ items: [] });
+    }
+    if (call.url.startsWith("/robinauts/api/apps")) return json({ apps: [] });
+    return json(page([]));
+  });
   render(<App />);
   await act(async () => {
     await Promise.resolve();
-    await Promise.resolve();
   });
+  return fetch;
 }
 
-test("nobody signed in: the sign-in page in place of every page", async () => {
-  answering({
-    sign_in: true,
-    local_development: false,
-    providers: [{ id: "google", title: "Google" }],
-    user: null,
-  });
-  await app();
+test("nobody signed in: the shell's sign-in page in place of every page", async () => {
+  await app(null);
   expect(
-    screen.getByRole("heading", { name: "Sign in to Robinauts" }),
+    screen.getByRole("link", { name: /Sign in with Google/ }),
   ).toBeVisible();
   expect(screen.queryByRole("complementary", { name: "Panel" })).toBeNull();
 });
 
 test("a pairing code opened in a browser: the link page, signed out", async () => {
   location.hash = "#/link?v=1&c=abc123";
-  answering({
-    sign_in: true,
-    local_development: false,
-    providers: [{ id: "google", title: "Google" }],
-    user: null,
-  });
-  await app();
+  await app(null);
   expect(
     screen.getByText(
       "This code is for the Robinauts app on a phone. Open the app and scan it there.",
     ),
   ).toBeVisible();
-  expect(
-    screen.queryByRole("heading", { name: "Sign in to Robinauts" }),
-  ).toBeNull();
+  expect(screen.queryByRole("link", { name: /Sign in with/ })).toBeNull();
   // It reads no parameter, and leaves the hash as it found it.
   expect(location.hash).toBe("#/link?v=1&c=abc123");
 });
 
 test("the link page is the same for somebody signed in", async () => {
   location.hash = "#/link";
-  answering({
-    sign_in: true,
-    local_development: false,
-    providers: [{ id: "google", title: "Google" }],
-    user: { id: "u-1", provider: "google", name: "Ada", email: "ada@x.test" },
-  });
-  await app();
+  await app(ADA);
   expect(screen.getByText(/This code is for the Robinauts app/)).toBeVisible();
-  expect(screen.queryByRole("complementary", { name: "Panel" })).toBeNull();
+  expect(screen.queryByRole("navigation", { name: "Applications" })).toBeNull();
 });
 
-test("signed in: the shell, with the panel and the empty chat", async () => {
-  answering({
-    sign_in: true,
-    local_development: false,
-    providers: [{ id: "google", title: "Google" }],
-    user: { id: "u-1", provider: "google", name: "Ada", email: "ada@x.test" },
+test("signed in: the rail of two applications, and Robinauts first", async () => {
+  await app(ADA);
+  const rail = await screen.findByRole("navigation", { name: "Applications" });
+  const links = within(rail).getAllByRole("link");
+  expect(links.map((link) => link.textContent)).toEqual(["Robinauts", "neorc"]);
+  expect(within(rail).getByRole("button", { name: "Account" })).toBeVisible();
+  // Robinauts is the application opened first, on its empty chat.
+  await waitFor(() => {
+    expect(location.hash).toBe("#/robinauts");
   });
-  await app();
-  expect(screen.getByRole("complementary", { name: "Panel" })).toBeVisible();
-  expect(screen.getByRole("heading", { name: "New chat" })).toBeVisible();
-  expect(screen.queryByRole("note")).toBeNull();
-});
-
-test("the local development mode: the shell, and the banner", async () => {
-  answering({
-    sign_in: false,
-    local_development: true,
-    providers: [],
-    user: { id: "u-0", provider: "!local", name: "Local developer" },
-  });
-  await app();
-  expect(screen.getByRole("complementary", { name: "Panel" })).toBeVisible();
-  expect(screen.getByRole("note")).toHaveTextContent(/Local development mode/);
-});
-
-test("a session that cannot be loaded offers a way to ask again", async () => {
-  answering({ error: "broken", detail: "the database is away" }, 500);
-  await app();
-  expect(screen.getByRole("alert")).toHaveTextContent("the database is away");
-  expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
+  expect(
+    await screen.findByRole("complementary", { name: "Panel" }),
+  ).toBeVisible();
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "New chat" }),
+  ).toBeVisible();
 });

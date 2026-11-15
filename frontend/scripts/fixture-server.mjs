@@ -50,8 +50,8 @@
  * A turn really writes its messages into the conversation, so the reread that
  * follows one shows what the store would.
  *
- * **"Linked devices"** (`#/devices`) is answered in every scene with somebody
- * signed in: a few phones and tokens, a Remove and a Revoke that really
+ * **"Linked devices"**, oneberth's account page (`#/account/devices`), is
+ * answered in every scene with somebody signed in: a few phones and tokens, a Remove and a Revoke that really
  * remove, a New token that really adds and answers a secret, and a pairing
  * whose poll says `waiting` twice and `claimed` after that. The number the
  * fixture phone shows is `482 913`; anything else is a wrong number, and the
@@ -117,12 +117,23 @@ const NOT_OFFERED = "body.model_id: is not a model this deployment offers";
 const NO_LONGER_OFFERED =
   "this conversation's model is no longer offered here; move the conversation to another";
 
-const SIGNED_IN = {
-  sign_in: true,
-  local_development: false,
-  providers: PROVIDERS,
-  user: USER,
-};
+/**
+ * oneberth's session (`GET /auth/session`), with that principal.
+ *
+ * @param {Record<string, unknown> | null} principal
+ * @param {"providers" | "local"} mode
+ */
+function session(principal, mode = "providers") {
+  return {
+    mode,
+    providers: mode === "local" ? [] : PROVIDERS,
+    principal,
+    roles: principal === null ? [] : ["robinauts/user", "neorc/user"],
+    pairing: null,
+  };
+}
+
+const SIGNED_IN = session({ kind: "user", ...USER });
 
 const RUN = "99999999-9999-4999-8999-999999999999";
 
@@ -405,26 +416,20 @@ const SCENES = {
     agents: [],
   },
   local: {
-    session: {
-      sign_in: false,
-      local_development: true,
-      providers: [],
-      user: {
+    session: session(
+      {
+        kind: "user",
         id: "00000000-0000-0000-0000-000000000000",
         provider: "!local",
         name: "Local developer",
         email: null,
       },
-    },
+      "local",
+    ),
     agents: AGENTS,
   },
   "signed-out": {
-    session: {
-      sign_in: true,
-      local_development: false,
-      providers: PROVIDERS,
-      user: null,
-    },
+    session: session(null),
     agents: [],
   },
 };
@@ -525,14 +530,14 @@ function body(request) {
 }
 
 const UUID = "[0-9a-fA-F-]{36}";
-const ONE = new RegExp(`^/api/conversations/(${UUID})$`);
+const ONE = new RegExp(`^/robinauts/api/conversations/(${UUID})$`);
 const CANCEL = new RegExp(
-  `^/api/conversations/(${UUID})/runs/(${UUID})/cancel$`,
+  `^/robinauts/api/conversations/(${UUID})/runs/(${UUID})/cancel$`,
 );
-const LEAF = new RegExp(`^/api/conversations/(${UUID})/leaf$`);
-const MODEL = new RegExp(`^/api/conversations/(${UUID})/model$`);
-const TURNS = new RegExp(`^/api/conversations/(${UUID})/turns$`);
-const EVENTS = new RegExp(`^/api/runs/(${UUID})/events$`);
+const LEAF = new RegExp(`^/robinauts/api/conversations/(${UUID})/leaf$`);
+const MODEL = new RegExp(`^/robinauts/api/conversations/(${UUID})/model$`);
+const TURNS = new RegExp(`^/robinauts/api/conversations/(${UUID})/turns$`);
+const EVENTS = new RegExp(`^/robinauts/api/runs/(${UUID})/events$`);
 
 /**
  * The conversation routes, as far as the interface uses them.
@@ -548,7 +553,7 @@ const EVENTS = new RegExp(`^/api/runs/(${UUID})/events$`);
  */
 async function conversations(request, response, path, query) {
   const method = request.method ?? "GET";
-  if (path === "/api/conversations" && method === "GET") {
+  if (path === "/robinauts/api/conversations" && method === "GET") {
     const cursor = query.get("cursor");
     const from = cursor === null ? 0 : Number(cursor);
     const items = listed.slice(from, from + PAGE);
@@ -1374,11 +1379,11 @@ const server = createServer((request, response) => {
     json(response, 200, fixture.session);
     return;
   }
-  if (path === "/api/agents") {
+  if (path === "/robinauts/api/agents") {
     json(response, 200, { items: fixture.agents });
     return;
   }
-  if (path === "/api/models") {
+  if (path === "/robinauts/api/models") {
     json(response, 200, { items: MODELS });
     return;
   }
@@ -1391,7 +1396,8 @@ const server = createServer((request, response) => {
     path.startsWith("/auth/tokens") ||
     path.startsWith("/auth/pairings")
   ) {
-    const user = /** @type {{user?: unknown}} */ (fixture.session).user;
+    const user = /** @type {{principal?: unknown}} */ (fixture.session)
+      .principal;
     if (user === null || user === undefined) {
       refuse(
         response,
@@ -1408,7 +1414,7 @@ const server = createServer((request, response) => {
     });
     return;
   }
-  if (path === "/api/turns" && request.method === "POST") {
+  if (path === "/robinauts/api/turns" && request.method === "POST") {
     // A first message creates the conversation, and the response's headers
     // are how the interface learns which one (`docs/specs/wire.md`).
     void body(request).then((sent) => {
@@ -1455,7 +1461,7 @@ const server = createServer((request, response) => {
     void follow(response, events[1] ?? "", Number.isFinite(after) ? after : 0);
     return;
   }
-  if (path.startsWith("/api/conversations")) {
+  if (path.startsWith("/robinauts/api/conversations")) {
     void conversations(request, response, path, asked.searchParams).then(
       (answered) => {
         if (!answered) {

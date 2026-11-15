@@ -1,0 +1,46 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright The Robinauts Authors */
+
+/*
+ * The pages that stand alone, outside oneberth's shell: the page a pairing
+ * code opens in a browser (`./LinkPage.tsx`) and the page of an error that
+ * stopped the whole interface (`./ErrorBoundary.tsx`).
+ */
+
+.page {
+  margin-inline: auto;
+  display: flex;
+  min-height: 100vh;
+  max-width: 28rem;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.75rem;
+  padding-inline: 1rem;
+}
+
+.page-title {
+  font-size: 1.25rem;
+  line-height: calc(1.75 / 1.25);
+  font-weight: 600;
+}
+
+.page-text {
+  color: var(--muted);
+}
+
+.page-failed {
+  color: var(--bad);
+}
+
+.page-button {
+  border-radius: var(--radius);
+  border: 1px solid var(--edge);
+  background-color: var(--paper);
+  padding: 0.375rem 0.75rem;
+}
+
+@media (hover: hover) {
+  .page-button:hover {
+    background-color: var(--hover);
+  }
+}

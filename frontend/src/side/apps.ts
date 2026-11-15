@@ -5,7 +5,7 @@
  * The agent's MCP apps, as tabs the side panel offers
  * (`docs/architecture/web.md`, "Apps").
  *
- * The list is the backend's (`GET /api/apps?agent=`): the apps of the tool
+ * The list is the backend's (`GET /robinauts/api/apps?agent=`): the apps of the tool
  * servers the agent names. It is asked for again when the agent changes,
  * and a list that does not come is no apps: nothing to offer, and no
  * failure of the panel's.
@@ -29,7 +29,7 @@ export function useApps(agent: string | null): readonly App[] {
   useEffect(() => {
     if (agent === null) return;
     const dropped = new AbortController();
-    request("get", "/api/apps", {
+    request("get", "/robinauts/api/apps", {
       query: { agent },
       signal: dropped.signal,
     }).then(
@@ -84,7 +84,7 @@ export function appOf(apps: readonly App[], offer: TabOffer): App | undefined {
 export function viewUrl(agent: string, app: App): string {
   const server = encodeURIComponent(app.server);
   const tool = encodeURIComponent(app.tool);
-  return `/api/apps/${server}/${tool}/view?agent=${encodeURIComponent(agent)}`;
+  return `/robinauts/api/apps/${server}/${tool}/view?agent=${encodeURIComponent(agent)}`;
 }
 
 /**

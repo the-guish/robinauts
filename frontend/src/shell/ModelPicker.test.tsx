@@ -263,5 +263,5 @@ test("the list is asked for once", async () => {
   expect(result.current).toEqual({ status: "ready", items: MODELS });
   rerender();
   expect(fetch).toHaveBeenCalledTimes(1);
-  expect(fetch.mock.calls[0]?.[0]).toBe("/api/models");
+  expect(fetch.mock.calls[0]?.[0]).toBe("/robinauts/api/models");
 });

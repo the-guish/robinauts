@@ -62,6 +62,10 @@ if [ "$running" -lt "$wanted" ]; then
     exit 2
 fi
 
+# @neorc/ui and @oneberth/ui, packed from the neorc commit that
+# backend/pyproject.toml pins; the lock holds the hash of each.
+"$root/scripts/ui-packages-from-source.sh"
+
 # --ignore-scripts as well as .npmrc: the file is the rule, this is the
 # reminder that no package's own code runs while it is being installed.
 npm ci --ignore-scripts
@@ -85,4 +89,17 @@ CHECK_BUNDLED=1 npm run build
 # ships. The registry does not serve attestations for every dev-only package,
 # and a 404 there is not a reason to fail.
 npm audit --audit-level=low
-npm audit signatures --omit=dev
+# The registry has neither @neorc/ui nor @oneberth/ui, which are packed from the
+# pinned neorc commit, and `npm audit signatures` stops at a package it cannot
+# find there. What they bring from the registry ships, so the signatures are
+# read over the shipped tree as the registry knows it: the lock with the two
+# tarballs taken out and their dependencies in their place, installed as it pins
+# them (scripts/registry-tree.mjs).
+tree=$(mktemp -d)
+trap 'rm -rf "$tree"' EXIT
+trap 'rm -rf "$tree"; exit 130' INT
+trap 'rm -rf "$tree"; exit 143' TERM
+node scripts/registry-tree.mjs "$tree"
+cp .npmrc "$tree/.npmrc"
+(cd "$tree" && npm ci --ignore-scripts --omit=dev --no-audit --no-fund &&
+    npm audit signatures --omit=dev)

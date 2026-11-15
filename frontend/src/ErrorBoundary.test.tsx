@@ -6,10 +6,11 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
 import { ErrorBoundary } from "./ErrorBoundary";
 
-// The sign-in page, made to throw: it is the page somebody who is not signed
-// in reaches, and a blank one there is a deployment nobody can get into.
-vi.mock("./session/SignInPage", () => ({
-  SignInPage: () => {
+// oneberth's shell, made to throw: it holds the sign-in page, the page
+// somebody who is not signed in reaches, and a blank one there is a
+// deployment nobody can get into.
+vi.mock("@oneberth/ui", () => ({
+  Shell: () => {
     throw new Error("the sign-in page fell over");
   },
 }));
@@ -37,21 +38,7 @@ test("a child that throws becomes a message and a way back", () => {
   expect(screen.getByRole("button", { name: "Reload" })).toBeVisible();
 });
 
-test("the boundary is outside the sign-in page, not only the shell", async () => {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn<typeof globalThis.fetch>().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          sign_in: true,
-          local_development: false,
-          providers: [{ id: "google", title: "Google" }],
-          user: null,
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      ),
-    ),
-  );
+test("the boundary is outside oneberth's shell, the sign-in page included", async () => {
   render(<App />);
   await act(async () => {
     await Promise.resolve();

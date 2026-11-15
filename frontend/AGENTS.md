@@ -67,9 +67,9 @@ Do not:
   `<style>` block in `index.html`. Each fails the build.
 - write a literal colour, radius or font, a `prefers-color-scheme` rule, a
   utility class or a class-merging helper. Style with plain CSS over the
-  tokens of `src/tokens.css` (`var(--panel)`), one stylesheet per area,
+  tokens of `@oneberth/ui` (`var(--panel)`), one stylesheet per area,
   imported by the component that uses it, with class names prefixed by the
-  area (`shell-`, `panel-`, `history-`, `signin-`, `chat-`, `md-`, `icon`).
+  area (`shell-`, `panel-`, `history-`, `side-`, `page-`, `chat-`, `md-`, `icon`).
   Dark mode is the tokens' job. A `style` attribute is only for a value
   that is genuinely dynamic. Keep animations off under
   `prefers-reduced-motion: reduce`, and leave the global `:focus-visible`

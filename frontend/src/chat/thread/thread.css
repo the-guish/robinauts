@@ -5,7 +5,7 @@
  * The chat window: the thread, its messages, the box, and the sentences
  * `Chat.tsx` says beside them.
  *
- * Plain CSS over the tokens of `src/tokens.css` and nothing else: every
+ * Plain CSS over the tokens of `@oneberth/ui` and nothing else: every
  * colour, radius and font is a token, or a mix of tokens, so dark mode is the
  * tokens' business and nothing here mentions it. Written against the base
  * reset of `src/styles.css` alone -- a border is `0 solid var(--line)` until

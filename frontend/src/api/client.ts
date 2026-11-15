@@ -14,10 +14,12 @@
  * and does not belong here; it arrives with the chat, behind `src/chat/`
  * (ADR 0001).
  */
+import { reportUnauthorized } from "@oneberth/ui";
+
 import type { components, paths } from "./schema";
 
-/** Every refusal the API makes, in one shape. */
-export type ErrorResponse = components["schemas"]["ErrorResponse"];
+/** Every refusal the API makes, in one shape: oneberth's. */
+export type ErrorResponse = components["schemas"]["ErrorBody"];
 
 /**
  * A refusal, as something to catch.
@@ -69,29 +71,6 @@ export function isRefusal(failure: unknown, error: string): boolean {
  */
 export function detailOf(failure: unknown): string {
   return failure instanceof ApiError ? failure.detail : String(failure);
-}
-
-/**
- * What is told when a call is answered 401.
- *
- * A session ends between two requests, and the page finds out from whichever
- * call happens to be next. The session store subscribes here and puts the
- * interface back to signed-out (`src/session/session.ts`); nothing else does.
- *
- * A callback rather than an event on `window`: the interface's own state is
- * not something any script sharing the page should be able to raise, and a
- * subscription that is returned as a function is one a test can take back.
- *
- * `/auth/session` itself is never a 401 (`docs/specs/sign-in.md`), so this
- * cannot fire for the very call that would answer it.
- */
-const unauthorized = new Set<() => void>();
-
-export function onUnauthorized(listener: () => void): () => void {
-  unauthorized.add(listener);
-  return () => {
-    unauthorized.delete(listener);
-  };
 }
 
 type Method = "get" | "put" | "post" | "delete" | "patch";
@@ -186,15 +165,10 @@ function url(
 export async function refused(response: Response): Promise<ApiError> {
   if (response.status === 401) {
     // Told before the refusal is thrown, so that a caller catching it already
-    // sees an interface that knows the session is gone. A listener that
-    // throws is its own bug and must not swallow the refusal.
-    for (const listener of [...unauthorized]) {
-      try {
-        listener();
-      } catch {
-        // Nothing here can do anything about it.
-      }
-    }
+    // sees an interface that knows the session is gone. The session is
+    // oneberth's: its store forgets the user, and the shell puts the sign-in
+    // page in place of every page.
+    reportUnauthorized();
   }
   return refusal(response);
 }
@@ -241,6 +215,9 @@ async function refusal(response: Response): Promise<ApiError> {
  */
 const SAFE_METHODS = new Set(["get", "head", "options"]);
 
+/** The writes that always carry a body: `{}` when the route takes none. */
+const WITH_BODY = new Set(["post", "put", "patch"]);
+
 /**
  * One call. JSON in, JSON out, an `ApiError` on anything else.
  *
@@ -277,9 +254,13 @@ export async function request<M extends Method, P extends PathsWith<M>>(
       method: method.toUpperCase(),
       headers,
       credentials: "same-origin",
-      ...(options.body === undefined
-        ? {}
-        : { body: JSON.stringify(options.body) }),
+      // Every write is JSON, a bodyless POST, PUT or PATCH included, which
+      // sends `{}`: the backend reads a write's body as JSON.
+      ...(options.body !== undefined
+        ? { body: JSON.stringify(options.body) }
+        : WITH_BODY.has(method)
+          ? { body: "{}" }
+          : {}),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
   } catch (failure) {
