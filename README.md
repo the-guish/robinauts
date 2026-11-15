@@ -115,7 +115,8 @@ OpenRouter key ([demo/README.md](demo/README.md)):
 
 On one machine, `robinauts desktop` runs it as a desktop application: a
 window, with its data in a folder and no database server
-([docs/deployment.md](docs/deployment.md#the-desktop)).
+([docs/deployment.md](docs/deployment.md#the-desktop)). A worker may run in a
+container there, and the backend then runs in Robinauts' image.
 
 ## Planned
 

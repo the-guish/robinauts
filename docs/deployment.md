@@ -690,7 +690,8 @@ without:
 - **Usage reporting**, token budgets, audit export, retention and purge.
 - **Several backend processes.** One process, one machine.
 - **Draining runs on shutdown.** A restart interrupts them.
-- **A container image**, an SBOM and signed releases.
+- **A server's container image**, an SBOM and signed releases. Robinauts' image serves the
+  desktop alone for now ([The desktop with Docker](#the-desktop-with-docker)).
 
 ## The desktop
 
@@ -710,7 +711,8 @@ ROBINAUTS_ANTHROPIC_KEY=… robinauts desktop
   directory. The first start makes that file empty. Its tables are those of step 4, and the
   example below is one. The keys are read from the environment of the command.
 - `ROBINAUTS_FLOWS_DIR` names a flows folder, as for a server.
-- The desktop needs no database server, no oneberth file and no Docker.
+- The desktop needs no database server and no oneberth file. It needs Docker only when a worker
+  runs in a container ([The desktop with Docker](#the-desktop-with-docker)).
 - The launcher looks for Chrome, Chromium, Edge and Brave. `--browser` names another, and each
   `--browser-argument` goes to it. Without a browser, the default browser opens the address,
   and the application then stops on Ctrl-C alone.
@@ -742,11 +744,69 @@ What runs as a process, and what each one is given:
 | the window | the browser, with `--app` | the address that signs the person in |
 
 The launcher names everything else in variables that start with `ONEBERTH_`. A worker's
-`command` is started with them, so a `docker run` command passes on `ONEBERTH_WORKER_NAME` and
-`ONEBERTH_WORKER_URL`. The desktop's Docker shape, which starts containers itself, is the next
-step of oneberth's plan. The admin scripts, `robinauts tokens` and the rest, open PostgreSQL
+`command` is started with them. A worker in a container is better named by its `image`, below.
+The admin scripts, `robinauts tokens` and the rest, open PostgreSQL
 alone: a desktop has none of them yet. A script reaches the API with a personal token from the
 account page.
+
+### The desktop with Docker
+
+A worker whose `[workers.<name>]` table names an `image` runs in a container of that image. One
+such worker puts the whole desktop in the Docker shape: the launcher then runs the backend in a
+container too. A person who adds a first Docker worker keeps their data.
+
+```toml
+[agents.coder]
+title = "Coder"
+system_prompt = "You work in this conversation's directory."
+models = ["opus"]
+engine = "claude-code"
+worker = "claude"
+
+[workers.claude]
+image = "robinauts-claude-code-worker"
+# The variables of the desktop's environment the container gets, beside its agents' keys.
+environment = ["ROBINAUTS_CLAUDE_AUTH", "CLAUDE_CODE_OAUTH_TOKEN"]
+```
+
+Build Robinauts' image and the worker's from the root of the repository, from the same
+checkout as the `robinauts` command that starts them:
+
+```sh
+scripts/ui-packages-from-source.sh
+docker build -t robinauts .
+docker build -f extra-workers/claude-code-worker/Dockerfile -t robinauts-claude-code-worker .
+```
+
+- The backend runs in a container of the image `ROBINAUTS_IMAGE` names, `robinauts` by default.
+  It sees the data directory at `/data`, and the configuration there or at
+  `/etc/robinauts/robinauts.toml`. It gets every key the configuration names.
+- The flows folder and the handlers' code are mounted into the backend's container read-only,
+  at the paths the host has them. neorc's worker stays a process of the host: it runs the
+  handlers from there, and reaches both listeners on the loopback address.
+- Each worker's container sees its own folder, `workers/<worker name>/`, at
+  `/data/workers/<worker name>/`. That folder holds its engines' state, a copy of the
+  configuration that `robinauts desktop` writes at each start, and its home. The container
+  runs as the person's own user, so the files it writes are the person's.
+- A worker's container gets the keys of its agents' providers and tool servers, and the
+  variables its table's `environment` names. It gets nothing else of the desktop's
+  environment, and no database.
+- Every worker of this version is a trusted worker. Its container joins the `app` network,
+  which reaches the model providers and the tool servers. The launcher creates the `sandbox`
+  network too, and no worker joins it.
+- A service on the host, such as a local model or a local tool server, is
+  `host.docker.internal` from a container. On Linux that name is the address of Docker's
+  bridge: the service must listen there or on every address. A service on `127.0.0.1` alone
+  is out of a container's reach.
+- The workers without an `image` stay processes of the host. The front listener and the worker
+  listener are published on the host's loopback address.
+- The launcher refuses to start while Docker is down, and names the workers that need it.
+- Closing the window stops every container and removes them and both networks. A start that
+  crashed leaves them, and the next start removes them first.
+
+Not in this version: an untrusted worker, a worker on the `sandbox` network, the egress proxy
+that holds the real keys, a worker in a VM, and the narrower worker routes. A trusted worker's
+keys are visible to `docker inspect` on that machine.
 
 ## The local mode
 

@@ -8,6 +8,8 @@ robinauts/
   .github/          the CI workflow and Dependabot
   docs/             specs, decisions, architecture, legal records
   scripts/          one script per check; CI runs these
+  Dockerfile        Robinauts' image: the backend and the built interface, which
+                    the desktop's Docker shape runs (docs/deployment.md)
   demo/             one command to run the whole thing on one machine
   frontend/         the UI (ADR 0006)
   extra-workers/    workers that run beside the server, each a project of its

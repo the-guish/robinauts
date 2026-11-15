@@ -230,6 +230,11 @@ input. It names the worker listener in `ONEBERTH_WORKER_URL` and the front liste
 of `neorc/tasks:claim` on the queue `default`, the handlers' queue, and to nobody else. Both
 tokens live in the backend's memory alone, and end with it.
 
+neorc's worker is a process of the host in both shapes of the desktop. In the Docker shape the
+backend runs in a container, and the worker reaches both listeners where they are published on
+the loopback address. It runs the handlers from the host, and the backend's container sees the
+flows folder and the handlers' code at the same paths, read-only.
+
 | variable | holds |
 |---|---|
 | `NEORC_API_TOKEN` | the token of `neorc/worker`: what the worker sends to the manager |

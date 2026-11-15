@@ -139,8 +139,8 @@
 - The deliverable is **one Python wheel** that contains the built
   frontend: `pip install` plus a PostgreSQL is a complete deployment. The
   bundle is built only in CI; built assets are never committed, and a
-  bundle built on a laptop is never released. A container image is
-  planned.
+  bundle built on a laptop is never released. Robinauts' image, which the
+  desktop's Docker shape runs, builds the bundle from the lock too.
 
 ## Supply chain
 

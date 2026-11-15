@@ -148,7 +148,8 @@ topic documents listed under [Documents](#documents).
   manager. Delivered as one Python wheel. On a server, `robinauts start`
   starts the backend, and the backend its workers. On the desktop,
   `robinauts desktop` has oneberth's launcher start the backend, each worker
-  and a browser window as processes.
+  and a browser window as processes. A worker in a container puts the desktop
+  in the Docker shape, with the backend in a container of Robinauts' image.
   [frontend.md](frontend.md), [operations.md](operations.md),
   [web.md](../architecture/web.md).
 - **Sign-in.** oneberth's: Google and Okta over OpenID Connect, an allow list,
@@ -205,7 +206,8 @@ hard, the decision is taken with them in mind.
 - More delivery channels: a mobile application, a Slack bridge; and a way
   to consume a run without streaming, for the clients that need it.
 - Agents created by users.
-- A container image.
+- A server's container image. Robinauts' image serves the desktop's Docker
+  shape alone.
 
 ## Open
 

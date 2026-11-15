@@ -6,7 +6,8 @@ What an internal platform team deploys and controls.
 
 - One backend process, which also serves the frontend; one PostgreSQL.
   Nothing else (goal 6).
-- Installed from one Python wheel. A container image is planned.
+- Installed from one Python wheel. The repository's `Dockerfile` builds Robinauts' image,
+  which runs the backend in the desktop's Docker shape. A server's image is planned.
 - A deployment requires PostgreSQL. A documented one-command local Postgres
   covers development and demos.
 - The backend is a oneberth composition of Robinauts' component and neorc's
@@ -83,9 +84,9 @@ What an internal platform team deploys and controls.
 
 ## The desktop
 
-- `robinauts desktop` is the desktop as processes (oneberth's `docs/specs/shapes.md`).
-  oneberth's launcher starts the backend, each worker, neorc's worker when there is a flows
-  folder, and the window ([deployment.md](../deployment.md), "The desktop").
+- `robinauts desktop` starts the desktop with oneberth's launcher (oneberth's
+  `docs/specs/shapes.md`). The launcher starts the backend, each worker, neorc's worker when
+  there is a flows folder, and the window ([deployment.md](../deployment.md), "The desktop").
 - The backend is `robinauts desktop-backend`: the local mode, local storage in the data
   directory, its listeners where the launcher says, and the launch secret on its standard
   input. It starts no worker.
@@ -95,6 +96,16 @@ What an internal platform team deploys and controls.
 - The data directory is `$XDG_DATA_HOME/robinauts` on Linux, `~/.local/share/robinauts` by
   default, and `~/Library/Application Support/Robinauts` on macOS. `--data-dir` or
   `ROBINAUTS_DATA_DIR` names another.
+- A worker whose table names an `image` runs in a container of that image. One such worker
+  puts the whole desktop in the Docker shape. The backend then runs in a container of
+  Robinauts' image, `ROBINAUTS_IMAGE`, with the data directory mounted at `/data`.
+- A worker's container sees its own folder of the data directory, and a copy of the
+  configuration in it. It gets the keys of its agents and the variables its table names, and
+  nothing else of the desktop's environment. Every worker of this version is a trusted worker:
+  its container joins the `app` network, which has a way out.
+- neorc's worker and the workers without an `image` stay processes of the host. They reach the
+  backend's listeners on the loopback address.
+- The launcher refuses to start while Docker is down, and names the workers that need it.
 - Closing the window stops the application: the workers first, each ending its turns, then the
   backend. One launcher runs per data directory: a second start brings its window forward.
 - A server keeps its own shape: PostgreSQL, sign-in through identity providers, and
@@ -171,6 +182,18 @@ What an internal platform team deploys and controls.
   ([extra-workers/](../../extra-workers/README.md)). Refused at start-up: a table without
   `command`, one no agent names, and a command that cannot be started or ends without saying
   `ready`.
+- A `[workers.<name>]` table may name an **image** in the place of a command, or beside it.
+  On the desktop, the worker then runs in a container of that image ("The desktop"). Its
+  `environment` names the variables of the desktop's environment that the container gets
+  beside the keys of its agents, such as the token of a GitHub account. A server starts a
+  worker with its command alone: a table with an image and no command is refused there.
+
+  ```toml
+  [workers.claude]
+  image = "robinauts-claude-code-worker"
+  environment = ["ROBINAUTS_CLAUDE_AUTH", "CLAUDE_CODE_OAUTH_TOKEN"]
+  ```
+
 - `max_running_tasks_per_worker` is per worker: each runs that many turns at once.
 - `/health` answers 503 when any of the server's workers has not been heard from: one in the
   server's process at its heartbeat, one in a process of its own at its requests to the
