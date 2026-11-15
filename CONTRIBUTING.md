@@ -66,6 +66,9 @@ or one at a time:
                                 over a server on both agent engines and
                                 PostgreSQL: the one ROBINAUTS_TEST_DATABASE_URL
                                 names, or a throwaway one in Docker
+    scripts/check-desktop-docker.sh
+                                Robinauts' image and the base worker's, and
+                                the desktop started with both on Docker
     scripts/check-wheel.sh      the wheel: built, looked inside, installed
     scripts/check-reuse.sh      reuse lint: every file states its licence
     scripts/check-dco.sh        sign-off on every commit of the branch

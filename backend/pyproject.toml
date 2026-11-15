@@ -177,6 +177,7 @@ markers = [
     # is failed if none of these ran. See tests/conftest.py.
     "database: tests that need the PostgreSQL named by ROBINAUTS_TEST_DATABASE_URL",
     "live: tests that call a real model provider with a real key, and cost money",
+    "docker: tests that start containers on the Docker daemon, from images built beforehand",
 ]
 # `tests/adapters_metered/` is never collected by a plain run, and therefore never by CI:
 # those tests call a vendor with a real key and are run by hand, by naming the
