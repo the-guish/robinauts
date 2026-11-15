@@ -153,6 +153,9 @@ system_prompt, checkpointer)` and starts from that checkpoint.
   (`StorageKind.POSTGRES`). Nothing of the controller's references them. LangGraph
   needs a saver of our own: `langgraph-checkpoint-postgres` depends on `psycopg`,
   which is LGPL (ADR 0002).
+- **Local:** the engine's own SQLite file, `langchain.db` or `pydantic-ai.db`, in the
+  worker's folder (`StorageKind.LOCAL`). The engine opens it with the standard
+  library's `sqlite3`, and its LangGraph saver is ours too.
 - **AWS:** the engine's own DynamoDB table, through a storage the external package
   supplies; `langgraph-checkpoint-aws`'s `DynamoDBSaver` would be one. Today both
   engines keep their state in the process.

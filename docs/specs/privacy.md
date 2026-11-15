@@ -42,8 +42,8 @@ on the company's servers; this document says who, inside them, sees what.
 
 - Deletion by the author hides the conversation at once, and purges it
   once no turn runs in it. A 30-day trash before the purge is planned.
-- **The engines' state holds conversation content too**, in tables of
-  each engine's own. A conversation's purge removes it. A failed or
+- **The engines' state holds conversation content too**, in tables or
+  files of each engine's own. A conversation's purge removes it. A failed or
   interrupted turn may leave a partial checkpoint there, which Resume
   reads.
 - **Edited-away and regenerated-away messages are retained** with their

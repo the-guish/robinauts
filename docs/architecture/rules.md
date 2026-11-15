@@ -31,8 +31,8 @@ flowchart TD
 
 contract -> nothing from robinauts
 echo_engine -> contract
-langchain_engine -> contract + langchain deps + postgres
-pydantic_ai_engine -> contract + pydantic ai deps + postgres
+langchain_engine -> contract + langchain deps + postgres + sqlite3
+pydantic_ai_engine -> contract + pydantic ai deps + postgres + sqlite3
 no engine imports another
 
 ## Inside tools

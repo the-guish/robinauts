@@ -49,7 +49,8 @@ class EngineSettings:
 
 class StorageKind(Enum):
     POSTGRES = "postgres"  # options: {"pool": <the connection pool>}
-    LOCAL = "local"  # options: {"path": <the folder>}
+    LOCAL = "local"  # options: {"path": <the folder>}, the worker's own, which the engine's
+    # files go in
     IN_PROCESS = "in-process"  # no options
 
 
@@ -115,6 +116,11 @@ class AgentEngine(ABC):
     @abstractmethod
     async def forget(self, session_id: uuid.UUID) -> None:
         raise NotImplementedError
+
+    async def close(self) -> None:
+        """Let go of the storage: the files or connections ``setup`` opened. Nothing for an
+        engine that opened none. The engine is not used after it."""
+        return None
 
 
 EngineFactory = Callable[[EngineSettings, StorageConfig], AgentEngine]

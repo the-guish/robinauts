@@ -232,6 +232,12 @@ store's tables alone, and sign-in's stay on PostgreSQL. The server applies it
 to a new file itself, and refuses a file made from another edit. After pulling
 a change to it, move the data directory's `robinauts.db` away.
 
+Each engine's SQLite schema is a constant beside its session store, in
+`langchain_engine/session_store.py` and `pydantic_ai_engine/session_store.py`.
+The file records the schema's version and hash, and the engine refuses a
+file made from another edit. After pulling a change to one, move the data
+directory's `workers/` folder away.
+
 ## Licence header
 
 Every source file starts with:
