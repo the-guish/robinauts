@@ -71,7 +71,9 @@ def test_the_window_opens_signed_in_and_closing_it_stops_the_desktop(desktop: De
         )
         browser = connected(chromium, port)
         page = the_window(browser)
-        assert page.url == f"{desktop.front_url}/ui/"
+        # The window opens on the interface. The shell then goes to its first application,
+        # which adds a fragment: when it has, the address reads /ui/#/robinauts.
+        assert page.url.split("#")[0] == f"{desktop.front_url}/ui/"
         expect(rail(page).get_by_role("link", name="Robinauts")).to_have_attribute(
             "aria-current", "page"
         )
