@@ -152,9 +152,10 @@ topic documents listed under [Documents](#documents).
   personal tokens, linked devices and service tokens; on the desktop, the one
   person signs in locally. Robinauts declares its roles: user, admin, worker
   and handler. [sign-in.md](sign-in.md).
-- **Interface.** neorc's layout: a collapsible left navigation panel that
-  this project owns, and the chat in the middle; the application opens on
-  an empty chat. [frontend.md](frontend.md).
+- **Interface.** oneberth's shell, with two applications on its rail:
+  Robinauts and neorc. Robinauts' has neorc's layout: a collapsible left
+  navigation panel that this project owns, and the chat in the middle; it
+  opens on an empty chat. [frontend.md](frontend.md).
 - **Conversations.** A tree of messages in the platform's own format —
   text, images, files, reasoning, tool calls and their results — the
   transcript of what was said; with attachments, search and export.

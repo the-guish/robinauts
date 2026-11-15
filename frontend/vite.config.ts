@@ -477,8 +477,9 @@ const proxy = {
   target: BACKEND,
   changeOrigin: false,
   // Nothing may sit on the stream: no compression to fill a buffer with, and
-  // no deadline for a run that takes minutes.
-  headers: { "accept-encoding": "identity" },
+  // no deadline for a run that takes minutes. A write with the session cookie
+  // needs the backend's own Origin, which a page of this server's port is not.
+  headers: { "accept-encoding": "identity", origin: BACKEND },
   timeout: 0,
   proxyTimeout: 0,
 };
@@ -507,10 +508,10 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": proxy,
+      "/robinauts": proxy,
+      "/neorc": proxy,
       "/auth": proxy,
       "/health": proxy,
-      "/openapi.json": proxy,
     },
   },
   // A worker is a second rollup build with a bundle of its own, so the licence
