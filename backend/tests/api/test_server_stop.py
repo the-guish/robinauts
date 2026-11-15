@@ -2,8 +2,7 @@
 # Copyright The Robinauts Authors
 
 """A stop asked by a signal, as a service manager asks it, stops the worker and closes the
-controller before the process ends. uvicorn raises the signal again once it has shut down,
-so whatever runs after its ``serve`` returns never runs on SIGTERM, and is cut short on SIGINT.
+controller before the process ends, which then exits 0: oneberth's server handles the signal.
 A signal while the controller and the worker start waits for the start, then stops both.
 A poll of the change feed left open does not hold the stop back.
 """
@@ -29,28 +28,24 @@ pytestmark = pytest.mark.io
 CLOSED = b"the controller is closed"
 
 
-@pytest.mark.parametrize(
-    ("signum", "status"),
-    [(signal.SIGTERM, -signal.SIGTERM), (signal.SIGINT, 130)],
-    ids=["SIGTERM", "SIGINT"],
-)
+@pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGINT], ids=["SIGTERM", "SIGINT"])
 def test_a_signal_closes_the_controller_before_the_process_ends(
-    signum: signal.Signals, status: int, tmp_path: Path
+    signum: signal.Signals, tmp_path: Path
 ) -> None:
     config = tmp_path / "robinauts.toml"
     config.write_text("")
     environment = {**os.environ, "ROBINAUTS_CONFIG": str(config)}
     environment.pop("ROBINAUTS_DATABASE_URL", None)
-    port = stack.free_port()
-    command = [str(stack.ROBINAUTS), "start", "--dev-no-sign-in", "--port", str(port)]
-    with subprocess.Popen(command, env=environment, stderr=subprocess.PIPE) as running:
-        stack.wait_until_up(f"http://127.0.0.1:{port}", running)
+    running, url = stack.start_local(environment, stderr=subprocess.PIPE)
+    with running, httpx.Client(base_url=url, timeout=60) as client:
+        stack.wait_until_up(url, running)
+        stack.signed_in(client, url)
         activity = Path(tempfile.gettempdir()) / f"robinauts-worker-{running.pid}.alive"
         assert activity.exists()
-        feed = f"http://127.0.0.1:{port}/api/changes"
-        version = httpx.get(feed).json()["version"]
+        feed = "/robinauts/api/changes"
+        version = client.get(feed).json()["version"]
         polled = {"after": version, "timeout": 30}
-        poll = threading.Thread(target=lambda: httpx.get(feed, params=polled, timeout=60))
+        poll = threading.Thread(target=lambda: client.get(feed, params=polled))
         poll.start()
         time.sleep(0.5)
         began = time.monotonic()
@@ -60,7 +55,7 @@ def test_a_signal_closes_the_controller_before_the_process_ends(
         poll.join(10)
     assert CLOSED in said, said.decode(errors="replace")
     assert b"Traceback" not in said, said.decode(errors="replace")
-    assert running.returncode == status
+    assert running.returncode == 0
     assert not activity.exists()
 
 
@@ -73,8 +68,8 @@ from robinauts.cli.main import run
 
 started = lifecycle.Lifecycle.start
 
-async def slow(self):
-    await started(self)
+async def slow(self, *args, **kwargs):
+    await started(self, *args, **kwargs)
     print({STARTING.decode()!r}, flush=True)
     await asyncio.sleep(3)
 
@@ -94,11 +89,13 @@ def test_a_signal_during_the_start_waits_for_it_then_stops_cleanly(
     script.write_text(SLOW_START)
     environment = {**os.environ, "ROBINAUTS_CONFIG": str(config)}
     environment.pop("ROBINAUTS_DATABASE_URL", None)
-    port = stack.free_port()
-    command = [sys.executable, str(script), "start", "--dev-no-sign-in", "--port", str(port)]
-    with subprocess.Popen(
-        command, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
-    ) as running:
+    running, _ = stack.start_local(
+        environment,
+        [sys.executable, str(script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    with running:
         assert running.stdout is not None
         for line in running.stdout:
             if STARTING in line:

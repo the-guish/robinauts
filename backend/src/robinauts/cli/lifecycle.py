@@ -5,26 +5,28 @@
 runs around the HTTP server (``cli/main.py``), and what a test runs around an app or in its
 place. There is a worker for each the configuration names (``AgentConfig.worker``), the
 default first. They run in this process, or each in a process of its own, which reaches the
-core through this server's API alone (``broker_url``), with a secret of its own handed to it
-at its start on its standard input, never in its environment: the secret says which worker
-asks, and the API hands it the turns of its own agents alone. A worker whose table names a
-command (``Composed.commands``) is started with that command in place of this build's worker
-module, in a process of its own even where the rest run in this one, and differs in nothing
-else: the same environment, the same secret, the same line to say it is ready, the same
-SIGTERM to stop. That is how a worker runs in a container, on another machine, or with an
-engine this build lacks."""
+core through this server's API alone (``broker_url``, the component's address on the worker
+listener), with a token of its own handed to it at its start on its standard input, never in
+its environment: a oneberth service token of ``robinauts/worker`` bound to the worker's name,
+which ``start`` is given a way to mint. The token says which worker asks, and the API hands it
+the turns of its own agents alone. A worker whose table names a command
+(``Composed.commands``) is started with that command in place of this build's worker module,
+in a process of its own even where the rest run in this one, and differs in nothing else: the
+same environment, the same token, the same line to say it is ready, the same SIGTERM to stop.
+That is how a worker runs in a container, on another machine, or with an engine this build
+lacks. The launcher of a later step takes the start of these processes over."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
-import secrets
 import shlex
 import signal
 import sys
 import tempfile
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import cast
 
@@ -40,6 +42,10 @@ from robinauts.web.changes import FeedGate
 from robinauts.web.worker_api import WorkerAccess
 
 _log = logging.getLogger(__name__)
+
+WorkerTokens = Callable[[str], Awaitable[str]]
+"""What mints the token of the worker of a name: a service token of ``robinauts/worker`` bound
+to that name, which ends when the server stops."""
 
 WORKER_MODULE = "robinauts.cli.worker_process"
 
@@ -72,7 +78,11 @@ def activity_file(worker: str) -> Path:
 
 class Lifecycle:
     def __init__(
-        self, composed: Composed, *, broker_url: str | None = None, in_process: bool | None = None
+        self,
+        composed: Composed,
+        *,
+        broker_url: str | None = None,
+        in_process: bool | None = None,
     ) -> None:
         """``broker_url`` is where a worker in a process of its own reaches the core: this
         server's, as the worker's machine reaches it. ``in_process`` says whether the workers
@@ -96,6 +106,7 @@ class Lifecycle:
         self._opened = False
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._watching: dict[str, asyncio.Task[None]] = {}
+        self._tokens: WorkerTokens | None = None
         self.access = WorkerAccess(heard=self._heard)
         self.feed = FeedGate()
         """Closed by the server's shut-down, which ends the change feed's waits."""
@@ -103,13 +114,15 @@ class Lifecycle:
         self.activity_files = {name: activity_file(name) for name in composed.workers}
         """When each worker was last heard from, by worker: the file's time."""
 
-    async def start(self) -> None:
+    async def start(self, tokens: WorkerTokens | None = None) -> None:
         """Open the controller, then start every worker. Return once they all have started, so
         that a server which says it is up runs turns. Each worker process is let in through the
-        API from then on, with the secret it read from its standard input at its start.
+        API from then on, with the token ``tokens`` minted for it, which it read from its
+        standard input at its start. A worker in a process of its own needs ``tokens``.
 
         A start that fails, or is cancelled, part way stops what it had started before it
         raises: the workers, in this process or their own, and the controller."""
+        self._tokens = tokens
         try:
             await self._start()
         except BaseException:
@@ -149,15 +162,17 @@ class Lifecycle:
 
     async def _spawn(self, name: str, broker_url: str) -> None:
         """Start the process of the worker ``name``, and return once its worker has started."""
-        secret = secrets.token_urlsafe(32)
-        self.access.open(secret, name)
+        if self._tokens is None:
+            raise WorkerStartError(f"the worker {name!r} runs in a process of its own: no token")
+        secret = await self._tokens(name)
+        self.access.open(name)
         environment = {
             **os.environ,
             PARENT_VARIABLE: str(os.getpid()),
             BROKER_URL_VARIABLE: broker_url,
             WORKER_NAME_VARIABLE: name,
         }
-        # The secret, whole and closed, on the process's standard input before it exists: far
+        # The token, whole and closed, on the process's standard input before it exists: far
         # shorter than a pipe holds, and read to its end at once.
         read_end, write_end = os.pipe()
         try:
@@ -167,7 +182,10 @@ class Lifecycle:
         command = self.command_of(name)
         try:
             process = await asyncio.create_subprocess_exec(
-                *command, env=environment, stdin=read_end, stdout=asyncio.subprocess.PIPE
+                *command,
+                env=environment,
+                stdin=read_end,
+                stdout=asyncio.subprocess.PIPE,
             )
         except OSError as error:
             raise WorkerStartError(

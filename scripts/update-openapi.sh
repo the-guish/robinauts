@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 #
-# Write backend/openapi.json from the routes as they are now.
+# Write backend/openapi.json from the routes as they are now: Robinauts' component's
+# document, as the backend serves it at /robinauts/openapi.json.
 #
 # The document is a committed snapshot (docs/specs/backend.md): the frontend's
 # typed client is generated from it, and a reviewer sees a change to the wire
@@ -25,17 +26,9 @@ uv run --locked --no-build python - <<'PY'
 import json
 from pathlib import Path
 
-from robinauts.cli.lifecycle import Lifecycle
-from robinauts.cli.main import build_app
-from robinauts.cli.composition import compose
-from robinauts.shared_domain.domain import Config, StorageConfig, StorageKind
+from robinauts.cli.main import openapi_document
 
-composed = compose(
-    Config(), storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get
-)
-app = build_app(composed, Lifecycle(composed), sign_in=None, secret_for={}.get)
-document = app.openapi()
 snapshot = Path("openapi.json")
-snapshot.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
+snapshot.write_text(json.dumps(openapi_document(), indent=2, sort_keys=True) + "\n")
 print(f"wrote {snapshot.resolve()}")
 PY

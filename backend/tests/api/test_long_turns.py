@@ -44,7 +44,9 @@ def fake_model() -> FakeModel:
 def test_a_turn_outlasts_a_vendor_error_and_fifty_tool_rounds(
     api: httpx.Client, local_gpt: FakeLocalGPTServer, agent: str
 ) -> None:
-    started = api.post("/api/turns", json={"agent_id": agent, "text": "go"}, timeout=120.0)
+    started = api.post(
+        "/robinauts/api/turns", json={"agent_id": agent, "text": "go"}, timeout=120.0
+    )
     assert started.status_code == 200, started.text
     last = [line for line in started.text.splitlines() if line.startswith("data: ")][-1]
     assert '"RUN_FINISHED"' in last

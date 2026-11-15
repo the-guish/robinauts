@@ -12,7 +12,6 @@ import json
 from collections.abc import Iterator
 from typing import Any
 
-import httpx
 import pytest
 
 from util import stack
@@ -65,7 +64,8 @@ def read(n: int) -> str:
 
 class SmallWindowModel:
     """Reads ten pages, one a round, then answers "done". Refuses a prompt larger than the
-    window, at four characters a token; a request to summarise is answered with a summary."""
+    window, at four characters a token; a request to summarise is answered with a summary.
+    """
 
     def __init__(self) -> None:
         self.read = 0
@@ -106,8 +106,8 @@ def test_a_turn_larger_than_its_window_finishes(
     model = SmallWindowModel()
     model_server.model = model
 
-    with httpx.Client(base_url=small_window, timeout=60.0) as api:
-        started = api.post("/api/turns", json={"agent_id": agent, "text": "read"})
+    with stack.client(small_window, timeout=60.0) as api:
+        started = api.post("/robinauts/api/turns", json={"agent_id": agent, "text": "read"})
 
     assert started.status_code == 200, started.text
     last = [line for line in started.text.splitlines() if line.startswith("data: ")][-1]

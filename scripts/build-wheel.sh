@@ -90,8 +90,9 @@ mv "$fresh/$built" "$out/$built"
 # (scripts/check-audit.sh says the same about its own export).
 uv export --locked --no-dev --no-emit-project --no-annotate \
     --no-emit-package neorc --no-emit-package neorc-core --no-emit-package neorc-ui \
+    --no-emit-package oneberth \
     --format requirements.txt >"$fresh/requirements.txt"
-# neorc-from-source: its wheels, beside this one, and their hashed requirements.
+# neorc-from-source: its wheels and oneberth's, beside this one, and their hashed requirements.
 "$root/scripts/neorc-from-source.sh" "$out/neorc-wheels" >>"$fresh/requirements.txt"
 mv "$fresh/requirements.txt" "$out/requirements.txt"
 

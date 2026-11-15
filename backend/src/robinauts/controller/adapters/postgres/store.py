@@ -226,7 +226,7 @@ class PostgresStore(Store):
 
     @property
     def pool(self) -> asyncpg.Pool:
-        """The pool given, or the one ``open`` made: the credentials share it."""
+        """The pool given, or the one ``open`` made."""
         return self._pool
 
     async def open(self) -> asyncpg.Pool:

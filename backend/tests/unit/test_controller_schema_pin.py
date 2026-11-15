@@ -59,16 +59,22 @@ def test_the_sqlite_version_is_one_and_its_tables_are_the_stores_alone() -> None
     assert "INSERT INTO schema_version (only_row, version) VALUES (1, 1)" in sqlite.schema_sql()
     created = re.findall(r"CREATE TABLE (\w+)", sqlite.schema_sql())
     assert sorted(created) == sorted(sqlite.SCHEMA_TABLES)
-    # Sign-in's tables stay on PostgreSQL until oneberth's store takes them.
-    assert set(sqlite.SCHEMA_TABLES) < set(SCHEMA_TABLES)
+    # Sign-in's tables are oneberth's, in its own store, on both.
+    assert set(sqlite.SCHEMA_TABLES) == set(SCHEMA_TABLES)
 
 
 @pytest.mark.parametrize(
     ("sql", "expected"),
     [
         ("SELECT 1;", ["SELECT 1;"]),
-        ("-- a; comment\nSELECT 1;\nSELECT 2;\n", ["-- a; comment\nSELECT 1;\n", "SELECT 2;\n"]),
-        ("CREATE TABLE t (\n  a TEXT -- ;\n);\n", ["CREATE TABLE t (\n  a TEXT -- ;\n);\n"]),
+        (
+            "-- a; comment\nSELECT 1;\nSELECT 2;\n",
+            ["-- a; comment\nSELECT 1;\n", "SELECT 2;\n"],
+        ),
+        (
+            "CREATE TABLE t (\n  a TEXT -- ;\n);\n",
+            ["CREATE TABLE t (\n  a TEXT -- ;\n);\n"],
+        ),
         ("SELECT 'a;\nb';\n", ["SELECT 'a;\nb';\n"]),
         ("-- nothing\n", []),
     ],

@@ -42,7 +42,7 @@ FILE_NAME = "robinauts.db"
 SCHEMA_VERSION = 1
 """The schema this build was written against; frozen at 1 until the first release."""
 
-SCHEMA_SHA256 = "ffc10ef46ee680d86439846324cd18078a761c8a937dd31cfab8b3d092bf3173"
+SCHEMA_SHA256 = "95342fa71ca5e71a3d9476182546d49b1dc1eb483a0cdc62e4cb205fa0dd32f0"
 """``schema.sql`` as this build was written against it, line endings normalised to LF."""
 
 SCHEMA_TABLES = (

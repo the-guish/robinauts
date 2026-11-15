@@ -14,10 +14,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from robinauts.cli.composition import compose
-from robinauts.cli.lifecycle import Lifecycle
-from robinauts.cli.main import build_app
-from robinauts.shared_domain.domain import Config, StorageConfig, StorageKind
+from robinauts.cli.main import openapi_document
 
 SNAPSHOT = Path(__file__).resolve().parents[2] / "openapi.json"
 
@@ -26,9 +23,7 @@ REGENERATE = "scripts/update-openapi.sh"
 
 def written() -> str:
     """The snapshot's one spelling, the one ``scripts/update-openapi.sh`` writes."""
-    composed = compose(Config(), storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get)
-    app = build_app(composed, Lifecycle(composed), sign_in=None, secret_for={}.get)
-    return json.dumps(app.openapi(), indent=2, sort_keys=True) + "\n"
+    return json.dumps(openapi_document(), indent=2, sort_keys=True) + "\n"
 
 
 def test_the_snapshot_is_what_the_code_describes() -> None:
@@ -41,6 +36,7 @@ def test_the_streaming_routes_are_outside_the_document() -> None:
     """They answer server-sent events, not JSON (``docs/specs/wire.md``)."""
     paths = json.loads(SNAPSHOT.read_text(encoding="utf-8"))["paths"]
 
-    assert "/api/turns" not in paths
-    assert "/api/conversations/{conversation_id}/turns" not in paths
-    assert "/api/runs/{run_id}/events" not in paths
+    assert "/robinauts/api/turns" not in paths
+    assert "/robinauts/api/conversations/{conversation_id}/turns" not in paths
+    assert "/robinauts/api/conversations/{conversation_id}/runs/{run_id}/events" not in paths
+    assert "/robinauts/api/conversations" in paths

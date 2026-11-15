@@ -20,7 +20,7 @@ from robinauts.shared_domain.domain import (
     ToolServerAuth,
     ToolServerConfig,
 )
-from robinauts.web.headers import VIEW_CONTENT_SECURITY_POLICY
+from robinauts.web.apps import VIEW_CONTENT_SECURITY_POLICY
 from util.aio import asyncio_test
 from util.app import running
 from util.mcp_server import View, mcp_server
@@ -36,16 +36,18 @@ def counter(start: int = 0) -> int:
 @asynccontextmanager
 async def client(url: str) -> AsyncIterator[httpx.AsyncClient]:
     server = ToolServerConfig(
-        "counter", url, secret_env="COUNTER_KEY", auth=ToolServerAuth.HEADER, header="x-api-key"
+        "counter",
+        url,
+        secret_env="COUNTER_KEY",
+        auth=ToolServerAuth.HEADER,
+        header="x-api-key",
     )
     echo = replace(CONFIG.agents["echo"], tools=("counter",))
     config = replace(CONFIG, tool_servers={"counter": server}, agents={"echo": echo})
     secrets = {"COUNTER_KEY": TOKEN}.get
     composed = compose(config, storage=StorageConfig(StorageKind.IN_PROCESS), secret_for=secrets)
-    async with running(composed, sign_in=None, secret_for=secrets) as app:
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as http:
-            yield http
+    async with running(composed, secret_for=secrets) as up:
+        yield up.http
 
 
 @asyncio_test
@@ -53,10 +55,12 @@ async def test_an_app_is_listed_viewed_and_called_over_a_server_that_keeps_sessi
     view = View(counter, "<p>count</p>", title="Counter")
     with mcp_server(views=[view], sessions=True, json_response=True) as url:
         async with client(url) as http:
-            listed = await http.get("/api/apps", params={"agent": "echo"})
-            shown = await http.get("/api/apps/counter/counter/view", params={"agent": "echo"})
+            listed = await http.get("/robinauts/api/apps", params={"agent": "echo"})
+            shown = await http.get(
+                "/robinauts/api/apps/counter/counter/view", params={"agent": "echo"}
+            )
             called = await http.post(
-                "/api/apps/counter/tools/counter",
+                "/robinauts/api/apps/counter/tools/counter",
                 json={"agent": "echo", "arguments": {"start": 41}},
             )
 

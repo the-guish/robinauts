@@ -3,13 +3,14 @@
 
 """neorc's handlers for the flows in ``flows/``: plain functions that reach the Robinauts API.
 
-They run in a neorc worker, which is handed the server's URL in ``ROBINAUTS_API_URL``. The
-worker ``robinauts start`` starts beside itself in the local development mode
-(``docs/architecture/orchestration.md``) is handed nothing else: that mode has no sign-in, and
-every request is its one user's, so what a flow starts is the developer's. A worker started on
-its own, against a server with sign-in on, is given an API token a signed-in person minted
-(``docs/specs/sign-in.md``, "API tokens") in ``ROBINAUTS_API_TOKEN``, and the handlers send it
-as a bearer: what they start is then that person's.
+They run in a neorc worker, which is handed Robinauts' API in ``ROBINAUTS_API_URL``: the
+component's address, ``…/robinauts``. The worker ``robinauts start`` starts beside itself
+(``docs/architecture/orchestration.md``) is given a service token of ``robinauts/handler`` in
+``ROBINAUTS_API_TOKEN``, and the handlers send it as a bearer. Each handler that reaches the
+API takes its run's id, ``neorc.flow_run_id``, as ``run``, and names it in
+``X-Robinauts-Run``: the server then acts for the person who started that run, and what the
+handler opens is that person's. A worker started on its own may be given a person's own token
+instead, which acts for that person whatever the run.
 
 They import neither neorc nor Robinauts, and nothing but the standard library, so that the
 worker needs nothing installed beside neorc itself.
@@ -49,16 +50,23 @@ code and review, that is a second pull request.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import random
 import re
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from typing import Any
 
 API_URL_VARIABLE = "ROBINAUTS_API_URL"
 API_TOKEN_VARIABLE = "ROBINAUTS_API_TOKEN"
+RUN_HEADER = "X-Robinauts-Run"
+"""The header that names the run a handler acts in: the server acts for its starter."""
+
+_RUN: contextvars.ContextVar[str | None] = contextvars.ContextVar("run", default=None)
+"""The run of the handler this thread runs, which every request names."""
 
 GAME_PROMPT = (
     "Let's play a guessing game. Your secret number is {number}. Keep it secret: do not write"
@@ -140,16 +148,29 @@ TIMEOUT_SECONDS = 30.0
 """Per read: a turn's stream says something at least every few seconds while it runs."""
 
 
-def api_headers(environ: Mapping[str, str]) -> dict[str, str]:
+def api_headers(environ: Mapping[str, str], run: str | None = None) -> dict[str, str]:
     """What every request carries: the API token in ``ROBINAUTS_API_TOKEN`` as a bearer when the
-    worker was given one, and nothing when it was not, as in the local development mode."""
+    worker was given one, and the run the handler acts in, when it names one."""
     token = environ.get(API_TOKEN_VARIABLE)
-    return {"Authorization": f"Bearer {token}"} if token else {}
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    if run is not None:
+        headers[RUN_HEADER] = run
+    return headers
+
+
+@contextmanager
+def acting_in(run: str | None) -> Iterator[None]:
+    """Name ``run`` in every request made inside the block."""
+    token = _RUN.set(run)
+    try:
+        yield
+    finally:
+        _RUN.reset(token)
 
 
 def _request(path: str, body: dict[str, Any] | None = None) -> urllib.request.Request:
     url = os.environ[API_URL_VARIABLE].rstrip("/") + path
-    headers = api_headers(os.environ)
+    headers = api_headers(os.environ, _RUN.get())
     data = None
     if body is not None:
         data = json.dumps(body).encode()
@@ -278,22 +299,28 @@ def game_prompt(number: int) -> str:
     return GAME_PROMPT.format(number=number)
 
 
-def open_game(model: str, number: int) -> dict[str, str]:
+def open_game(model: str, number: int, run: str | None = None) -> dict[str, str]:
     """The game's conversation, on the first model whose id or title holds ``model``: told
     the secret number, and how to judge the guesses."""
-    return _open(game_prompt(number), model=model_named(_get("/api/models")["items"], model))
+    with acting_in(run):
+        models = _get("/api/models")["items"]
+        return _open(game_prompt(number), model=model_named(models, model))
 
 
-def open_guesser() -> dict[str, str]:
+def open_guesser(run: str | None = None) -> dict[str, str]:
     """The guesser's conversation, asked to guess: its first answer is the first guess."""
-    return _open(GUESSING_PROMPT)
+    with acting_in(run):
+        return _open(GUESSING_PROMPT)
 
 
-def judge_guess(game: dict[str, str], guesser: dict[str, str]) -> dict[str, Any]:
+def judge_guess(
+    game: dict[str, str], guesser: dict[str, str], run: str | None = None
+) -> dict[str, Any]:
     """Carry the guesser's latest answer to the game, after ``GUESS_PREFIX``, and return the
     guess, the game's verdict, and whether it is a hit."""
-    _, guess = _latest_answer(guesser["conversation_id"])
-    verdict = _say(game["conversation_id"], GUESS_PREFIX + guess)
+    with acting_in(run):
+        _, guess = _latest_answer(guesser["conversation_id"])
+        verdict = _say(game["conversation_id"], GUESS_PREFIX + guess)
     return {"guess": guess, "verdict": verdict, "hit": is_hit(verdict)}
 
 
@@ -308,13 +335,17 @@ def game_over(judged: list[dict[str, Any]], loop_count: int, max_tries: int) -> 
 
 
 def relay_verdict(
-    guesser: dict[str, str], judged: list[dict[str, Any]], over: list[bool]
+    guesser: dict[str, str],
+    judged: list[dict[str, Any]],
+    over: list[bool],
+    run: str | None = None,
 ) -> str | None:
     """Carry the game's verdict to the guesser as it is, and return its next guess; nothing,
     and send nothing, once the game is over."""
     if over[-1]:
         return None
-    return _say(guesser["conversation_id"], judged[-1]["verdict"])
+    with acting_in(run):
+        return _say(guesser["conversation_id"], judged[-1]["verdict"])
 
 
 def summarize(number: int, judged: list[dict[str, Any]]) -> dict[str, Any]:
@@ -328,13 +359,16 @@ def summarize(number: int, judged: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def implement(task: str, repo_branch: str, model: str, agent: str) -> dict[str, Any]:
+def implement(
+    task: str, repo_branch: str, model: str, agent: str, run: str | None = None
+) -> dict[str, Any]:
     """Have ``agent``, on ``model``, do ``task`` in its worktree of the repository and open a
     pull request against the branch; return the pull request, its branch and the
     conversation."""
     repo, base = split_repo_branch(repo_branch)
     prompt = IMPLEMENT_PROMPT.format(repo=repo, base=base, task=task, result=RESULT)
-    opened = _open(prompt, model=model, agent=agent, task_payload=code_task(repo, base))
+    with acting_in(run):
+        opened = _open(prompt, model=model, agent=agent, task_payload=code_task(repo, base))
     found = result_of(opened["answer"])
     pr_url = found.get("pr_url")
     branch = found.get("branch")
@@ -354,7 +388,9 @@ def implement(task: str, repo_branch: str, model: str, agent: str) -> dict[str, 
     }
 
 
-def review(implemented: dict[str, Any], model: str, agent: str) -> dict[str, Any]:
+def review(
+    implemented: dict[str, Any], model: str, agent: str, run: str | None = None
+) -> dict[str, Any]:
     """Have ``agent``, on ``model``, review the pull request ``implement`` opened, against the
     task; return its verdict and summary, with both conversations."""
     prompt = REVIEW_PROMPT.format(
@@ -366,7 +402,8 @@ def review(implemented: dict[str, Any], model: str, agent: str) -> dict[str, Any
         result=RESULT,
     )
     payload = code_task(implemented["repository"], implemented["base"])
-    opened = _open(prompt, model=model, agent=agent, task_payload=payload)
+    with acting_in(run):
+        opened = _open(prompt, model=model, agent=agent, task_payload=payload)
     found = result_of(opened["answer"])
     verdict = found.get("verdict")
     if verdict not in VERDICTS:

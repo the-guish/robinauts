@@ -97,9 +97,9 @@ class RobinautsController(Controller):
             await asyncio.gather(sweeping, return_exceptions=True)
         await self._store.close()
 
-    async def ensure_user(self, identity: Identity) -> User:
+    async def ensure_user(self, identity: Identity, *, id: uuid.UUID) -> User:
         user = User(
-            id=uuid.uuid4(),
+            id=id,
             provider=identity.provider,
             subject=identity.subject,
             name=identity.name,
@@ -328,7 +328,12 @@ class RobinautsController(Controller):
             raise MessageNotFoundError(str(answer_id))
         question = by_id[failed.parent_id]
         turn = await self._queue_turn(
-            user, session, question, model, new_question=False, retries_message_id=failed.id
+            user,
+            session,
+            question,
+            model,
+            new_question=False,
+            retries_message_id=failed.id,
         )
         return TurnStarted(session_id, turn.id, question)
 
@@ -394,7 +399,10 @@ class RobinautsController(Controller):
             await self._store.update_session(dataclasses.replace(session, archived_at=None))
         now = self._now()
         turn_id = uuid.uuid4()
-        payload: dict[str, object] = {"turn_id": str(turn_id), "create_session": create_session}
+        payload: dict[str, object] = {
+            "turn_id": str(turn_id),
+            "create_session": create_session,
+        }
         if resume:
             payload["resume"] = True
         task = Task(

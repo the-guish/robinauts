@@ -12,7 +12,7 @@
 # round before: steps of one loop cannot wait on each other's earlier
 # iterations, which would be a cycle.
 name: guess_number
-version: 0.3.0
+version: 0.4.0
 
 output: tasks.summarize
 
@@ -26,12 +26,15 @@ steps:
     handler: robinauts_tasks:open_game
     params:
       number: tasks.pick_number
+      run: neorc.flow_run_id
     fixed_params:
       model: haiku
 
   open_guesser:
     queue: default
     handler: robinauts_tasks:open_guesser
+    params:
+      run: neorc.flow_run_id
 
   rounds:
     loop:
@@ -46,6 +49,7 @@ steps:
         params:
           game: tasks.open_game
           guesser: tasks.open_guesser
+          run: neorc.flow_run_id
 
       game_over:
         queue: default
@@ -63,6 +67,7 @@ steps:
           guesser: tasks.open_guesser
           judged: tasks.judge
           over: tasks.game_over
+          run: neorc.flow_run_id
 
   summarize:
     queue: default

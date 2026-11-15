@@ -5,8 +5,9 @@
 
 from __future__ import annotations
 
+import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Mapping, MutableMapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -31,19 +32,11 @@ MOVED = (
 )
 
 MOUNT = "/neorc"
-"""Where the orchestration engine's application is mounted on this server."""
-UI_URL = f"{MOUNT}/ui/"
-"""Where its UI is, which the interface frames."""
+"""Where neorc's manager is served, composed into this backend: its component's address."""
 
-DEV_ONLY = (
-    f"{FLOWS_VARIABLE}: neorc is served with no authentication, which only the local"
-    f" development mode allows for now: start with --dev-no-sign-in, or unset {FLOWS_VARIABLE}"
-)
-
-ASGIApp = Callable[
-    [MutableMapping[str, Any], Callable[[], Awaitable[Any]], Callable[[Any], Awaitable[None]]],
-    Awaitable[None],
-]
+TokenMinter = Callable[[str, str, str | None], Awaitable[str]]
+"""What mints a service token of this backend's own, for the duration of its start: a name,
+a role and the role's resource, if it needs one. It answers the token's secret."""
 
 
 class LovKind(StrEnum):
@@ -131,16 +124,30 @@ class InvalidInputsError(FlowRefused):
 
 
 class Flows(ABC):
-    """The flows a person may start, as forms, and the start of one."""
+    """The flows a person may start, as forms, the start of one, and who started a run."""
 
     @abstractmethod
     async def forms(self) -> tuple[FlowForm, ...]:
         """Every flow of the flows folder, by name."""
 
     @abstractmethod
-    async def start(self, flow: str, inputs: Mapping[str, Any]) -> str:
+    async def start(
+        self,
+        flow: str,
+        inputs: Mapping[str, Any],
+        *,
+        owner: uuid.UUID,
+        credential: str | None,
+    ) -> str:
         """Start a run of ``flow`` with ``inputs``, which are passed on as they are once they
-        fit its form, and return the run's id. ``NoSuchFlowError``, ``InvalidInputsError``."""
+        fit its form, for the person whose user id is ``owner``, and return the run's id. The
+        start is sent to neorc with ``credential``, the person's own, so that the run is theirs
+        there too. ``NoSuchFlowError``, ``InvalidInputsError``."""
+
+    @abstractmethod
+    async def owner_of(self, run: str) -> uuid.UUID | None:
+        """Whose run ``run`` is: the person who started it here, or ``None`` for a run this
+        server did not start for a person since it started."""
 
 
 class OrchestrationStartError(RuntimeError):
@@ -154,35 +161,40 @@ class OrchestrationConfig:
 
     code_location: Path
     flows: Path
-    ui: bool = True
     repositories: tuple[Repository, ...] = ()
     forms: Mapping[str, FormSpec] = field(default_factory=dict)
     """By flow name, the forms of the folder."""
 
 
 class Orchestrator(ABC):
-    """The orchestration engine embedded in this server: its application, to mount at
-    ``MOUNT``, and what runs beside it, started and stopped around the server's own."""
+    """neorc composed into this backend: its manager's component, composed beside Robinauts'
+    own, its storage, opened before the component starts and closed after it stops, and what
+    runs beside it once the backend serves: the flows' upload and neorc's worker."""
 
     @property
     @abstractmethod
-    def mounted(self) -> ASGIApp:
-        """The application to mount at ``MOUNT``."""
+    def component(self) -> object:
+        """neorc's manager, as the component ``compose_app`` composes: named ``neorc``."""
 
     @abstractmethod
-    async def start(self) -> None:
-        """Start what runs beside the server. A start that fails part way stops what it had
-        started before it raises ``OrchestrationStartError``."""
+    async def open(self) -> None:
+        """Open neorc's storage. ``OrchestrationStartError`` when it will not open."""
+
+    @abstractmethod
+    async def close(self) -> None:
+        """Close it. Safe to repeat."""
+
+    @abstractmethod
+    async def start(self, mint: TokenMinter, transport: object) -> None:
+        """Once the backend serves: upload the flows and start neorc's worker, each with a
+        token ``mint`` makes. ``transport`` is the httpx transport that reaches this backend in
+        its own process. A start that fails part way stops what it had started before it
+        raises ``OrchestrationStartError``."""
 
     @abstractmethod
     async def stop(self) -> None:
-        """Stop it. Safe to repeat."""
+        """Stop what ``start`` started. Safe to repeat."""
 
-
-@dataclass(frozen=True, slots=True)
-class Orchestration:
-    """What the orchestrator gives a shell: the engine to mount, start and stop, and the flows
-    to serve."""
-
-    embedded: Orchestrator
-    flows: Flows
+    @abstractmethod
+    def flows(self, transport: object) -> Flows | None:
+        """The flows folder's flows, started through ``transport``: none without a folder."""

@@ -17,7 +17,7 @@ from robinauts.orchestrator.contract.domain import (
     Repository,
 )
 
-KEYS = frozenset({"code_location", "ui", "repositories"})
+KEYS = frozenset({"code_location", "repositories"})
 REPOSITORY_KEYS = frozenset({"url", "branches"})
 
 
@@ -32,10 +32,6 @@ def parse_flows_settings(
     ``code_location`` starts at the folder, and is ``default_code`` when it names none.
     ``forms`` are the folder's, already read. ``ConfigError`` names every problem."""
     problems = [f"{SETTINGS_FILE} {key}: unknown key" for key in sorted(settings.keys() - KEYS)]
-    ui = settings.get("ui", True)
-    if not isinstance(ui, bool):
-        problems.append(f"{SETTINGS_FILE} ui: true or false")
-        ui = True
     code_location = default_code
     value = settings.get("code_location")
     if value is not None:
@@ -49,7 +45,6 @@ def parse_flows_settings(
     return OrchestrationConfig(
         code_location=code_location,
         flows=folder,
-        ui=ui,
         repositories=repositories,
         forms=dict(forms or {}),
     )

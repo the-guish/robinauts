@@ -9,7 +9,7 @@
 # Its form is code_and_review.form.toml. The repositories its form offers are the flows
 # folder's, in flows.toml.
 name: code_and_review
-version: 0.1.0
+version: 0.2.0
 
 inputs:
   task: string
@@ -28,6 +28,7 @@ steps:
       repo_branch: inputs.repo_branch
       model: inputs.model
       agent: inputs.agent
+      run: neorc.flow_run_id
 
   review:
     queue: default
@@ -36,3 +37,4 @@ steps:
       implemented: tasks.implement
       model: inputs.model
       agent: inputs.agent
+      run: neorc.flow_run_id

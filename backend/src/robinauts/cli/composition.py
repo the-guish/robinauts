@@ -5,15 +5,13 @@
 them from here. Loads a configuration file, and builds a controller: the store for the storage
 asked (PostgreSQL, a SQLite file in the data directory, or this process), the application over
 it, and for each worker the configuration names, what it needs of the core over that store and
-the worker that claims and runs its agents' turns through it, with the credentials sign-in
-keeps on the same storage, but on SQLite, where they are kept in this process.
+the worker that claims and runs its agents' turns through it. Sign-in, sessions and tokens are
+oneberth's, in its own store beside this one (``cli/main.py``).
 A worker in a process of its own is built with `compose_worker`, over the core it is handed:
-`http_turn_broker`, the server's API.
-The file holds web's tables beside the controller's, so web is handed the tables of one
-reading and parses its own. Also
-what `robinauts db init` does, since it is the one other thing that names the store and the
-engines together. The orchestrator is built apart, in ``cli/orchestration.py``: a worker in a
-process of its own imports this module, and the extra workers' images leave neorc out."""
+`http_turn_broker`, the server's API. Also what `robinauts db init` does, since it is the one
+other thing that names the store and the engines together. The orchestrator is built apart, in
+``cli/orchestration.py``: a worker in a process of its own imports this module, and the extra
+workers' images leave neorc out."""
 
 from __future__ import annotations
 
@@ -27,9 +25,7 @@ from robinauts.agent_engines.contract.ports import EngineFactory, installed
 from robinauts.agent_engines.contract.ports import StorageConfig as EngineStorage
 from robinauts.agent_engines.contract.ports import StorageKind as EngineStorageKind
 from robinauts.controller.adapters.config_file import read_config
-from robinauts.controller.adapters.in_process.credentials import InProcessCredentials
 from robinauts.controller.adapters.in_process.store import InProcessStore
-from robinauts.controller.adapters.postgres.credentials import PostgresCredentials
 from robinauts.controller.adapters.postgres.pool import close_pool, open_pool
 from robinauts.controller.adapters.postgres.schema import (
     SCHEMA_SHA256,
@@ -43,10 +39,15 @@ from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.application.turn_broker import InProcessTurnBroker
 from robinauts.controller.contract.broker.ports import TurnBroker
 from robinauts.controller.contract.domain import ConfigError
-from robinauts.controller.contract.ports import Controller, Credentials
+from robinauts.controller.contract.ports import Controller
 from robinauts.controller.core.config import parse_config
 from robinauts.controller.ports.store import Store
-from robinauts.shared_domain.domain import DEFAULT_WORKER, Config, StorageConfig, StorageKind
+from robinauts.shared_domain.domain import (
+    DEFAULT_WORKER,
+    Config,
+    StorageConfig,
+    StorageKind,
+)
 from robinauts.tools import sessions
 from robinauts.tools.contract.ports import ToolProvider
 from robinauts.worker.agent_engine_store import PoolAgentEngineStore
@@ -95,14 +96,13 @@ def storage_from(environ: Mapping[str, str]) -> StorageConfig:
 
 @dataclass(frozen=True, slots=True)
 class Composed:
-    """The controller, the credentials on its storage, and for each worker by name what it
-    needs of the core and the worker over it. The credentials and the core open nothing: they
-    use the store, which `controller.open` opens and `close` closes. The workers start after
-    `open` and stop before `close`, by the shell's hand; the agent engines' store is each
-    worker's own, which it opens at its start and closes at its stop."""
+    """The controller, and for each worker by name what it needs of the core and the worker
+    over it. The core opens nothing: it uses the store, which `controller.open` opens and
+    `close` closes. The workers start after `open` and stop before `close`, by the shell's
+    hand; the agent engines' store is each worker's own, which it opens at its start and
+    closes at its stop."""
 
     controller: Controller
-    credentials: Credentials
     workers: Mapping[str, Worker]
     """By name, the default first: those that run in this process."""
     brokers: Mapping[str, TurnBroker]
@@ -124,23 +124,16 @@ def compose(
 ) -> Composed:
     """`engines` are the factories by engine name; the installed ones when not given."""
     store: Store
-    credentials: Credentials
     if storage.kind is StorageKind.POSTGRES:
         if not storage.url:
             raise ConfigError(f"{DATABASE_URL_VARIABLE} is not set")
-        postgres = PostgresStore(dsn=storage.url)
-        store, credentials = postgres, PostgresCredentials(postgres)
+        store = PostgresStore(dsn=storage.url)
     elif storage.kind is StorageKind.LOCAL:
         if not storage.path:
             raise ConfigError(f"{DATA_DIR_VARIABLE} is not set")
-        # The controller's records in the data directory's file. Sign-in's have no store on
-        # SQLite until oneberth's takes them, and are kept in this process: only the local
-        # development mode starts on local storage (`cli/main.py`).
         store = SQLiteStore(Path(storage.path) / FILE_NAME)
-        credentials = InProcessCredentials()
     else:
-        in_process = InProcessStore()
-        store, credentials = in_process, InProcessCredentials(in_process)
+        store = InProcessStore()
     controller = RobinautsController(config, store=store)
     brokers: dict[str, TurnBroker] = {}
     workers: dict[str, Worker] = {}
@@ -154,7 +147,7 @@ def compose(
             engines=engines,
             name=name,
         )
-    return Composed(controller, credentials, workers, brokers, config.commands, config)
+    return Composed(controller, workers, brokers, config.commands, config)
 
 
 def compose_worker(
@@ -169,7 +162,8 @@ def compose_worker(
     """The worker `name`, which reaches the core through `broker` alone. Its engines keep their
     state on `storage`: on PostgreSQL in a pool of the worker's own, which reads and writes the
     engines' tables, never the core's; on local storage in files of the engines' own, in the
-    worker's folder of the data directory (`worker_folder`); else in the worker's process."""
+    worker's folder of the data directory (`worker_folder`); else in the worker's process.
+    """
     agent_engine_store = None
     if storage.kind is StorageKind.POSTGRES:
         if not storage.url:
@@ -190,7 +184,8 @@ def compose_worker(
 
 def http_turn_broker(url: str, secret: str) -> TurnBroker:
     """What a worker in a process of its own reaches the core through: the API of the server
-    at `url`, with the secret that server handed it."""
+    at `url`, the component's address on its worker listener, with the token that server
+    handed it."""
     return HttpTurnBroker(url, secret)
 
 

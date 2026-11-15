@@ -16,6 +16,7 @@ from util import stack
 pytestmark = pytest.mark.io
 
 SIGN_IN = """
+[apps.robinauts]
 public_url = "https://robinauts.example.com"
 
 [providers.okta]
@@ -32,8 +33,15 @@ everyone = true
 
 def test_a_start_with_sign_in_and_no_database_is_refused(tmp_path: Path) -> None:
     config = tmp_path / "robinauts.toml"
-    config.write_text(SIGN_IN)
-    environment = {**os.environ, "ROBINAUTS_CONFIG": str(config)}
+    config.write_text("")
+    oneberth = tmp_path / "oneberth.toml"
+    oneberth.write_text(SIGN_IN)
+    environment = {
+        **os.environ,
+        "ROBINAUTS_CONFIG": str(config),
+        "ONEBERTH_CONFIG": str(oneberth),
+    }
+    environment["ROBINAUTS_OKTA_SECRET"] = "secret"
     environment.pop("ROBINAUTS_DATABASE_URL", None)
     command = [str(stack.ROBINAUTS), "start", "--port", str(stack.free_port())]
     try:

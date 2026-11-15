@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The security headers on the interface, the API and their refusals."""
+"""The security headers oneberth sets on the interface, Robinauts' API and their refusals."""
 
 from __future__ import annotations
 
 import httpx
+from oneberth.web import SECURITY_HEADERS
 
-from robinauts.web.headers import SECURITY_HEADERS
 from util.controller_db import requires_postgres
 
 pytestmark = requires_postgres
@@ -17,9 +17,9 @@ def test_every_answer_carries_the_security_headers(api: httpx.Client) -> None:
     answers = {
         "page": api.get("/ui/"),
         "missing file": api.get("/ui/assets/nothing.js"),
-        "write to the interface": api.post("/ui/"),
-        "api": api.get("/api/conversations"),
-        "refused": api.get("/api/conversations", headers={"host": "evil.example"}),
+        "write to the interface": api.post("/ui/", json={}),
+        "api": api.get("/robinauts/api/conversations"),
+        "refused": api.get("/robinauts/api/conversations", headers={"host": "evil.example"}),
         "refused page": api.get("/ui/", headers={"host": "evil.example"}),
     }
     statuses = {name: answer.status_code for name, answer in answers.items()}
@@ -33,6 +33,14 @@ def test_every_answer_carries_the_security_headers(api: httpx.Client) -> None:
     }
     for name, answer in answers.items():
         for header, value in SECURITY_HEADERS:
+            if header == "cache-control" and name in (
+                "page",
+                "missing file",
+                "write to the interface",
+            ):
+                # The interface's files are cached, and asked again each time.
+                assert answer.headers.get_list(header) == ["no-cache"], name
+                continue
             assert answer.headers.get_list(header) == [value], (name, header)
     # The policy of docs/specs/frontend.md, word for word: the interface frames this server's
     # own pages alone, an MCP app's view, and is framed by nothing.

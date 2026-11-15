@@ -18,7 +18,6 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import asyncpg
-import httpx
 import pytest
 
 from util import stack
@@ -111,14 +110,14 @@ def test_each_worker_runs_the_turns_of_its_own_agents(
     with (
         stack.database(config) as url,
         stack.server(config, url, env=stack.API_KEY, started=started) as server,
-        httpx.Client(base_url=server, timeout=30.0) as api,
+        stack.client(server, timeout=30.0) as api,
     ):
         workers = workers_of(started[0].pid)
         assert sorted(workers) == ["default", "special"]
 
         runs = {}
         for agent in ("langchain", "pydantic_ai", "special_one"):
-            done = api.post("/api/turns", json={"agent_id": agent, "text": "hello"})
+            done = api.post("/robinauts/api/turns", json={"agent_id": agent, "text": "hello"})
             assert '"RUN_FINISHED"' in done.text, done.text
             runs[agent] = done.headers["x-robinauts-run-id"]
         assert {agent: task_of(url, run) for agent, run in runs.items()} == {
@@ -133,10 +132,12 @@ def test_each_worker_runs_the_turns_of_its_own_agents(
         pool = ThreadPoolExecutor(1)
         try:
             later = pool.submit(
-                api.post, "/api/turns", json={"agent_id": "special_one", "text": "later"}
+                api.post,
+                "/robinauts/api/turns",
+                json={"agent_id": "special_one", "text": "later"},
             )
             assert wait_until_queued(url) == ["special"]
-            now = api.post("/api/turns", json={"agent_id": "pydantic_ai", "text": "now"})
+            now = api.post("/robinauts/api/turns", json={"agent_id": "pydantic_ai", "text": "now"})
             assert '"RUN_FINISHED"' in now.text, now.text
             assert queued(url) == ["special"]
         finally:
@@ -144,4 +145,7 @@ def test_each_worker_runs_the_turns_of_its_own_agents(
             pool.shutdown(wait=True)
         answered = later.result()
         assert '"RUN_FINISHED"' in answered.text, answered.text
-        assert task_of(url, answered.headers["x-robinauts-run-id"]) == ("special", "done")
+        assert task_of(url, answered.headers["x-robinauts-run-id"]) == (
+            "special",
+            "done",
+        )

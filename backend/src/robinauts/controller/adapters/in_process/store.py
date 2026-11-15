@@ -115,14 +115,6 @@ class InProcessStore(Store):
         self._users[key] = user
         return user
 
-    def user_by_id(self, user_id: uuid.UUID) -> User | None:
-        """Not the port's: what ``InProcessCredentials`` resolves a secret to."""
-        return next((u for u in self._users.values() if u.id == user_id), None)
-
-    def all_users(self) -> list[User]:
-        """Not the port's: whom ``InProcessCredentials`` looks a person up among."""
-        return list(self._users.values())
-
     # --- projects -----------------------------------------------------------
 
     async def ensure_project(self, project: Project) -> Project:
@@ -348,7 +340,8 @@ class InProcessStore(Store):
         async with self._changed:
             try:
                 await asyncio.wait_for(
-                    self._changed.wait_for(lambda: bool(self._claimable(now, worker))), timeout
+                    self._changed.wait_for(lambda: bool(self._claimable(now, worker))),
+                    timeout,
                 )
             except TimeoutError:
                 return False
@@ -410,7 +403,12 @@ class InProcessStore(Store):
         return self._turn_of(session, turn)
 
     async def wait_for_events(
-        self, owner: uuid.UUID, session: uuid.UUID, turn: uuid.UUID, after: int, timeout: float
+        self,
+        owner: uuid.UUID,
+        session: uuid.UUID,
+        turn: uuid.UUID,
+        after: int,
+        timeout: float,
     ) -> bool:
         def ready() -> bool:
             found = self._turns.get(turn)

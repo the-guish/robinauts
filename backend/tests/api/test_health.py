@@ -12,8 +12,6 @@ import tempfile
 import time
 from pathlib import Path
 
-import httpx
-
 from util import stack
 from util.controller_db import requires_postgres
 from util.fake_openai import FakeLocalGPTServer
@@ -27,21 +25,23 @@ def test_health_is_the_age_of_the_workers_activity(
     config = tmp_path / "robinauts.toml"
     config.write_text(
         stack.config_for(model_server.base_url).replace(
-            'engine = "pydantic-ai"\n', 'engine = "pydantic-ai"\nworker = "special"\n', 1
+            'engine = "pydantic-ai"\n',
+            'engine = "pydantic-ai"\nworker = "special"\n',
+            1,
         )
     )
     started: list[subprocess.Popen[bytes]] = []
     with (
         stack.database(config) as url,
         stack.server(config, url, stack.API_KEY, started) as server,
-        httpx.Client(base_url=server, timeout=10.0) as api,
+        stack.client(server, timeout=10.0) as api,
     ):
         here = Path(tempfile.gettempdir())
         for activity in (
             here / f"robinauts-worker-{started[0].pid}.alive",
             here / f"robinauts-worker-{started[0].pid}-special.alive",
         ):
-            assert api.get("/health").json() == {"status": "ok"}
+            assert api.get("/health").json() == stack.HEALTHY
 
             six_minutes_ago = time.time() - 360
             os.utime(activity, (six_minutes_ago, six_minutes_ago))

@@ -3,7 +3,8 @@
 
 """The handlers of the flows Robinauts ships (``orchestration/robinauts_tasks.py``): what their
 requests carry. The module is loaded from its file, with no bytecode written, since
-``orchestration/`` is no package of the backend's and is left as it is in the checkout."""
+``orchestration/`` is no package of the backend's and is left as it is in the checkout.
+"""
 
 from __future__ import annotations
 
@@ -32,18 +33,23 @@ def tasks() -> ModuleType:
     return module
 
 
+TOKEN = {"ROBINAUTS_API_TOKEN": "ob_svc_minted"}
+
+
 @pytest.mark.parametrize(
-    ("environ", "headers"),
+    ("environ", "run", "headers"),
     [
-        ({}, {}),
-        ({"ROBINAUTS_API_TOKEN": ""}, {}),
-        ({"ROBINAUTS_API_TOKEN": "rbt_minted"}, {"Authorization": "Bearer rbt_minted"}),
+        ({}, None, {}),
+        ({"ROBINAUTS_API_TOKEN": ""}, None, {}),
+        (TOKEN, None, {"Authorization": "Bearer ob_svc_minted"}),
+        (TOKEN, "r1", {"Authorization": "Bearer ob_svc_minted", "X-Robinauts-Run": "r1"}),
+        ({}, "r1", {"X-Robinauts-Run": "r1"}),
     ],
 )
-def test_a_request_carries_a_bearer_only_when_the_worker_was_given_an_api_token(
-    tasks: ModuleType, environ: dict[str, str], headers: dict[str, str]
+def test_a_request_carries_the_worker_s_token_and_the_run_it_acts_in(
+    tasks: ModuleType, environ: dict[str, str], run: str | None, headers: dict[str, str]
 ) -> None:
-    assert tasks.api_headers(environ) == headers
+    assert tasks.api_headers(environ, run) == headers
 
 
 MODELS = [
@@ -55,7 +61,11 @@ MODELS = [
 
 @pytest.mark.parametrize(
     ("name", "model"),
-    [("haiku", "claude-haiku-4-5"), ("HAIKU", "claude-haiku-4-5"), ("openrouter", "fast")],
+    [
+        ("haiku", "claude-haiku-4-5"),
+        ("HAIKU", "claude-haiku-4-5"),
+        ("openrouter", "fast"),
+    ],
 )
 def test_the_game_s_model_is_the_first_whose_id_or_title_holds_the_name(
     tasks: ModuleType, name: str, model: str
@@ -63,7 +73,9 @@ def test_the_game_s_model_is_the_first_whose_id_or_title_holds_the_name(
     assert tasks.model_named(MODELS, name) == model
 
 
-def test_a_server_without_the_model_is_refused_with_what_it_offers(tasks: ModuleType) -> None:
+def test_a_server_without_the_model_is_refused_with_what_it_offers(
+    tasks: ModuleType,
+) -> None:
     with pytest.raises(RuntimeError, match="no sonnet model .it offers: echo, claude-haiku"):
         tasks.model_named(MODELS, "sonnet")
 
@@ -138,12 +150,19 @@ def test_once_the_game_is_over_the_guesser_is_told_nothing(tasks: ModuleType) ->
     assert tasks.relay_verdict({"conversation_id": "c2"}, judged, [True]) is None
 
 
-def test_the_run_says_whether_the_guesser_won_and_in_how_many_tries(tasks: ModuleType) -> None:
+def test_the_run_says_whether_the_guesser_won_and_in_how_many_tries(
+    tasks: ModuleType,
+) -> None:
     judged = [
         {"guess": "5", "verdict": "TOO LOW", "hit": False},
         {"guess": "8", "verdict": "HIT", "hit": True},
     ]
-    assert tasks.summarize(9, judged) == {"number": 9, "won": True, "tries": 2, "rounds": judged}
+    assert tasks.summarize(9, judged) == {
+        "number": 9,
+        "won": True,
+        "tries": 2,
+        "rounds": judged,
+    }
 
 
 def test_the_number_is_a_whole_number_between_1_and_10(tasks: ModuleType) -> None:
@@ -194,7 +213,12 @@ def test_the_result_is_the_json_of_the_last_result_line(
 
 @pytest.mark.parametrize(
     "answer",
-    ["Done, no line.", "RESULT not json", 'RESULT ["a list"]', 'RESULT {"a": 1}\nRESULT oops'],
+    [
+        "Done, no line.",
+        "RESULT not json",
+        'RESULT ["a list"]',
+        'RESULT {"a": 1}\nRESULT oops',
+    ],
 )
 def test_an_answer_without_a_result_line_of_json_is_refused(tasks: ModuleType, answer: str) -> None:
     with pytest.raises(RuntimeError, match="no RESULT line of JSON"):
@@ -215,7 +239,9 @@ def test_a_pull_request_is_told_by_its_url(tasks: ModuleType, url: str, is_one: 
     assert bool(tasks.PULL_REQUEST.fullmatch(url)) is is_one
 
 
-def test_the_prompts_carry_the_task_and_ask_for_their_result_line(tasks: ModuleType) -> None:
+def test_the_prompts_carry_the_task_and_ask_for_their_result_line(
+    tasks: ModuleType,
+) -> None:
     task = "Fix {the} bug"
     implement = tasks.IMPLEMENT_PROMPT.format(
         repo="app", base="main", task=task, result=tasks.RESULT
@@ -241,7 +267,9 @@ def test_the_prompts_carry_the_task_and_ask_for_their_result_line(tasks: ModuleT
     )
 
 
-def test_a_conversation_on_a_repository_carries_its_code_task(tasks: ModuleType) -> None:
+def test_a_conversation_on_a_repository_carries_its_code_task(
+    tasks: ModuleType,
+) -> None:
     assert tasks.code_task("app", "develop") == {
         "task_key": "code_task/1",
         "repositories": {"app": {"branch": "develop"}},

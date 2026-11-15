@@ -6,8 +6,8 @@
 -- `postgres/schema.sql` does, and the comments there explain each table. This
 -- file says only where SQLite differs.
 --
--- It holds the store's tables alone. Sign-in's tables are kept through the
--- credentials port, and oneberth's store takes them over: this file has none.
+-- It holds the store's tables alone. Sign-in, sessions, tokens and devices
+-- are oneberth's, in `oneberth.db` beside this file.
 -- The engines keep their state apart, and nothing here references it.
 --
 -- The store applies this file itself, to an empty file, in one transaction.
