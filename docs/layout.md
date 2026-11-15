@@ -24,7 +24,7 @@ robinauts/
                         echo_engine/, langchain_engine/, pydantic_ai_engine/
       controller/       the application: contract/ (and contract/broker/),
                         core/, ports/, application/,
-                        adapters/{in_process,postgres}/
+                        adapters/{in_process,postgres,sqlite}/
       orchestrator/     flows and their runs, a sibling of the controller that
                         sees its contract alone: contract/, ports/, core/,
                         application/, adapters/ (adapters/neorc/ is the one

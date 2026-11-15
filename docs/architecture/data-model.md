@@ -2,8 +2,9 @@
 
 What the controller stores, and how a message and a turn's event are written as
 data. The model is the same in every store. `controller/adapters/postgres/schema.sql`
-is its PostgreSQL rendering, and the in-process store holds the same model. Another
-store, outside this repository, holds it on AWS serverless.
+is its PostgreSQL rendering, and `controller/adapters/sqlite/schema.sql` its SQLite
+rendering. The in-process store holds the same model. Another store, outside this
+repository, holds it on AWS serverless.
 
 Engines keep their state apart, in storage of their own, and nothing here references
 it (`docs/specs/agent-engines.md`). The controller keeps only the checkpoint id an
@@ -30,9 +31,9 @@ agent to another engine, and what its sessions then do, is stage two.
 | device session | `id` | `user_id`, `name`, `platform`, `app_version`, `secret_hash` (unique), `created_at`, `last_used_at`, `expires_at` | no |
 | pairing | `id` | `user_id`, `code_hash` (unique), `claim_hash` (unique), `match_number`, `wrong_tries`, `state`, `device_name`, `device_platform`, `device_app_version`, `created_at`, `expires_at` | no |
 
-Also in the PostgreSQL schema: `schema_version`, one row with the version and the
-hash of the file. The last five records are sign-in's, kept through the
-`Credentials` port and not the store, in `user_sessions`, `pending_logins`,
+Also in each schema: `schema_version`, one row with the version and the hash of the
+file. The SQLite file holds the first seven records alone. The last five records are
+sign-in's, kept through the `Credentials` port and not the store, in `user_sessions`, `pending_logins`,
 `api_tokens`, `device_sessions` and `pairings`. Each holds the SHA-256 of a
 secret, and is found by it (`docs/specs/sign-in.md`,
 `docs/architecture/device-pairing.md`). A user's `name`, `email`, `hosted_domain`

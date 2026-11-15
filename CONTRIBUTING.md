@@ -224,6 +224,14 @@ violation of `turns_one_active_per_session`, `turn_events_pkey`,
 and lets every other one through as the bug it is, and it tells them apart by
 name. Renaming one means changing the store too.
 
+`backend/src/robinauts/controller/adapters/sqlite/schema.sql` is the store's
+schema on SQLite, for local storage. It follows the same rules: one definition
+edited in place, `SCHEMA_VERSION` at 1, and a `SCHEMA_SHA256` pinned in
+`controller/adapters/sqlite/schema.py` that a test enforces. It holds the
+store's tables alone, and sign-in's stay on PostgreSQL. The server applies it
+to a new file itself, and refuses a file made from another edit. After pulling
+a change to it, move the data directory's `robinauts.db` away.
+
 ## Licence header
 
 Every source file starts with:
