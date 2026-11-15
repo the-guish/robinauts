@@ -14,7 +14,11 @@ the turns of its own agents alone. A worker whose table names a command
 in a process of its own even where the rest run in this one, and differs in nothing else: the
 same environment, the same token, the same line to say it is ready, the same SIGTERM to stop.
 That is how a worker runs in a container, on another machine, or with an engine this build
-lacks. The launcher of a later step takes the start of these processes over."""
+lacks.
+
+On the desktop, oneberth's launcher starts every worker, each in a process of its own, and the
+backend starts none (``outside``). The backend lets each in by the token the launcher had it
+mint, hands it its turns, and counts it in ``/health`` once it is heard from."""
 
 from __future__ import annotations
 
@@ -26,7 +30,7 @@ import signal
 import sys
 import tempfile
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from pathlib import Path
 from typing import cast
 
@@ -83,6 +87,7 @@ class Lifecycle:
         *,
         broker_url: str | None = None,
         in_process: bool | None = None,
+        outside: Collection[str] = (),
     ) -> None:
         """``broker_url`` is where a worker in a process of its own reaches the core: this
         server's, as the worker's machine reaches it. ``in_process`` says whether the workers
@@ -90,12 +95,16 @@ class Lifecycle:
         they do when there is no URL. That suits a store in this process, which is this
         process's alone: an engine in another process would hold nothing of a session this one
         ran. A worker with a command runs in a process of its own either way, so it needs the
-        URL."""
+        URL. ``outside`` names the workers a supervisor starts, each in a process of its own:
+        this server starts none of them, and lets each in at its start."""
         self.composed = composed
         self._broker_url = broker_url or ""
         self._in_process = broker_url is None if in_process is None else in_process
+        self._outside = frozenset(name for name in composed.workers if name in outside)
         self._spawned = tuple(
-            name for name in composed.workers if not self._in_process or name in composed.commands
+            name
+            for name in composed.workers
+            if name not in self._outside and (not self._in_process or name in composed.commands)
         )
         if self._spawned and not self._broker_url:
             raise ValueError(
@@ -134,16 +143,18 @@ class Lifecycle:
         self._opened = True
         # Before they start: one that fails part way holds what it opened until stopped.
         self._workers_running = True
-        if self._spawned:
+        if self._spawned or self._outside:
             # Somebody is served over the API. Every worker's broker reaches the one store,
             # which tells each listener every cancel.
             await self.composed.brokers[next(iter(self.composed.brokers))].listen_for_cancels(
                 self.access.stop_requested
             )
-        for name, worker in self.composed.workers.items():
-            if name not in self._spawned:
-                worker.activity_file = self.activity_files[name]
-                await worker.start()
+        for name in self._outside:
+            self.access.open(name)
+        for name in self._here():
+            worker = self.composed.workers[name]
+            worker.activity_file = self.activity_files[name]
+            await worker.start()
         # Side by side: a server is up once its slowest worker is. One that failed to start
         # fails the start, and `start` then stops the others.
         spawning = [self._spawn(name, self._broker_url) for name in self._spawned]
@@ -154,6 +165,11 @@ class Lifecycle:
         ]
         if failed:
             raise failed[0]
+
+    def _here(self) -> list[str]:
+        """The workers that run in this process, by name."""
+        away = {*self._spawned, *self._outside}
+        return [name for name in self.composed.workers if name not in away]
 
     def command_of(self, name: str) -> tuple[str, ...]:
         """What starts the process of the worker ``name``: its table's command, or this build's
@@ -231,7 +247,7 @@ class Lifecycle:
         """A request from the worker ``name``, through the API: for a worker in a process of
         its own, the sign of life the health check reads, as a worker in this process gives it
         by touching the file itself."""
-        if name in self._processes:
+        if name in self._processes or name in self._outside:
             self.activity_files[name].touch()
 
     def healthy(self) -> bool:
@@ -251,11 +267,7 @@ class Lifecycle:
         already. A server does it while it still listens: a worker in a process of its own
         ends its turns through the API. Then the API lets no worker in."""
         if self._workers_running:
-            stops = [
-                worker.stop()
-                for name, worker in self.composed.workers.items()
-                if name not in self._spawned
-            ]
+            stops = [self.composed.workers[name].stop() for name in self._here()]
             await asyncio.gather(*stops, *(self._stop_process(n) for n in list(self._processes)))
             # Once stopped: a stop that failed or was cancelled is done again by the next one.
             self._workers_running = False

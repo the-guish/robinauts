@@ -13,10 +13,12 @@ one place in Robinauts that imports neorc, beside ``cli.orchestration``, which w
 - once the backend serves, the flows of the flows folder are **uploaded** with a service token
   of ``neorc/ci``, after the ``default`` queue is declared as a worker queue. This backend is
   the operator here, and declares the queue on the manager directly.
-- one **worker**, on the ``default`` queue, runs in a process of its own with neorc's own
-  command. It reaches the worker listener with a token of ``neorc/worker`` bound to that queue,
-  and its handlers reach Robinauts' API on the front listener with a token of
-  ``robinauts/handler``.
+- one **worker**, on the ``default`` queue, runs in a process of its own: ``robinauts
+  neorc-worker``, which becomes neorc's own command (``neorc_worker``). Its supervisor starts
+  it: the launcher on the desktop (``supervised``), this backend on a server. It reaches the
+  worker listener with a token of ``neorc/worker`` bound to that queue, which its supervisor
+  writes on its standard input. With that token it asks Robinauts for the token its handlers
+  reach Robinauts' API with, on the front listener: one of ``robinauts/handler``.
 - a run a person starts through Robinauts is started on neorc's API with that person's own
   credential, in this process, through the backend's own front listener. neorc records the
   person as the run's starter, as it does for a run started on its own form, and Robinauts
@@ -34,6 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shlex
 import signal
 import sys
@@ -41,7 +44,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 import httpx
 from neorc import NEORC_ROLES
@@ -61,6 +64,8 @@ from neorc_core.local import MemoryStore, MemoryTaskNotifier
 
 from robinauts.orchestrator.contract.domain import (
     FLOWS_VARIABLE,
+    HANDLER_QUEUE,
+    HANDLER_TOKEN_PATH,
     MOUNT,
     SETTINGS_FILE,
     Flows,
@@ -99,16 +104,19 @@ SERVER_SECRETS = frozenset(
 """What the server's own environment holds that the worker is not handed, beside the variables
 the configuration names."""
 
-DEFAULT_QUEUE = "default"
+DEFAULT_QUEUE = HANDLER_QUEUE
 STOP_SECONDS = 15.0
 """How long the stop waits for the worker after its SIGTERM before it kills it."""
 
+START_SECONDS = 60.0
+"""How long the start waits for the worker to say it is ready before it stops it and fails."""
+READY_LINE = b"ready\n"
+"""What the worker's process writes on its standard output once it is about to serve."""
+
 UPLOAD_TOKEN = "robinauts-flows"
 WORKER_TOKEN = "robinauts-neorc-worker"
-HANDLER_TOKEN = "robinauts-handlers"
 CI_ROLE = "neorc/ci"
 WORKER_ROLE = "neorc/worker"
-HANDLER_ROLE = "robinauts/handler"
 
 ROLES = NEORC_ROLES
 """neorc's role table, as its component gives it to oneberth."""
@@ -150,8 +158,8 @@ def check_ready(orchestration: OrchestrationConfig, *, command: tuple[str, ...])
 
 
 def hidden_variables(config: Config) -> frozenset[str]:
-    """The variables the worker is not handed: those the configuration reads a secret from,
-    and the server's own."""
+    """The variables neorc's worker is not handed: those the configuration reads a secret
+    from, and the server's own."""
     named = {p.api_key_env for p in config.providers.values()}
     named |= {t.secret_env for t in config.tool_servers.values() if t.secret_env}
     return frozenset(named) | SERVER_SECRETS
@@ -191,6 +199,54 @@ def worker_command(
     )
 
 
+def handler_token(worker_url: str, token: str) -> str:
+    """The token the handlers reach Robinauts' API with, which Robinauts gives the holder of
+    ``token``, a token of ``neorc/worker`` on the handlers' queue. ``OrchestrationStartError``
+    when Robinauts refuses."""
+    path = HANDLER_TOKEN_PATH.format(queue=DEFAULT_QUEUE)
+    try:
+        answer = httpx.post(
+            f"{worker_url.rstrip('/')}/robinauts{path}",
+            json={},
+            headers={"authorization": f"Bearer {token}"},
+            timeout=30.0,
+            trust_env=False,
+        )
+    except httpx.HTTPError as error:
+        raise OrchestrationStartError(
+            f"Robinauts did not answer at {worker_url}: {error}"
+        ) from error
+    if answer.status_code != 201:
+        raise OrchestrationStartError(
+            f"Robinauts refused the handlers' token: {answer.status_code} {answer.text}"
+        )
+    return str(answer.json()["token"])
+
+
+def become_worker(
+    orchestration: OrchestrationConfig,
+    *,
+    environ: Mapping[str, str],
+    hidden: frozenset[str],
+    worker_url: str,
+    front_url: str,
+    token: str,
+    handlers: str,
+) -> NoReturn:
+    """Replace this process with neorc's worker: on the handlers' queue, against the manager
+    on the worker listener with ``token``, its handlers reaching Robinauts' API on the front
+    listener with ``handlers``, and without the variables ``hidden`` names."""
+    command = worker_command(orchestration, command=neorc_command(), manager_url=worker_url)
+    environment = worker_environment(
+        environ,
+        hidden=hidden,
+        api_url=f"{front_url.rstrip('/')}/robinauts",
+        api_token=handlers,
+        neorc_token=token,
+    )
+    os.execve(command[0], command, environment)
+
+
 class NeorcFlowEngine(FlowEngine):
     """Runs started on neorc's API, in this process, with the credential of whoever asks."""
 
@@ -221,39 +277,33 @@ class ComposedNeorc(Orchestrator):
     """neorc in this backend: its manager on storage of this backend's kind, the component
     that serves it, and the flows folder's upload and worker, when there is a folder.
 
-    ``public_url`` is the backend's, which its own requests to neorc's API name; ``api_url``
-    the front listener's, where the handlers reach Robinauts' API; ``worker_url`` the worker
-    listener's, where neorc's worker reaches the manager. Name at most one place
-    for neorc's records: ``database_url`` or ``database_file``; with neither, it keeps them in
-    this process."""
+    ``public_url`` is the backend's, which its own requests to neorc's API name. The worker
+    starts with ``program`` and the environment, plus ``supervision``: what a supervisor tells
+    a worker, the listeners' addresses among them. A ``supervised`` worker is started by the
+    supervisor of this backend, and this backend starts none. Name at most one place for
+    neorc's records: ``database_url`` or ``database_file``; with neither, it keeps them in this
+    process."""
 
     def __init__(
         self,
         orchestration: OrchestrationConfig | None,
         environ: Mapping[str, str],
         *,
-        hidden: frozenset[str],
         public_url: str,
-        api_url: str,
-        worker_url: str,
         database_url: str | None = None,
         database_file: Path | None = None,
-        command: tuple[str, ...] = (),
+        program: tuple[str, ...] = (),
+        supervision: Mapping[str, str] | None = None,
+        supervised: bool = False,
         make_flows: Callable[[FlowEngine], Flows] | None = None,
     ) -> None:
         self.orchestration = orchestration
-        self._environ = dict(environ)
-        self._hidden = hidden
+        self._environ = {**environ, **(supervision or {})}
         self._public_url = public_url
-        self._api_url = api_url
-        self._command = command
+        self._program = program
+        self._supervised = supervised
         self._make_flows = make_flows
         self._flows: Flows | None = None
-        self.worker_command = (
-            None
-            if orchestration is None
-            else worker_command(orchestration, command=command, manager_url=worker_url)
-        )
         self._stack = AsyncExitStack()
         self._open: Callable[[], Awaitable[None]] | None = None
         self._where = "in this process"
@@ -350,10 +400,8 @@ class ComposedNeorc(Orchestrator):
     async def _start(self, mint: TokenMinter, transport: httpx.AsyncBaseTransport) -> None:
         orchestration = cast(OrchestrationConfig, self.orchestration)
         await self._upload(orchestration, await mint(UPLOAD_TOKEN, CI_ROLE, None), transport)
-        await self._spawn_worker(
-            api_token=await mint(HANDLER_TOKEN, HANDLER_ROLE, None),
-            neorc_token=await mint(WORKER_TOKEN, WORKER_ROLE, DEFAULT_QUEUE),
-        )
+        if not self._supervised:
+            await self._spawn_worker(await mint(WORKER_TOKEN, WORKER_ROLE, DEFAULT_QUEUE))
         _log.info(
             "neorc is up: its manager at %s, its flows from %s, its records %s",
             MOUNT,
@@ -383,33 +431,57 @@ class ComposedNeorc(Orchestrator):
             raise OrchestrationStartError(f"neorc refused the flows in {flows}: {error}") from error
         _log.info("neorc flows from %s: %s new of %s", flows, sum(stored), len(stored))
 
-    async def _spawn_worker(self, *, api_token: str, neorc_token: str) -> None:
-        command = cast(tuple[str, ...], self.worker_command)
-        environment = worker_environment(
-            self._environ,
-            hidden=self._hidden,
-            api_url=f"{self._api_url}/robinauts",
-            api_token=api_token,
-            neorc_token=neorc_token,
-        )
+    async def _spawn_worker(self, token: str) -> None:
+        """Start the worker's process, its token on its standard input, and return once it
+        says it is ready. Its output is logged from then on."""
+        command = self._program
         _log.info("neorc's worker starts with the command: %s", shlex.join(command))
+        # The token, whole and closed, on the process's standard input before it exists.
+        read_end, write_end = os.pipe()
         try:
-            self._worker = await asyncio.create_subprocess_exec(
-                *command, env=environment, stdin=asyncio.subprocess.DEVNULL
+            os.write(write_end, token.encode())
+        finally:
+            os.close(write_end)
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                env=self._environ,
+                stdin=read_end,
+                stdout=asyncio.subprocess.PIPE,
             )
         except OSError as error:
             raise OrchestrationStartError(
                 f"neorc's worker could not be started with {shlex.join(command)}: {error}"
             ) from error
-        self._watching = asyncio.create_task(self._watch(self._worker), name="neorc worker")
+        finally:
+            os.close(read_end)
+        self._worker = process
+        output = cast(asyncio.StreamReader, process.stdout)
+        try:
+            async with asyncio.timeout(START_SECONDS):
+                while (line := await output.readline()) != READY_LINE:
+                    if not line:
+                        raise OrchestrationStartError(
+                            f"neorc's worker ended with code {await process.wait()} before it"
+                            f" was ready (started with: {shlex.join(command)})"
+                        )
+                    _said(line)
+        except TimeoutError:
+            raise OrchestrationStartError(
+                f"neorc's worker was not ready within {START_SECONDS:g} s"
+            ) from None
+        self._watching = asyncio.create_task(self._watch(process), name="neorc worker")
 
     async def _watch(self, process: asyncio.subprocess.Process) -> None:
+        output = cast(asyncio.StreamReader, process.stdout)
+        while line := await output.readline():
+            _said(line)
         code = await process.wait()
         _log.error(
             "neorc's worker ended with code %s: no task runs until the server restarts"
             " (it was started with: %s)",
             code,
-            shlex.join(self.worker_command or ()),
+            shlex.join(self._program),
         )
 
     async def stop(self) -> None:
@@ -428,3 +500,7 @@ class ComposedNeorc(Orchestrator):
             _log.warning("neorc's worker did not stop in %s s: killed", STOP_SECONDS)
             process.kill()
             await process.wait()
+
+
+def _said(line: bytes) -> None:
+    _log.info("neorc's worker says: %s", line.decode(errors="replace").rstrip())

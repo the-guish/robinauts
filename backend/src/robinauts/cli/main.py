@@ -3,7 +3,9 @@
 
 """The ``robinauts`` command: the one place that runs Robinauts, and that starts and stops its
 parts in order. ``robinauts start`` serves the backend; ``robinauts db init`` makes Robinauts'
-own tables ready on PostgreSQL; ``robinauts version`` prints the version. ``store``,
+own tables ready on PostgreSQL; ``robinauts version`` prints the version. ``robinauts desktop``
+starts the desktop with oneberth's launcher (``cli/desktop.py``), which runs the backend as
+``robinauts desktop-backend`` and neorc's worker as ``robinauts neorc-worker``. ``store``,
 ``tokens``, ``sessions`` and ``devices`` are oneberth's admin scripts, with Robinauts' and
 neorc's roles (oneberth's ``docs/specs/identity.md``, "Admin scripts").
 
@@ -57,6 +59,7 @@ from oneberth.identity import (
     Registry,
 )
 from oneberth.identity.memory import MemoryIdentityStore
+from oneberth.launcher import LaunchedBackend, LauncherError, launch
 from oneberth.stores import opened_store
 from oneberth.web import Component, Context, Listen, compose_app
 from oneberth.web import run as run_server
@@ -75,10 +78,18 @@ from robinauts.cli.composition import (
     read_tables,
     storage_from,
 )
+from robinauts.cli.desktop import (
+    CONFIG_FILE,
+    CONFIG_TEMPLATE,
+    chosen_data_dir,
+    desktop_application,
+)
 from robinauts.cli.lifecycle import Lifecycle, WorkerStartError
-from robinauts.cli.orchestration import NEORC_ROLES, orchestrator_of
+from robinauts.cli.orchestration import NEORC_ROLES, neorc_worker, orchestrator_of
+from robinauts.cli.worker_process import end_with_parent
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.orchestrator.contract.domain import (
+    FLOWS_VARIABLE,
     MOVED,
     TABLE,
     OrchestrationStartError,
@@ -89,6 +100,11 @@ from robinauts.web.app import NAME, new_robinauts_webapp
 from robinauts.web.roles import ROBINAUTS_ROLES, WORKER_ROLE
 
 REPO = Path(__file__).resolve().parents[4]
+DEFAULT_CODE = REPO / "orchestration"
+"""Where the handlers Robinauts ships are, when the flows' settings name no other place."""
+
+COMMAND = (sys.executable, "-m", "robinauts.cli")
+"""This build's ``robinauts`` command, as this interpreter runs it."""
 
 DEFAULT_PORT = 8000
 WORKER_PORT_OFFSET = 1
@@ -125,10 +141,13 @@ LOCAL_STORAGE = (
     "the records are in %s: robinauts.db, oneberth.db and neorc.db; each worker's engines keep"
     " their state in its folder under workers/ there"
 )
+NOT_LAUNCHED = (
+    "desktop-backend is the desktop's backend, which the launcher starts: start the desktop"
+    " with robinauts desktop"
+)
 STORE_INIT = "robinauts store init"
 NOT_BUILT = (
-    "the interface is not built in %s: /ui/ says so. Run npm run build in frontend/ and"
-    " start again"
+    "the interface is not built in %s: /ui/ says so. Run npm run build in frontend/ and start again"
 )
 
 log = logging.getLogger(__name__)
@@ -351,26 +370,44 @@ class Backend:
                 await self.lifecycle.stop_worker()
 
 
-def start(host: str, port: int, worker_host: str, worker_port: int | None, *, local: bool) -> int:
-    config_path = Path(os.environ["ROBINAUTS_CONFIG"])
+def start(
+    host: str,
+    port: int,
+    worker_host: str,
+    worker_port: int | None,
+    *,
+    local: bool,
+    environ: Mapping[str, str] | None = None,
+    public_host: str | None = None,
+    supervised: bool = False,
+) -> int:
+    """Serve the backend until SIGINT or SIGTERM: its front listener on ``host`` and its worker
+    listener on ``worker_host``, configured by ``environ``, this process's by default.
+    ``public_host`` is where a browser reaches the front listener, ``host`` by default. A
+    ``supervised`` backend starts no worker: its supervisor, the launcher, starts every one."""
+    environ = os.environ if environ is None else environ
+    public_host = host if public_host is None else public_host
+    config_path = Path(environ["ROBINAUTS_CONFIG"])
     tables = read_tables(config_path)
     worker_port = port + WORKER_PORT_OFFSET if worker_port is None else worker_port
     try:
         config, secret_for, oneberth = serving(
-            tables, os.environ, host=host, port=port, local=local
+            tables, environ, host=public_host, port=port, local=local
         )
         orchestrator = orchestrator_of(
-            os.environ,
+            environ,
             config,
-            default_code=REPO / "orchestration",
+            default_code=DEFAULT_CODE,
             public_url=oneberth.app(NAME).public_url,
             api_url=local_url(host, port),
             worker_url=local_url(worker_host, worker_port),
+            program=(*COMMAND, "neorc-worker"),
+            supervised=supervised,
         )
     except ConfigError as refused:
         print(refused, file=sys.stderr)
         return 1
-    storage = storage_from(os.environ)
+    storage = storage_from(environ)
     composed = compose(config, storage=storage, secret_for=secret_for)
     logging.basicConfig(level=logging.INFO)
     ui_dir = interface()
@@ -378,14 +415,18 @@ def start(host: str, port: int, worker_host: str, worker_port: int | None, *, lo
         log.warning(LOCAL_MODE)
     if storage.kind is StorageKind.LOCAL:
         log.warning(LOCAL_STORAGE, storage.path)
-    for name, command in config.commands.items():
-        log.info("worker %r starts with the command: %s", name, shlex.join(command))
+    if supervised:
+        log.info("the launcher starts the workers: %s", ", ".join(composed.workers))
+    else:
+        for name, command in config.commands.items():
+            log.info("worker %r starts with the command: %s", name, shlex.join(command))
     lifecycle = Lifecycle(
         composed,
         broker_url=f"{local_url(worker_host, worker_port)}/{NAME}",
         # A store in this process is this process's alone, and so is a SQLite file: its workers
         # run here, but for one that starts with a command of its own.
         in_process=storage.kind is not StorageKind.POSTGRES,
+        outside=composed.workers if supervised else (),
     )
     try:
         backend = Backend(
@@ -394,7 +435,7 @@ def start(host: str, port: int, worker_host: str, worker_port: int | None, *, lo
             orchestrator,
             oneberth=oneberth,
             secret_for=secret_for,
-            store=store_of(os.environ),
+            store=store_of(environ),
             ui_dir=ui_dir,
             local=local,
         )
@@ -415,6 +456,61 @@ def start(host: str, port: int, worker_host: str, worker_port: int | None, *, lo
         return 1
     except KeyboardInterrupt:
         return 130
+
+
+def desktop_backend() -> int:
+    """``robinauts desktop-backend``: the backend as oneberth's launcher starts it, on the
+    desktop. The launcher names the data directory and where each listener is, and writes
+    the launch secret on the standard input. The backend is in the local mode, keeps its
+    records in the data directory, starts no worker, and ends with the launcher."""
+    launched = LaunchedBackend.from_environ()
+    if launched is None:
+        print(NOT_LAUNCHED, file=sys.stderr)
+        return 2
+    end_with_parent(os.environ)
+    environ = {**os.environ, DATA_DIR_VARIABLE: os.fspath(launched.data_dir)}
+    environ.pop(DATABASE_URL_VARIABLE, None)
+    environ.pop(ONEBERTH_CONFIG_VARIABLE, None)
+    return start(
+        launched.front_bind,
+        launched.front_port,
+        launched.worker_bind,
+        launched.worker_port,
+        local=True,
+        environ=environ,
+        public_host=launched.host,
+        supervised=True,
+    )
+
+
+def desktop(data_dir: str | None, browser: str | None, arguments: Sequence[str]) -> int:
+    """``robinauts desktop``: the backend, the workers and the window, started by oneberth's
+    launcher on the data directory, until the window closes or a signal stops them. The
+    configuration is the file ``ROBINAUTS_CONFIG`` names, else ``robinauts.toml`` in the data
+    directory, which a first start makes empty."""
+    folder = chosen_data_dir(data_dir, os.environ)
+    folder.mkdir(parents=True, exist_ok=True)
+    named = os.environ.get("ROBINAUTS_CONFIG")
+    config_file = Path(named).absolute() if named else folder / CONFIG_FILE
+    if not named and not config_file.exists():
+        config_file.write_text(CONFIG_TEMPLATE)
+        print(f"Robinauts' configuration is {config_file}: it names no agent yet", file=sys.stderr)
+    flows_dir = os.environ.get(FLOWS_VARIABLE)
+    try:
+        config, _ = load(config_file, os.environ)
+        application = desktop_application(
+            config,
+            data_dir=folder,
+            config_file=config_file,
+            flows=Path(flows_dir).absolute() if flows_dir else None,
+            robinauts=COMMAND,
+            browser=browser,
+            arguments=arguments,
+        )
+    except (ConfigError, LauncherError, OSError) as refused:
+        print(refused, file=sys.stderr)
+        return 1
+    return launch(application)
 
 
 def database_init() -> int:
@@ -493,6 +589,25 @@ def run(argv: Sequence[str] | None = None) -> None:
         action="store_true",
         help="oneberth's local mode: the one person at this machine, signed in with a ticket",
     )
+    desktop_command = commands.add_parser(
+        "desktop", help="start the desktop: the backend, the workers and the window"
+    )
+    desktop_command.add_argument(
+        "--data-dir",
+        default=None,
+        help="the data directory; ROBINAUTS_DATA_DIR, or this platform's by default",
+    )
+    desktop_command.add_argument(
+        "--browser", default=None, help="the window's browser: Chrome or Chromium, found by default"
+    )
+    desktop_command.add_argument(
+        "--browser-argument",
+        action="append",
+        default=[],
+        help="an argument for the window's browser, after the launcher's own; repeatable",
+    )
+    commands.add_parser("desktop-backend", help="the desktop's backend, as the launcher starts it")
+    commands.add_parser("neorc-worker", help="neorc's worker, as its supervisor starts it")
     database = commands.add_parser("db", help="Robinauts' tables in the deployment's database")
     database_commands = database.add_subparsers(dest="database_command", required=True)
     database_commands.add_parser("init", help="create this build's schema in an empty database")
@@ -509,6 +624,12 @@ def run(argv: Sequence[str] | None = None) -> None:
             arguments.worker_port,
             local=arguments.local,
         )
+    elif arguments.command == "desktop":
+        status = desktop(arguments.data_dir, arguments.browser, arguments.browser_argument)
+    elif arguments.command == "desktop-backend":
+        status = desktop_backend()
+    elif arguments.command == "neorc-worker":
+        status = neorc_worker(os.environ, default_code=DEFAULT_CODE)
     elif arguments.command == "db":
         status = database_init()
     elif arguments.command == "version":

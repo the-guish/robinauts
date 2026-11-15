@@ -10,11 +10,24 @@ nothing a worker imports may reach neorc (a contract in ``backend/pyproject.toml
 
 from __future__ import annotations
 
+import os
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from robinauts.cli.composition import DATA_DIR_VARIABLE, DATABASE_URL_VARIABLE
+from oneberth.launcher import (
+    FRONT_URL,
+    LAUNCHER_PID,
+    WORKER_NAME,
+    WORKER_URL,
+    read_token,
+    say_ready,
+)
+
+from robinauts.cli.composition import DATA_DIR_VARIABLE, DATABASE_URL_VARIABLE, load
+from robinauts.cli.desktop import NEORC_WORKER
+from robinauts.cli.worker_process import end_with_parent
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.orchestrator.adapters.flows_folder import read_forms, read_settings
 from robinauts.orchestrator.adapters.neorc import composed as neorc
@@ -23,6 +36,7 @@ from robinauts.orchestrator.contract.domain import (
     FLOWS_VARIABLE,
     FormSpec,
     OrchestrationConfig,
+    OrchestrationStartError,
     Orchestrator,
 )
 from robinauts.orchestrator.core.config import parse_flows_settings
@@ -38,15 +52,19 @@ def orchestrator_of(
     public_url: str,
     api_url: str,
     worker_url: str,
+    program: tuple[str, ...] = (),
+    supervised: bool = False,
 ) -> Orchestrator:
     """neorc on this server's storage: the PostgreSQL ``ROBINAUTS_DATABASE_URL`` names, the
     file ``neorc.db`` in ``ROBINAUTS_DATA_DIR``, or this process. With a flows folder,
     ``ROBINAUTS_FLOWS_DIR``, as its ``flows.toml`` describes it, the folder's flows as forms,
     with the lists of values ``config``, the agents' configuration, and the folder's
-    repositories give. ``public_url`` is the backend's, which its own requests to neorc name;
-    ``api_url`` is where the handlers reach its front listener, and ``worker_url`` where
-    neorc's worker reaches its worker listener. ``default_code`` is where the handlers
-    are when ``flows.toml`` names none. ``ConfigError`` names what stops it from starting.
+    repositories give. ``public_url`` is the backend's, which its own requests to neorc name.
+    neorc's worker starts with ``program``, ``robinauts neorc-worker``, and is told as the
+    launcher tells a worker that ``api_url`` is the front listener's address and ``worker_url``
+    the worker listener's. A ``supervised`` worker is started by this backend's supervisor, and
+    this backend starts none. ``default_code`` is where the handlers are when ``flows.toml``
+    names none. ``ConfigError`` names what stops it from starting.
     """
     database_url = environ.get(DATABASE_URL_VARIABLE) or None
     data_dir = environ.get(DATA_DIR_VARIABLE) or None
@@ -57,15 +75,7 @@ def orchestrator_of(
         storage["database_file"] = Path(data_dir) / neorc.FILE_NAME
     named = environ.get(FLOWS_VARIABLE)
     if not named:
-        return neorc.ComposedNeorc(
-            None,
-            environ,
-            hidden=frozenset(),
-            public_url=public_url,
-            api_url=api_url,
-            worker_url=worker_url,
-            **storage,
-        )
+        return neorc.ComposedNeorc(None, environ, public_url=public_url, **storage)
     folder = Path(named).absolute()
     problems: list[str] = []
     forms: dict[str, FormSpec] = {}
@@ -96,15 +106,66 @@ def orchestrator_of(
     return neorc.ComposedNeorc(
         orchestration,
         environ,
-        hidden=neorc.hidden_variables(config),
         public_url=public_url,
-        api_url=api_url,
-        worker_url=worker_url,
-        command=command,
+        program=program,
+        supervision={
+            WORKER_NAME: NEORC_WORKER,
+            WORKER_URL: worker_url,
+            FRONT_URL: api_url,
+            LAUNCHER_PID: str(os.getpid()),
+        },
+        supervised=supervised,
         make_flows=lambda engine: FlowForms(engine, orchestration, declared, config),
         **storage,
     )
 
+
+def neorc_worker(environ: Mapping[str, str], *, default_code: Path) -> int:
+    """``robinauts neorc-worker``: neorc's worker, as its supervisor starts it, the launcher
+    or this backend. It reads its token, a token of ``neorc/worker`` on the handlers' queue,
+    from its standard input, and the listeners' addresses from the launcher's variables. It
+    asks Robinauts for the handlers' token with it, says it is ready, and becomes neorc's own
+    worker, without the secrets of the configuration in its environment. It ends with its
+    supervisor."""
+    worker_url, front_url = environ.get(WORKER_URL), environ.get(FRONT_URL)
+    named = environ.get(FLOWS_VARIABLE)
+    if not worker_url or not front_url or not named:
+        print(NOT_SUPERVISED, file=sys.stderr)
+        return 2
+    end_with_parent(environ)
+    token = read_token(environ=environ)
+    folder = Path(named).absolute()
+    try:
+        orchestration = parse_flows_settings(
+            read_settings(folder), folder=folder, default_code=default_code
+        )
+        hidden: frozenset[str] = frozenset()
+        config_file = environ.get(CONFIG_VARIABLE)
+        if config_file:
+            config, _ = load(Path(config_file), environ)
+            hidden = neorc.hidden_variables(config)
+        handlers = neorc.handler_token(worker_url, token)
+    except (ConfigError, OrchestrationStartError) as refused:
+        print(refused, file=sys.stderr)
+        return 1
+    say_ready()
+    neorc.become_worker(
+        orchestration,
+        environ=environ,
+        hidden=hidden | neorc.SERVER_SECRETS,
+        worker_url=worker_url,
+        front_url=front_url,
+        token=token,
+        handlers=handlers,
+    )
+
+
+CONFIG_VARIABLE = "ROBINAUTS_CONFIG"
+NOT_SUPERVISED = (
+    "neorc's worker is started by its supervisor, the launcher or Robinauts' backend, which"
+    f" names the listeners in {WORKER_URL} and {FRONT_URL}, and the flows folder in"
+    f" {FLOWS_VARIABLE}"
+)
 
 NEORC_ROLES = neorc.ROLES
 """neorc's roles, as its component gives them to oneberth: what the admin scripts need to

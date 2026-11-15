@@ -30,6 +30,7 @@ import pytest
 
 from util import stack
 from util.controller_db import NO_DATABASE
+from util.desktop import environ_of, gone, processes_with
 
 pytestmark = pytest.mark.io
 
@@ -143,6 +144,25 @@ def test_neorc_is_composed_in_the_server_and_a_run_of_its_flow_plays_the_game(
         play_a_game(url)
     assert b"neorc is up" in said[0], said[0].decode(errors="replace")
     assert b"in this process" in said[0]
+
+
+def test_neorc_s_worker_ends_with_a_server_that_is_killed(tmp_path: Path) -> None:
+    config = tmp_path / "robinauts.toml"
+    config.write_text(CONFIG)
+    mark = uuid.uuid4().hex
+    environment = {**environment_for(config), "ROBINAUTS_TEST_MARK": mark}
+    running, _ = stack.start_local(environment, stdout=subprocess.PIPE)
+    with running:
+        try:
+            stack.wait_until_ready(running)
+            workers = [p for p in processes_with("ROBINAUTS_TEST_MARK", mark) if p != running.pid]
+            assert len(workers) == 1, workers
+            assert environ_of(workers[0])["ONEBERTH_WORKER_NAME"] == "neorc"
+            running.kill()
+            assert gone(workers, 30)
+        finally:
+            if running.poll() is None:
+                running.kill()
 
 
 def test_neorc_s_api_is_checked_as_every_route_of_the_backend(tmp_path: Path) -> None:

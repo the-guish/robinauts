@@ -22,10 +22,16 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
+from neorc_core import QueueKind
 from oneberth.web import testing
 
 from robinauts.cli.composition import compose
 from robinauts.controller.contract.domain import Identity as RobinautsIdentity
+from robinauts.orchestrator.contract.domain import (
+    HANDLER_QUEUE,
+    HANDLER_QUEUE_PERMISSION,
+    HANDLER_TOKEN_PATH,
+)
 from robinauts.shared_domain.domain import (
     AgentConfig,
     Config,
@@ -86,6 +92,7 @@ PERMISSION_OF: dict[tuple[str, str], str] = {
     ("GET", f"{W}{OWNED}/messages"): roles.SESSIONS_READ,
     ("PUT", f"{W}{OWNED}/turns/{{turn_id}}/events/{{position}}"): roles.TURNS_WRITE,
     ("POST", f"{W}{OWNED}/turns/{{turn_id}}/finish"): roles.TURNS_WRITE,
+    ("POST", HANDLER_TOKEN_PATH): HANDLER_QUEUE_PERMISSION,
 }
 """Every route of the component, by method and path below ``/robinauts``, and the permission
 it declares."""
@@ -150,6 +157,7 @@ def concrete(path: str) -> str:
         .replace("{server}", "s")
         .replace("{tool}", "t")
         .replace("{position}", "1")
+        .replace("{queue}", HANDLER_QUEUE)
     )
 
 
@@ -239,3 +247,32 @@ async def test_the_worker_listener_serves_the_worker_routes_and_nothing_else() -
         async with testing.client_of(composition) as front:
             same = await front.get(f"/{NAME}{W}/cancels", headers=testing.bearer(worker))
             assert same.status_code == 200, same.text
+
+
+@asyncio_test
+async def test_the_worker_of_the_handlers_queue_gets_the_handlers_token() -> None:
+    async with composed_backend() as backend:
+        composition = backend.composition
+        manager = backend.orchestrator.manager
+        await manager.declare_queue(HANDLER_QUEUE, QueueKind.WORKER)
+        await manager.declare_queue("other", QueueKind.WORKER)
+        handlers = await testing.service_token(composition, "neorc/worker", HANDLER_QUEUE)
+        other = await testing.service_token(composition, "neorc/worker", "other")
+        async with testing.client_of(composition, worker=True) as listener:
+            given = await listener.post(
+                f"/{NAME}{concrete(HANDLER_TOKEN_PATH)}", json={}, headers=testing.bearer(handlers)
+            )
+            assert given.status_code == 201, given.text
+            # A token of another queue's worker: its own queue is not the handlers'; the
+            # handlers' queue is not its own.
+            for queue, status in ((HANDLER_QUEUE, 403), ("other", 404)):
+                path = HANDLER_TOKEN_PATH.format(queue=queue)
+                refused = await listener.post(
+                    f"/{NAME}{path}", json={}, headers=testing.bearer(other)
+                )
+                assert refused.status_code == status, refused.text
+        token = testing.bearer(given.json()["token"])
+        async with testing.client_of(composition) as front:
+            assert (await front.get(f"/{NAME}/api/agents", headers=token)).status_code == 200
+            listed = await front.get(f"/{NAME}/api/conversations", headers=token)
+            assert listed.status_code == 403, listed.text

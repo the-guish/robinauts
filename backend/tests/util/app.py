@@ -46,7 +46,8 @@ def backend_of(
     """The backend ``robinauts start --local`` composes over ``composed``, with oneberth's and
     neorc's stores in this process, or in the data directory ``environ`` names; with
     ``oneberth``, the backend ``robinauts start`` composes with that sign-in configuration
-    instead."""
+    instead. It starts no neorc worker, as a backend the launcher starts: a test plays the
+    worker's part."""
     orchestrator = orchestrator_of(
         environ or {},
         composed.config,
@@ -54,6 +55,7 @@ def backend_of(
         public_url=PUBLIC_URL,
         api_url=PUBLIC_URL,
         worker_url=WORKER_URL,
+        supervised=True,
     )
     return Backend(
         composed,

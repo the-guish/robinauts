@@ -48,6 +48,9 @@ from robinauts.controller.contract.domain import (
 )
 from robinauts.controller.contract.ports import Controller
 from robinauts.orchestrator.contract.domain import (
+    HANDLER_QUEUE,
+    HANDLER_QUEUE_PERMISSION,
+    HANDLER_TOKEN_PATH,
     FlowForm,
     Flows,
     InvalidInputsError,
@@ -97,9 +100,12 @@ RUN_HEADER = "X-Robinauts-Run"
 for the person who started that run."""
 
 NOT_A_PERSON = (
-    "a service acts for a person only as a flow's handler, which names its run in" f" {RUN_HEADER}"
+    f"a service acts for a person only as a flow's handler, which names its run in {RUN_HEADER}"
 )
 UNKNOWN_RUN = "neorc holds no run of that id that a person started"
+NOT_THE_HANDLERS_QUEUE = (
+    f"the handlers that call Robinauts run on the queue {HANDLER_QUEUE!r} alone"
+)
 
 STATUS_OF: dict[type[Exception], int] = {
     ControllerError: 500,
@@ -135,6 +141,10 @@ def error_body(error: Exception) -> Mapping[str, Any]:
 
 
 # --- what the interface reads ----------------------------------------------------
+
+
+class HandlerToken(BaseModel):
+    token: str
 
 
 class AgentSummary(BaseModel):
@@ -889,6 +899,23 @@ def new_robinauts_webapp(
     # --- the workers -------------------------------------------------------------
 
     router.include_router(worker_router(brokers, worker_access))
+
+    # Outside the OpenAPI document: neorc's worker calls it, not a client of the API.
+    @router.post(
+        HANDLER_TOKEN_PATH,
+        status_code=201,
+        dependencies=[permit(HANDLER_QUEUE_PERMISSION, "queue")],
+        include_in_schema=False,
+    )
+    async def handler_token(request: Request, queue: str) -> HandlerToken:
+        """A token of ``robinauts/handler``, for the worker that takes the tasks of the
+        handlers' queue: what its handlers call Robinauts with. It lives in this backend's
+        memory, and ends when the backend stops."""
+        if queue != HANDLER_QUEUE:
+            raise Refusal(404, "Not Found", NOT_THE_HANDLERS_QUEUE)
+        access = request.app.state.oneberth.access
+        secret, _ = await access.create_own_token(f"robinauts-handlers-{queue}", roles.HANDLER_ROLE)
+        return HandlerToken(token=secret)
 
     async def well() -> bool:
         return True if health is None else bool(await health())

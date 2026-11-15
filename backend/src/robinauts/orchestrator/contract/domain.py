@@ -34,6 +34,15 @@ MOVED = (
 MOUNT = "/neorc"
 """Where neorc's manager is served, composed into this backend: its component's address."""
 
+HANDLER_QUEUE = "default"
+"""The queue of the handlers Robinauts ships, which call its API on the front listener: neorc's
+worker serves it, with a token of ``neorc/worker`` bound to it."""
+HANDLER_QUEUE_PERMISSION = "neorc/tasks:claim"
+"""neorc's permission to take a queue's tasks. A token that holds it on ``HANDLER_QUEUE`` runs
+the handlers, and is given what they call Robinauts with: a token of ``robinauts/handler``."""
+HANDLER_TOKEN_PATH = "/internal/queues/{queue}/handler-token"
+"""Where neorc's worker asks for that token, under Robinauts' component, on either listener."""
+
 TokenMinter = Callable[[str, str, str | None], Awaitable[str]]
 """What mints a service token of this backend's own, for the duration of its start: a name,
 a role and the role's resource, if it needs one. It answers the token's secret."""
