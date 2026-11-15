@@ -203,8 +203,8 @@ neorc, even through another module.
 Robinauts depends on `neorc[http,postgres]`, `neorc-core` and `oneberth`. Neither
 publishes wheels yet. neorc's `manager` extra is left out: it brings neorc's built interface,
 which nothing serves here. Robinauts builds them from commits of the-guish/neorc and
-the-guish/oneberth, named in `[tool.uv.sources]` in `backend/pyproject.toml`. The oneberth
-commit is the one the neorc commit pins, so the lock holds one oneberth.
+open-shipyard/oneberth, named in `[tool.uv.sources]` in `backend/pyproject.toml`. The oneberth
+repository and commit are the ones the neorc commit pins, so the lock holds one oneberth.
 
 uv builds these packages from those commits. Every other package stays under `--no-build`.
 `scripts/neorc-from-source.sh` builds the wheels of a release, and refuses a commit outside

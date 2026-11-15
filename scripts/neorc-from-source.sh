@@ -25,9 +25,9 @@ if [ -z "$revision" ]; then
     printf 'backend/pyproject.toml pins no commit of neorc\n' >&2
     exit 1
 fi
-oneberth_repository=https://github.com/the-guish/oneberth
+oneberth_repository=$(sed -n 's/^oneberth = .*git = "\([^"]*\)".*/\1/p' "$root/backend/pyproject.toml")
 oneberth_revision=$(sed -n 's/^oneberth = .*rev = "\([0-9a-f]*\)".*/\1/p' "$root/backend/pyproject.toml")
-if [ -z "$oneberth_revision" ]; then
+if [ -z "$oneberth_repository" ] || [ -z "$oneberth_revision" ]; then
     printf 'backend/pyproject.toml pins no commit of oneberth\n' >&2
     exit 1
 fi
