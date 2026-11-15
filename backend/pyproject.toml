@@ -104,9 +104,9 @@ environments = [
 ]
 
 [tool.uv.sources]
-neorc = { git = "https://github.com/the-guish/neorc", rev = "412b062a5e12db91ac06462bbff4c0644e430aa2", subdirectory = "python/neorc" }
-neorc-core = { git = "https://github.com/the-guish/neorc", rev = "412b062a5e12db91ac06462bbff4c0644e430aa2", subdirectory = "python/neorc-core" }
-oneberth = { git = "https://github.com/the-guish/oneberth", rev = "fe4df3b9aca9f1805ba081c5de5a4c42f89c6f6e", subdirectory = "python/oneberth" }
+neorc = { git = "https://github.com/the-guish/neorc", rev = "2fc768e284f61046a870795d8261783ea3bdef04", subdirectory = "python/neorc" }
+neorc-core = { git = "https://github.com/the-guish/neorc", rev = "2fc768e284f61046a870795d8261783ea3bdef04", subdirectory = "python/neorc-core" }
+oneberth = { git = "https://github.com/the-guish/oneberth", rev = "d91fc0b7320a569b32c0fbba5724d5f8295230b5", subdirectory = "python/oneberth" }
 
 [project.scripts]
 robinauts = "robinauts.cli.main:run"
