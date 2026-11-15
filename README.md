@@ -108,7 +108,7 @@ interface, placed behind the company's usual HTTPS reverse proxy.
 [docs/deployment.md](docs/deployment.md) walks through it, step by step.
 
 To try it on a laptop, one command starts a throwaway database and the
-application, with no sign-in; it needs `uv`, Node.js and an Anthropic or
+application, in oneberth's local mode: the printed URL signs you in; it needs `uv`, Node.js and an Anthropic or
 OpenRouter key ([demo/README.md](demo/README.md)):
 
     demo/start.sh          # demo/stop.sh takes it down
