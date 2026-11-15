@@ -35,22 +35,17 @@ from robinauts.controller.contract.domain import ConfigError
 SCHEMA_VERSION = 1
 """The schema this build was written against; frozen at 1 until the first release."""
 
-SCHEMA_SHA256 = "ec782e0b07d7f256051d20a56a0f06c434ae460d49b4766db160415adc562168"
+SCHEMA_SHA256 = "3fe636e68aec69528e91171483b0d5ae8533009b1b168254777bdcca4a6b9c5b"
 """``schema.sql`` as this build was written against it, line endings normalised to LF."""
 
 SCHEMA_TABLES = (
-    "api_tokens",
-    "device_sessions",
     "messages",
-    "pairings",
-    "pending_logins",
     "projects",
     "schema_version",
     "sessions",
     "tasks",
     "turn_events",
     "turns",
-    "user_sessions",
     "users",
 )
 """Every table ``schema.sql`` creates; a test keeps this list in step with it."""
@@ -185,7 +180,9 @@ def _unversioned(names: list[str]) -> ConfigError:
     )
 
 
-async def _state(connection: asyncpg.Connection) -> tuple[_Tables, int | None, str | None]:
+async def _state(
+    connection: asyncpg.Connection,
+) -> tuple[_Tables, int | None, str | None]:
     here = await _current_schema(connection)
     tables = _Tables(await connection.fetch(_TABLES_HERE, list(SCHEMA_TABLES)))
     if "schema_version" not in tables.here:

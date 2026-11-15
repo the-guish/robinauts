@@ -45,6 +45,11 @@ class MissingSecretError(EngineError):
     pass
 
 
+class StorageRefusedError(EngineError):
+    """The engine's storage cannot be opened, or is not this build's: a file of another
+    version, of someone else's, or not a database."""
+
+
 class ProviderKind(StrEnum):
     ANTHROPIC = "anthropic"
     ANTHROPIC_COMPATIBLE = "anthropic-compatible"

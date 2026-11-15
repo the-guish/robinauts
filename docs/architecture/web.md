@@ -1,26 +1,93 @@
 # Web
 
-The operations the web shell offers the frontend.
+The operations Robinauts' backend offers the interface, the phone and the workers.
 
-## Sign-in
+## The component
 
-- `sign_in`: start the sign-in with a provider, and finish it when the provider answers.
-- `sign_out`
-- `current_user_session`: who is signed in, if anyone.
-- `mint_api_token`, `list_api_tokens`, `revoke_api_token`: the API tokens of the person signed in, sent as a bearer. Minting and revoking need the browser's session, minting one younger than ten minutes.
+Robinauts' backend is a oneberth composition (oneberth's `docs/specs/composition.md`).
+Robinauts gives oneberth a component named `robinauts`: its routes, written on FastAPI, its
+roles, and what it starts and stops. `new_robinauts_webapp` in `web/app.py` builds it, and
+`robinauts start` composes it with neorc's manager (`docs/architecture/orchestration.md`).
 
-## Devices
+| address | served by |
+|---|---|
+| `/robinauts/api/…` | Robinauts' routes, below |
+| `/robinauts/internal/worker/…` | the workers' routes, on both listeners |
+| `/robinauts/openapi.json` | Robinauts' OpenAPI document, `backend/openapi.json` |
+| `/neorc/…` | neorc's manager |
+| `/auth/…` | oneberth: sign-in, the session, tokens, pairing, devices, service tokens |
+| `/ui/` | the built interface, or a page that says it is not built |
+| `/health` | oneberth, from each component's state |
 
-How a phone is linked and ended (`docs/architecture/device-pairing.md`). Minting and removing need the browser's session; a bearer is answered 403.
+oneberth holds who is asking, the check of a route's permission, the checks on a request, the
+security headers and the shape of an error, `{"error": …, "detail": …}`. A write is
+`application/json`, a `POST` without a body too. The checks on ownership, such as whose
+conversation this is, are the controller's.
 
-- `mint_pairing`: a code for a phone, answered as its QR picture alone; it needs a session younger than ten minutes.
-- `pairing_state`: what the browser polls: waiting, claimed with the device's description, or approved.
-- `claim_pairing`: the phone presents the code, with no credential, and gets a claim secret and the number to show.
-- `approve_pairing`: the number the phone shows, typed into the browser; links the device.
-- `refuse_pairing`: No, or a code cancelled.
-- `list_devices`: the person's linked devices, oldest first.
-- `remove_device`: end one of them.
-- `current_user_session` also answers a bearer: the device or the token it is, or the pairing a claim waits on; and `sign_out` with a device's bearer ends that device.
+### The start and the stop
+
+The component has two moments of oneberth's. Its lifespan opens neorc's storage and the
+controller, and starts the workers. Its serving begins once both listeners serve, before the
+server says `ready`. It uploads the flows and starts neorc's worker, since both call the
+backend's own listeners. On the desktop the launcher starts every worker, neorc's included, and
+the backend starts none: `robinauts desktop-backend` is the backend there. A stop ends the serving first, while the listeners still serve: the
+workers stop there, and end their turns through the listeners. Then the listeners stop, and
+then the lifespan closes the controller and neorc's storage.
+
+The tokens the backend mints for its own parts live in its memory alone: its workers', neorc's
+worker's, the flows' upload's and the handlers'. The tokens the launcher has it mint live
+there too. Each ends with the process, at a stop or a crash. The store holds none of them.
+
+A checkout whose interface is not built still serves the API. `/ui/` then answers 404 with a
+page that says the interface is not built, and the log says to run `npm run build` in
+`frontend/`. A wheel always holds the interface.
+
+## Roles and permissions
+
+Robinauts declares its roles as data in `web/roles.py`. Every route declares one permission,
+and oneberth refuses a principal that does not hold it with 403.
+
+A worker's grant is bound to the worker's name. The worker routes name no worker in their
+path: each declares `permit(…, bound=True)` and acts on the worker the token is bound to.
+Every other route names its resource or serves every one, and refuses a bound grant.
+
+| role | given to | resource | holds |
+|---|---|---|---|
+| `robinauts/user` | every person who may sign in | none | every permission of `/api/` |
+| `robinauts/admin` | the people the configuration names | none | the same: no route is an admin's alone yet |
+| `robinauts/worker` | a service token | one worker name | the routes of `/internal/worker/` |
+| `robinauts/handler` | a service token | none | `agents:read`, `conversations:read`, `turns:start` |
+
+| permission | routes |
+|---|---|
+| `robinauts/agents:read` | the agents and the models |
+| `robinauts/apps:use` | the MCP apps |
+| `robinauts/projects:read`, `robinauts/projects:write` | the projects |
+| `robinauts/conversations:read` | the list, a conversation, the change feed, a turn's stream |
+| `robinauts/conversations:write` | rename, archive, delete, fork, the model |
+| `robinauts/turns:start` | a new conversation, a message, a cancel |
+| `robinauts/flows:read`, `robinauts/flows:start` | the flows as forms, and a run's start |
+| `robinauts/tasks:work` | a worker's tasks, its cancels, a turn's owner |
+| `robinauts/sessions:read` | the sessions and messages a worker's turn reads |
+| `robinauts/turns:write` | the events and the end of a worker's turn |
+| `neorc/tasks:claim`, on the queue `default` | the handlers' token, for neorc's worker |
+
+## Who a request is for
+
+- A person is the oneberth user. Robinauts keeps its own row of them, under the same id, in
+  its `users` table: their projects, conversations and change version hang from it. The row is
+  written the first time the person asks.
+- A flow's handler holds a token of `robinauts/handler` and names its run in
+  `X-Robinauts-Run`. The server acts for the person who started that run through
+  `POST /robinauts/api/flows/{flow}/runs`. In the local mode, a run started elsewhere is the
+  one person's. Any other service is refused with 403.
+
+## Sign-in, devices, tokens
+
+oneberth's (oneberth's `docs/specs/identity.md`, "Routes"). `GET /auth/session` says who is
+asking, their roles and the providers. Personal tokens, pairing a phone, the linked devices and
+the service tokens are under `/auth/`. The local mode signs its one person in with a ticket at
+`/auth/local`.
 
 ## Catalogue
 
@@ -32,25 +99,25 @@ How a phone is linked and ended (`docs/architecture/device-pairing.md`). Minting
 The MCP apps of an agent's tool servers, for the side panel
 ([ADR 0007](../adr/0007-mcp-apps-in-the-side-panel.md), `web/apps.py`). An app is a tool whose
 `_meta.ui.resourceUri` names a `ui://` resource of type `text/html;profile=mcp-app`: its view.
-Each route wants a signed-in user, like `list_agents`, and names the agent. The agent's apps are
+Each route needs `robinauts/apps:use`, and names the agent. The agent's apps are
 those of the tool servers it names, less what a server's `exclude` keeps from it. Web reaches a
 server with its configured credential, read from `secret_env` as the worker reads it, within its
 `timeout_seconds`, over streamable HTTP with a client of its own (`web/mcp_client.py`): `mcp` is
 the engines' alone.
 
-- `list_apps`: `GET /api/apps?agent=<agent>`, answered
+- `list_apps`: `GET /robinauts/api/apps?agent=<agent>`, answered
   `{"apps": [{"id": "<server>/<tool>", "server", "tool", "title", "description"}]}`, server by
   server in the agent's order. An app is listed when a view may call its tool. A server that
   cannot be reached is left out and logged by its id and the kind of failure. An unknown agent
   is 404 `UnknownAgentError`.
-- `open_app_view`: `GET /api/apps/<server>/<tool>/view?agent=<agent>`, the view's HTML, which the
+- `open_app_view`: `GET /robinauts/api/apps/<server>/<tool>/view?agent=<agent>`, the view's HTML, which the
   panel frames. Its answer alone carries `Content-Security-Policy: default-src 'none';
   script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:;
   connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self';
   sandbox allow-scripts`, `X-Frame-Options: SAMEORIGIN` and `Cache-Control: no-store`. The
   origins a server asks for in `_meta.ui.csp` are not given. Outside the OpenAPI document: it is
   a frame's address, not a call.
-- `call_app_tool`: `POST /api/apps/<server>/tools/<tool>` with `{"agent", "arguments"}`, a tool
+- `call_app_tool`: `POST /robinauts/api/apps/<server>/tools/<tool>` with `{"agent", "arguments"}`, a tool
   call of the view's, answered with the server's `CallToolResult` as it gave it:
   `{"content", "structuredContent", "isError"}`. A tool that failed is `isError` and 200. A tool
   whose `_meta.ui.visibility` does not include `app` is refused.
@@ -81,27 +148,32 @@ the engines' alone.
 
 What a worker in a process of its own reaches the core through: the operations of
 `TurnBroker` (`docs/architecture/controller.md`, "Worker"), one route each under
-`/internal/worker/`, served over the controller's store. They are not the frontend's and are
-not in the OpenAPI document.
+`/robinauts/internal/worker/`, served over the controller's store. They are not the
+interface's and are not in the OpenAPI document.
 
 - There is one worker process per worker the configuration names (`AgentConfig.worker`,
-  `default` for an agent that names none). The server makes a secret for each at its start
-  and writes it on that worker's process's standard input, which the process reads to its end
-  at its own start; it is in no environment variable and no file. A worker started with its
-  table's command is let in the same way: the command carries the standard input to wherever
-  the worker runs. Every route wants one of them as `Authorization: Bearer`: any other
-  credential is 401. With no worker process running, the routes answer 404. Each admitted
+  `default` for an agent that names none). The server, or on the desktop the launcher, mints a
+  oneberth service token of `robinauts/worker` for each at its start, bound to the worker's
+  name, and writes it on that worker's process's standard input, which the process reads to its end at its own start; it
+  is in no environment variable and no file. The token lives in the backend's memory, and
+  ends with it ([The start and the stop](#the-start-and-the-stop)). A worker started with its table's command is let in the same way: the command carries
+  the standard input to wherever the worker runs.
+- oneberth serves these routes on the worker listener, `--worker-host` and `--worker-port`,
+  where they are the only routes; they are on the front listener too. A worker reaches
+  `http://<worker listener>/robinauts`. The launcher names the listener in
+  `ONEBERTH_WORKER_URL`, and a server names the whole address in `ROBINAUTS_WORKER_BROKER_URL`.
+- Every route needs one of the three worker permissions, and a person or another service is
+  403. Each route is bound: it reads the worker's name from the token's grant
+  (`Access.bound_resource`). With no worker process of that name running, the routes answer 404. Each admitted
   request is a sign of life for `/health`, which hears a worker in a process of its own
   through nothing else.
-- The secret says which worker asks, and each is served over a broker of its own: its claims
-  and waits see the tasks of its own agents alone, whatever the request says. Cancels are
-  every worker's alike; a worker ignores those of tasks it does not run.
-- The worker reaches the server where it listens, on a loopback address when it listens on
-  every address.
+- The worker name the token is bound to says which worker asks, and each is served over a
+  broker of its own: its claims and waits see the tasks of its own agents alone, whatever the
+  request says. Cancels are every worker's alike; a worker ignores those of tasks it does not
+  run.
 - A turn lost is 409 `turn_lost`, a session not found 404 `session_not_found`: the worker
   raises the core's own errors for them.
 - `listen_for_cancels` is a long poll past a cursor. A cancel the worker misses is named by
   its next renewal of the leases.
 - A server stops its workers before it stops listening, since a worker ends its turns
   through these routes; the waits they hold end at once when the workers have stopped.
-

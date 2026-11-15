@@ -37,6 +37,25 @@ from robinauts.web.mcp_client import McpError, McpSession, session
 
 SecretLookup = Callable[[str], str | None]
 
+VIEW_CONTENT_SECURITY_POLICY = (
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';"
+    " img-src data:; font-src data:; connect-src 'none'; base-uri 'none';"
+    " form-action 'none'; frame-ancestors 'self'; sandbox allow-scripts"
+)
+"""An MCP app's view: a tool server's HTML, with its script and style inline and nothing to
+fetch, framed by the interface alone. It reaches nothing but its frame's parent, by
+``postMessage``. ``sandbox`` gives it an origin of its own wherever it is opened, even as a page
+of its own, so it never acts as this server's; whatever origins the server asks for are not
+given."""
+
+VIEW_HEADERS: tuple[tuple[str, str], ...] = (
+    ("content-security-policy", VIEW_CONTENT_SECURITY_POLICY),
+    ("x-frame-options", "SAMEORIGIN"),
+    ("cache-control", "no-store"),
+)
+"""The headers of an MCP app's view, in the place of oneberth's: the interface's policy, with
+``frame-src 'self'``, lets the side panel frame it."""
+
 UI_SCHEME = "ui://"
 UI_MIME_TYPE = "text/html;profile=mcp-app"
 APP_VISIBILITY = "app"
@@ -53,7 +72,8 @@ log = logging.getLogger(__name__)
 
 class NoSuchAppError(Exception):
     """An app the agent does not have, or that cannot be reached. One answer for all of them:
-    which servers an agent names, and which of them is down, is not the asker's to learn."""
+    which servers an agent names, and which of them is down, is not the asker's to learn.
+    """
 
     def __init__(self) -> None:
         super().__init__(NO_SUCH_APP)
@@ -239,7 +259,10 @@ class Apps:
     async def _tool(
         self, opened: McpSession, server: ToolServerConfig, name: str
     ) -> Mapping[str, Any] | None:
-        return next((t for t in await self._tools(opened, server) if t.get("name") == name), None)
+        return next(
+            (t for t in await self._tools(opened, server) if t.get("name") == name),
+            None,
+        )
 
     @staticmethod
     def _failed(server: ToolServerConfig, doing: str, error: Exception) -> None:

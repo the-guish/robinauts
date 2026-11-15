@@ -23,6 +23,9 @@ from pydantic import AwareDatetime, BaseModel, Field
 from robinauts.controller.contract.broker.domain import StoredEvent, StoredMessage, Task
 from robinauts.shared_domain.domain import Session, Turn, TurnState
 
+COMPONENT = "/robinauts"
+"""Where Robinauts' component is served, on the worker listener as on the front one: the root of
+the broker's URL is the listener's address and this."""
 PREFIX = "/internal/worker"
 
 TURN_LOST = "turn_lost"

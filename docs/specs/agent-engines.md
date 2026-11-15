@@ -109,7 +109,8 @@ function receives:
   secrets are asked for, never handed over in the open.
 - **Storage**: which kind, and what that kind needs. PostgreSQL with a
   connection pool; local with a folder; or in-process with nothing, for
-  tests.
+  tests. The local folder is the worker's own. An engine keeps its files
+  there, in a file named after the engine.
 
 It returns an engine. The caller then runs the engine's setup once before
 anything else.
@@ -139,6 +140,8 @@ anything else.
   two are independent.
 - **forget** a session: delete everything the engine keeps for it. Safe to
   repeat. This is the only way a session's state is deleted.
+- **close**: let go of the storage that setup opened. The caller uses the
+  engine no more after it.
 
 ### Events of a turn
 

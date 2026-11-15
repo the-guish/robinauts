@@ -14,7 +14,9 @@ class FlowEngine(ABC):
     """Where a run of a flow starts."""
 
     @abstractmethod
-    async def start_run(self, flow: str, inputs: Mapping[str, Any]) -> str:
-        """Start a run of the latest version of ``flow`` and return its id.
-        ``NoSuchFlowError`` for a flow the engine does not hold, ``InvalidInputsError`` for
-        inputs it refuses."""
+    async def start_run(
+        self, flow: str, inputs: Mapping[str, Any], *, credential: str | None
+    ) -> str:
+        """Start a run of the latest version of ``flow`` and return its id, asked with
+        ``credential`` as a bearer: the person's own. ``NoSuchFlowError`` for a flow the engine
+        does not hold, ``InvalidInputsError`` for inputs it refuses."""

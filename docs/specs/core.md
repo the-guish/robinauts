@@ -143,15 +143,23 @@ topic documents listed under [Documents](#documents).
 ## The system in one page
 
 - **Shape.** One Python backend that also serves the built frontend, one
-  PostgreSQL database. Delivered as one Python wheel.
-  [frontend.md](frontend.md), [operations.md](operations.md).
-- **Sign-in.** Google and Okta over OpenID Connect, the way neorc does it;
-  an allow list decides who gets in. Two roles, user and admin.
-  API tokens, minted by a signed-in person, reach the API without a browser.
-  [sign-in.md](sign-in.md).
-- **Interface.** neorc's layout: a collapsible left navigation panel that
-  this project owns, and the chat in the middle; the application opens on
-  an empty chat. [frontend.md](frontend.md).
+  PostgreSQL database, or SQLite files in a data directory on the desktop.
+  The backend is a oneberth composition of Robinauts' component and neorc's
+  manager. Delivered as one Python wheel. On a server, `robinauts start`
+  starts the backend, and the backend its workers. On the desktop,
+  `robinauts desktop` has oneberth's launcher start the backend, each worker
+  and a browser window as processes. A worker in a container puts the desktop
+  in the Docker shape, with the backend in a container of Robinauts' image.
+  [frontend.md](frontend.md), [operations.md](operations.md),
+  [web.md](../architecture/web.md).
+- **Sign-in.** oneberth's: Google and Okta over OpenID Connect, an allow list,
+  personal tokens, linked devices and service tokens; on the desktop, the one
+  person signs in locally. Robinauts declares its roles: user, admin, worker
+  and handler. [sign-in.md](sign-in.md).
+- **Interface.** oneberth's shell, with two applications on its rail:
+  Robinauts and neorc. Robinauts' has neorc's layout: a collapsible left
+  navigation panel that this project owns, and the chat in the middle; it
+  opens on an empty chat. [frontend.md](frontend.md).
 - **Conversations.** A tree of messages in the platform's own format —
   text, images, files, reasoning, tool calls and their results — the
   transcript of what was said; with attachments, search and export.
@@ -198,7 +206,8 @@ hard, the decision is taken with them in mind.
 - More delivery channels: a mobile application, a Slack bridge; and a way
   to consume a run without streaming, for the clients that need it.
 - Agents created by users.
-- A container image.
+- A server's container image. Robinauts' image serves the desktop's Docker
+  shape alone.
 
 ## Open
 
