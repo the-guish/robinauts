@@ -10,19 +10,20 @@ from __future__ import annotations
 import pytest
 from playwright.sync_api import Page, expect
 
-from util.browser import expect_thread, open_conversation, send
+from util.browser import expect_thread, open_conversation, send, sign_in
 from util.fake_openai import FakeLocalGPTServer
+from util.stack import Server
 
 pytestmark = [pytest.mark.io, pytest.mark.database]
 
 
 def test_a_draft_stays_with_its_conversation(
-    server: str, page: Page, local_gpt: FakeLocalGPTServer
+    server: Server, page: Page, local_gpt: FakeLocalGPTServer
 ) -> None:
     box = page.get_by_label("Message input")
 
     # 1. Two conversations.
-    page.goto(server)
+    sign_in(page, server)
     for question in ("alpha", "bravo"):
         page.get_by_role("button", name="New chat").click()
         page.get_by_label("Agent").select_option("pydantic_ai")

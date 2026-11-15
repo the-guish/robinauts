@@ -11,17 +11,18 @@ import re
 import pytest
 from playwright.sync_api import Page, expect
 
-from util.browser import expect_thread, send
+from util.browser import expect_thread, send, sign_in
 from util.fake_openai import FakeLocalGPTServer
+from util.stack import Server
 
 pytestmark = [pytest.mark.io, pytest.mark.database]
 
 
-def test_projects_in_the_panel(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+def test_projects_in_the_panel(server: Server, page: Page, local_gpt: FakeLocalGPTServer) -> None:
     history = page.get_by_role("navigation", name="History")
 
     # 1. A first conversation, with no project chosen, is in "Default".
-    page.goto(server)
+    sign_in(page, server)
     page.get_by_role("button", name="New chat").click()
     page.get_by_label("Agent").select_option("pydantic_ai")
     expect(page.get_by_label("Project").locator("option:checked")).to_have_text("Default")

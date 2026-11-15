@@ -25,7 +25,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from util import stack
-from util.browser import DID_NOT_FINISH, browser_page, history, send
+from util.browser import DID_NOT_FINISH, browser_page, history, send, sign_in
 from util.fake_openai import FakeLocalGPTServer, FakeModel, ToolEchoModel
 from util.mcp_server import mcp_server
 
@@ -79,7 +79,7 @@ def hang(page: Page) -> str:
 
 
 def conversation_id(page: Page) -> str:
-    expect(page).to_have_url(re.compile(r"#/c/[0-9a-f-]{36}$"))
+    expect(page).to_have_url(re.compile(r"#/robinauts/c/[0-9a-f-]{36}$"))
     return page.url.rsplit("/", 1)[-1]
 
 
@@ -129,6 +129,8 @@ def test_replicas(local_gpt: FakeLocalGPTServer, tools_url: str, tmp_path: Path)
     ):
         with browser_page() as page:
             answers = page.locator('[data-role="assistant"]')
+            sign_in(page, a)
+            sign_in(page, b)
 
             # 1. On A, a turn whose tool call takes 4 s finishes, past the model's 2 s timeout.
             new_chat(page, a)
@@ -140,7 +142,7 @@ def test_replicas(local_gpt: FakeLocalGPTServer, tools_url: str, tmp_path: Path)
             #    takes a new message.
             new_chat(page, a)
             stopped = hang(page)
-            page.goto(f"{b}/#/c/{stopped}")
+            page.goto(f"{b}/#/robinauts/c/{stopped}")
             page.get_by_label("Stop generating").click()
             expect(page.get_by_text(STOPPED)).to_be_visible(timeout=15_000)
             send(page, "wait 0")
@@ -160,11 +162,11 @@ def test_replicas(local_gpt: FakeLocalGPTServer, tools_url: str, tmp_path: Path)
 
             # 4. "hang", then A is killed: on B the answer shows as failed with its tool call,
             #    and the conversation takes a new message.
-            page.goto(f"{a}/#/c/{first}")
+            page.goto(f"{a}/#/robinauts/c/{first}")
             expect(answers).to_have_count(1)
             conversation = hang(page)
             started[0].kill()
-            page.goto(f"{b}/#/c/{conversation}")
+            page.goto(f"{b}/#/robinauts/c/{conversation}")
             expect(answers.last.get_by_text(DID_NOT_FINISH)).to_be_visible(timeout=15_000)
             expect(answers.last.get_by_role("button", name="1 tool call")).to_be_visible()
             send(page, "hello")
@@ -174,6 +176,7 @@ def test_replicas(local_gpt: FakeLocalGPTServer, tools_url: str, tmp_path: Path)
 
             # 5. A2 starts a turn that hangs and is killed, and nobody opens that conversation.
             with stack.server(config, url, stack.API_KEY, started) as a2:
+                sign_in(page, a2)
                 new_chat(page, a2)
                 hanging = hang(page)
                 started[-1].kill()

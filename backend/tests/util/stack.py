@@ -101,6 +101,11 @@ tools = ["tools"]
 
 API_KEY = {"LOCAL_GPT_KEY": "not-a-real-key"}
 
+STOP_SECONDS = 30
+"""How long a stop may take. oneberth's server gives the answers in progress ten seconds, and
+a long poll of neorc's whose browser has gone holds on until then: neorc's wait does not end
+when its client leaves."""
+
 HEALTHY = {"status": "ok", "components": {"robinauts": "ok", "neorc": "ok"}}
 """What ``/health`` answers while every worker is heard from."""
 
@@ -283,4 +288,4 @@ def server(
             yield url
         finally:
             running.terminate()
-            running.wait(timeout=10)
+            running.wait(timeout=STOP_SECONDS)
