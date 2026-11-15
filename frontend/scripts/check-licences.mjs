@@ -605,6 +605,16 @@ function describe(failure) {
 export const EXACT = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 /**
+ * A tarball under `vendor/`, packed from a pinned commit: exact as well.
+ *
+ * `@neorc/ui` and `@oneberth/ui` are published nowhere yet. They are packed
+ * from the neorc commit `backend/pyproject.toml` pins
+ * (`scripts/ui-packages-from-source.sh`), and the lockfile holds each
+ * tarball's hash, so `npm ci` installs that content or nothing.
+ */
+export const VENDORED = /^file:vendor\/[a-z0-9][a-z0-9.-]*\.tgz$/;
+
+/**
  * Every problem with the exact pins of a `package.json`.
  * @param {Record<string, unknown>} manifest
  * @returns {string[]}
@@ -618,7 +628,7 @@ export function pinProblems(manifest) {
    */
   const look = (value, where) => {
     if (typeof value === "string") {
-      if (!EXACT.test(value)) {
+      if (!EXACT.test(value) && !VENDORED.test(value)) {
         problems.push(
           `package.json ${where} is "${value}", which is not an exact version; ` +
             ".npmrc sets save-exact and an update is a deliberate diff",

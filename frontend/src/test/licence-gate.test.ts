@@ -315,6 +315,22 @@ describe("exact pins", () => {
     expect(pinProblems({ dependencies: { a: "1.0.0+a+b" } })).toHaveLength(1);
   });
 
+  test("a tarball packed into vendor/ is exact: the lock holds its hash", () => {
+    expect(
+      pinProblems({ dependencies: { a: "file:vendor/a-ui-0.0.0.tgz" } }),
+    ).toEqual([]);
+    expect(pinProblems({ dependencies: { a: "file:../a" } })).toHaveLength(1);
+    expect(
+      pinProblems({ dependencies: { a: "file:vendor/../a.tgz" } }),
+    ).toHaveLength(1);
+    expect(
+      pinProblems({ dependencies: { a: "file:vendor/a/b.tgz" } }),
+    ).toHaveLength(1);
+    expect(
+      pinProblems({ dependencies: { a: "https://x.example/a.tgz" } }),
+    ).toHaveLength(1);
+  });
+
   test("a long version that is not exact is refused at once", () => {
     // What made the pattern before this one backtrack exponentially
     // (SonarCloud AaDjWhnOz5PIa1mbqWEW): each "-a" doubled the time, and

@@ -42,6 +42,9 @@ cd "$root/frontend"
 # check-all.sh, and CI's wheel job starts from an empty runner, so the lock is
 # what decides either way. What is never skipped is the build: the bundle in
 # the wheel is always made here and now.
+# @neorc/ui and @oneberth/ui from the pinned neorc commit, when they are not
+# packed yet; `npm ci` refuses a tarball the lock does not name.
+"$root/scripts/ui-packages-from-source.sh"
 if [ ! -d node_modules ]; then
     npm ci --ignore-scripts >&2
 fi

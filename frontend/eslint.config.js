@@ -244,7 +244,7 @@ const confine = (restricted, { unjudgeable = true } = {}) => {
 };
 
 export default tseslint.config(
-  { ignores: ["dist", "src/api/schema.d.ts"] },
+  { ignores: ["dist", "vendor", "src/api/schema.d.ts"] },
   {
     files: ["**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"],
     extends: [

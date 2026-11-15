@@ -86,7 +86,7 @@ const BUNDLED_PACKAGES = resolve(here, "bundled-packages.txt");
  * the record, and ship its notice with the code it belongs to.
  *
  * **Empty since ADR 0006.** Every stylesheet is this project's own, written
- * over `src/tokens.css`, and none names a package: Tailwind and the two
+ * over oneberth's tokens, and none names a package: Tailwind and the two
  * plugins the vendored chat components were written against went with them.
  * The mechanism stays, because the day a stylesheet does name a package,
  * this is where the name goes, and `src/test/build-rules.test.ts` proves it
@@ -523,6 +523,7 @@ export default defineConfig({
       refuseStylesheets(),
       license({
         thirdParty: {
+          includePrivate: true,
           allow: {
             test: (dependency) => isAllowed(dependency.license ?? ""),
             failOnUnlicensed: true,
@@ -540,6 +541,9 @@ export default defineConfig({
       plugins: [
         license({
           thirdParty: {
+            // @neorc/ui and @oneberth/ui are private packages, packed from
+            // the pinned neorc commit: gated and recorded like the rest.
+            includePrivate: true,
             allow: {
               // The allowed list, and SPDX's AND/OR with it, from the gate.
               // A bundled package is never excepted: this is the list or
