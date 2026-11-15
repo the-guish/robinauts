@@ -18,7 +18,9 @@ one place in Robinauts that imports neorc, beside ``cli.orchestration``, which w
   and its handlers reach Robinauts' API on the front listener with a token of
   ``robinauts/handler``.
 - a run a person starts through Robinauts is started on neorc's API with that person's own
-  credential, in this process, through the backend's own front listener.
+  credential, in this process, through the backend's own front listener. neorc records the
+  person as the run's starter, as it does for a run started on its own form, and Robinauts
+  reads the starter from the manager.
 
 The worker is a process of its own, not a task in this one, for three reasons. neorc puts the
 code location first on ``sys.path``, so a handler module could shadow a package this server
@@ -35,21 +37,24 @@ import logging
 import shlex
 import signal
 import sys
+import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any, cast
 
 import httpx
+from neorc import NEORC_ROLES
 from neorc.http import HttpManagerClient
 from neorc.manager import new_manager_webapp
 from neorc_core import (
     FlowNotFoundError,
     InvalidValueError,
     Manager,
-    ManagerUnavailableError,
     NeorcError,
     QueueKind,
+    RunNotFoundError,
+    StarterKind,
 )
 from neorc_core.flows import flow_files, load_flow_yaml, read_flows
 from neorc_core.local import MemoryStore, MemoryTaskNotifier
@@ -97,8 +102,6 @@ the configuration names."""
 DEFAULT_QUEUE = "default"
 STOP_SECONDS = 15.0
 """How long the stop waits for the worker after its SIGTERM before it kills it."""
-SERVED_SECONDS = 30.0
-"""How long the start waits for the backend to answer neorc's API in this process."""
 
 UPLOAD_TOKEN = "robinauts-flows"
 WORKER_TOKEN = "robinauts-neorc-worker"
@@ -106,6 +109,9 @@ HANDLER_TOKEN = "robinauts-handlers"
 CI_ROLE = "neorc/ci"
 WORKER_ROLE = "neorc/worker"
 HANDLER_ROLE = "robinauts/handler"
+
+ROLES = NEORC_ROLES
+"""neorc's role table, as its component gives it to oneberth."""
 
 
 def neorc_command() -> tuple[str, ...]:
@@ -183,12 +189,6 @@ def worker_command(
         "--queue",
         DEFAULT_QUEUE,
     )
-
-
-def neorc_roles() -> object:
-    """neorc's role table, as its component gives it to oneberth."""
-    manager = Manager(MemoryStore(), tasks=MemoryTaskNotifier(), events=MemoryTaskNotifier())
-    return new_manager_webapp(manager=manager).roles
 
 
 class NeorcFlowEngine(FlowEngine):
@@ -283,6 +283,19 @@ class ComposedNeorc(Orchestrator):
             self._flows = self._make_flows(engine)
         return self._flows
 
+    async def starter_of(self, run: str) -> uuid.UUID | None:
+        try:
+            found = await self.manager.get_run(uuid.UUID(run))
+        except (ValueError, RunNotFoundError):
+            return None
+        starter = found.started_by
+        if starter is None or starter.kind is not StarterKind.USER:
+            return None
+        try:
+            return uuid.UUID(starter.id)
+        except ValueError:
+            return None
+
     def _on_postgres(self, database_url: str) -> Manager:
         from neorc.postgres import PostgresStore, PostgresTaskNotifier, create_schema
         from neorc.postgres._notifier import EVENTS_CHANNEL, TASKS_CHANNEL
@@ -365,7 +378,7 @@ class ComposedNeorc(Orchestrator):
                 self._public_url, token=token, allow_insecure=True, transport=transport
             )
             async with client:
-                stored = await _when_served(lambda: client.upload_flows(contents))
+                stored = await client.upload_flows(contents)
         except (OSError, NeorcError) as error:
             raise OrchestrationStartError(f"neorc refused the flows in {flows}: {error}") from error
         _log.info("neorc flows from %s: %s new of %s", flows, sum(stored), len(stored))
@@ -415,16 +428,3 @@ class ComposedNeorc(Orchestrator):
             _log.warning("neorc's worker did not stop in %s s: killed", STOP_SECONDS)
             process.kill()
             await process.wait()
-
-
-async def _when_served[T](ask: Callable[[], Awaitable[T]]) -> T:
-    """What ``ask`` answers once the backend serves neorc's API: it answers 503 while it is
-    still starting, which neorc's client reads as a manager that is not there yet."""
-    deadline = asyncio.get_running_loop().time() + SERVED_SECONDS
-    while True:
-        try:
-            return await ask()
-        except ManagerUnavailableError:
-            if asyncio.get_running_loop().time() > deadline:
-                raise
-            await asyncio.sleep(0.1)

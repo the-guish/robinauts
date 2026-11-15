@@ -2,13 +2,13 @@
 # Copyright The Robinauts Authors
 
 """The flows a person may start, as forms, and the start of one: the inputs are checked against
-the flow's form and then handed to the engine as they came. The run is then that person's: a
-flow's handler acts for them (``docs/architecture/orchestration.md``, "Whose a run is").
+the flow's form and then handed to the engine as they came, with the person's own credential.
+The engine records the run as that person's, and a flow's handler acts for them
+(``docs/architecture/orchestration.md``, "Whose a run is").
 """
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import Mapping
 from typing import Any
 
@@ -44,7 +44,6 @@ class FlowForms(Flows):
             config=config,
         )
         self._by_name = {form.name: form for form in self._forms}
-        self._owners: dict[str, uuid.UUID] = {}
 
     async def forms(self) -> tuple[FlowForm, ...]:
         return self._forms
@@ -54,7 +53,6 @@ class FlowForms(Flows):
         flow: str,
         inputs: Mapping[str, Any],
         *,
-        owner: uuid.UUID,
         credential: str | None,
     ) -> str:
         form = self._by_name.get(flow)
@@ -62,10 +60,4 @@ class FlowForms(Flows):
             raise NoSuchFlowError(f"no flow {flow!r}")
         if problems := check_inputs(form, inputs):
             raise InvalidInputsError(f"{flow}: " + "; ".join(problems))
-        run = await self._engine.start_run(flow, inputs, credential=credential)
-        # Kept in this process: neorc records no starter of a run yet.
-        self._owners[run] = owner
-        return run
-
-    async def owner_of(self, run: str) -> uuid.UUID | None:
-        return self._owners.get(run)
+        return await self._engine.start_run(flow, inputs, credential=credential)

@@ -37,9 +37,7 @@ import asyncio
 import importlib.metadata
 import logging
 import os
-import secrets
 import shlex
-import signal
 import sys
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -54,27 +52,14 @@ from oneberth.config import ConfigError as OneberthConfigError
 from oneberth.config import is_loopback, load_config, local_config
 from oneberth.identity import (
     ONEBERTH_ROLES,
-    OPERATOR,
     Access,
-    CredentialKind,
     IdentityStore,
-    NotFoundError,
     Registry,
-    RoleTable,
-    new_secret,
 )
 from oneberth.identity.memory import MemoryIdentityStore
 from oneberth.stores import opened_store
-from oneberth.web import (
-    Component,
-    Composition,
-    Context,
-    Listen,
-    ServerError,
-    compose_app,
-    read_launch_secret,
-    serve,
-)
+from oneberth.web import Component, Context, Listen, compose_app
+from oneberth.web import run as run_server
 
 from robinauts.cli.composition import (
     CONTROLLER_TABLES,
@@ -91,7 +76,7 @@ from robinauts.cli.composition import (
     storage_from,
 )
 from robinauts.cli.lifecycle import Lifecycle, WorkerStartError
-from robinauts.cli.orchestration import neorc_roles, orchestrator_of
+from robinauts.cli.orchestration import NEORC_ROLES, orchestrator_of
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.orchestrator.contract.domain import (
     MOVED,
@@ -257,42 +242,6 @@ def store_of(
     return in_memory
 
 
-class ServiceTokens:
-    """The service tokens of this backend's own start: its workers', neorc's worker's, the
-    flows' upload's and the handlers'. In the local mode the launch secret mints them, and they
-    live in the backend's memory alone; else the operator does, under a name of this start's,
-    and each is revoked at the stop. The launcher of a later step mints the workers' instead.
-    """
-
-    def __init__(self, composition: Composition) -> None:
-        self._composition = composition
-        self.access: Access | None = None
-        self._made: list[Any] = []
-
-    async def mint(self, name: str, role: str, resource: str | None) -> str:
-        access = self.access
-        assert access is not None, "the backend is not started"
-        if self._composition.local and self._composition.launch_secret is not None:
-            by: Any = await access.authenticate(self._composition.launch_secret, bearer=True)
-        else:
-            by = OPERATOR
-            name = f"{name}-{secrets.token_hex(4)}"
-        secret, token = await access.create_service_token(name, role, resource=resource, by=by)
-        self._made.append(token.id)
-        return secret
-
-    async def revoke_all(self) -> None:
-        access = self.access
-        made, self._made = self._made, []
-        if access is None:
-            return
-        for token in made:
-            try:
-                await access.revoke_service_token(token, by=OPERATOR)
-            except NotFoundError:
-                pass
-
-
 class LateTransport(httpx.AsyncBaseTransport):
     """An httpx transport to an ASGI application named after it is built: how a part of the
     backend reaches the backend's own front listener, in its own process."""
@@ -306,7 +255,13 @@ class LateTransport(httpx.AsyncBaseTransport):
 
 class Backend:
     """What ``robinauts start`` serves: the composition of Robinauts' component and neorc's,
-    the lifecycle of the controller and the workers, and neorc's start."""
+    the lifecycle of the controller and the workers, and neorc's start.
+
+    Robinauts' component starts first and stops last. Its lifespan opens neorc's storage and
+    the controller, and starts the workers. Its serving begins once both listeners serve: it
+    uploads the flows and starts neorc's worker, which call the backend's own listeners. It
+    ends while the listeners still serve, and stops every worker. The tokens the backend mints
+    for its own parts live in its memory alone, and end with it."""
 
     def __init__(
         self,
@@ -324,6 +279,7 @@ class Backend:
         self.lifecycle = lifecycle
         self.orchestrator = orchestrator
         self.transport = LateTransport()
+        self._access: Access | None = None
         self.component = new_robinauts_webapp(
             composed.controller,
             composed.brokers,
@@ -332,8 +288,10 @@ class Backend:
             config=composed.config,
             secret_for=secret_for,
             lifespan=self._lifespan,
+            serving=self._serving,
             health=self._healthy,
             flows=orchestrator.flows(self.transport),
+            starter_of=orchestrator.starter_of,
         )
         neorc = orchestrator.component
         assert isinstance(neorc, Component)
@@ -345,105 +303,52 @@ class Backend:
             local=local,
         )
         self.transport.app = self.composition.front
-        self.tokens = ServiceTokens(self.composition)
 
     async def _healthy(self) -> bool:
         return self.lifecycle.healthy()
+
+    async def _mint(self, name: str, role: str, resource: str | None) -> str:
+        """A token of this backend's own, in its memory: it ends when the backend stops."""
+        assert self._access is not None, "the backend is not started"
+        secret, _ = await self._access.create_own_token(name, role, resource=resource)
+        return secret
 
     @asynccontextmanager
     async def _lifespan(self, context: Context) -> AsyncIterator[None]:
         """Open neorc's storage, then the controller, then start the workers; and the
         reverse at the stop. neorc's component starts after this, and stops before."""
-        self.tokens.access = context.access
+        self._access = context.access
         await self.orchestrator.open()
         try:
             await self.lifecycle.start(
-                lambda name: self.tokens.mint(f"robinauts-worker-{name}", WORKER_ROLE, name)
+                lambda name: self._mint(f"robinauts-worker-{name}", WORKER_ROLE, name)
             )
             try:
                 yield
             finally:
+                # The serving stopped them, unless it never began.
                 self.lifecycle.feed.close()
                 try:
                     await self.orchestrator.stop()
                 finally:
                     await self.lifecycle.stop()
         finally:
-            try:
-                await self.tokens.revoke_all()
-            finally:
-                await self.orchestrator.close()
+            await self.orchestrator.close()
 
-    async def start_orchestrator(self) -> None:
-        """Once the backend serves: upload the flows and start neorc's worker."""
-        await self.orchestrator.start(self.tokens.mint, self.transport)
-
-    async def stop_workers(self) -> None:
-        """While the listeners still serve: a worker in a process of its own ends its turns
-        through them. The change feed's polls end first."""
-        self.lifecycle.feed.close()
+    @asynccontextmanager
+    async def _serving(self, context: Context) -> AsyncIterator[None]:
+        """Once both listeners serve: upload the flows and start neorc's worker. At the end,
+        while the listeners still serve, stop the workers: one in a process of its own ends
+        its turns through them. The change feed's polls end first."""
+        await self.orchestrator.start(self._mint, self.transport)
         try:
-            await self.orchestrator.stop()
+            yield
         finally:
-            await self.lifecycle.stop_worker()
-
-
-async def serve_backend(
-    backend: Backend,
-    front: Listen,
-    worker: Listen,
-    *,
-    launch_secret: str | None,
-    by_hand: bool,
-) -> int:
-    """Serve until SIGINT or SIGTERM. ``ready`` is said once both listeners serve and neorc
-    has started. A stop ends the workers while the listeners still serve, then the listeners,
-    then the components in reverse."""
-    composition = backend.composition
-    up = asyncio.Event()
-    stop = asyncio.Event()
-    final = asyncio.Event()
-    serving = asyncio.create_task(
-        serve(
-            composition,
-            front,
-            worker,
-            ready=up.set,
-            stop=final,
-            launch_secret=launch_secret,
-        )
-    )
-    started = asyncio.create_task(up.wait())
-    await asyncio.wait({serving, started}, return_when=asyncio.FIRST_COMPLETED)
-    if not up.is_set():
-        started.cancel()
-        await serving
-        return 1
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, stop.set)
-    status = 0
-    try:
-        await backend.start_orchestrator()
-    except OrchestrationStartError as refused:
-        print(refused, file=sys.stderr)
-        status = 1
-    else:
-        print("ready", flush=True)
-        if by_hand and composition.launch_secret is not None:
-            access = composition.access
-            launcher = await access.authenticate(composition.launch_secret, bearer=True)
-            ticket, _ = await access.create_ticket(launcher)
-            print(f"open {composition.ticket_url(ticket)}", flush=True)
-        stopping = asyncio.create_task(stop.wait())
-        await asyncio.wait({serving, stopping}, return_when=asyncio.FIRST_COMPLETED)
-        stopping.cancel()
-    try:
-        await backend.stop_workers()
-    finally:
-        final.set()
-        await serving
-    return status
+            self.lifecycle.feed.close()
+            try:
+                await self.orchestrator.stop()
+            finally:
+                await self.lifecycle.stop_worker()
 
 
 def start(host: str, port: int, worker_host: str, worker_port: int | None, *, local: bool) -> int:
@@ -493,24 +398,12 @@ def start(host: str, port: int, worker_host: str, worker_port: int | None, *, lo
             ui_dir=ui_dir,
             local=local,
         )
-        launch_secret, by_hand = None, False
-        if local:
-            launch_secret = read_launch_secret(sys.stdin)
-            if launch_secret is None:
-                launch_secret, by_hand = new_secret(CredentialKind.LAUNCH), True
-        return asyncio.run(
-            serve_backend(
-                backend,
-                Listen(host, port),
-                Listen(worker_host, worker_port),
-                launch_secret=launch_secret,
-                by_hand=by_hand,
-            )
-        )
+        # Until SIGINT or SIGTERM; it says why and exits 1 when the backend did not start.
+        run_server(backend.composition, Listen(host, port), Listen(worker_host, worker_port))
+        return 0
     except (
         ControllerError,
         OneberthConfigError,
-        ServerError,
         *ENGINE_REFUSALS,
         WorkerStartError,
         OrchestrationStartError,
@@ -575,9 +468,7 @@ def openapi_document() -> dict[str, Any]:
 
 def registry() -> Registry:
     """The roles a deployment of Robinauts knows: oneberth's, Robinauts' and neorc's."""
-    neorc = neorc_roles()
-    assert isinstance(neorc, RoleTable)
-    return Registry([ONEBERTH_ROLES, ROBINAUTS_ROLES, neorc])
+    return Registry([ONEBERTH_ROLES, ROBINAUTS_ROLES, NEORC_ROLES])
 
 
 def run(argv: Sequence[str] | None = None) -> None:

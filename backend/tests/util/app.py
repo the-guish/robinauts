@@ -43,9 +43,10 @@ def backend_of(
     environ: Mapping[str, str] | None = None,
     oneberth: OneberthConfig | None = None,
 ) -> Backend:
-    """The backend ``robinauts start --local`` composes over ``composed``, with every store in
-    this process; with ``oneberth``, the backend ``robinauts start`` composes with that
-    sign-in configuration instead."""
+    """The backend ``robinauts start --local`` composes over ``composed``, with oneberth's and
+    neorc's stores in this process, or in the data directory ``environ`` names; with
+    ``oneberth``, the backend ``robinauts start`` composes with that sign-in configuration
+    instead."""
     orchestrator = orchestrator_of(
         environ or {},
         composed.config,
@@ -60,7 +61,7 @@ def backend_of(
         orchestrator,
         oneberth=local_config(NAME, port=PORT) if oneberth is None else oneberth,
         secret_for=secret_for,
-        store=store_of({}),
+        store=store_of(environ or {}),
         local=oneberth is None,
     )
 

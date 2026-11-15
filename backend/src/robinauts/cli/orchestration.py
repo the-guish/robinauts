@@ -106,7 +106,6 @@ def orchestrator_of(
     )
 
 
-def neorc_roles() -> object:
-    """neorc's roles, as its component gives them to oneberth: what the admin scripts need to
-    mint a token of neorc's."""
-    return neorc.neorc_roles()
+NEORC_ROLES = neorc.ROLES
+"""neorc's roles, as its component gives them to oneberth: what the admin scripts need to
+mint a token of neorc's."""

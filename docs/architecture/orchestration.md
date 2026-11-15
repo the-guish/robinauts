@@ -38,8 +38,9 @@ Once the backend serves:
 5. one **worker**, on the `default` queue, with the handlers in `code_location`, runs in a
    process of its own: neorc's own command, as installed with it, against the worker listener.
 
-The server says `ready` once these have started. If the flows are refused or the worker cannot
-be started, the server stops and exits 1. At a stop, the worker stops first, with SIGTERM and
+Robinauts' component does 4 and 5 in its serving, oneberth's moment between the listeners and
+`ready` ([web.md](web.md), "The start and the stop"). The server says `ready` once these have
+started. If the flows are refused or the worker cannot be started, the server stops and exits 1. At a stop, the worker stops first, with SIGTERM and
 killed after fifteen seconds, while the listeners still serve; then the scheduler, then the
 storage.
 
@@ -147,18 +148,19 @@ It costs one process and a long-poll over the loopback interface.
 
 ### Whose a run is
 
-A run a person starts through `POST /robinauts/api/flows/<name>/runs` is that person's, and so
-are the conversations its handlers open for it.
+A run is the person's who started it, and so are the conversations its handlers open for it.
+That holds in both modes, for a run started on neorc's form and for one started through
+`POST /robinauts/api/flows/<name>/runs`.
 
-- The server keeps who started each run it started, in its own process: neorc records no
-  starter of a run yet.
+- neorc records the starter on the run, as `started_by`, from the credential that started it.
+  Robinauts starts a run with the person's own credential. A sub-flow's run has its tree's
+  starter.
 - The handlers hold a service token of `robinauts/handler`, and each request names its run in
-  `X-Robinauts-Run`, from the step's `run: neorc.flow_run_id`. The server acts for the person
-  who started that run.
-- In the local mode, a run started on neorc's own API, as neorc's form starts one, is the one
-  person's.
-- Any other run, or a request without one, is refused with 403. A run this server started
-  before it restarted is refused too.
+  `X-Robinauts-Run`, from the step's `run: neorc.flow_run_id`. The server reads the run's
+  starter from neorc's manager, and acts for that person. The record is neorc's, so it holds
+  after a restart.
+- A run neorc does not hold, one a service started, or a request without a run is refused
+  with 403.
 
 ### The interface
 
@@ -218,9 +220,8 @@ neorc's PostgreSQL adapter is on asyncpg: psycopg is LGPL-3.0, which
 
 ### What the worker is handed
 
-The server mints two service tokens for neorc's worker at each start: in the local mode with
-the launch secret, in the backend's memory alone; otherwise as the operator, revoked at the
-stop.
+The server mints two service tokens for neorc's worker at each start. They live in the
+backend's memory alone, and end with it.
 
 | variable | holds |
 |---|---|

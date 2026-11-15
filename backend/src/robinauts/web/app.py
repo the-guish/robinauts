@@ -22,13 +22,13 @@ servers for the side panel's MCP apps (``web/apps.py``).
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
-from oneberth.identity import LOCAL_PROVIDER, LOCAL_SUBJECT, Principal
+from oneberth.identity import Principal
 from oneberth.identity import User as OneberthUser
 from oneberth.web import Asking, Component, Health, Lifespan, Refusal, bearer_of, permit
 from pydantic import BaseModel, Field
@@ -99,7 +99,7 @@ for the person who started that run."""
 NOT_A_PERSON = (
     "a service acts for a person only as a flow's handler, which names its run in" f" {RUN_HEADER}"
 )
-UNKNOWN_RUN = "this server started no run of that id for a person"
+UNKNOWN_RUN = "neorc holds no run of that id that a person started"
 
 STATUS_OF: dict[type[Exception], int] = {
     ControllerError: 500,
@@ -540,8 +540,10 @@ def new_robinauts_webapp(
     config: Config,
     secret_for: SecretLookup,
     lifespan: Lifespan | None = None,
+    serving: Lifespan | None = None,
     health: Health | None = None,
     flows: Flows | None = None,
+    starter_of: Callable[[str], Awaitable[uuid.UUID | None]] | None = None,
     feed: FeedGate | None = None,
 ) -> Component:
     """Robinauts' component, for ``oneberth.web.compose_app``.
@@ -549,9 +551,11 @@ def new_robinauts_webapp(
     ``brokers``, one per worker by name, and ``worker_access`` serve the workers at
     ``/internal/worker/``. ``config`` names the agents' tool servers, whose secrets
     ``secret_for`` reads. ``lifespan`` is what starts and stops with the backend: the
-    controller and the workers (``cli/lifecycle.py``). ``health`` says whether the workers are
-    heard from. ``flows`` are the orchestrator's flows as forms, which ``/api/flows`` lists and
-    starts: none without a flows folder. ``feed`` ends the waits of ``GET /api/changes`` once
+    controller and the workers (``cli/lifecycle.py``). ``serving`` is what runs while the
+    backend serves: the parts that call its own listeners. ``health`` says whether the workers
+    are heard from. ``flows`` are the orchestrator's flows as forms, which ``/api/flows`` lists
+    and starts: none without a flows folder. ``starter_of`` reads who started a run at neorc:
+    the person a flow's handler acts for. ``feed`` ends the waits of ``GET /api/changes`` once
     whoever stops the server closes it."""
     gate = FeedGate() if feed is None else feed
     apps = Apps(config, secret_for)
@@ -570,13 +574,8 @@ def new_robinauts_webapp(
         run = request.headers.get(RUN_HEADER)
         if run is None or roles.HANDLER_ROLE not in principal.roles:
             raise Refusal(403, "Forbidden", NOT_A_PERSON)
-        owner = None if flows is None else await flows.owner_of(run)
-        found: OneberthUser | None = None
-        if owner is not None:
-            found = await access.store.user(owner)
-        elif access.local:
-            # A run neorc's own form started: the local mode has one person.
-            found = await access.store.user_of(LOCAL_PROVIDER, LOCAL_SUBJECT)
+        owner = None if starter_of is None else await starter_of(run)
+        found = None if owner is None else await access.store.user(owner)
         if found is None:
             raise Refusal(403, "Forbidden", UNKNOWN_RUN)
         return found
@@ -645,7 +644,7 @@ def new_robinauts_webapp(
             raise NoSuchFlowError(f"no flow {flow!r}: this server runs no orchestrator")
         # Sent on with the person's own credential: the run is then theirs at neorc.
         credential = credential_of(request)
-        started = await flows.start(flow, body.inputs, owner=user.id, credential=credential)
+        started = await flows.start(flow, body.inputs, credential=credential)
         return FlowRunStarted(id=started)
 
     # --- MCP apps, for the side panel: web/apps.py -------------------------------
@@ -899,6 +898,7 @@ def new_robinauts_webapp(
         roles=roles.ROBINAUTS_ROLES,
         router=router,
         lifespan=lifespan,
+        serving=serving,
         health=well,
         errors=STATUS_OF,
         error_body=error_body,

@@ -16,13 +16,30 @@ roles, and what it starts and stops. `new_robinauts_webapp` in `web/app.py` buil
 | `/robinauts/openapi.json` | Robinauts' OpenAPI document, `backend/openapi.json` |
 | `/neorc/…` | neorc's manager |
 | `/auth/…` | oneberth: sign-in, the session, tokens, pairing, devices, service tokens |
-| `/ui/` | the built interface |
+| `/ui/` | the built interface, or a page that says it is not built |
 | `/health` | oneberth, from each component's state |
 
 oneberth holds who is asking, the check of a route's permission, the checks on a request, the
 security headers and the shape of an error, `{"error": …, "detail": …}`. A write is
 `application/json`, a `POST` without a body too. The checks on ownership, such as whose
 conversation this is, are the controller's.
+
+### The start and the stop
+
+The component has two moments of oneberth's. Its lifespan opens neorc's storage and the
+controller, and starts the workers. Its serving begins once both listeners serve, before the
+server says `ready`. It uploads the flows and starts neorc's worker, since both call the
+backend's own listeners. A stop ends the serving first, while the listeners still serve: the
+workers stop there, and end their turns through the listeners. Then the listeners stop, and
+then the lifespan closes the controller and neorc's storage.
+
+The tokens the backend mints for its own parts live in its memory alone: its workers', neorc's
+worker's, the flows' upload's and the handlers'. Each ends with the process, at a stop or a
+crash. The store holds none of them.
+
+A checkout whose interface is not built still serves the API. `/ui/` then answers 404 with a
+page that says the interface is not built, and the log says to run `npm run build` in
+`frontend/`. A wheel always holds the interface.
 
 ## Roles and permissions
 
@@ -132,9 +149,8 @@ interface's and are not in the OpenAPI document.
   `default` for an agent that names none). The server mints a oneberth service token of
   `robinauts/worker` for each at its start, bound to the worker's name, and writes it on that
   worker's process's standard input, which the process reads to its end at its own start; it
-  is in no environment variable and no file. In the local mode the launch secret mints it, and
-  it lives in the backend's memory; otherwise the operator's name for it is revoked at the
-  stop. A worker started with its table's command is let in the same way: the command carries
+  is in no environment variable and no file. The token lives in the backend's memory, and
+  ends with it ([The start and the stop](#the-start-and-the-stop)). A worker started with its table's command is let in the same way: the command carries
   the standard input to wherever the worker runs.
 - oneberth serves these routes on the worker listener, `--worker-host` and `--worker-port`,
   where they are the only routes; they are on the front listener too. A worker reaches

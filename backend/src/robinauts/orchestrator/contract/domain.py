@@ -124,7 +124,7 @@ class InvalidInputsError(FlowRefused):
 
 
 class Flows(ABC):
-    """The flows a person may start, as forms, the start of one, and who started a run."""
+    """The flows a person may start, as forms, and the start of one."""
 
     @abstractmethod
     async def forms(self) -> tuple[FlowForm, ...]:
@@ -136,18 +136,12 @@ class Flows(ABC):
         flow: str,
         inputs: Mapping[str, Any],
         *,
-        owner: uuid.UUID,
         credential: str | None,
     ) -> str:
         """Start a run of ``flow`` with ``inputs``, which are passed on as they are once they
-        fit its form, for the person whose user id is ``owner``, and return the run's id. The
-        start is sent to neorc with ``credential``, the person's own, so that the run is theirs
-        there too. ``NoSuchFlowError``, ``InvalidInputsError``."""
-
-    @abstractmethod
-    async def owner_of(self, run: str) -> uuid.UUID | None:
-        """Whose run ``run`` is: the person who started it here, or ``None`` for a run this
-        server did not start for a person since it started."""
+        fit its form, and return the run's id. The start is sent to neorc with ``credential``,
+        the person's own, so that neorc records the run as theirs. ``NoSuchFlowError``,
+        ``InvalidInputsError``."""
 
 
 class OrchestrationStartError(RuntimeError):
@@ -194,6 +188,12 @@ class Orchestrator(ABC):
     @abstractmethod
     async def stop(self) -> None:
         """Stop what ``start`` started. Safe to repeat."""
+
+    @abstractmethod
+    async def starter_of(self, run: str) -> uuid.UUID | None:
+        """The user id of the person neorc records as the starter of ``run``, wherever it was
+        started: through Robinauts, or on neorc's own form. ``None`` for a run neorc does not
+        hold, or one a service started. A sub-flow's run has its tree's starter."""
 
     @abstractmethod
     def flows(self, transport: object) -> Flows | None:
