@@ -6,12 +6,32 @@ What an internal platform team deploys and controls.
 
 - One backend process, which also serves the frontend; one PostgreSQL.
   Nothing else (goal 6).
-- Installed from one Python wheel. A container image is planned.
-- PostgreSQL is always required. A documented one-command local Postgres
+- Installed from one Python wheel. The repository's `Dockerfile` builds Robinauts' image,
+  which runs the backend in the desktop's Docker shape. A server's image is planned.
+- A deployment requires PostgreSQL. A documented one-command local Postgres
   covers development and demos.
-- A local development mode runs without sign-in, on the loopback interface
-  only ([sign-in.md](sign-in.md)). It is not a way to deploy.
-- Served at the root of an origin, over https. `public_url` is mandatory
+- The backend is a oneberth composition of Robinauts' component and neorc's
+  manager ([architecture/web.md](../architecture/web.md)). It has a front
+  listener, `--host` and `--port`, and a worker listener, `--worker-host` and
+  `--worker-port`, the front's port plus one by default.
+- oneberth's local mode, `--local`, signs the one person at the machine in
+  with a ticket, on the loopback interface only ([sign-in.md](sign-in.md)).
+  It is the desktop's mode and the mode for development.
+- Local storage: the records are then in files of the data directory, which
+  `ROBINAUTS_DATA_DIR` names: Robinauts' in `robinauts.db`, oneberth's in
+  `oneberth.db` and neorc's in `neorc.db`. The server makes them at its first
+  start, and refuses a file of another schema version. Local storage serves
+  both sign-in modes.
+- On local storage each worker keeps its engines' state in a folder of its
+  own, `workers/<worker name>/` in the data directory. Each engine has one
+  file there: `langchain.db`, `pydantic-ai.db`. An engine makes its file at
+  its first start, and refuses a file of another schema version. A
+  conversation from before a restart takes new turns.
+- On PostgreSQL, oneberth's store is the schema `oneberth` and neorc's the
+  schema `neorc`, beside Robinauts' tables. `robinauts db init` makes
+  Robinauts' tables, and `robinauts store init` oneberth's.
+- Served at the root of an origin, over https, behind sign-in through
+  identity providers. `public_url` is mandatory, in oneberth's file
   ([sign-in.md](sign-in.md)).
 - Upgrades: install the new wheel, bring the schema up to date, restart.
   Until the first release the schema is edited in place and the database
@@ -62,24 +82,51 @@ What an internal platform team deploys and controls.
   its schema, which Anthropic's API refuses. A value that is not a list of
   names is refused at start-up.
 
+## The desktop
+
+- `robinauts desktop` starts the desktop with oneberth's launcher (oneberth's
+  `docs/specs/shapes.md`). The launcher starts the backend, each worker, neorc's worker when
+  there is a flows folder, and the window ([deployment.md](../deployment.md), "The desktop").
+- The backend is `robinauts desktop-backend`: the local mode, local storage in the data
+  directory, its listeners where the launcher says, and the launch secret on its standard
+  input. It starts no worker.
+- Each worker is a process of its own. It reads its token on its standard input and the
+  launcher's variables, and keeps its engines' state in its own folder of the data directory.
+  The backend's process opens none of a worker's files.
+- The data directory is `$XDG_DATA_HOME/robinauts` on Linux, `~/.local/share/robinauts` by
+  default, and `~/Library/Application Support/Robinauts` on macOS. `--data-dir` or
+  `ROBINAUTS_DATA_DIR` names another.
+- A worker whose table names an `image` runs in a container of that image. One such worker
+  puts the whole desktop in the Docker shape. The backend then runs in a container of
+  Robinauts' image, `ROBINAUTS_IMAGE`, with the data directory mounted at `/data`.
+- A worker's container sees its own folder of the data directory, and a copy of the
+  configuration in it. It gets the keys of its agents and the variables its table names, and
+  nothing else of the desktop's environment. Every worker of this version is a trusted worker:
+  its container joins the `app` network, which has a way out.
+- neorc's worker and the workers without an `image` stay processes of the host. They reach the
+  backend's listeners on the loopback address.
+- The launcher refuses to start while Docker is down, and names the workers that need it.
+- Closing the window stops the application: the workers first, each ending its turns, then the
+  backend. One launcher runs per data directory: a second start brings its window forward.
+- A server keeps its own shape: PostgreSQL, sign-in through identity providers, and
+  `robinauts start`, which starts its own workers.
+
 ## Configuration
 
 - Files, version-controllable, with no secret in them: a secret is always
   given as the *name* of an environment variable.
-- **One file names the deployment**, and `ROBINAUTS_CONFIG` names the file.
-  It was `ROBINAUTS_AUTH_CONFIG` while sign-in was all the file held; that
-  name is still read, with a warning at start-up, and is deprecated. If both
-  are set, `ROBINAUTS_CONFIG` is what is read and the start-up log says so.
-  That file is the **agents'** configuration. The **flows'** is a folder of
+- **Two files configure the backend.** `ROBINAUTS_CONFIG` names Robinauts'
+  own: the **agents'** configuration. `ONEBERTH_CONFIG` names oneberth's: the
+  sign-in, which every backend of the deployment reads
+  ([sign-in.md](sign-in.md)). The local mode reads no oneberth file. The **flows'** is a folder of
   its own, apart from it, which `ROBINAUTS_FLOWS_DIR` names: the flow files
   and their settings, `flows.toml`; without it there is no orchestrator
   ([architecture/orchestration.md](../architecture/orchestration.md)).
-- What the operator configures: sign-in providers, the allow list and the
-  admins ([sign-in.md](sign-in.md)); model providers, models, agents and
-  the MCP tool servers agents may use; limits and retention (below).
-- The **local development mode** ([sign-in.md](sign-in.md)) may be given the
-  same file and reads only its model tables; a file that also holds sign-in
-  tables is a start-up refusal there.
+- What the operator configures: in oneberth's file, the sign-in providers,
+  the allow list and the grants ([sign-in.md](sign-in.md)); in Robinauts',
+  model providers, models, agents and the MCP tool servers agents may use;
+  limits and retention (below). A sign-in key in Robinauts' file is refused,
+  with where it went.
 - Unknown keys are errors, and all problems are reported at once, at
   start-up.
 
@@ -100,7 +147,8 @@ What an internal platform team deploys and controls.
   ```
 
 - On PostgreSQL each worker is a **process of its own**, which the server spawns at its
-  start and stops at its stop. The server's broker API hands each worker the turns of
+  start and stops at its stop. On the desktop, oneberth's launcher starts each worker, and
+  the backend starts none: it lets each in by the token the launcher had it mint. The server's broker API hands each worker the turns of
   its own agents: a worker is known by the secret the server gave it, not by
   anything it says. A worker builds the engines of its own agents alone.
 - A worker's optional `[workers.<name>]` table names the **command** that starts it, in
@@ -134,6 +182,18 @@ What an internal platform team deploys and controls.
   ([extra-workers/](../../extra-workers/README.md)). Refused at start-up: a table without
   `command`, one no agent names, and a command that cannot be started or ends without saying
   `ready`.
+- A `[workers.<name>]` table may name an **image** in the place of a command, or beside it.
+  On the desktop, the worker then runs in a container of that image ("The desktop"). Its
+  `environment` names the variables of the desktop's environment that the container gets
+  beside the keys of its agents, such as the token of a GitHub account. A server starts a
+  worker with its command alone: a table with an image and no command is refused there.
+
+  ```toml
+  [workers.claude]
+  image = "robinauts-claude-code-worker"
+  environment = ["ROBINAUTS_CLAUDE_AUTH", "CLAUDE_CODE_OAUTH_TOKEN"]
+  ```
+
 - `max_running_tasks_per_worker` is per worker: each runs that many turns at once.
 - `/health` answers 503 when any of the server's workers has not been heard from: one in the
   server's process at its heartbeat, one in a process of its own at its requests to the
@@ -195,12 +255,10 @@ is settled:
 
 - Whether the configuration is one file or several, and the key names.
   Sketches are in [sign-in.md](sign-in.md).
-- The `robinauts` command: `start`, `db init`, `version`, later
-  `db migrate`, and what else it needs. `start` runs uvicorn with
-  `--proxy-headers` on and `--forwarded-allow-ips` naming the reverse proxy
-  in front, since that is where the scheme and the client address of a
-  request come from; `--dev-no-sign-in` is the local development mode and
-  refuses any bind address that is not loopback.
+- The `robinauts` command: `start`, `db init`, `version`, oneberth's
+  `store`, `tokens`, `sessions` and `devices`, later `db migrate`, and what
+  else it needs. `start` serves with oneberth's server; `--local` is
+  oneberth's local mode and refuses any bind address that is not loopback.
 - `--uds` binds a unix socket instead of an address, for a reverse proxy on
   the same machine. A socket is a file, so it is on no network at all — and
   **who on this machine may open it is the file's mode and its directory's**,
@@ -216,6 +274,7 @@ is settled:
   connect is whatever the mode lets open the file — which is the proxy. **That
   assumes the default mode**: a deployment that widens `--uds-mode` has
   widened who may connect, and says `--forwarded-allow-ips` for itself.
+- `ROBINAUTS_DATABASE_URL` and `ROBINAUTS_DATA_DIR` together are refused.
 - The database is named by `ROBINAUTS_DATABASE_URL` and by nothing on a
   command line: a url holds a password, and a command line is a shell
   history. A database that cannot be opened — no server there, no such

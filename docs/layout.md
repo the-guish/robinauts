@@ -8,6 +8,8 @@ robinauts/
   .github/          the CI workflow and Dependabot
   docs/             specs, decisions, architecture, legal records
   scripts/          one script per check; CI runs these
+  Dockerfile        Robinauts' image: the backend and the built interface, which
+                    the desktop's Docker shape runs (docs/deployment.md)
   demo/             one command to run the whole thing on one machine
   frontend/         the UI (ADR 0006)
   extra-workers/    workers that run beside the server, each a project of its
@@ -24,18 +26,19 @@ robinauts/
                         echo_engine/, langchain_engine/, pydantic_ai_engine/
       controller/       the application: contract/ (and contract/broker/),
                         core/, ports/, application/,
-                        adapters/{in_process,postgres}/
+                        adapters/{in_process,postgres,sqlite}/
       orchestrator/     flows and their runs, a sibling of the controller that
                         sees its contract alone: contract/, ports/, core/,
                         application/, adapters/ (adapters/neorc/ is the one
                         place neorc is imported)
       worker/           runs the turns; of the controller it sees
                         contract/broker/ alone
-      web/              the HTTP server and sign-in
+      web/              Robinauts' component for oneberth: its routes, its
+                        roles (roles.py) and the workers' routes
       cli/              the robinauts command: builds the controller and the
                         worker (composition.py) and the orchestrator
-                        (orchestration.py), and starts and stops them and the
-                        HTTP server
+                        (orchestration.py), composes Robinauts' component with
+                        neorc's on oneberth, and starts and stops them
     tests/              unit/, fast/, api/, adapters_free/, adapters_metered/,
                         e2e/, tooling/, util/
 ```

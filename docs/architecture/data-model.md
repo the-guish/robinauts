@@ -2,11 +2,14 @@
 
 What the controller stores, and how a message and a turn's event are written as
 data. The model is the same in every store. `controller/adapters/postgres/schema.sql`
-is its PostgreSQL rendering, and the in-process store holds the same model. Another
-store, outside this repository, holds it on AWS serverless.
+is its PostgreSQL rendering, and `controller/adapters/sqlite/schema.sql` its SQLite
+rendering. The in-process store holds the same model. Another store, outside this
+repository, holds it on AWS serverless.
 
 Engines keep their state apart, in storage of their own, and nothing here references
-it (`docs/specs/agent-engines.md`). The controller keeps only the checkpoint id an
+it (`docs/specs/agent-engines.md`). On PostgreSQL that is tables of each engine's own. On
+local storage it is a file per engine in the worker's folder, `workers/<worker name>/` in the
+data directory. The controller keeps only the checkpoint id an
 engine hands back, on the answer, and the engine's name on the session and on the
 answer. A turn runs on the engine the session records, which holds its state, and the
 purge forgets on it, whatever the agent's configuration names today; the worker
@@ -24,20 +27,13 @@ agent to another engine, and what its sessions then do, is stage two.
 | turn | `id` | `session_id`, `follows`, `model`, `state`, `started_at`, `ended_at`, `error`, `retries_message_id`, `task_id` | no |
 | task | `id` | `task_name`, `payload`, `state`, `created_at`, `lease_until`, `claimed_at`, `cancel_requested_at` | no |
 | turn event | `(turn_id, position)` | `expires_at` | **yes** |
-| user session | `id` | `user_id`, `secret_hash` (unique), `created_at`, `expires_at` | no |
-| pending login | `state_hash` | `provider`, `nonce`, `verifier`, `return_to`, `created_at`, `expires_at` | no |
-| API token | `id` | `user_id`, `name`, `secret_hash` (unique), `created_at`, `expires_at` | no |
-| device session | `id` | `user_id`, `name`, `platform`, `app_version`, `secret_hash` (unique), `created_at`, `last_used_at`, `expires_at` | no |
-| pairing | `id` | `user_id`, `code_hash` (unique), `claim_hash` (unique), `match_number`, `wrong_tries`, `state`, `device_name`, `device_platform`, `device_app_version`, `created_at`, `expires_at` | no |
 
-Also in the PostgreSQL schema: `schema_version`, one row with the version and the
-hash of the file. The last five records are sign-in's, kept through the
-`Credentials` port and not the store, in `user_sessions`, `pending_logins`,
-`api_tokens`, `device_sessions` and `pairings`. Each holds the SHA-256 of a
-secret, and is found by it (`docs/specs/sign-in.md`,
-`docs/architecture/device-pairing.md`). A user's `name`, `email`, `hosted_domain`
-and `groups` are what their last sign-in said, refreshed by each one, and are what
-the allow list is checked against again when a credential of theirs is used.
+Also in each schema: `schema_version`, one row with the version and the hash of the
+file. PostgreSQL and SQLite hold the same records. Sign-in, sessions, tokens, devices and
+pairing are oneberth's, in its own store (`docs/specs/sign-in.md`). A user here is
+Robinauts' row of a person oneberth holds, under oneberth's id for them. Its `name`, `email`,
+`hosted_domain` and `groups` are what oneberth said of the person, refreshed when they
+change.
 
 A record whose fields are all ordered, filtered or decided by is columns. A record
 with content of many shapes is a document: the store keeps it whole and never reads

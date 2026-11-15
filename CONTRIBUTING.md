@@ -66,6 +66,9 @@ or one at a time:
                                 over a server on both agent engines and
                                 PostgreSQL: the one ROBINAUTS_TEST_DATABASE_URL
                                 names, or a throwaway one in Docker
+    scripts/check-desktop-docker.sh
+                                Robinauts' image and the base worker's, and
+                                the desktop started with both on Docker
     scripts/check-wheel.sh      the wheel: built, looked inside, installed
     scripts/check-reuse.sh      reuse lint: every file states its licence
     scripts/check-dco.sh        sign-off on every commit of the branch
@@ -210,7 +213,8 @@ Every edit to that file updates the `SCHEMA_SHA256` pinned in
 both. That pin is the only thing standing where a migration would otherwise
 be; freezing the released schema comes with the migrations work. After
 pulling a schema change, drop your local database and run
-`robinauts db init` again. If you forget, the server and the command refuse
+`robinauts db init` again. oneberth's store, which holds the sign-in, is made by
+`robinauts store init` (oneberth's admin scripts). If you forget, the server and the command refuse
 the database, saying it was made from an older `schema.sql`: `db init`
 records the file's hash in the version row and both compare it, since the
 version alone says nothing about which edit a database was made from. The
@@ -223,6 +227,20 @@ violation of `turns_one_active_per_session`, `turn_events_pkey`,
 `messages_pkey` or `users_provider_subject_key` into an answer for its caller
 and lets every other one through as the bug it is, and it tells them apart by
 name. Renaming one means changing the store too.
+
+`backend/src/robinauts/controller/adapters/sqlite/schema.sql` is the store's
+schema on SQLite, for local storage. It follows the same rules: one definition
+edited in place, `SCHEMA_VERSION` at 1, and a `SCHEMA_SHA256` pinned in
+`controller/adapters/sqlite/schema.py` that a test enforces. It holds the
+same tables as the PostgreSQL schema. The server applies it
+to a new file itself, and refuses a file made from another edit. After pulling
+a change to it, move the data directory's `robinauts.db` away.
+
+Each engine's SQLite schema is a constant beside its session store, in
+`langchain_engine/session_store.py` and `pydantic_ai_engine/session_store.py`.
+The file records the schema's version and hash, and the engine refuses a
+file made from another edit. After pulling a change to one, move the data
+directory's `workers/` folder away.
 
 ## Licence header
 

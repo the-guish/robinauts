@@ -108,10 +108,15 @@ interface, placed behind the company's usual HTTPS reverse proxy.
 [docs/deployment.md](docs/deployment.md) walks through it, step by step.
 
 To try it on a laptop, one command starts a throwaway database and the
-application, with no sign-in; it needs `uv`, Node.js and an Anthropic or
+application, in oneberth's local mode: the printed URL signs you in; it needs `uv`, Node.js and an Anthropic or
 OpenRouter key ([demo/README.md](demo/README.md)):
 
     demo/start.sh          # demo/stop.sh takes it down
+
+On one machine, `robinauts desktop` runs it as a desktop application: a
+window, with its data in a folder and no database server
+([docs/deployment.md](docs/deployment.md#the-desktop)). A worker may run in a
+container there, and the backend then runs in Robinauts' image.
 
 ## Planned
 

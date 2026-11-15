@@ -35,8 +35,9 @@ A server runs one worker per name its agents give (`[agents.*] worker`), and `de
 for the agents that give none; `default` always runs. When a turn is queued, its task is
 stamped with its agent's worker (`Config.worker_of`), and a worker claims and waits for the
 tasks stamped with its own name alone. Each worker builds the engines of its own agents at
-its start. On PostgreSQL each worker is a process of its own; in the server's process, with
-the store there too, they are workers side by side in that process. A worker whose
+its start. On PostgreSQL each worker is a process of its own. With the store in the server's
+process, or in a SQLite file that process alone opens, they are workers side by side in that
+process. A worker whose
 `[workers.<name>]` table names a command (`Config.commands`) is started with it in place of
 the worker module, in a process of its own either way, and differs in nothing else.
 
@@ -58,13 +59,15 @@ A worker in the server's process has it over the controller's store
 PostgreSQL spawns, has it over HTTP: the same operations as the API's `/internal/worker/`
 routes (`docs/architecture/web.md`), with the secret its server handed it at its start, which
 tells the server which worker it is. The
-engines keep their state apart, in the worker's `AgentEngineStore`: on PostgreSQL a pool of the
-worker's own, for the engines' tables.
+engines keep their state apart. The worker's `AgentEngineStore` holds it on PostgreSQL: a pool of
+the worker's own, for the engines' tables. Each engine keeps a SQLite file on local storage, in
+the worker's folder, `workers/<worker name>/` in the data directory (`worker_folder`).
 
 ## Users
 
-- `ensure_user`: the user for an identity, created on first sight. Web passes the provider and
-  the subject; a terminal passes the operating system's user.
+- `ensure_user`: Robinauts' row of a person oneberth holds, under oneberth's id for them,
+  created on first sight. Web passes what oneberth says of the person: the provider, the
+  subject, the name and the email.
 
 ## Catalogue
 

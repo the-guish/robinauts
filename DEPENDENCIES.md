@@ -179,17 +179,21 @@ Both are pinned to an exact version in
 Dependabot does not see them. The licence gate itself needs no tool at all:
 it is the Python standard library.
 
-## neorc's UI, a built bundle inside a wheel
+## oneberth and neorc, built from source
 
-`neorc-ui`, which `robinauts start` serves at `/neorc/ui/` when it embeds neorc
-([docs/architecture/orchestration.md](docs/architecture/orchestration.md)), is
-a Python wheel whose payload is a built JavaScript bundle. The gate reads its
-metadata, Apache-2.0, and cannot see inside the bundle; the wheel carries the
-notices of what it bundles in `neorc_ui/static/THIRD_PARTY_LICENSES.txt`, which
-neorc's own build writes and refuses to write for a licence outside its
-allowlist. Read for the commit `backend/uv.lock` pins (2026-11-09): twenty
-packages, eleven MIT, eight ISC and one BSD-3-Clause, all on the allowed list
-above. It is read again whenever the pin moves.
+`oneberth` (Apache-2.0) holds Robinauts' sign-in, roles, web application and server, and
+brings FastAPI, Starlette and uvicorn through its `web` extra; Robinauts names no version of
+those three. `neorc` (Apache-2.0) is composed into the backend. Neither publishes wheels yet,
+so `backend/uv.lock` pins each to a commit of its repository, and uv builds them. The gate
+reads their metadata like any other package's. `oneberth` may be imported by `robinauts.web`
+and `robinauts.cli` alone, and `neorc` by `robinauts.orchestrator.adapters.neorc` alone
+([docs/architecture/rules.md](docs/architecture/rules.md)).
+
+neorc's interface reaches Robinauts' from neorc's node package, `@neorc/ui`, with
+`@oneberth/ui`, at build time. Both are packed from the neorc commit `backend/pyproject.toml`
+pins (`scripts/ui-packages-from-source.sh`), and the frontend's gates read them as they read
+any npm package. Robinauts leaves out neorc's `manager` extra, which brings neorc's built
+interface as a Python wheel.
 
 ## Restricted dependencies in use
 
@@ -404,5 +408,5 @@ then, the by-hand list is the record.
 | `langgraph-checkpoint-postgres` | MIT, but depends on `psycopg` | cannot be adopted as it is, and is not needed: the model's state is a column of the platform's own schema ([ADR 0002](docs/adr/0002-conversation-persistence.md), [ADR 0005](docs/adr/0005-the-framework-owns-the-loop-and-the-memory.md)) |
 | `mcp` (the MCP Python SDK), `langchain-mcp-adapters`, `fastmcp-slim` | MIT; `mcp` requires `pywin32` on Windows, which the lock does not resolve for | **adopted** (2026-09-30; [ADR 0005](docs/adr/0005-the-framework-owns-the-loop-and-the-memory.md)): both agent frameworks' MCP clients are built on the SDK, and the tool loop is theirs now, so the client of our own over `httpx` that stood in for it is gone. The whole tree passes -- `jsonschema` and what it brings, `pyjwt`, `sse-starlette`, `httpx-sse`, `python-multipart`, `cryptography` (`Apache-2.0 OR BSD-3-Clause`), `cffi` (`MIT-0`, allowed by the decision above), `pycparser` (BSD-3-Clause), and what is in the lock already (checked 2026-09-30, at `mcp` 1.30.0). It was known to fail on two packages until then: `MIT-0` settled one, and the row below records the other |
 | `pywin32` | the classifier `License :: OSI Approved :: Python Software Foundation License` and `PSF` in the free-text field, which name a family and no licence. The licence files the 312 wheel ships (read 2026-09-30) are the three-clause BSD text for `win32`, `com` and `pythonwin`, MIT for the MAPI stub library, an HPND-style notice for Scintilla, the Python licence stack for the IDLE-derived code -- and the **LGPL-2.1** text as `adodbapi/license.txt`, for the `adodbapi` package the wheel carries | **not locked**: `mcp` needs it on Windows alone (`sys_platform == "win32"`, for the job objects of its stdio transport, which the platform never uses -- its tool servers are reached over HTTP), and the lock is resolved for Linux and macOS only. That is the decision the wheel forced. The gate fails closed on the metadata, and the runtime exception by name that the project owner asked for first, the twin of the `colorama` row the development-only table had, could not be written: an exception never covers a forbidden licence, LGPL is forbidden in any version, transitively, development-only included, and a row signs what a person read. So the owner chose the platforms over the exception (2026-09-30), and `colorama` and `pywin32-ctypes`, Windows-only too, left the lock with it. The gate does not read platform markers, on purpose: what the lock has is checked whole, and what it does not have is not supported |
-| `segno` | the classifier `License :: OSI Approved :: BSD License` alone, which names no version of BSD, so the gate fails closed | not used; the QR code of device pairing is `qrcodegen` (MIT, pure Python, no dependencies), and the SVG is drawn by `robinauts.web.pairing` itself (docs/architecture/device-pairing.md) |
+| `segno` | the classifier `License :: OSI Approved :: BSD License` alone, which names no version of BSD, so the gate fails closed | not used; the QR code of device pairing is oneberth's, which draws it itself |
 | `pgserver` | no licence metadata published: the wheel carries the Apache-2.0 text as its `LICENSE` and states no identifier anywhere, so the gate fails closed | not a dependency, and cannot become one. The tests take the URL of a PostgreSQL they are given, and `demo/` runs this as a **tool** in a throwaway environment (`uv run --with pgserver==<version>`), as `reuse` and `pip-audit` are run: nothing imports it and it is not in `backend/uv.lock` ([demo/README.md](demo/README.md)) |

@@ -123,6 +123,13 @@ licence again and writes down what they read.
   No script can check this after the fact — the dates are not in the lockfile
   — so it is checked when the pin is written, and the dates that were read go
   in the pull request.
+- `@neorc/ui` and `@oneberth/ui` are published nowhere yet. They are tarballs
+  in `frontend/vendor/`, packed from the neorc commit `backend/pyproject.toml`
+  pins by `scripts/ui-packages-from-source.sh`, and never committed. The lock
+  holds the hash of each, so `npm ci` installs that content or fails. Moving
+  the neorc pin means packing again and updating the lock in the same change.
+  `npm audit signatures` reads the tree with the two tarballs replaced by
+  their registry dependencies (`frontend/scripts/registry-tree.mjs`).
 - One dependency change per pull request, never as a side effect of a feature.
 - CI runs `npm audit --audit-level=low` for known advisories on everything
   installed, and `npm audit signatures --omit=dev` for registry signatures and

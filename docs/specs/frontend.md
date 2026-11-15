@@ -2,34 +2,35 @@
 
 ## The interface
 
-- The layout is neorc's: a collapsible left navigation panel, the chat
-  in the middle, and a collapsible side panel on the right. There is no
-  top bar.
+- The interface is oneberth's shell with two applications, Robinauts and
+  neorc (oneberth's `docs/specs/shell.md`). The rail on the left has an icon
+  for each, and the theme toggle and the account button at its bottom. The
+  shell holds the session, the sign-in page and the account pages: personal
+  tokens, linked devices with pairing, and service tokens for an admin.
+- Robinauts' area has neorc's layout: a collapsible left navigation panel,
+  the chat in the middle, and a collapsible side panel on the right. There
+  is no top bar.
 - **The panel is ours**, and not part of the chat window
-  ([ADR 0006](../adr/0006-chat-ui-on-react-alone.md)). Top to
-  bottom: the collapse button and the brand; when the server has an
-  orchestrator, a switch of two tabs, **Sessions** and **Flows**; "new chat"
-  and the conversation history, a project at a time; and, pinned to the
-  bottom, the profile block with sign-out. Each project is a heading that folds its
+  ([ADR 0006](../adr/0006-chat-ui-on-react-alone.md)). Top to bottom: the
+  collapse button and the brand, "new chat", and the conversation history,
+  a project at a time. Each project is a heading that folds its
   conversations away and opens them again, which is remembered per
   browser, with a "+" that starts a conversation in it; "New project", at the
   head of the history, makes another. The empty chat has a project picker
-  beside the agent's, on "Default" until another is picked. Collapsed, it becomes an icon rail. The state is remembered
-  per browser.
-- **Sessions or Flows.** The two tabs choose what the panel holds between
-  the switch and the profile block: Sessions is "new chat" and the history,
-  with no heading of its own; Flows is the orchestrator's navigation, with
-  "New run" where "new chat" was. One at a time, each with the whole height,
-  so a long history never squeezes the runs, nor they it. The tab and the
-  page agree: a flows page shows Flows, a conversation or the empty chat
-  shows Sessions, and choosing a tab goes back to the page last open under
-  it -- under Sessions the conversation last open, or the empty chat; under
-  Flows the flows page last open, or the runs. A page of neither, such as
-  "Linked devices", keeps the tab shown last, which is remembered per
-  browser. A switch loses nothing: the tab not shown is hidden, not
-  dropped, so the history keeps its scroll and what was typed in it, and
-  the Flows lists stay up to date. In the rail the switch is the two icons,
-  one above the other. With no orchestrator there is no switch.
+  beside the agent's, on "Default" until another is picked. Collapsed, it
+  becomes an icon rail. The state is remembered per browser.
+- **neorc** is the other application on the rail: neorc's own interface, from
+  its node package, over neorc's API at `/neorc/`. It draws its own panel of
+  runs, flows and queues, and its pages. Each application keeps its state
+  while the other is shown: the conversation on the screen, what was typed
+  and the scroll position.
+- **The form that starts a run** is Robinauts' where the flow has a form
+  file (oneberth's `docs/specs/neorc-in-robinauts.md`). The backend reads
+  the file and fills its lists (`GET /robinauts/api/flows`), and the
+  interface turns it into A2UI v0.9 in neorc's subset: a heading and one
+  control per input, a choice for each list. neorc draws its own form for a
+  flow with no form file, and for one this cannot say: an empty list, or a
+  date and time.
 - The application opens on an empty chat, ready for a first message, with
   the agent to talk to and the model selectable side by side. The model
   picker lists the operator's models, with no "default" entry: until one is
@@ -52,24 +53,26 @@
 - A re-read redraws nothing when the open conversation's last message and
   running turn are as they were. What the person is typing, an open edit box,
   the scroll position and a turn this tab is streaming stay as they are.
-- A hidden tab pauses the feed and reads again as soon as it is visible.
-  A tab streaming a turn already holds two connections, and a browser allows
-  six per origin over HTTP/1.1.
+- A hidden tab pauses the feed and reads again as soon as it is visible, and
+  so does Robinauts while the shell shows neorc. A tab streaming a turn
+  already holds two connections, neorc's long poll a third, and a browser
+  allows six per origin over HTTP/1.1.
 - The history marks a conversation with a running turn, from the list's
   `running` field.
 - **Archiving takes one click.** A row of the history has an archive button.
   It shows on hover and while the row has the focus, and always on a screen
   without hover. A click takes the conversation off the list, with no
   question. Its next message brings it back.
-- On a small screen the panel becomes an overlay drawer opened from a
-  button, and the chat is usable on a phone.
+- On a small screen the panel is in the shell's drawer, under the row of
+  applications, opened from the shell's button. The chat is usable on a
+  phone.
 - **The right side panel** is ours too (`src/side/`). It holds tabs
   beside the conversation on the screen:
   - It collapses to a thin rail, and starts as one. Its left edge is a
     separator that a pointer drags and the arrow keys move, from 260px to
     60% of the window. The rail and the width are remembered per browser.
   - On a small screen it is an overlay drawer from the right edge, opened
-    from a button, like the left panel. The two are never open together.
+    from a button.
   - A tab strip, each tab with a close button. "Add a tab" opens a menu of
     every tab not open in this conversation: the agent's MCP apps
     (`GET /api/apps`; on the empty chat, the agent picked for it). Picking
@@ -95,11 +98,13 @@
     or a first call that fails, is said so in its place, with "Try again".
   - The keyboard: Left and Right move between tabs, Delete closes one;
     the menu takes the arrow keys and closes on Escape.
-- The theme follows the operating system by default. A light / dark /
-  system toggle is remembered per browser.
-- Until someone is signed in, the sign-in page stands in place of every
-  page ([sign-in.md](sign-in.md)). In local development mode there is no
-  sign-in page, and a permanent banner says that sign-in is off.
+- The theme follows the operating system by default. The shell's toggle,
+  on the rail, is remembered per browser.
+- Until someone is signed in, the shell's sign-in page stands in place of
+  every page ([sign-in.md](sign-in.md)). The local mode has no sign-in page:
+  the launcher opens the window signed in.
+- `#/link`, the address in a pairing's QR code, stands outside the shell. It
+  says to open the code in the Robinauts app, whatever the session.
 
 ## The chat window
 
@@ -116,8 +121,7 @@
   Content-Security-Policy allows no remote image.
 - **The seam.** The rest of the application imports `src/chat/index.ts`,
   an interface this project owns, and nothing else under `src/chat/`. A lint
-  rule enforces it. The panel, the history, routing and the session read
-  our API directly.
+  rule enforces it. The panel and the history read our API directly.
 - **The discard test.** Replacing everything under `src/chat/` but
   `index.ts` breaks one thing: the implementation behind
   `src/chat/index.ts`.
@@ -135,8 +139,8 @@
 - The deliverable is **one Python wheel** that contains the built
   frontend: `pip install` plus a PostgreSQL is a complete deployment. The
   bundle is built only in CI; built assets are never committed, and a
-  bundle built on a laptop is never released. A container image is
-  planned.
+  bundle built on a laptop is never released. Robinauts' image, which the
+  desktop's Docker shape runs, builds the bundle from the lock too.
 
 ## Supply chain
 
@@ -155,7 +159,8 @@ neorc's rules (`neorc/contributing/js-dependencies.md`):
 ## Details likely to change
 
 - Vite, React 19, TypeScript in strict mode, Vitest, ESLint. Hash routing,
-  so the static files need no fallback route. Served under `/ui/`.
+  so the static files need no fallback route; the shell reads the first
+  segment, and Robinauts' routes are `#/robinauts/…`. Served under `/ui/`.
 - The typed API client is generated from the committed OpenAPI snapshot.
 - Content-Security-Policy: `default-src 'none'`; `script-src`, `font-src`,
   `connect-src` `'self'`; `style-src 'self' 'unsafe-inline'`;
@@ -176,12 +181,17 @@ neorc's rules (`neorc/contributing/js-dependencies.md`):
   `405` with `Allow: GET, HEAD`. Nothing under `/ui/` whose name begins with
   a dot is served or packaged: a directory a build writes into is one an
   editor or a stray `.env` writes into too.
-- Design tokens are CSS custom properties carried over from neorc, in
-  `src/tokens.css`. Every colour, radius and font is one of them. The
-  styling is plain CSS over the tokens: a base reset, the body and the focus
-  outline in `src/styles.css`, and one stylesheet per area, with class names
-  prefixed by the area. No utility classes.
-- The only runtime dependencies are `react` and `react-dom` (2026-11-04).
+- Design tokens are oneberth's CSS custom properties, from `@oneberth/ui`.
+  Every colour, radius and font is one of them. The styling is plain CSS
+  over the tokens: the body and the focus outline in `src/styles.css`, a
+  base reset that holds inside Robinauts' application, and one stylesheet
+  per area, with class names prefixed by the area. No utility classes.
+- The runtime dependencies are `react`, `react-dom`, `@oneberth/ui` and
+  `@neorc/ui` (2026-11-15). `@neorc/ui` brings a query library and two graph
+  libraries, at the versions neorc's own lock holds. The two packages are
+  packed from the neorc commit `backend/pyproject.toml` pins, and that
+  commit pins oneberth's (`scripts/ui-packages-from-source.sh`); the lock
+  holds the hash of each tarball.
   The icons are 22 inline SVG components in `src/icons/`, over
   path data copied from `lucide-react` 1.61.0 (ISC, and MIT for the icons
   lucide derives from Feather), recorded in
@@ -197,8 +207,10 @@ neorc's rules (`neorc/contributing/js-dependencies.md`):
   budget is that with room for the features named above and none for a
   dependency an order of magnitude too big. With the chat on React alone it is
   101.5 KB (2026-11-04), from 303.8 KB of JavaScript and 12.3 KB of CSS
-  before; `react` and `react-dom` are about 76 KB of that. The budget was left
-  where it was. It is `SIZE_BUDGET_BYTES` in
+  before; `react` and `react-dom` are about 76 KB of that. In oneberth's shell
+  with neorc it is 227.8 KB (2026-11-15): the entry with the shell is 85.0 KB,
+  Robinauts' application 38.4 KB, and neorc's 104.4 KB. Each application
+  loads on its first choice. The budget was left where it was. It is `SIZE_BUDGET_BYTES` in
   `frontend/vite.config.ts` and the build fails over it; raising it is a
   reviewed change with its reason written down
   ([contributing/js-dependencies.md](../contributing/js-dependencies.md)).
