@@ -42,6 +42,9 @@ cd "$root/frontend"
 # check-all.sh, and CI's wheel job starts from an empty runner, so the lock is
 # what decides either way. What is never skipped is the build: the bundle in
 # the wheel is always made here and now.
+# @neorc/ui and @oneberth/ui from the pinned neorc commit, when they are not
+# packed yet; `npm ci` refuses a tarball the lock does not name.
+"$root/scripts/ui-packages-from-source.sh"
 if [ ! -d node_modules ]; then
     npm ci --ignore-scripts >&2
 fi
@@ -89,9 +92,10 @@ mv "$fresh/$built" "$out/$built"
 # leave an empty requirements file beside a perfectly good wheel
 # (scripts/check-audit.sh says the same about its own export).
 uv export --locked --no-dev --no-emit-project --no-annotate \
-    --no-emit-package neorc --no-emit-package neorc-core --no-emit-package neorc-ui \
+    --no-emit-package neorc --no-emit-package neorc-core \
+    --no-emit-package oneberth \
     --format requirements.txt >"$fresh/requirements.txt"
-# neorc-from-source: its wheels, beside this one, and their hashed requirements.
+# neorc-from-source: its wheels and oneberth's, beside this one, and their hashed requirements.
 "$root/scripts/neorc-from-source.sh" "$out/neorc-wheels" >>"$fresh/requirements.txt"
 mv "$fresh/requirements.txt" "$out/requirements.txt"
 

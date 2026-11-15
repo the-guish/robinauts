@@ -95,6 +95,7 @@ PACKAGE = "robinauts"
 WANTED = (
     f"{PACKAGE}/ui/index.html",
     f"{PACKAGE}/controller/adapters/postgres/schema.sql",
+    f"{PACKAGE}/controller/adapters/sqlite/schema.sql",
 )
 UI = f"{PACKAGE}/ui/"
 ASSETS = f"{UI}assets/"
@@ -158,7 +159,7 @@ if wrong:
 
 print(
     f"the wheel carries {len(names)} files: the interface ({len(assets)} hashed assets),"
-    f" the schema and every licence file"
+    f" the schemas and every licence file"
 )
 PYTHON
 

@@ -3,15 +3,20 @@
 
 """The worker's process, ``python -m robinauts_claude_worker``: the image's command.
 
-The server starts it as it starts every worker whose ``[workers.<name>]`` table names a command:
-with its own environment plus the worker's name and the broker's URL, the secret on its standard
-input, and the line ``ready`` expected on its standard output. The worker is the backend's own
-worker module, ``robinauts.cli.worker_process``, with the ``claude-code`` engine plugged in
-through its entry point; this module runs in front of it alone, to check what that module cannot
-know: that this worker's environment is one of the two credential modes (CREDENTIALS.md), that
-the configuration gives it agents on its engine, that no database was handed to it, and what
-every extra worker checks (robinauts_worker_common: the GitHub token it may be handed). What it
-refuses, it says all at once on its standard error and exits 2, before the secret is read.
+Its supervisor starts it: the server, as it starts every worker whose ``[workers.<name>]`` table
+names a command, with its own environment plus the worker's name and the broker's URL; or the
+desktop's launcher, as a container of the image its table names, with the launcher's variables
+(``ONEBERTH_WORKER_URL``, ``ONEBERTH_WORKER_NAME``). Either way the secret comes on its standard
+input, and the line ``ready`` is expected on its standard output. Under the launcher, Claude
+Code's transcripts and the workspaces are in the worker's own folder of the data directory.
+
+The worker is the backend's own worker module, ``robinauts.cli.worker_process``, with the
+``claude-code`` engine plugged in through its entry point; this module runs in front of it
+alone, to check what that module cannot know: that this worker's environment is one of the two
+credential modes (CREDENTIALS.md), that the configuration gives it agents on its engine, that no
+database was handed to it, and what every extra worker checks (robinauts_worker_common: the
+GitHub token it may be handed). What it refuses, it says all at once on its standard error and
+exits 2, before the secret is read.
 """
 
 from __future__ import annotations
@@ -22,32 +27,58 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from robinauts.agent_engines.contract.domain import ModelProviderConfig
-from robinauts.cli.composition import load
-from robinauts.cli.worker_process import BROKER_URL_VARIABLE, WORKER_NAME_VARIABLE
+from robinauts.cli.composition import DATA_DIR_VARIABLE, load
+from robinauts.cli.worker_process import (
+    BROKER_URL_VARIABLE,
+    LAUNCHED_DATA_DIR_VARIABLE,
+    WORKER_URL_VARIABLE,
+    broker_url,
+    worker_name,
+)
 from robinauts.cli.worker_process import main as run_worker
 from robinauts.controller.contract.domain import ConfigError
-from robinauts.shared_domain.domain import DEFAULT_WORKER, Config
+from robinauts.shared_domain.domain import Config
 from robinauts.worker.engine_settings import engine_settings
 from robinauts_claude_worker import engine
 from robinauts_claude_worker.credentials import credential_problems
-from robinauts_claude_worker.settings import SettingsError, settings_from
+from robinauts_claude_worker.settings import WORKSPACES_VARIABLE, SettingsError, settings_from
 from robinauts_worker_common.__main__ import problems_of as shared_problems
 
 CONFIG_VARIABLE = "ROBINAUTS_CONFIG"
 """The deployment's TOML file, the same the server reads: this worker's agents are in it."""
 
-SERVER_VARIABLES = (CONFIG_VARIABLE, BROKER_URL_VARIABLE)
-"""What the server's environment holds when it starts a worker, and the command passes on."""
-
 
 def environment_problems(environ: Mapping[str, str]) -> list[str]:
-    """The server's variables the worker module cannot start without."""
-    return [
-        f"{variable} is not set: the server sets it when it starts this worker, and the"
-        " command passes it on"
-        for variable in SERVER_VARIABLES
-        if not environ.get(variable, "").strip()
-    ]
+    """The supervisor's variables the worker module cannot start without."""
+    problems = []
+    if not environ.get(CONFIG_VARIABLE, "").strip():
+        problems.append(
+            f"{CONFIG_VARIABLE} is not set: the server sets it when it starts this worker, and the"
+            " command passes it on"
+        )
+    if (
+        not environ.get(WORKER_URL_VARIABLE, "").strip()
+        and not environ.get(BROKER_URL_VARIABLE, "").strip()
+    ):
+        problems.append(
+            f"{BROKER_URL_VARIABLE} is not set: the server sets it when it starts this worker, and"
+            f" the command passes it on; the desktop's launcher sets {WORKER_URL_VARIABLE}"
+        )
+    return problems
+
+
+def launched_state(environ: Mapping[str, str]) -> dict[str, str]:
+    """Where Claude Code's transcripts and the workspaces go when the desktop's launcher started
+    this worker: its own folder of the data directory, which outlives the container. Nothing
+    under a server, whose command names the volumes."""
+    data = environ.get(LAUNCHED_DATA_DIR_VARIABLE) or environ.get(DATA_DIR_VARIABLE)
+    if not environ.get(WORKER_URL_VARIABLE) or not data:
+        return {}
+    folder = Path(data) / "workers" / worker_name(environ)
+    return {
+        engine.CONFIG_DIR_VARIABLE: str(folder / "claude"),
+        WORKSPACES_VARIABLE: str(folder / "workspaces"),
+    }
 
 
 def configuration_problems(name: str, config: Config) -> list[str]:
@@ -87,15 +118,16 @@ def problems_of(environ: Mapping[str, str]) -> list[str]:
         config, _ = load(Path(environ[CONFIG_VARIABLE]), environ)
     except (ConfigError, OSError, ValueError) as refused:
         return [f"{CONFIG_VARIABLE}: {refused}"]
-    name = environ.get(WORKER_NAME_VARIABLE) or DEFAULT_WORKER
+    name = worker_name(environ)
     problems = configuration_problems(name, config)
     if problems:
         return problems
-    url = environ[BROKER_URL_VARIABLE]
+    url = broker_url(environ)
     return credential_problems(settings.auth, environ, url, providers_of(name, config))
 
 
 def main() -> int:
+    os.environ.update(launched_state(os.environ))
     problems = problems_of(os.environ)
     if problems:
         print("\n".join(problems), file=sys.stderr)

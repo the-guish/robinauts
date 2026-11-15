@@ -9,6 +9,9 @@ htmlcov/
 
 frontend/node_modules/
 frontend/dist/
+# The node packages of neorc and oneberth, packed from the pinned neorc commit by
+# scripts/ui-packages-from-source.sh.
+frontend/vendor/
 
 # The wheel, and what `uv build` writes into it. backend/hatch_build.py stages
 # the three licence files beside pyproject.toml while a wheel is being built

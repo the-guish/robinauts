@@ -22,8 +22,8 @@ dev = [
 ]
 
 [tool.uv]
-# neorc-from-source: the backend depends on neorc, which uv builds from source.
-no-binary-package = ["neorc", "neorc-core", "neorc-ui"]
+# neorc-from-source: the backend depends on neorc and oneberth, which uv builds from source.
+no-binary-package = ["neorc", "neorc-core", "oneberth"]
 environments = [
     "sys_platform == 'linux'",
     "sys_platform == 'darwin'",

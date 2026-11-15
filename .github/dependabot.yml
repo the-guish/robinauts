@@ -35,6 +35,10 @@ updates:
     ignore:
       - dependency-name: "typescript"
         versions: ["7.0.x"]
+      # Packed from the neorc commit backend/pyproject.toml pins
+      # (scripts/ui-packages-from-source.sh): moved with that pin, by hand.
+      - dependency-name: "@neorc/ui"
+      - dependency-name: "@oneberth/ui"
     commit-message:
       prefix: "frontend"
 

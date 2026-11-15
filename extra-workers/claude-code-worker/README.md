@@ -97,8 +97,8 @@ to choose one.
 
 ## Personal use (one person, their own machine)
 
-One person, their own machine, their own subscription. The server runs in the
-local development mode, the container beside it.
+One person, their own machine, their own subscription. The server runs in
+oneberth's local mode, the container beside it.
 
 1. Install Claude Code, log in, and make your token in your own terminal:
 
@@ -115,10 +115,11 @@ local development mode, the container beside it.
    that authenticates (CREDENTIALS.md, "Personal"):
 
        export CLAUDE_CODE_OAUTH_TOKEN=<what claude setup-token printed>
-       ROBINAUTS_CONFIG=~/robinauts.toml robinauts start --dev-no-sign-in --port 8000
+       ROBINAUTS_CONFIG=~/robinauts.toml robinauts start --local --port 8000
 
    The server starts the container, waits for it to say `ready`, and listens.
-5. Open `http://127.0.0.1:8000/`, pick the agent *Claude Code*, and hold a
+   It then prints `open http://127.0.0.1:8000/auth/local?ticket=…`.
+5. Open that address, which signs you in, pick the agent *Claude Code*, and hold a
    conversation. Each conversation gets `/workspace/<id>` in the container.
 
 The worker refuses to start if a key is set beside the token, if a provider is
@@ -126,8 +127,8 @@ not plain Anthropic, or if the server is not on this machine: the broker URL
 the server hands it is on loopback, which is. The token lasts a year; when
 Anthropic refuses it, a turn fails with an error that says to run
 `claude setup-token` again. On Docker Desktop, where there is no host network,
-see the base worker's README: the server must listen on an address the
-container reaches, and `-e ROBINAUTS_WORKER_BROKER_URL=http://host.docker.internal:8000`
+see the base worker's README: the worker listener must listen on an address the
+container reaches, and `-e ROBINAUTS_WORKER_BROKER_URL=http://host.docker.internal:8001/robinauts`
 names it, which the worker still counts as this machine.
 
 Without Docker, the same package runs as a process on your machine with your
@@ -136,6 +137,23 @@ own Claude Code: a command of
 with `ROBINAUTS_CLAUDE_AUTH`, `ROBINAUTS_CLAUDE_WORKSPACES` somewhere of
 yours, and `ROBINAUTS_CLAUDE_CLI_PATH` pointing at your `claude` if you prefer
 it to the bundled one, exported where the server starts. The same rules apply.
+
+### On the desktop, with Docker
+
+`robinauts desktop` starts the worker as a container of oneberth's launcher
+when its table names the image ([docs/deployment.md](../../docs/deployment.md),
+"The desktop with Docker"). The table names the variables the container gets:
+
+```toml
+[workers.claude]
+image = "robinauts-claude-code-worker"
+environment = ["ROBINAUTS_CLAUDE_AUTH", "CLAUDE_CODE_OAUTH_TOKEN"]
+```
+
+Export both where you run `robinauts desktop`. The container sees the worker's
+folder of the data directory, `workers/claude`, and keeps Claude Code's
+transcripts in `claude/` there and the workspaces in `workspaces/`. Both
+outlive the container.
 
 ## A deployment
 
@@ -217,10 +235,11 @@ channel for Claude Code's questions through the chat is later work.
   The answer the person reads, and every tool call shown in the chat, are in
   the server's database as for any engine.
 - **Workspaces**: `/workspace/<conversation id>`, the files the agent made.
-- Both are volumes in the command above. They outlive the container, which
-  `--rm` removes at every stop, and an image rebuild; they do not outlive
-  `docker volume rm`, and a command without them keeps nothing past the
-  container. A conversation whose transcripts are gone refuses its next turn,
+- On a server, both are volumes in the command above. On the desktop, both are
+  in the worker's folder of the data directory.
+- The volumes outlive the container, which `--rm` removes at every stop, and
+  an image rebuild; they do not outlive `docker volume rm`, and a command
+  without them keeps nothing past the container. A conversation whose transcripts are gone refuses its next turn,
   saying so, and a new conversation starts from nothing. Durable, shared
   transcripts (the SDK's session store on PostgreSQL) are later work.
 

@@ -31,8 +31,8 @@ env:
   PYTHON_VERSION: "3.12"
 
 jobs:
-  # Decides whether `test`, `ui`, `frontend`, `android`, `extra-workers` and
-  # `mcp-servers` run.
+  # Decides whether `test`, `ui`, `desktop-docker`, `frontend`, `android`,
+  # `extra-workers` and `mcp-servers` run.
   # GitHub counts a skipped job as passed, and all but `android` are required
   # checks, so a job skips only when every area it depends on is explicitly
   # `false`. If this job
@@ -69,8 +69,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # neorc-from-source
-      - uses: ./.github/actions/neorc-from-source
       # The uv version lives with the other hand-bumped pins, in one file.
       - run: . ./scripts/tool-versions.sh && echo "UV_VERSION=$UV_VERSION" >>"$GITHUB_ENV"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -123,8 +121,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # neorc-from-source
-      - uses: ./.github/actions/neorc-from-source
       # The uv version lives with the other hand-bumped pins, in one file.
       - run: . ./scripts/tool-versions.sh && echo "UV_VERSION=$UV_VERSION" >>"$GITHUB_ENV"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -205,6 +201,35 @@ jobs:
           ROBINAUTS_TEST_DATABASE_URL: postgresql://postgres:robinauts-test@127.0.0.1:5432/robinauts_test
         run: scripts/check-e2e.sh
 
+  desktop-docker:
+    name: the desktop with Docker
+    needs: [scope]
+    # On the changes that run the tests: the image holds the backend and the interface.
+    if: ${{ !cancelled() && (needs.scope.outputs.backend != 'false' || needs.scope.outputs.frontend != 'false' || needs.scope.outputs.contract != 'false' || needs.scope.outputs.repo != 'false') }}
+    runs-on: ubuntu-latest
+    # Two image builds, then two starts of the desktop: about ten minutes.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Node.js packs the node packages of neorc and oneberth, which the image's
+      # interface is built with.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: frontend/.nvmrc
+      # The uv version lives with the other hand-bumped pins, in one file.
+      - run: . ./scripts/tool-versions.sh && echo "UV_VERSION=$UV_VERSION" >>"$GITHUB_ENV"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+      - run: uv sync --locked --no-build
+        working-directory: backend
+      # Robinauts' image and the base worker's, and the desktop started with both.
+      - run: scripts/check-desktop-docker.sh
+
   android:
     name: the client, assembled
     needs: [scope]
@@ -238,8 +263,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # neorc-from-source
-      - uses: ./.github/actions/neorc-from-source
       # The uv version lives with the other hand-bumped pins, in one file.
       - run: . ./scripts/tool-versions.sh && echo "UV_VERSION=$UV_VERSION" >>"$GITHUB_ENV"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -277,8 +300,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # neorc-from-source
-      - uses: ./.github/actions/neorc-from-source
       # The uv version lives with the other hand-bumped pins, in one file.
       - run: . ./scripts/tool-versions.sh && echo "UV_VERSION=$UV_VERSION" >>"$GITHUB_ENV"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
