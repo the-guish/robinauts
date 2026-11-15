@@ -239,6 +239,9 @@ def launched(
     assert process.stdin is not None
     process.stdin.write(f"{launch_secret}\n".encode())
     process.stdin.close()
+    # communicate() flushes the standard input it finds, and Python 3.12 refuses to flush a
+    # closed file: the process has none any more.
+    process.stdin = None
     return process
 
 

@@ -228,6 +228,9 @@ def launched(
     assert server.stdin is not None
     server.stdin.write(f"{launch_secret}\n".encode())
     server.stdin.close()
+    # communicate() flushes the standard input it finds, and Python 3.12 refuses to flush a
+    # closed file: the process has none any more.
+    server.stdin = None
     return server
 
 
