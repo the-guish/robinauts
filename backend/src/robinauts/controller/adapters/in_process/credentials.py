@@ -3,6 +3,11 @@
 
 """The credentials over dicts, resolving to the users of the store they are built over.
 
+Built over no store, they resolve to no user. The local development mode on SQLite keeps its
+credentials so until oneberth's store holds them. A bearer of that mode's one user signs
+nobody in, so a credential that resolves to nobody changes no answer. The tokens and devices
+it lists last until the process stops.
+
 No operation awaits, so each is one step of the event loop: of two coroutines taking one
 pending login, claiming one pairing or approving it, the second finds what the first did.
 """
@@ -32,8 +37,8 @@ from robinauts.controller.contract.ports import Credentials
 
 
 class InProcessCredentials(Credentials):
-    def __init__(self, store: InProcessStore) -> None:
-        self._store = store
+    def __init__(self, store: InProcessStore | None = None) -> None:
+        self._store = InProcessStore() if store is None else store
         self._sessions: dict[str, UserSession] = {}
         self._pending: dict[str, PendingLogin] = {}
         self._tokens: dict[str, ApiToken] = {}

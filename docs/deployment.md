@@ -704,6 +704,13 @@ models = ["sonnet"]
 engine = "pydantic-ai"
 ```
 
+The mode keeps the controller's records in the server's process, gone at the
+stop, or in the PostgreSQL `ROBINAUTS_DATABASE_URL` names. With
+`ROBINAUTS_DATA_DIR`, it keeps them in the file `robinauts.db` in that folder,
+which the server makes. The engines' state stays in the server's process, so
+a conversation from before a restart takes no new turn
+([specs/operations.md](specs/operations.md)).
+
 **It is not a way to deploy.** Nothing in this guide uses it.
 
 ## What can go wrong

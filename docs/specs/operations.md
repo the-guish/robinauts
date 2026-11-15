@@ -7,10 +7,21 @@ What an internal platform team deploys and controls.
 - One backend process, which also serves the frontend; one PostgreSQL.
   Nothing else (goal 6).
 - Installed from one Python wheel. A container image is planned.
-- PostgreSQL is always required. A documented one-command local Postgres
+- A deployment requires PostgreSQL. A documented one-command local Postgres
   covers development and demos.
 - A local development mode runs without sign-in, on the loopback interface
   only ([sign-in.md](sign-in.md)). It is not a way to deploy.
+- The local development mode also runs on local storage. The controller's
+  records are then in the file `robinauts.db` in the data directory, which
+  `ROBINAUTS_DATA_DIR` names. The server makes the file at its first start,
+  and refuses a file of another schema version.
+- Local storage serves the local development mode alone. Sign-in's records
+  have no store on SQLite until oneberth's store holds them, and a start with
+  sign-in on local storage is refused. The mode keeps its tokens and linked
+  devices in the server's process.
+- On local storage the engines' state and the embedded neorc's are kept in
+  the server's process. A conversation's next turn after a restart fails,
+  since its engine holds nothing of it any more. A new conversation runs.
 - Served at the root of an origin, over https. `public_url` is mandatory
   ([sign-in.md](sign-in.md)).
 - Upgrades: install the new wheel, bring the schema up to date, restart.
@@ -216,6 +227,7 @@ is settled:
   connect is whatever the mode lets open the file — which is the proxy. **That
   assumes the default mode**: a deployment that widens `--uds-mode` has
   widened who may connect, and says `--forwarded-allow-ips` for itself.
+- `ROBINAUTS_DATABASE_URL` and `ROBINAUTS_DATA_DIR` together are refused.
 - The database is named by `ROBINAUTS_DATABASE_URL` and by nothing on a
   command line: a url holds a password, and a command line is a shell
   history. A database that cannot be opened — no server there, no such

@@ -3,9 +3,10 @@
 
 """The one module that imports both the controller and the worker; the rest of ``cli`` gets
 them from here. Loads a configuration file, and builds a controller: the store for the storage
-asked, the application over it, and for each worker the configuration names, what it needs of
-the core over that store and the worker that claims and runs its agents' turns through it, with
-the credentials sign-in keeps on the same storage.
+asked (PostgreSQL, a SQLite file in the data directory, or this process), the application over
+it, and for each worker the configuration names, what it needs of the core over that store and
+the worker that claims and runs its agents' turns through it, with the credentials sign-in
+keeps on the same storage, but on SQLite, where they are kept in this process.
 A worker in a process of its own is built with `compose_worker`, over the core it is handed:
 `http_turn_broker`, the server's API.
 The file holds web's tables beside the controller's, so web is handed the tables of one
@@ -35,6 +36,8 @@ from robinauts.controller.adapters.postgres.schema import (
     create_schema,
 )
 from robinauts.controller.adapters.postgres.store import PostgresStore
+from robinauts.controller.adapters.sqlite.schema import FILE_NAME
+from robinauts.controller.adapters.sqlite.store import SQLiteStore
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.application.turn_broker import InProcessTurnBroker
 from robinauts.controller.contract.broker.ports import TurnBroker
@@ -51,6 +54,9 @@ from robinauts.worker.http_turn_broker import HttpTurnBroker
 from robinauts.worker.worker import Worker
 
 DATABASE_URL_VARIABLE = "ROBINAUTS_DATABASE_URL"
+
+DATA_DIR_VARIABLE = "ROBINAUTS_DATA_DIR"
+"""The data directory of a local start, whose `robinauts.db` holds the controller's records."""
 
 
 def built_in_tools() -> dict[str, ToolProvider]:
@@ -70,10 +76,14 @@ promise is the state of the database, not the work it did."""
 
 
 def storage_from(environ: Mapping[str, str]) -> StorageConfig:
-    """PostgreSQL when `ROBINAUTS_DATABASE_URL` is set, in this process otherwise."""
+    """PostgreSQL when `ROBINAUTS_DATABASE_URL` is set; else local, in the folder
+    `ROBINAUTS_DATA_DIR` names, when it is set; in this process otherwise."""
     url = environ.get(DATABASE_URL_VARIABLE)
     if url:
         return StorageConfig(StorageKind.POSTGRES, url=url)
+    folder = environ.get(DATA_DIR_VARIABLE)
+    if folder:
+        return StorageConfig(StorageKind.LOCAL, path=folder)
     return StorageConfig(StorageKind.IN_PROCESS)
 
 
@@ -114,11 +124,17 @@ def compose(
             raise ConfigError(f"{DATABASE_URL_VARIABLE} is not set")
         postgres = PostgresStore(dsn=storage.url)
         store, credentials = postgres, PostgresCredentials(postgres)
-    elif storage.kind is StorageKind.IN_PROCESS:
+    elif storage.kind is StorageKind.LOCAL:
+        if not storage.path:
+            raise ConfigError(f"{DATA_DIR_VARIABLE} is not set")
+        # The controller's records in the data directory's file. Sign-in's have no store on
+        # SQLite until oneberth's takes them, and are kept in this process: only the local
+        # development mode starts on local storage (`cli/main.py`).
+        store = SQLiteStore(Path(storage.path) / FILE_NAME)
+        credentials = InProcessCredentials()
+    else:
         in_process = InProcessStore()
         store, credentials = in_process, InProcessCredentials(in_process)
-    else:
-        raise NotImplementedError(f"{storage.kind} storage")
     controller = RobinautsController(config, store=store)
     brokers: dict[str, TurnBroker] = {}
     workers: dict[str, Worker] = {}
@@ -146,7 +162,8 @@ def compose_worker(
 ) -> Worker:
     """The worker `name`, which reaches the core through `broker` alone. Its engines keep their
     state on `storage`: on PostgreSQL in a pool of the worker's own, which reads and writes the
-    engines' tables, never the core's."""
+    engines' tables, never the core's; else in the worker's process, since no engine has a
+    store on SQLite yet."""
     agent_engine_store = None
     if storage.kind is StorageKind.POSTGRES:
         if not storage.url:

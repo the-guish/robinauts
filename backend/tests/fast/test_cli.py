@@ -13,7 +13,7 @@ from unittest.mock import create_autospec
 import pytest
 import uvicorn
 
-from robinauts.cli.composition import compose
+from robinauts.cli.composition import compose, storage_from
 from robinauts.cli.main import devices_command, run, serving, worker_broker_url
 from robinauts.controller.contract.domain import (
     ConfigError,
@@ -74,6 +74,35 @@ def test_a_flows_folder_is_served_in_the_local_development_mode_alone() -> None:
     with pytest.raises(ConfigError, match="ROBINAUTS_FLOWS_DIR: neorc is served"):
         serving(SIGN_IN, environ, host="0.0.0.0", dev_no_sign_in=False)
     serving({}, environ, host="127.0.0.1", dev_no_sign_in=True)
+
+
+DATABASE = {"ROBINAUTS_DATABASE_URL": "postgresql://robinauts.example.com/robinauts"}
+DATA_DIR = {"ROBINAUTS_DATA_DIR": "/home/someone/.robinauts"}
+
+
+@pytest.mark.parametrize(
+    ("tables", "environ", "mode", "refusal"),
+    [
+        (SIGN_IN, DATA_DIR, False, "ROBINAUTS_DATA_DIR: local storage holds no sign-in records"),
+        ({}, DATABASE | DATA_DIR, True, "are both set: set one"),
+        (SIGN_IN, DATABASE | DATA_DIR, False, "are both set: set one"),
+    ],
+)
+def test_local_storage_is_refused_but_to_the_local_development_mode(
+    tables: dict[str, object], environ: dict[str, str], mode: bool, refusal: str
+) -> None:
+    with pytest.raises(ConfigError, match=refusal):
+        serving(tables, environ, host="127.0.0.1", dev_no_sign_in=mode)
+
+
+def test_the_local_development_mode_serves_on_local_storage() -> None:
+    _, _, sign_in = serving({}, DATA_DIR, host="127.0.0.1", dev_no_sign_in=True)
+    assert sign_in is None
+    assert storage_from(DATA_DIR) == StorageConfig(
+        StorageKind.LOCAL, path=DATA_DIR["ROBINAUTS_DATA_DIR"]
+    )
+    assert storage_from(DATABASE | DATA_DIR).kind is StorageKind.POSTGRES
+    assert storage_from({}).kind is StorageKind.IN_PROCESS
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost"])

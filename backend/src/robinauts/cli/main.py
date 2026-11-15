@@ -16,9 +16,12 @@ provider, every ``/api/`` route answers for the person signed in through it; in 
 development mode, for the mode's one local user. The interface is the directory
 ``ROBINAUTS_UI_DIR`` names, or the build an installed wheel carries, or ``frontend/dist`` of
 this checkout when it is built. Storage is the PostgreSQL ``ROBINAUTS_DATABASE_URL`` names,
-which a start with sign-in needs; the local development mode is in this process without it. The
-sign-in records are kept on the same storage. The server never changes the database: it
-refuses one that is not this build's and names the command. That file is the agents'
+which a start with sign-in needs. The local development mode takes it too, or local storage:
+the file ``robinauts.db`` in the folder ``ROBINAUTS_DATA_DIR`` names, which the server makes; or
+this process, with neither. The sign-in records are kept on the same storage, but on local
+storage, where they are kept in this process until oneberth's store holds them. The server
+never changes a PostgreSQL database: it refuses one that is not this build's and names the
+command. That file is the agents'
 configuration; the flows' is a folder of its own, which ``ROBINAUTS_FLOWS_DIR`` names. In the
 local development mode, a flows folder embeds neorc in the server, at ``/neorc``, and starts and
 stops what runs beside it with the server (``orchestrator/``,
@@ -45,6 +48,7 @@ from fastapi import FastAPI
 
 from robinauts.cli.composition import (
     CONTROLLER_TABLES,
+    DATA_DIR_VARIABLE,
     DATABASE_URL_VARIABLE,
     Composed,
     SecretLookup,
@@ -87,6 +91,15 @@ NO_PROVIDER = (
 )
 NO_DATABASE = f"no database: set {DATABASE_URL_VARIABLE} to the PostgreSQL this deployment uses"
 SIGN_IN_OFF = "sign-in is off: the local development mode, one local user, loopback only"
+LOCAL_NEEDS_THE_MODE = (
+    f"{DATA_DIR_VARIABLE}: local storage holds no sign-in records yet, so it serves the local"
+    f" development mode alone: start with --dev-no-sign-in, or set {DATABASE_URL_VARIABLE}"
+)
+TWO_STORAGES = f"{DATABASE_URL_VARIABLE} and {DATA_DIR_VARIABLE} are both set: set one"
+LOCAL_STORAGE = (
+    "the controller's records are in %s; the engines' state and neorc's are kept in this"
+    " process, and end with it"
+)
 
 
 def interface() -> Path:
@@ -115,6 +128,10 @@ def serving(
     ]
     if environ.get(FLOWS_VARIABLE) and not dev_no_sign_in:
         problems.append(DEV_ONLY)
+    if environ.get(DATABASE_URL_VARIABLE) and environ.get(DATA_DIR_VARIABLE):
+        problems.append(TWO_STORAGES)
+    elif environ.get(DATA_DIR_VARIABLE) and not dev_no_sign_in:
+        problems.append(LOCAL_NEEDS_THE_MODE)
     sign_in = None
     if dev_no_sign_in:
         if held := sorted(SIGN_IN_KEYS & tables.keys()):
@@ -135,7 +152,7 @@ def serving(
         else:
             if sign_in is None or not sign_in.providers:
                 problems.append(NO_PROVIDER)
-        if not environ.get(DATABASE_URL_VARIABLE):
+        if not environ.get(DATABASE_URL_VARIABLE) and not environ.get(DATA_DIR_VARIABLE):
             problems.append(NO_DATABASE)
     try:
         config, secret_for = configure(tables, environ)
@@ -269,6 +286,8 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     logging.basicConfig(level=logging.INFO)
     if dev_no_sign_in:
         logging.getLogger(__name__).warning(SIGN_IN_OFF)
+    if storage.kind is StorageKind.LOCAL:
+        logging.getLogger(__name__).warning(LOCAL_STORAGE, storage.path)
     for name, command in config.commands.items():
         logging.getLogger(__name__).info(
             "worker %r starts with the command: %s", name, shlex.join(command)
@@ -276,8 +295,8 @@ def start(host: str, port: int, *, dev_no_sign_in: bool) -> int:
     lifecycle = Lifecycle(
         composed,
         broker_url=worker_broker_url(host, port),
-        # A store in this process is this process's alone: its workers run here, but for one
-        # that starts with a command of its own.
+        # A store in this process is this process's alone, and so is a SQLite file: its workers
+        # run here, but for one that starts with a command of its own.
         in_process=storage.kind is not StorageKind.POSTGRES,
     )
     app = build_app(

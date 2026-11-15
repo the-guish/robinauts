@@ -25,7 +25,8 @@ its own port
    mode has none. Every request to it passes this server's checks first: the
    mode's `Host` and `Origin` rules reach `/neorc` as they reach every path;
 2. its **storage** follows this server's: in this process without
-   `ROBINAUTS_DATABASE_URL`, gone at the stop; on that PostgreSQL with it, in a
+   `ROBINAUTS_DATABASE_URL`, gone at the stop, and so on local storage, since
+   neorc has no store on SQLite here yet; on that PostgreSQL with it, in a
    schema of its own, `neorc`, made at the start if it is not there. Its tables
    are named `neorc_*` besides, so none meets one of this server's;
 3. the flows in the flows folder are **uploaded**, at every start;
