@@ -5,26 +5,32 @@
 runs around the HTTP server (``cli/main.py``), and what a test runs around an app or in its
 place. There is a worker for each the configuration names (``AgentConfig.worker``), the
 default first. They run in this process, or each in a process of its own, which reaches the
-core through this server's API alone (``broker_url``), with a secret of its own handed to it
-at its start on its standard input, never in its environment: the secret says which worker
-asks, and the API hands it the turns of its own agents alone. A worker whose table names a
-command (``Composed.commands``) is started with that command in place of this build's worker
-module, in a process of its own even where the rest run in this one, and differs in nothing
-else: the same environment, the same secret, the same line to say it is ready, the same
-SIGTERM to stop. That is how a worker runs in a container, on another machine, or with an
-engine this build lacks."""
+core through this server's API alone (``broker_url``, the component's address on the worker
+listener), with a token of its own handed to it at its start on its standard input, never in
+its environment: a oneberth service token of ``robinauts/worker`` bound to the worker's name,
+which ``start`` is given a way to mint. The token says which worker asks, and the API hands it
+the turns of its own agents alone. A worker whose table names a command
+(``Composed.commands``) is started with that command in place of this build's worker module,
+in a process of its own even where the rest run in this one, and differs in nothing else: the
+same environment, the same token, the same line to say it is ready, the same SIGTERM to stop.
+That is how a worker runs in a container, on another machine, or with an engine this build
+lacks.
+
+On the desktop, oneberth's launcher starts every worker, each in a process of its own, and the
+backend starts none (``outside``). The backend lets each in by the token the launcher had it
+mint, hands it its turns, and counts it in ``/health`` once it is heard from."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
-import secrets
 import shlex
 import signal
 import sys
 import tempfile
 import time
+from collections.abc import Awaitable, Callable, Collection
 from pathlib import Path
 from typing import cast
 
@@ -40,6 +46,10 @@ from robinauts.web.changes import FeedGate
 from robinauts.web.worker_api import WorkerAccess
 
 _log = logging.getLogger(__name__)
+
+WorkerTokens = Callable[[str], Awaitable[str]]
+"""What mints the token of the worker of a name: a service token of ``robinauts/worker`` bound
+to that name, which ends when the server stops."""
 
 WORKER_MODULE = "robinauts.cli.worker_process"
 
@@ -72,7 +82,12 @@ def activity_file(worker: str) -> Path:
 
 class Lifecycle:
     def __init__(
-        self, composed: Composed, *, broker_url: str | None = None, in_process: bool | None = None
+        self,
+        composed: Composed,
+        *,
+        broker_url: str | None = None,
+        in_process: bool | None = None,
+        outside: Collection[str] = (),
     ) -> None:
         """``broker_url`` is where a worker in a process of its own reaches the core: this
         server's, as the worker's machine reaches it. ``in_process`` says whether the workers
@@ -80,12 +95,16 @@ class Lifecycle:
         they do when there is no URL. That suits a store in this process, which is this
         process's alone: an engine in another process would hold nothing of a session this one
         ran. A worker with a command runs in a process of its own either way, so it needs the
-        URL."""
+        URL. ``outside`` names the workers a supervisor starts, each in a process of its own:
+        this server starts none of them, and lets each in at its start."""
         self.composed = composed
         self._broker_url = broker_url or ""
         self._in_process = broker_url is None if in_process is None else in_process
+        self._outside = frozenset(name for name in composed.workers if name in outside)
         self._spawned = tuple(
-            name for name in composed.workers if not self._in_process or name in composed.commands
+            name
+            for name in composed.workers
+            if name not in self._outside and (not self._in_process or name in composed.commands)
         )
         if self._spawned and not self._broker_url:
             raise ValueError(
@@ -96,6 +115,7 @@ class Lifecycle:
         self._opened = False
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._watching: dict[str, asyncio.Task[None]] = {}
+        self._tokens: WorkerTokens | None = None
         self.access = WorkerAccess(heard=self._heard)
         self.feed = FeedGate()
         """Closed by the server's shut-down, which ends the change feed's waits."""
@@ -103,13 +123,15 @@ class Lifecycle:
         self.activity_files = {name: activity_file(name) for name in composed.workers}
         """When each worker was last heard from, by worker: the file's time."""
 
-    async def start(self) -> None:
+    async def start(self, tokens: WorkerTokens | None = None) -> None:
         """Open the controller, then start every worker. Return once they all have started, so
         that a server which says it is up runs turns. Each worker process is let in through the
-        API from then on, with the secret it read from its standard input at its start.
+        API from then on, with the token ``tokens`` minted for it, which it read from its
+        standard input at its start. A worker in a process of its own needs ``tokens``.
 
         A start that fails, or is cancelled, part way stops what it had started before it
         raises: the workers, in this process or their own, and the controller."""
+        self._tokens = tokens
         try:
             await self._start()
         except BaseException:
@@ -121,16 +143,18 @@ class Lifecycle:
         self._opened = True
         # Before they start: one that fails part way holds what it opened until stopped.
         self._workers_running = True
-        if self._spawned:
+        if self._spawned or self._outside:
             # Somebody is served over the API. Every worker's broker reaches the one store,
             # which tells each listener every cancel.
             await self.composed.brokers[next(iter(self.composed.brokers))].listen_for_cancels(
                 self.access.stop_requested
             )
-        for name, worker in self.composed.workers.items():
-            if name not in self._spawned:
-                worker.activity_file = self.activity_files[name]
-                await worker.start()
+        for name in self._outside:
+            self.access.open(name)
+        for name in self._here():
+            worker = self.composed.workers[name]
+            worker.activity_file = self.activity_files[name]
+            await worker.start()
         # Side by side: a server is up once its slowest worker is. One that failed to start
         # fails the start, and `start` then stops the others.
         spawning = [self._spawn(name, self._broker_url) for name in self._spawned]
@@ -142,6 +166,11 @@ class Lifecycle:
         if failed:
             raise failed[0]
 
+    def _here(self) -> list[str]:
+        """The workers that run in this process, by name."""
+        away = {*self._spawned, *self._outside}
+        return [name for name in self.composed.workers if name not in away]
+
     def command_of(self, name: str) -> tuple[str, ...]:
         """What starts the process of the worker ``name``: its table's command, or this build's
         worker module."""
@@ -149,15 +178,17 @@ class Lifecycle:
 
     async def _spawn(self, name: str, broker_url: str) -> None:
         """Start the process of the worker ``name``, and return once its worker has started."""
-        secret = secrets.token_urlsafe(32)
-        self.access.open(secret, name)
+        if self._tokens is None:
+            raise WorkerStartError(f"the worker {name!r} runs in a process of its own: no token")
+        secret = await self._tokens(name)
+        self.access.open(name)
         environment = {
             **os.environ,
             PARENT_VARIABLE: str(os.getpid()),
             BROKER_URL_VARIABLE: broker_url,
             WORKER_NAME_VARIABLE: name,
         }
-        # The secret, whole and closed, on the process's standard input before it exists: far
+        # The token, whole and closed, on the process's standard input before it exists: far
         # shorter than a pipe holds, and read to its end at once.
         read_end, write_end = os.pipe()
         try:
@@ -167,7 +198,10 @@ class Lifecycle:
         command = self.command_of(name)
         try:
             process = await asyncio.create_subprocess_exec(
-                *command, env=environment, stdin=read_end, stdout=asyncio.subprocess.PIPE
+                *command,
+                env=environment,
+                stdin=read_end,
+                stdout=asyncio.subprocess.PIPE,
             )
         except OSError as error:
             raise WorkerStartError(
@@ -213,7 +247,7 @@ class Lifecycle:
         """A request from the worker ``name``, through the API: for a worker in a process of
         its own, the sign of life the health check reads, as a worker in this process gives it
         by touching the file itself."""
-        if name in self._processes:
+        if name in self._processes or name in self._outside:
             self.activity_files[name].touch()
 
     def healthy(self) -> bool:
@@ -233,11 +267,7 @@ class Lifecycle:
         already. A server does it while it still listens: a worker in a process of its own
         ends its turns through the API. Then the API lets no worker in."""
         if self._workers_running:
-            stops = [
-                worker.stop()
-                for name, worker in self.composed.workers.items()
-                if name not in self._spawned
-            ]
+            stops = [self.composed.workers[name].stop() for name in self._here()]
             await asyncio.gather(*stops, *(self._stop_process(n) for n in list(self._processes)))
             # Once stopped: a stop that failed or was cancelled is done again by the next one.
             self._workers_running = False

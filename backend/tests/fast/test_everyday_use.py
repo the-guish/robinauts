@@ -22,6 +22,8 @@ from unittest.mock import MagicMock, create_autospec
 
 import httpx
 import pytest
+from oneberth.identity import LOCAL_PROVIDER
+from oneberth.web import testing
 
 from robinauts.agent_engines.contract.domain import (
     Done,
@@ -34,7 +36,6 @@ from robinauts.agent_engines.contract.domain import (
 from robinauts.agent_engines.contract.ports import AgentEngine
 from robinauts.cli.composition import compose, configure
 from robinauts.shared_domain.domain import StorageConfig, StorageKind
-from robinauts.web.app import LOCAL_IDENTITY
 from util import stack
 from util.aio import asyncio_test
 from util.app import running
@@ -90,10 +91,10 @@ class Api:
         return cid
 
     async def start(self, agent: str, text: str) -> str:
-        return await self.turn("/api/turns", agent_id=agent, text=text)
+        return await self.turn("/robinauts/api/turns", agent_id=agent, text=text)
 
     async def open_conversation(self, cid: str) -> dict[str, Any]:
-        return await self.get(f"/api/conversations/{cid}")
+        return await self.get(f"/robinauts/api/conversations/{cid}")
 
     async def thread(self, cid: str) -> list[str]:
         """The text of each message, questions and answers in order."""
@@ -104,7 +105,7 @@ class Api:
         return (await self.open_conversation(cid))["messages"][index]["id"]
 
     async def history(self) -> list[str]:
-        return [c["title"] for c in (await self.get("/api/conversations"))["items"]]
+        return [c["title"] for c in (await self.get("/robinauts/api/conversations"))["items"]]
 
 
 def echoed(*questions: str) -> list[str]:
@@ -124,12 +125,8 @@ async def test_everyday_use(agent: str) -> None:
         secret_for=secret_for,
         engines={name: lambda *_, built=built: built for name, built in engines.items()},
     )
-    async with (
-        running(composed, sign_in=None, secret_for=secret_for) as app,
-        httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
-        ) as http,
-    ):
+    async with running(composed, secret_for=secret_for) as up:
+        http = up.http
         api = Api(http)
 
         def last_call(model: str, prompt: str, checkpoint: str | None) -> None:
@@ -139,19 +136,20 @@ async def test_everyday_use(agent: str) -> None:
 
         # --- Opening the app ---------------------------------------------------------------
 
-        # 0. The local user, and the agents and models of the configuration.
+        # 0. The local user, with Robinauts' roles, and the agents and models of the
+        #    configuration.
         session = await api.get("/auth/session")
-        assert (session["sign_in"], session["local_development"]) == (False, True)
-        assert (session["providers"], session["user"]["provider"]) == ([], LOCAL_IDENTITY.provider)
-        assert (await http.get("/auth/login/okta")).status_code == 404
-        agents = (await api.get("/api/agents"))["items"]
+        assert (session["mode"], session["providers"]) == ("local", [])
+        assert session["principal"]["provider"] == LOCAL_PROVIDER
+        assert {"robinauts/user", "robinauts/admin"} <= set(session["roles"])
+        agents = (await api.get("/robinauts/api/agents"))["items"]
         both = ["local_gpt", "local_gpt_2"]
         assert [(a["id"], a["title"], a["model"], a["models"]) for a in agents] == [
             ("langchain", "LangChain", "local_gpt", both),
             ("pydantic_ai", "Pydantic AI", "local_gpt", both),
             ("pinned", "Pinned to GPT 2", "local_gpt_2", ["local_gpt_2"]),
         ]
-        models = (await api.get("/api/models"))["items"]
+        models = (await api.get("/robinauts/api/models"))["items"]
         assert [(m["id"], m["title"]) for m in models] == [
             ("local_gpt", "Local GPT"),
             ("local_gpt_2", "Local GPT 2"),
@@ -176,10 +174,14 @@ async def test_everyday_use(agent: str) -> None:
 
         # 3. Two more, each from the checkpoint of the answer before it.
         await api.turn(
-            f"/api/conversations/{a}/turns", text="alpha two", parent_id=await api.message(a, 1)
+            f"/robinauts/api/conversations/{a}/turns",
+            text="alpha two",
+            parent_id=await api.message(a, 1),
         )
         await api.turn(
-            f"/api/conversations/{a}/turns", text="alpha three", parent_id=await api.message(a, 3)
+            f"/robinauts/api/conversations/{a}/turns",
+            text="alpha three",
+            parent_id=await api.message(a, 3),
         )
         assert await api.thread(a) == echoed("alpha one", "alpha two", "alpha three")
         last_call("local_gpt", "alpha three", "cp2")
@@ -204,7 +206,12 @@ async def test_everyday_use(agent: str) -> None:
         answer = (await api.open_conversation(a))["messages"][5]
         assert answer["parts"] == [
             {"kind": "text", "text": "alpha "},
-            {"kind": "tool_call", "call_id": "c1", "name": "add", "arguments": {"a": 1, "b": 2}},
+            {
+                "kind": "tool_call",
+                "call_id": "c1",
+                "name": "add",
+                "arguments": {"a": 1, "b": 2},
+            },
             {"kind": "tool_result", "call_id": "c1", "text": "3", "is_error": False},
             {"kind": "text", "text": "three"},
         ]
@@ -212,7 +219,9 @@ async def test_everyday_use(agent: str) -> None:
         # 4. Edit the middle message: everything after it is cut, and it goes on from the
         #    answer before it.
         await api.turn(
-            f"/api/conversations/{a}/turns", text="alpha TWO", edit=await api.message(a, 2)
+            f"/robinauts/api/conversations/{a}/turns",
+            text="alpha TWO",
+            edit=await api.message(a, 2),
         )
         assert await api.thread(a) == echoed("alpha one", "alpha TWO")
         last_call("local_gpt", "alpha TWO", "cp1")
@@ -220,7 +229,7 @@ async def test_everyday_use(agent: str) -> None:
 
         # 5. Regenerate the last answer: a new answer, from the same checkpoint.
         replaced = await api.message(a, 3)
-        await api.turn(f"/api/conversations/{a}/turns", regenerate=replaced)
+        await api.turn(f"/robinauts/api/conversations/{a}/turns", regenerate=replaced)
         assert await api.message(a, 3) != replaced
         assert await api.thread(a) == echoed("alpha one", "alpha TWO")
         assert engine.stream.call_count == 5
@@ -235,10 +244,12 @@ async def test_everyday_use(agent: str) -> None:
         last_call("local_gpt", "beta one", None)
 
         # 7. Change B's model: the next message goes to the other model, from B's checkpoint.
-        moved = await http.put(f"/api/conversations/{b}/model", json={"model_id": "local_gpt_2"})
+        moved = await http.put(
+            f"/robinauts/api/conversations/{b}/model", json={"model_id": "local_gpt_2"}
+        )
         assert moved.json()["model"] == "local_gpt_2"
         await api.turn(
-            f"/api/conversations/{b}/turns",
+            f"/robinauts/api/conversations/{b}/turns",
             text="beta two",
             parent_id=await api.message(b, 1),
             model_id="local_gpt_2",
@@ -254,7 +265,9 @@ async def test_everyday_use(agent: str) -> None:
 
         # 9. A message in A goes on from the regenerated answer, to A's model.
         await api.turn(
-            f"/api/conversations/{a}/turns", text="alpha four", parent_id=await api.message(a, 3)
+            f"/robinauts/api/conversations/{a}/turns",
+            text="alpha four",
+            parent_id=await api.message(a, 3),
         )
         assert await api.thread(a) == echoed("alpha one", "alpha TWO", "alpha four")
         last_call("local_gpt", "alpha four", "cp5")
@@ -262,12 +275,13 @@ async def test_everyday_use(agent: str) -> None:
         # --- Managing conversations ---------------------------------------------------------
 
         # 10. Delete B: it leaves the list.
-        assert (await http.delete(f"/api/conversations/{b}")).status_code == 204
+        assert (await http.delete(f"/robinauts/api/conversations/{b}")).status_code == 204
         assert await api.history() == ["alpha one"]
 
         # 11. Rename A: the title is its first line, trimmed.
         renamed = await http.patch(
-            f"/api/conversations/{a}", json={"title": "  Project alpha\nignored"}
+            f"/robinauts/api/conversations/{a}",
+            json={"title": "  Project alpha\nignored"},
         )
         assert renamed.json()["title"] == "Project alpha"
         assert await api.history() == ["Project alpha"]
@@ -281,11 +295,13 @@ async def test_everyday_use(agent: str) -> None:
         assert await api.thread(a) == echoed("alpha one", "alpha TWO", "alpha four")
 
         # 13. B is not found, and no turn ran beyond the eight above.
-        assert (await http.get(f"/api/conversations/{b}")).status_code == 404
+        assert (await http.get(f"/robinauts/api/conversations/{b}")).status_code == 404
         assert engine.stream.call_count == 8
 
-        # 14. Signing out changes nothing: every route still answers as the local user.
-        assert (await http.post("/auth/logout")).status_code == 204
+        # 14. Signing out ends the local user's session: the next ticket signs them in again.
+        assert (await http.post("/auth/logout", json={})).status_code == 204
+        assert (await http.get("/robinauts/api/conversations")).status_code == 401
+        await testing.signed_in(up.backend.composition, http)
         assert await api.history() == ["Project alpha"]
 
         # 15. Each engine was built and set up once, and only the agent's engine ran a turn.

@@ -2,7 +2,10 @@
 # Copyright The Robinauts Authors
 
 """The flows a person may start, as forms, and the start of one: the inputs are checked against
-the flow's form and then handed to the engine as they came."""
+the flow's form and then handed to the engine as they came, with the person's own credential.
+The engine records the run as that person's, and a flow's handler acts for them
+(``docs/architecture/orchestration.md``, "Whose a run is").
+"""
 
 from __future__ import annotations
 
@@ -45,10 +48,16 @@ class FlowForms(Flows):
     async def forms(self) -> tuple[FlowForm, ...]:
         return self._forms
 
-    async def start(self, flow: str, inputs: Mapping[str, Any]) -> str:
+    async def start(
+        self,
+        flow: str,
+        inputs: Mapping[str, Any],
+        *,
+        credential: str | None,
+    ) -> str:
         form = self._by_name.get(flow)
         if form is None:
             raise NoSuchFlowError(f"no flow {flow!r}")
         if problems := check_inputs(form, inputs):
             raise InvalidInputsError(f"{flow}: " + "; ".join(problems))
-        return await self._engine.start_run(flow, inputs)
+        return await self._engine.start_run(flow, inputs, credential=credential)

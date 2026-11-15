@@ -22,17 +22,17 @@ def fake_model() -> FakeModel:
 
 
 def listed(api: httpx.Client) -> list[str]:
-    return [c["id"] for c in api.get("/api/conversations").json()["items"]]
+    return [c["id"] for c in api.get("/robinauts/api/conversations").json()["items"]]
 
 
 def archive(api: httpx.Client, cid: str) -> int:
-    return api.post(f"/api/conversations/{cid}/archive").status_code
+    return api.post(f"/robinauts/api/conversations/{cid}/archive", json={}).status_code
 
 
 def test_archive_hides_keeps_and_comes_back(
     api: httpx.Client, fake_model: HoldingEchoModel
 ) -> None:
-    started = api.post("/api/turns", json={"agent_id": "pydantic_ai", "text": "hello"})
+    started = api.post("/robinauts/api/turns", json={"agent_id": "pydantic_ai", "text": "hello"})
     assert started.status_code == 200, started.text
     cid = started.headers["x-robinauts-conversation-id"]
     assert cid in listed(api)
@@ -41,11 +41,11 @@ def test_archive_hides_keeps_and_comes_back(
     assert archive(api, cid) == 204
     assert cid not in listed(api)
     assert archive(api, cid) == 204
-    answer = api.get(f"/api/conversations/{cid}").json()["messages"][1]["id"]
+    answer = api.get(f"/robinauts/api/conversations/{cid}").json()["messages"][1]["id"]
 
     # Its next turn brings it back, and archiving it while that turn runs leaves the turn
     # running and the conversation archived once the turn has ended.
-    turns = f"/api/conversations/{cid}/turns"
+    turns = f"/robinauts/api/conversations/{cid}/turns"
     with api.stream("POST", turns, json={"parent_id": answer, "text": "hold"}) as held:
         assert fake_model.asked.wait(10)
         assert cid in listed(api)
@@ -53,7 +53,7 @@ def test_archive_hides_keeps_and_comes_back(
         fake_model.release.set()
         assert '"RUN_FINISHED"' in held.read().decode()
     assert cid not in listed(api)
-    opened = api.get(f"/api/conversations/{cid}").json()
+    opened = api.get(f"/robinauts/api/conversations/{cid}").json()
     assert opened["messages"][-1]["parts"][0]["text"] == "hold"
 
     assert archive(api, str(uuid.uuid4())) == 404

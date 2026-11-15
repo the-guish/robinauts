@@ -119,8 +119,8 @@ def flaky_stack(
 
 
 def turn(server: str, agent: str) -> httpx.Response:
-    with httpx.Client(base_url=server, timeout=60.0) as api:
-        started = api.post("/api/turns", json={"agent_id": agent, "text": "go"})
+    with stack.client(server, timeout=60.0) as api:
+        started = api.post("/robinauts/api/turns", json={"agent_id": agent, "text": "go"})
     assert started.status_code == 200, started.text
     return started
 
@@ -170,7 +170,8 @@ async def saved_histories(database: str, session: str) -> list[list[dict[str, An
     connection = await asyncpg.connect(database)
     try:
         rows = await connection.fetch(
-            "SELECT history FROM pydantic_ai_checkpoints WHERE session_id = $1", uuid.UUID(session)
+            "SELECT history FROM pydantic_ai_checkpoints WHERE session_id = $1",
+            uuid.UUID(session),
         )
     finally:
         await connection.close()

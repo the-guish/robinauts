@@ -11,7 +11,6 @@ import time
 from collections.abc import Iterator
 from typing import Any
 
-import httpx
 import pytest
 
 from util import stack
@@ -84,8 +83,8 @@ def napping(
 def last_event(server: str, agent: str, text: str) -> tuple[str, float]:
     """The turn's last event, and how long it took."""
     began = time.monotonic()
-    with httpx.Client(base_url=server, timeout=60.0) as api:
-        started = api.post("/api/turns", json={"agent_id": agent, "text": text})
+    with stack.client(server, timeout=60.0) as api:
+        started = api.post("/robinauts/api/turns", json={"agent_id": agent, "text": text})
     assert started.status_code == 200, started.text
     last = [line for line in started.text.splitlines() if line.startswith("data: ")][-1]
     return last, time.monotonic() - began

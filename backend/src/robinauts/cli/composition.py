@@ -3,16 +3,15 @@
 
 """The one module that imports both the controller and the worker; the rest of ``cli`` gets
 them from here. Loads a configuration file, and builds a controller: the store for the storage
-asked, the application over it, and for each worker the configuration names, what it needs of
-the core over that store and the worker that claims and runs its agents' turns through it, with
-the credentials sign-in keeps on the same storage.
+asked (PostgreSQL, a SQLite file in the data directory, or this process), the application over
+it, and for each worker the configuration names, what it needs of the core over that store and
+the worker that claims and runs its agents' turns through it. Sign-in, sessions and tokens are
+oneberth's, in its own store beside this one (``cli/main.py``).
 A worker in a process of its own is built with `compose_worker`, over the core it is handed:
-`http_turn_broker`, the server's API.
-The file holds web's tables beside the controller's, so web is handed the tables of one
-reading and parses its own. Also
-what `robinauts db init` does, since it is the one other thing that names the store and the
-engines together. The orchestrator is built apart, in ``cli/orchestration.py``: a worker in a
-process of its own imports this module, and the extra workers' images leave neorc out."""
+`http_turn_broker`, the server's API. Also what `robinauts db init` does, since it is the one
+other thing that names the store and the engines together. The orchestrator is built apart, in
+``cli/orchestration.py``: a worker in a process of its own imports this module, and the extra
+workers' images leave neorc out."""
 
 from __future__ import annotations
 
@@ -21,13 +20,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from robinauts.agent_engines.contract.domain import StorageRefusedError
 from robinauts.agent_engines.contract.ports import EngineFactory, installed
 from robinauts.agent_engines.contract.ports import StorageConfig as EngineStorage
 from robinauts.agent_engines.contract.ports import StorageKind as EngineStorageKind
 from robinauts.controller.adapters.config_file import read_config
-from robinauts.controller.adapters.in_process.credentials import InProcessCredentials
 from robinauts.controller.adapters.in_process.store import InProcessStore
-from robinauts.controller.adapters.postgres.credentials import PostgresCredentials
 from robinauts.controller.adapters.postgres.pool import close_pool, open_pool
 from robinauts.controller.adapters.postgres.schema import (
     SCHEMA_SHA256,
@@ -35,14 +33,21 @@ from robinauts.controller.adapters.postgres.schema import (
     create_schema,
 )
 from robinauts.controller.adapters.postgres.store import PostgresStore
+from robinauts.controller.adapters.sqlite.schema import FILE_NAME
+from robinauts.controller.adapters.sqlite.store import SQLiteStore
 from robinauts.controller.application.controller import RobinautsController
 from robinauts.controller.application.turn_broker import InProcessTurnBroker
 from robinauts.controller.contract.broker.ports import TurnBroker
 from robinauts.controller.contract.domain import ConfigError
-from robinauts.controller.contract.ports import Controller, Credentials
+from robinauts.controller.contract.ports import Controller
 from robinauts.controller.core.config import parse_config
 from robinauts.controller.ports.store import Store
-from robinauts.shared_domain.domain import DEFAULT_WORKER, Config, StorageConfig, StorageKind
+from robinauts.shared_domain.domain import (
+    DEFAULT_WORKER,
+    Config,
+    StorageConfig,
+    StorageKind,
+)
 from robinauts.tools import sessions
 from robinauts.tools.contract.ports import ToolProvider
 from robinauts.worker.agent_engine_store import PoolAgentEngineStore
@@ -51,6 +56,9 @@ from robinauts.worker.http_turn_broker import HttpTurnBroker
 from robinauts.worker.worker import Worker
 
 DATABASE_URL_VARIABLE = "ROBINAUTS_DATABASE_URL"
+
+DATA_DIR_VARIABLE = "ROBINAUTS_DATA_DIR"
+"""The data directory of a local start, whose `robinauts.db` holds the controller's records."""
 
 
 def built_in_tools() -> dict[str, ToolProvider]:
@@ -69,24 +77,32 @@ SCHEMA_READY = "the database is at schema version {version} (schema.sql {digest}
 promise is the state of the database, not the work it did."""
 
 
+ENGINE_REFUSALS = (StorageRefusedError,)
+"""What an engine raises at its setup for storage it will not use: what the shell says and
+stops on, as it does on a database that is not this build's."""
+
+
 def storage_from(environ: Mapping[str, str]) -> StorageConfig:
-    """PostgreSQL when `ROBINAUTS_DATABASE_URL` is set, in this process otherwise."""
+    """PostgreSQL when `ROBINAUTS_DATABASE_URL` is set; else local, in the folder
+    `ROBINAUTS_DATA_DIR` names, when it is set; in this process otherwise."""
     url = environ.get(DATABASE_URL_VARIABLE)
     if url:
         return StorageConfig(StorageKind.POSTGRES, url=url)
+    folder = environ.get(DATA_DIR_VARIABLE)
+    if folder:
+        return StorageConfig(StorageKind.LOCAL, path=folder)
     return StorageConfig(StorageKind.IN_PROCESS)
 
 
 @dataclass(frozen=True, slots=True)
 class Composed:
-    """The controller, the credentials on its storage, and for each worker by name what it
-    needs of the core and the worker over it. The credentials and the core open nothing: they
-    use the store, which `controller.open` opens and `close` closes. The workers start after
-    `open` and stop before `close`, by the shell's hand; the agent engines' store is each
-    worker's own, which it opens at its start and closes at its stop."""
+    """The controller, and for each worker by name what it needs of the core and the worker
+    over it. The core opens nothing: it uses the store, which `controller.open` opens and
+    `close` closes. The workers start after `open` and stop before `close`, by the shell's
+    hand; the agent engines' store is each worker's own, which it opens at its start and
+    closes at its stop."""
 
     controller: Controller
-    credentials: Credentials
     workers: Mapping[str, Worker]
     """By name, the default first: those that run in this process."""
     brokers: Mapping[str, TurnBroker]
@@ -108,17 +124,16 @@ def compose(
 ) -> Composed:
     """`engines` are the factories by engine name; the installed ones when not given."""
     store: Store
-    credentials: Credentials
     if storage.kind is StorageKind.POSTGRES:
         if not storage.url:
             raise ConfigError(f"{DATABASE_URL_VARIABLE} is not set")
-        postgres = PostgresStore(dsn=storage.url)
-        store, credentials = postgres, PostgresCredentials(postgres)
-    elif storage.kind is StorageKind.IN_PROCESS:
-        in_process = InProcessStore()
-        store, credentials = in_process, InProcessCredentials(in_process)
+        store = PostgresStore(dsn=storage.url)
+    elif storage.kind is StorageKind.LOCAL:
+        if not storage.path:
+            raise ConfigError(f"{DATA_DIR_VARIABLE} is not set")
+        store = SQLiteStore(Path(storage.path) / FILE_NAME)
     else:
-        raise NotImplementedError(f"{storage.kind} storage")
+        store = InProcessStore()
     controller = RobinautsController(config, store=store)
     brokers: dict[str, TurnBroker] = {}
     workers: dict[str, Worker] = {}
@@ -132,7 +147,7 @@ def compose(
             engines=engines,
             name=name,
         )
-    return Composed(controller, credentials, workers, brokers, config.commands, config)
+    return Composed(controller, workers, brokers, config.commands, config)
 
 
 def compose_worker(
@@ -146,7 +161,9 @@ def compose_worker(
 ) -> Worker:
     """The worker `name`, which reaches the core through `broker` alone. Its engines keep their
     state on `storage`: on PostgreSQL in a pool of the worker's own, which reads and writes the
-    engines' tables, never the core's."""
+    engines' tables, never the core's; on local storage in files of the engines' own, in the
+    worker's folder of the data directory (`worker_folder`); else in the worker's process.
+    """
     agent_engine_store = None
     if storage.kind is StorageKind.POSTGRES:
         if not storage.url:
@@ -167,7 +184,8 @@ def compose_worker(
 
 def http_turn_broker(url: str, secret: str) -> TurnBroker:
     """What a worker in a process of its own reaches the core through: the API of the server
-    at `url`, with the secret that server handed it."""
+    at `url`, the component's address on its worker listener, with the token that server
+    handed it."""
     return HttpTurnBroker(url, secret)
 
 

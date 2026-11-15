@@ -23,10 +23,8 @@ from util.app import running
 @asynccontextmanager
 async def client() -> AsyncIterator[httpx.AsyncClient]:
     composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get)
-    async with running(composed, sign_in=None, secret_for={}.get) as app:
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as http:
-            yield http
+    async with running(composed, secret_for={}.get) as up:
+        yield up.http
 
 
 def events(body: str) -> list[dict[str, object]]:
@@ -41,28 +39,35 @@ def events(body: str) -> list[dict[str, object]]:
 @asyncio_test
 async def test_a_run_is_re_attached_to_and_a_turn_on_no_question_is_refused() -> None:
     async with client() as http:
-        started = await http.post("/api/turns", json={"agent_id": "echo", "text": "hello"})
+        started = await http.post(
+            "/robinauts/api/turns", json={"agent_id": "echo", "text": "hello"}
+        )
         cid = started.headers["x-robinauts-conversation-id"]
         rid = started.headers["x-robinauts-run-id"]
         last = max(
             int(b.removeprefix("id: ")) for b in started.text.split("\n") if b.startswith("id: ")
         )
 
-        replayed = await http.get(f"/api/conversations/{cid}/runs/{rid}/events?after=0")
+        replayed = await http.get(f"/robinauts/api/conversations/{cid}/runs/{rid}/events?after=0")
         assert replayed.headers["x-robinauts-run-id"] == rid
         assert [e["type"] for e in events(replayed.text)][-1] == "RUN_FINISHED"
         at_the_end = await http.get(
-            f"/api/conversations/{cid}/runs/{rid}/events", headers={"last-event-id": str(last)}
+            f"/robinauts/api/conversations/{cid}/runs/{rid}/events",
+            headers={"last-event-id": str(last)},
         )
-        assert [e["type"] for e in events(at_the_end.text)] == ["RUN_STARTED", "RUN_FINISHED"]
-        elsewhere = await http.get(f"/api/conversations/{cid}/runs/{uuid.uuid4()}/events")
+        assert [e["type"] for e in events(at_the_end.text)] == [
+            "RUN_STARTED",
+            "RUN_FINISHED",
+        ]
+        elsewhere = await http.get(f"/robinauts/api/conversations/{cid}/runs/{uuid.uuid4()}/events")
         assert elsewhere.status_code == 404
 
         # A message names the parent it answers or the question it edits.
-        orphan = await http.post(f"/api/conversations/{cid}/turns", json={"text": "more"})
+        orphan = await http.post(f"/robinauts/api/conversations/{cid}/turns", json={"text": "more"})
         assert orphan.status_code == 422
-        answer = (await http.get(f"/api/conversations/{cid}")).json()["messages"][1]
+        answer = (await http.get(f"/robinauts/api/conversations/{cid}")).json()["messages"][1]
         not_a_question = await http.post(
-            f"/api/conversations/{cid}/turns", json={"text": "x", "edit": answer["id"]}
+            f"/robinauts/api/conversations/{cid}/turns",
+            json={"text": "x", "edit": answer["id"]},
         )
         assert not_a_question.status_code == 404

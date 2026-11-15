@@ -18,10 +18,11 @@ from typing import Any
 import pytest
 from playwright.sync_api import Locator, Page, expect
 
-from util.browser import DID_NOT_FINISH, send
+from util.browser import DID_NOT_FINISH, send, sign_in
 from util.fake_openai import FakeLocalGPTServer, FakeModel, ToolEchoModel
 from util.fake_openai.echo_model import text_of
 from util.mcp_server import mcp_server
+from util.stack import Server
 
 pytestmark = [pytest.mark.io, pytest.mark.database]
 
@@ -65,7 +66,7 @@ def expect_shout_used(answer: Locator, calls: int = 1) -> None:
 
 
 def aux_tool_calls(
-    agent: str, server: str, page: Page, local_gpt: FakeLocalGPTServer, release: threading.Event
+    agent: str, server: Server, page: Page, local_gpt: FakeLocalGPTServer, release: threading.Event
 ) -> None:
     calls = local_gpt.received
     answers = page.locator('[data-role="assistant"]')
@@ -73,7 +74,7 @@ def aux_tool_calls(
     # 1. "New chat", pick the agent with tools, send "hello": the model calls "shout", the MCP
     #    server runs it, and the model answers with its result. The answer shows the call under
     #    "1 tool call" as "Used tool: shout"; opening that shows the arguments and the "Result:".
-    page.goto(server)
+    sign_in(page, server)
     page.get_by_role("button", name="New chat").click()
     page.get_by_label("Agent").select_option(f"{agent}_tools")
     send(page, "hello")
@@ -138,12 +139,12 @@ def aux_tool_calls(
 
 
 def test_pydantic_ai_tool_calls(
-    server: str, page: Page, local_gpt: FakeLocalGPTServer, release: threading.Event
+    server: Server, page: Page, local_gpt: FakeLocalGPTServer, release: threading.Event
 ) -> None:
     aux_tool_calls("pydantic_ai", server, page, local_gpt, release)
 
 
 def test_langchain_tool_calls(
-    server: str, page: Page, local_gpt: FakeLocalGPTServer, release: threading.Event
+    server: Server, page: Page, local_gpt: FakeLocalGPTServer, release: threading.Event
 ) -> None:
     aux_tool_calls("langchain", server, page, local_gpt, release)

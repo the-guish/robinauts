@@ -102,16 +102,16 @@ def kill_with_its_worker(server: subprocess.Popen[bytes]) -> None:
 def start_turn(server: str, agent: str) -> None:
     """Ask, and read the stream until the server dies."""
     try:
-        with httpx.Client(base_url=server, timeout=60.0) as api:
-            api.post("/api/turns", json={"agent_id": agent, "text": "go"})
+        with stack.client(server, timeout=60.0) as api:
+            api.post("/robinauts/api/turns", json={"agent_id": agent, "text": "go"})
     except httpx.HTTPError:
         pass
 
 
 def opened(api: httpx.Client) -> dict[str, Any]:
     """The only conversation, opened."""
-    [conversation] = api.get("/api/conversations").json()["items"]
-    return api.get(f"/api/conversations/{conversation['id']}").json()
+    [conversation] = api.get("/robinauts/api/conversations").json()["items"]
+    return api.get(f"/robinauts/api/conversations/{conversation['id']}").json()
 
 
 def wait_for(condition: Any, seconds: float = 30.0) -> Any:
@@ -143,7 +143,7 @@ def test_a_crashed_turn_waits_until_asked_to_resume(
 
         with (
             stack.server(config, url, stack.API_KEY) as second,
-            httpx.Client(base_url=second, timeout=60.0) as api,
+            stack.client(second, timeout=60.0) as api,
         ):
             # Its lease passes, and a reader ends it; nothing runs it again.
             ended = wait_for(lambda: (o := opened(api))["ended_badly"] and o)
@@ -156,9 +156,14 @@ def test_a_crashed_turn_waits_until_asked_to_resume(
             assert failed["failed"]
             cid = ended["conversation"]["id"]
             question = ended["messages"][0]["id"]
-            refused = api.post(f"/api/conversations/{cid}/turns", json={"resume": question})
+            refused = api.post(
+                f"/robinauts/api/conversations/{cid}/turns", json={"resume": question}
+            )
             assert refused.status_code == 404
-            resumed = api.post(f"/api/conversations/{cid}/turns", json={"resume": failed["id"]})
+            resumed = api.post(
+                f"/robinauts/api/conversations/{cid}/turns",
+                json={"resume": failed["id"]},
+            )
             assert resumed.status_code == 200, resumed.text
             assert '"RUN_FINISHED"' in resumed.text
             answer = opened(api)["messages"][-1]
@@ -184,15 +189,15 @@ def test_a_stopped_server_ends_its_turn_through_its_api_before_it_stops_listenin
             with stack.server(config, url, stack.API_KEY, started) as first:
                 asking = thread.submit(start_turn, first, "langchain_counter")
                 wait_for(lambda: len(counted) == ROUNDS)
-                # Its worker waits for the turn, bounded, then interrupts it. uvicorn, once
-                # it has shut down, ends as the signal it was stopped with.
+                # Its worker waits for the turn, bounded, then interrupts it. oneberth's
+                # server handles the signal, and the process ends well.
                 started[0].terminate()
-                assert started[0].wait(timeout=40) == -signal.SIGTERM
+                assert started[0].wait(timeout=40) == 0
             asking.result(timeout=30)
 
             with (
                 stack.server(config, url, stack.API_KEY) as second,
-                httpx.Client(base_url=second, timeout=60.0) as api,
+                stack.client(second, timeout=60.0) as api,
             ):
                 ended = opened(api)
                 assert ended["run_id"] is None

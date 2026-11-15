@@ -11,6 +11,7 @@ panel, and through it to the server, which keeps what was done in its file.
 from __future__ import annotations
 
 import os
+import re
 import socket
 import subprocess
 import time
@@ -22,9 +23,9 @@ from typing import Any
 import pytest
 from playwright.sync_api import FrameLocator, Page, Route, expect
 
-from util.browser import send
+from util.browser import rail, send, sign_in
 from util.fake_openai import FakeModel, ToolEchoModel
-from util.stack import ROOT, free_port
+from util.stack import ROOT, Server, free_port
 
 pytestmark = [pytest.mark.io, pytest.mark.database]
 
@@ -103,7 +104,7 @@ def show_todos(page: Page) -> Any:
     """The list as the server holds it, asked through the API the panel uses."""
     return page.evaluate(
         """async ([server, tool, agent]) => {
-            const answer = await fetch(`/api/apps/${server}/tools/${tool}`, {
+            const answer = await fetch(`/robinauts/api/apps/${server}/tools/${tool}`, {
                 method: "POST",
                 headers: {"content-type": "application/json"},
                 body: JSON.stringify({agent, arguments: {}}),
@@ -114,10 +115,10 @@ def show_todos(page: Page) -> Any:
     )
 
 
-def test_side_panel_and_an_app(server: str, page: Page) -> None:
+def test_side_panel_and_an_app(server: Server, page: Page) -> None:
     # 1. "New chat", pick the agent with the to-do list, expand the side panel: "Add a tab"
     #    offers the agent's app.
-    page.goto(server)
+    sign_in(page, server)
     page.get_by_role("button", name="New chat").click()
     page.get_by_label("Agent").select_option(AGENT)
     page.get_by_role("button", name="Expand the side panel").click()
@@ -158,11 +159,13 @@ def test_side_panel_and_an_app(server: str, page: Page) -> None:
     frame.get_by_role("checkbox", name="eggs").uncheck()
     expect(frame.get_by_text("2 to-dos, 1 done")).to_be_visible()
 
-    # 4. The view follows the theme on the screen.
-    page.get_by_role("button", name="Dark").click()
-    expect(frame.locator("html")).to_have_attribute("data-theme", "dark")
-    page.get_by_role("button", name="Light").click()
+    # 4. The view follows the theme on the screen, which the shell's toggle on the rail moves
+    #    from the system's to light, then to dark.
+    theme = rail(page).get_by_role("button", name=re.compile("^Theme: "))
+    theme.click()
     expect(frame.locator("html")).to_have_attribute("data-theme", "light")
+    theme.click()
+    expect(frame.locator("html")).to_have_attribute("data-theme", "dark")
 
     # 5. Close the tab: it is offered again. Open it again: the list is the server's.
     page.get_by_role("button", name="Close To-do list").click()

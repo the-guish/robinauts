@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The orchestrator ``robinauts start`` embeds in the local development mode
-(``docs/architecture/orchestration.md``): with a flows folder, neorc's manager is
-mounted at ``/neorc``, its UI at ``/neorc/ui/``, behind this server's checks and port; the flows
-are uploaded at the start, its scheduler runs in the server and its worker in a process of its
-own, against ``/neorc``. A run of ``guess_number`` started through the mount plays the game
-between two conversations of the local user, on the echo engine.
+"""neorc composed into the backend ``robinauts start`` serves
+(``docs/architecture/orchestration.md``): neorc's manager is a component, served under
+``/neorc/`` behind oneberth's checks, beside Robinauts' own. With a flows folder, the flows are
+uploaded once the backend serves, with a token of ``neorc/ci``; neorc's scheduler runs in the
+server and its worker in a process of its own, against the worker listener. A run of
+``guess_number`` started on neorc's API plays the game between two conversations of the local
+user, on the echo engine: its handlers act for the person who started the run.
 
 neorc is the real one. Its storage follows the server's: in the process without
 ``ROBINAUTS_DATABASE_URL``, and on that PostgreSQL in the schema ``neorc`` with it."""
@@ -16,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+import threading
 import time
 import uuid
 from collections.abc import Iterator
@@ -28,6 +30,7 @@ import pytest
 
 from util import stack
 from util.controller_db import NO_DATABASE
+from util.desktop import appeared, gone
 
 pytestmark = pytest.mark.io
 
@@ -71,19 +74,24 @@ def environment_for(config: Path, flows: Path = SHIPPED) -> dict[str, str]:
 
 
 @contextmanager
-def started(config: Path, environment: dict[str, str]) -> Iterator[tuple[str, list[bytes]]]:
-    """The URL of a server started on ``config``, and once it has stopped, what it said."""
-    port = stack.free_port()
-    start = [str(stack.ROBINAUTS), "start", "--dev-no-sign-in", "--port", str(port)]
+def started(
+    config: Path, environment: dict[str, str]
+) -> Iterator[tuple[stack.Server, list[bytes]]]:
+    """A server started on ``config`` in the local mode, once it says it is ready, and once it
+    has stopped, what it said on its standard error, read as it comes."""
     said: list[bytes] = []
-    with subprocess.Popen(start, env=environment, stderr=subprocess.PIPE) as running:
+    running, url = stack.start_local(environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    with running:
+        assert running.stderr is not None
+        errors = running.stderr
+        reading = threading.Thread(target=lambda: said.append(errors.read()), daemon=True)
+        reading.start()
         try:
-            url = f"http://127.0.0.1:{port}"
-            stack.wait_until_up(url, running)
+            stack.wait_until_ready(running)
             yield url, said
             running.terminate()
-            _, stderr = running.communicate(timeout=60)
-            said.append(stderr)
+            running.wait(timeout=60)
+            reading.join(10)
         finally:
             if running.poll() is None:
                 running.kill()
@@ -105,110 +113,138 @@ def finished_run(api: httpx.Client, run_id: str) -> dict[str, Any]:
     raise AssertionError(f"the run did not end within {RUN_SECONDS:g} s")
 
 
-def play_a_game(url: str) -> None:
-    """Start ``guess_number`` through the mount, as the framed UI does, and check what it did:
+def play_a_game(url: stack.Server) -> None:
+    """Start ``guess_number`` on neorc's API, as neorc's own form does, and check what it did:
     the run ends, and its two conversations are the local user's."""
-    origin = {"origin": url}
-    with httpx.Client(base_url=url, timeout=30.0) as api:
+    with stack.client(url) as api:
         flows = api.get("/neorc/flows")
         assert flows.status_code == 200, flows.text
         assert "guess_number" in [f["name"] for f in flows.json()["flows"]]
-        before = {c["id"] for c in api.get("/api/conversations").json()["items"]}
-        begun = api.post("/neorc/flows/guess_number/runs", json={"inputs": {}}, headers=origin)
+        before = {c["id"] for c in api.get("/robinauts/api/conversations").json()["items"]}
+        begun = api.post("/neorc/flows/guess_number/runs", json={"inputs": {}})
         assert begun.status_code == 201, begun.text
         run = finished_run(api, begun.json()["id"])
         assert run["status"] == "succeeded", run
-        after = api.get("/api/conversations").json()["items"]
+        after = api.get("/robinauts/api/conversations").json()["items"]
         opened = [c for c in after if c["id"] not in before]
         # The game, on the Haiku model, and the guesser.
         assert len(opened) == 2, opened
 
 
-def test_neorc_is_mounted_in_the_server_and_a_run_of_its_flow_plays_the_game(
+def test_neorc_is_composed_in_the_server_and_a_run_of_its_flow_plays_the_game(
     tmp_path: Path,
 ) -> None:
     config = tmp_path / "robinauts.toml"
     config.write_text(CONFIG)
     with started(config, environment_for(config)) as (url, said):
-        with httpx.Client(base_url=url, timeout=30.0) as api:
+        with stack.client(url) as api:
             session = api.get("/auth/session").json()
-            assert session["flows_url"] == "/neorc/ui/"
-            assert api.get("/neorc/health").json() == {"status": "ok"}
+            assert {"neorc/user", "robinauts/user"} <= set(session["roles"])
+            assert api.get("/health").json() == stack.HEALTHY
         play_a_game(url)
     assert b"neorc is up" in said[0], said[0].decode(errors="replace")
     assert b"in this process" in said[0]
 
 
-def test_the_ui_is_framable_by_this_server_alone_and_the_api_by_nothing(tmp_path: Path) -> None:
+def test_neorc_s_worker_ends_with_a_server_that_is_killed(tmp_path: Path) -> None:
+    config = tmp_path / "robinauts.toml"
+    config.write_text(CONFIG)
+    mark = uuid.uuid4().hex
+    environment = {**environment_for(config), "ROBINAUTS_TEST_MARK": mark}
+    running, _ = stack.start_local(environment, stdout=subprocess.PIPE)
+    with running:
+        try:
+            stack.wait_until_ready(running)
+            workers = appeared("ROBINAUTS_TEST_MARK", mark, 30, beside=[running.pid])
+            assert len(workers) == 1, workers
+            ((worker, shown),) = workers.items()
+            assert shown["ONEBERTH_WORKER_NAME"] == "neorc"
+            running.kill()
+            assert gone([worker], 30)
+        finally:
+            if running.poll() is None:
+                running.kill()
+
+
+def test_neorc_s_api_is_checked_as_every_route_of_the_backend(tmp_path: Path) -> None:
     config = tmp_path / "robinauts.toml"
     config.write_text(CONFIG)
     with started(config, environment_for(config)) as (url, _):
-        with httpx.Client(base_url=url, timeout=30.0) as api:
-            page = api.get("/neorc/ui/")
-            api_answer = api.get("/neorc/flows")
+        with httpx.Client(base_url=url, timeout=30.0) as anyone:
+            nobody = anyone.get("/neorc/flows")
+        with stack.client(url) as api:
+            listed = api.get("/neorc/flows")
             elsewhere = api.get("/neorc/flows", headers={"host": "evil.example"})
-            ui_elsewhere = api.get("/neorc/ui/", headers={"host": "evil.example"})
-            cross_site = api.post(
+            cross_origin = api.post(
                 "/neorc/flows/guess_number/runs",
                 json={"inputs": {}},
                 headers={"origin": "http://evil.example"},
             )
-    assert page.status_code == 200, page.text
-    assert page.headers["content-type"].startswith("text/html")
-    policy = page.headers["content-security-policy"]
-    assert "frame-ancestors 'self'" in policy
-    assert "'none'" not in policy.split("frame-ancestors")[1]
-    # neorc's own policy otherwise: scripts and connections from this origin alone.
-    assert "script-src 'self'" in policy
-    assert "connect-src 'self'" in policy
-    assert page.headers.get_list("x-frame-options") == ["SAMEORIGIN"]
-    assert api_answer.status_code == 200
-    assert api_answer.headers.get_list("x-frame-options") == ["DENY"]
-    assert "frame-ancestors 'none'" in api_answer.headers["content-security-policy"]
-    # The local development mode's checks reach the mount as they reach every path.
-    assert (elsewhere.status_code, ui_elsewhere.status_code) == (403, 403)
-    assert cross_site.status_code == 403
+            page = api.get("/neorc/ui/")
+    assert nobody.status_code == 401
+    assert listed.status_code == 200
+    assert listed.headers.get_list("x-frame-options") == ["DENY"]
+    # The local mode's checks reach neorc's routes as they reach every path.
+    assert (elsewhere.status_code, cross_origin.status_code) == (403, 403)
+    # neorc's interface is in the backend's own bundle, under /ui/: neorc serves none here.
+    assert page.status_code == 404
 
 
-def test_a_start_whose_flows_are_refused_is_refused_before_it_binds(tmp_path: Path) -> None:
+def test_a_start_whose_flows_are_refused_is_refused_before_it_says_ready(
+    tmp_path: Path,
+) -> None:
     flows = tmp_path / "flows"
     flows.mkdir()
     (flows / "broken.yaml").write_text("name: broken\nversion: 1.0.0\nsteps: 3\n")
     config = tmp_path / "robinauts.toml"
     config.write_text(CONFIG)
     port = stack.free_port()
-    start = [str(stack.ROBINAUTS), "start", "--dev-no-sign-in", "--port", str(port)]
+    start = [str(stack.ROBINAUTS), "start", "--local", "--port", str(port)]
     environment = environment_for(config, flows)
-    refused = subprocess.run(start, env=environment, capture_output=True, timeout=60)
+    refused = subprocess.run(
+        start,
+        env=environment,
+        capture_output=True,
+        timeout=60,
+        stdin=subprocess.DEVNULL,
+    )
     assert refused.returncode == 1
     assert b"neorc refused the flows in" in refused.stderr, refused.stderr
 
 
-def test_a_folder_of_one_s_own_flows_is_served_as_its_flows_toml_says(tmp_path: Path) -> None:
-    """A folder anywhere, with the shipped handlers as its default, and the UI turned off."""
+def test_a_folder_of_one_s_own_flows_is_served_as_its_flows_toml_says(
+    tmp_path: Path,
+) -> None:
+    """A folder anywhere, with the shipped handlers as its default."""
     flows = tmp_path / "my-flows"
     flows.mkdir()
     (flows / "guess_number.yaml").write_text((SHIPPED / "guess_number.yaml").read_text())
-    (flows / "flows.toml").write_text("ui = false\n")
+    (flows / "flows.toml").write_text(f'code_location = "{SHIPPED.parent}"\n')
     config = tmp_path / "robinauts.toml"
     config.write_text(CONFIG)
     with started(config, environment_for(config, flows)) as (url, _):
-        with httpx.Client(base_url=url, timeout=30.0) as api:
+        with stack.client(url) as api:
             listed = api.get("/neorc/flows").json()["flows"]
-            page = api.get("/neorc/ui/")
     assert [f["name"] for f in listed] == ["guess_number"]
-    assert page.status_code == 404
 
 
-def test_a_flows_toml_that_is_not_toml_is_refused_before_it_binds(tmp_path: Path) -> None:
+def test_a_flows_toml_that_is_not_toml_is_refused_before_it_binds(
+    tmp_path: Path,
+) -> None:
     flows = tmp_path / "flows"
     flows.mkdir()
     (flows / "flows.toml").write_text("ui = \n")
     config = tmp_path / "robinauts.toml"
     config.write_text(CONFIG)
-    start = [str(stack.ROBINAUTS), "start", "--dev-no-sign-in", "--port", str(stack.free_port())]
+    start = [str(stack.ROBINAUTS), "start", "--local", "--port", str(stack.free_port())]
     environment = environment_for(config, flows)
-    refused = subprocess.run(start, env=environment, capture_output=True, timeout=30)
+    refused = subprocess.run(
+        start,
+        env=environment,
+        capture_output=True,
+        timeout=30,
+        stdin=subprocess.DEVNULL,
+    )
     assert refused.returncode == 1
     assert b"flows.toml: not TOML" in refused.stderr, refused.stderr
 
@@ -268,18 +304,25 @@ def test_a_flow_with_a_form_is_listed_with_its_values_and_started_with_them(
         "agent": "echo",
     }
     with started(config, environment_for(config, probe_folder(tmp_path))) as (url, _):
-        with httpx.Client(base_url=url, timeout=30.0, headers={"origin": url}) as api:
-            listed = api.get("/api/flows").json()["items"]
+        with stack.client(url) as api:
+            listed = api.get("/robinauts/api/flows").json()["items"]
             wrong = api.post(
-                "/api/flows/intake_probe/runs", json={"inputs": {**inputs, "model": "gpt"}}
+                "/robinauts/api/flows/intake_probe/runs",
+                json={"inputs": {**inputs, "model": "gpt"}},
             )
-            missing = api.post("/api/flows/intake_probe/runs", json={"inputs": {"task": "x"}})
-            unknown = api.post("/api/flows/nothing/runs", json={"inputs": {}})
-            begun = api.post("/api/flows/intake_probe/runs", json={"inputs": inputs})
+            missing = api.post(
+                "/robinauts/api/flows/intake_probe/runs", json={"inputs": {"task": "x"}}
+            )
+            unknown = api.post("/robinauts/api/flows/nothing/runs", json={"inputs": {}})
+            begun = api.post("/robinauts/api/flows/intake_probe/runs", json={"inputs": inputs})
             assert begun.status_code == 201, begun.text
             run = api.get(f"/neorc/runs/{begun.json()['id']}").json()
     [probe] = listed
-    assert (probe["name"], probe["title"], probe["has_form"]) == ("intake_probe", "Probe", True)
+    assert (probe["name"], probe["title"], probe["has_form"]) == (
+        "intake_probe",
+        "Probe",
+        True,
+    )
     fields = {field["name"]: field for field in probe["inputs"]}
     assert list(fields) == ["repo_branch", "model", "agent", "task"]
     assert fields["repo_branch"]["options"] == [
@@ -324,17 +367,22 @@ def test_the_shipped_code_and_review_runs_its_form_s_inputs_to_the_implementing_
         "agent": "echo",
     }
     with started(config, environment_for(config, flows)) as (url, _):
-        with httpx.Client(base_url=url, timeout=30.0, headers={"origin": url}) as api:
-            [form] = api.get("/api/flows").json()["items"]
-            begun = api.post("/api/flows/code_and_review/runs", json={"inputs": inputs})
+        with stack.client(url) as api:
+            [form] = api.get("/robinauts/api/flows").json()["items"]
+            begun = api.post("/robinauts/api/flows/code_and_review/runs", json={"inputs": inputs})
             assert begun.status_code == 201, begun.text
             run = finished_run(api, begun.json()["id"])
             tasks = api.get(f"/neorc/runs/{run['id']}/tasks").json()["tasks"]
-            conversations = api.get("/api/conversations").json()["items"]
-            opened = api.get(f"/api/conversations/{conversations[0]['id']}").json()
+            conversations = api.get("/robinauts/api/conversations").json()["items"]
+            opened = api.get(f"/robinauts/api/conversations/{conversations[0]['id']}").json()
             api_messages = opened["messages"]
     assert form["title"] == "Code and review"
-    assert [field["name"] for field in form["inputs"]] == ["task", "repo_branch", "agent", "model"]
+    assert [field["name"] for field in form["inputs"]] == [
+        "task",
+        "repo_branch",
+        "agent",
+        "model",
+    ]
     assert run["status"] == "failed", run
     [implement] = tasks
     assert implement["handler"] == "robinauts_tasks:implement"
@@ -349,13 +397,21 @@ def test_the_shipped_code_and_review_runs_its_form_s_inputs_to_the_implementing_
     }
 
 
-def test_a_form_that_does_not_fit_its_flow_is_refused_before_it_binds(tmp_path: Path) -> None:
+def test_a_form_that_does_not_fit_its_flow_is_refused_before_it_binds(
+    tmp_path: Path,
+) -> None:
     config = tmp_path / "robinauts.toml"
     config.write_text(CONFIG)
     flows = probe_folder(tmp_path, form='[inputs.colour]\nlov = "model"\n')
-    start = [str(stack.ROBINAUTS), "start", "--dev-no-sign-in", "--port", str(stack.free_port())]
+    start = [str(stack.ROBINAUTS), "start", "--local", "--port", str(stack.free_port())]
     environment = environment_for(config, flows)
-    refused = subprocess.run(start, env=environment, capture_output=True, timeout=30)
+    refused = subprocess.run(
+        start,
+        env=environment,
+        capture_output=True,
+        timeout=30,
+        stdin=subprocess.DEVNULL,
+    )
     assert refused.returncode == 1
     assert b"intake_probe declares no input 'colour'" in refused.stderr, refused.stderr
 
@@ -365,8 +421,14 @@ def test_the_flows_settings_in_the_agents_file_are_refused_with_where_they_went(
 ) -> None:
     config = tmp_path / "robinauts.toml"
     config.write_text(CONFIG + "\n[orchestration]\n")
-    start = [str(stack.ROBINAUTS), "start", "--dev-no-sign-in", "--port", str(stack.free_port())]
-    refused = subprocess.run(start, env=environment_for(config), capture_output=True, timeout=30)
+    start = [str(stack.ROBINAUTS), "start", "--local", "--port", str(stack.free_port())]
+    refused = subprocess.run(
+        start,
+        env=environment_for(config),
+        capture_output=True,
+        timeout=30,
+        stdin=subprocess.DEVNULL,
+    )
     assert refused.returncode == 1
     assert b"[orchestration]: no longer read from this file" in refused.stderr
     assert b"ROBINAUTS_FLOWS_DIR" in refused.stderr
@@ -389,13 +451,16 @@ def a_database() -> Iterator[str]:
 
 @pytest.mark.database
 @pytest.mark.skipif(os.environ.get("ROBINAUTS_TEST_DATABASE_URL") is None, reason=NO_DATABASE)
-def test_on_postgresql_neorc_keeps_its_tables_in_a_schema_of_its_own(tmp_path: Path) -> None:
+def test_on_postgresql_neorc_keeps_its_tables_in_a_schema_of_its_own(
+    tmp_path: Path,
+) -> None:
     config = tmp_path / "robinauts.toml"
     config.write_text(CONFIG)
     with a_database() as database_url:
         environment = environment_for(config)
         environment["ROBINAUTS_DATABASE_URL"] = database_url
         subprocess.run([str(stack.ROBINAUTS), "db", "init"], env=environment, check=True)
+        subprocess.run([str(stack.ROBINAUTS), "store", "init"], env=environment, check=True)
         with started(config, environment) as (url, said):
             play_a_game(url)
         tables = asyncio.run(_tables(database_url))

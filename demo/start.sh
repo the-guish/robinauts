@@ -367,6 +367,9 @@ fi
 say "Creating the schema if it is not there (robinauts db init) ..."
 "$ROBINAUTS" db init ||
     fail "robinauts db init failed; nothing was started, and it said why above." 1
+# oneberth's store, which holds the sign-in and the tokens, beside it: idempotent too.
+"$ROBINAUTS" store init ||
+    fail "robinauts store init failed; nothing was started, and it said why above." 1
 
 # --- the server --------------------------------------------------------------
 #
@@ -405,7 +408,9 @@ say "Starting the server on $BASE_URL/ ..."
         COMPOSIO_API_KEY=$composio_key
         export COMPOSIO_API_KEY
     fi
-    exec "$ROBINAUTS" start --dev-no-sign-in --port "$PORT"
+    # oneberth's local mode. Standard input is empty, so the server makes its own launch
+    # secret and writes the address that signs the person in to its log.
+    exec "$ROBINAUTS" start --local --port "$PORT" </dev/null
 ) >>"$LOG_FILE" 2>&1 &
 server=$!
 printf '%s\n' "$server" >"$PID_FILE"
@@ -454,10 +459,18 @@ then
     fail "the server did not come up; the log above says why." 1
 fi
 
-url="$BASE_URL/"
+# The server writes `open <url>` once it is ready: the address, with a ticket, that signs the
+# one person in. A ticket works once, within a minute.
+url=
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    url=$(sed -n 's/^open //p' "$LOG_FILE" | tail -n 1)
+    [ -n "$url" ] && break
+    sleep 1
+done
+[ -n "$url" ] || url="$BASE_URL/"
 say ""
 say "The demo is up: $url"
-say "  sign-in is off (the local development mode), loopback only, one user"
+say "  oneberth's local mode: one person, signed in by that address, loopback only"
 say "  two agents in the picker, one per engine: start a chat with each"
 say "  three models beside it: $model, $model_2, $model_3"
 if [ -n "$github_token" ]; then

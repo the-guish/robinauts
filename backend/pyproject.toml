@@ -18,7 +18,6 @@ dependencies = [
     # a direct dependency and is pinned as one, exactly as `langsmith` is.
     "anthropic>=1.3,<2",
     "asyncpg>=0.30",
-    "fastapi>=0.141,<0.142",
     "httpx>=0.28",
     # `create_agent` and the middleware the LangGraph engine runs a turn on
     # (docs/specs/agents.md, "A turn"), and the framework's own MCP client.
@@ -40,44 +39,30 @@ dependencies = [
     "langchain-openai>=1.6.2,<1.6.7",
     "langgraph>=1.2,<2",
     "langsmith>=0.3.45,<1",
-    # neorc, embedded by `robinauts start` in the local development mode
-    # (docs/architecture/orchestration.md), imported by `robinauts.cli` alone (the
-    # import-linter contract below). `http` for its worker, `manager` for the
-    # application mounted at /neorc and its UI, `postgres` for its store on
-    # asyncpg. neorc-from-source: neorc publishes no wheels yet, so the sources
-    # below pin a commit of open-shipyard/neorc's main (the asyncpg port, #78,
-    # the UI's embedded mode, #82, the flow and loop graphs, #83 and #84, and
-    # forms, task completion and queue pages, #85 to #87), and uv builds it
-    # from there.
-    "neorc[http,manager,postgres]",
+    # neorc, whose manager is composed into the backend beside Robinauts' own
+    # component (docs/architecture/orchestration.md), imported by
+    # `robinauts.orchestrator.adapters.neorc` alone (the import-linter contract
+    # below). `http` for its client and its worker, `postgres` for its store on
+    # asyncpg. Its manager's component needs oneberth's `web` extra, named below;
+    # neorc's `manager` extra would bring its built interface too, which nothing
+    # here serves: Robinauts' interface takes neorc's node package at build time
+    # (scripts/ui-packages-from-source.sh). neorc-from-source: neorc publishes no
+    # wheels yet, so the sources below pin a commit of the-guish/neorc, and uv
+    # builds it from there.
+    "neorc[http,postgres]",
     "neorc-core",
-    "neorc-ui",
+    # oneberth: sign-in, sessions, tokens, roles, the web application and its
+    # server (oneberth's docs/specs/composition.md), imported by `robinauts.web`
+    # and `robinauts.cli` alone (the import-linter contract below). `web` brings
+    # FastAPI, Starlette and uvicorn, whose versions are oneberth's: Robinauts
+    # names none of its own. `postgres` for its store on asyncpg, `providers` for
+    # its OpenID Connect client. Pinned to the commit neorc's pin pins, so the
+    # lock holds one oneberth; built from source like neorc.
+    "oneberth[web,postgres,providers]",
     "openai>=3.14.1,<3.38",
     # The `mcp` extra brings the framework's MCP client (fastmcp), which is how
     # that engine reaches the tool servers (docs/specs/agents.md, "Tools").
     "pydantic-ai-slim[anthropic,mcp,openai]>=2.47,<3",
-    # The QR code a browser shows to link a phone (docs/architecture/device-pairing.md):
-    # a module matrix, which `robinauts.web.pairing` draws as SVG itself, and which
-    # nothing outside `robinauts.web` imports (the import-linter contract below). MIT,
-    # pure Python, no dependencies; 1.8.0 was published on 2022-04-17. Not `segno`:
-    # its metadata names its licence only by the trove classifier
-    # `License :: OSI Approved :: BSD License`, which names no version of BSD, and the
-    # licence gate refuses that for a runtime dependency (DEPENDENCIES.md).
-    "qrcodegen>=1.8,<2",
-    # The ASGI server `robinauts start` runs (docs/specs/backend.md, "Web"),
-    # imported by `robinauts.cli.main` and by nothing else -- the import-linter
-    # contract below has named it since before it was a dependency. BSD-3-Clause,
-    # bringing `click` (BSD-3-Clause) and `h11` (MIT), both already in the lock.
-    # Not `uvicorn[standard]`: that adds `uvloop`, `httptools`, `watchfiles`,
-    # `websockets` and `python-dotenv` -- a faster loop and a parser we have not
-    # measured a need for, a reloader a deployment must not have, a protocol
-    # this platform deliberately does not serve and a
-    # second way to set environment variables.
-    #
-    # The upper bound is the ten-day cooldown (.github/dependabot.yml): 0.53.0
-    # was published on 2026-09-14 and this was adopted on 2026-09-23. Dependabot
-    # raises it once the window has passed.
-    "uvicorn>=0.52.4,<0.55",
 ]
 
 # PEP 639. The three files a wheel of this project distributes other people's
@@ -105,10 +90,10 @@ dev = [
 ]
 
 [tool.uv]
-# neorc-from-source: uv builds these three from the commit in [tool.uv.sources].
-# `--no-build` holds for every other package
+# neorc-from-source: uv builds neorc's packages and oneberth from the commits in
+# [tool.uv.sources]. `--no-build` holds for every other package
 # (docs/architecture/orchestration.md, "Installing neorc").
-no-binary-package = ["neorc", "neorc-core", "neorc-ui"]
+no-binary-package = ["neorc", "neorc-core", "oneberth"]
 # The platforms the project runs on, and the only ones the lock resolves for:
 # Windows is not a target (docs/deployment.md). A package that another platform
 # alone would need is then not locked, and the licence gate reads the lock
@@ -119,9 +104,9 @@ environments = [
 ]
 
 [tool.uv.sources]
-neorc = { git = "https://github.com/open-shipyard/neorc", rev = "26a30a0d6c3fa9521157f6ac6a038ca5603f1e87", subdirectory = "python/neorc" }
-neorc-core = { git = "https://github.com/open-shipyard/neorc", rev = "26a30a0d6c3fa9521157f6ac6a038ca5603f1e87", subdirectory = "python/neorc-core" }
-neorc-ui = { git = "https://github.com/open-shipyard/neorc", rev = "26a30a0d6c3fa9521157f6ac6a038ca5603f1e87", subdirectory = "python/neorc-ui" }
+neorc = { git = "https://github.com/the-guish/neorc", rev = "220148d7cb311178f0c0dcfa32c747748deb579c", subdirectory = "python/neorc" }
+neorc-core = { git = "https://github.com/the-guish/neorc", rev = "220148d7cb311178f0c0dcfa32c747748deb579c", subdirectory = "python/neorc-core" }
+oneberth = { git = "https://github.com/the-guish/oneberth", rev = "d8693a66f5ca3e78ab085d6e4bc77ff15126c764", subdirectory = "python/oneberth" }
 
 [project.scripts]
 robinauts = "robinauts.cli.main:run"
@@ -192,6 +177,7 @@ markers = [
     # is failed if none of these ran. See tests/conftest.py.
     "database: tests that need the PostgreSQL named by ROBINAUTS_TEST_DATABASE_URL",
     "live: tests that call a real model provider with a real key, and cost money",
+    "docker: tests that start containers on the Docker daemon, from images built beforehand",
 ]
 # `tests/adapters_metered/` is never collected by a plain run, and therefore never by CI:
 # those tests call a vendor with a real key and are run by hand, by naming the
@@ -415,13 +401,9 @@ forbidden_modules = [
     "robinauts.web.app",
     "robinauts.web.apps",
     "robinauts.web.changes",
-    "robinauts.web.cookies",
-    "robinauts.web.headers",
     "robinauts.web.logs",
     "robinauts.web.mcp_client",
-    "robinauts.web.oidc",
-    "robinauts.web.pairing",
-    "robinauts.web.sign_in",
+    "robinauts.web.roles",
     "robinauts.web.worker_api",
     "robinauts.controller.ports",
     "robinauts.controller.core",
@@ -581,9 +563,9 @@ ignore_imports = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "nothing a worker in a process of its own imports reaches neorc"
+name = "nothing a worker in a process of its own imports reaches neorc or oneberth"
 type = "forbidden"
-# Indirect imports count: the extra workers' images leave neorc out. They also read the
+# Indirect imports count: the extra workers' images leave neorc and oneberth out. They also read the
 # flows' settings with the orchestrator's own parser (extra-workers/worker-common).
 source_modules = [
     "robinauts.cli.worker_process",
@@ -591,7 +573,7 @@ source_modules = [
     "robinauts.orchestrator.contract",
     "robinauts.orchestrator.core.config",
 ]
-forbidden_modules = ["neorc", "neorc_core", "neorc_ui"]
+forbidden_modules = ["neorc", "neorc_core", "oneberth"]
 
 [[tool.importlinter.contracts]]
 name = "nothing imports cli"
@@ -726,7 +708,7 @@ ignore_imports = [
 unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
-name = "httpx only under web, the worker's HTTP turn broker and the two framework engines"
+name = "httpx only under web, cli, neorc's adapter, the worker's HTTP turn broker and the two framework engines"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts"]
@@ -734,6 +716,10 @@ forbidden_modules = ["httpx"]
 ignore_imports = [
     "robinauts.web -> *",
     "robinauts.web.** -> *",
+    "robinauts.cli -> *",
+    "robinauts.cli.** -> *",
+    "robinauts.orchestrator.adapters.neorc -> *",
+    "robinauts.orchestrator.adapters.neorc.** -> *",
     "robinauts.worker.http_turn_broker -> *",
     "robinauts.agent_engines.langchain_engine -> *",
     "robinauts.agent_engines.langchain_engine.** -> *",
@@ -743,14 +729,16 @@ ignore_imports = [
 unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
-name = "qrcodegen only under web"
+name = "oneberth only under web and cli"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts"]
-forbidden_modules = ["qrcodegen"]
+forbidden_modules = ["oneberth"]
 ignore_imports = [
     "robinauts.web -> *",
     "robinauts.web.** -> *",
+    "robinauts.cli -> *",
+    "robinauts.cli.** -> *",
 ]
 unmatched_ignore_imports_alerting = "none"
 
@@ -781,23 +769,18 @@ ignore_imports = [
 unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
-name = "uvicorn only under cli"
+name = "uvicorn nowhere: oneberth serves the backend"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts"]
 forbidden_modules = ["uvicorn"]
-ignore_imports = [
-    "robinauts.cli -> *",
-    "robinauts.cli.** -> *",
-]
-unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
 name = "neorc only under orchestrator.adapters.neorc"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts"]
-forbidden_modules = ["neorc", "neorc_core", "neorc_ui"]
+forbidden_modules = ["neorc", "neorc_core"]
 ignore_imports = [
     "robinauts.orchestrator.adapters.neorc -> *",
     "robinauts.orchestrator.adapters.neorc.** -> *",

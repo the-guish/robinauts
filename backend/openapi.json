@@ -53,53 +53,6 @@
         "title": "AgentSummary",
         "type": "object"
       },
-      "ApiTokenListResponse": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ApiTokenSummary"
-            },
-            "title": "Items",
-            "type": "array"
-          }
-        },
-        "required": [
-          "items"
-        ],
-        "title": "ApiTokenListResponse",
-        "type": "object"
-      },
-      "ApiTokenSummary": {
-        "properties": {
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "expires_at": {
-            "format": "date-time",
-            "title": "Expires At",
-            "type": "string"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "created_at",
-          "expires_at"
-        ],
-        "title": "ApiTokenSummary",
-        "type": "object"
-      },
       "AppListResponse": {
         "properties": {
           "apps": {
@@ -201,20 +154,6 @@
         "title": "AppToolCallResponse",
         "type": "object"
       },
-      "ApproveRequest": {
-        "properties": {
-          "number": {
-            "pattern": "^[0-9]{3} ?[0-9]{3}$",
-            "title": "Number",
-            "type": "string"
-          }
-        },
-        "required": [
-          "number"
-        ],
-        "title": "ApproveRequest",
-        "type": "object"
-      },
       "ChangesResponse": {
         "properties": {
           "version": {
@@ -226,88 +165,6 @@
           "version"
         ],
         "title": "ChangesResponse",
-        "type": "object"
-      },
-      "ClaimRequest": {
-        "properties": {
-          "code": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Code",
-            "type": "string"
-          },
-          "device": {
-            "$ref": "#/components/schemas/ClaimedDevice"
-          }
-        },
-        "required": [
-          "code",
-          "device"
-        ],
-        "title": "ClaimRequest",
-        "type": "object"
-      },
-      "ClaimResponse": {
-        "properties": {
-          "expires_at": {
-            "format": "date-time",
-            "title": "Expires At",
-            "type": "string"
-          },
-          "number": {
-            "title": "Number",
-            "type": "string"
-          },
-          "secret": {
-            "title": "Secret",
-            "type": "string"
-          }
-        },
-        "required": [
-          "secret",
-          "number",
-          "expires_at"
-        ],
-        "title": "ClaimResponse",
-        "type": "object"
-      },
-      "ClaimedDevice": {
-        "description": "What the phone says of itself, bounded: data for the list.",
-        "properties": {
-          "app_version": {
-            "anyOf": [
-              {
-                "maxLength": 32,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "App Version"
-          },
-          "name": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "platform": {
-            "enum": [
-              "android",
-              "ios",
-              "desktop",
-              "other"
-            ],
-            "title": "Platform",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "platform"
-        ],
-        "title": "ClaimedDevice",
         "type": "object"
       },
       "ConversationListResponse": {
@@ -385,94 +242,6 @@
         "title": "ConversationSummary",
         "type": "object"
       },
-      "DeviceDescriptionView": {
-        "properties": {
-          "app_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "App Version"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "platform": {
-            "title": "Platform",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "platform",
-          "app_version"
-        ],
-        "title": "DeviceDescriptionView",
-        "type": "object"
-      },
-      "DeviceListResponse": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/DeviceSummary"
-            },
-            "title": "Items",
-            "type": "array"
-          }
-        },
-        "required": [
-          "items"
-        ],
-        "title": "DeviceListResponse",
-        "type": "object"
-      },
-      "DeviceSummary": {
-        "properties": {
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "expires_at": {
-            "format": "date-time",
-            "title": "Expires At",
-            "type": "string"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "last_used_at": {
-            "format": "date-time",
-            "title": "Last Used At",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "platform": {
-            "title": "Platform",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "platform",
-          "created_at",
-          "last_used_at",
-          "expires_at"
-        ],
-        "title": "DeviceSummary",
-        "type": "object"
-      },
       "EndedBadlyView": {
         "properties": {
           "ended_at": {
@@ -503,7 +272,8 @@
         "title": "EndedBadlyView",
         "type": "object"
       },
-      "ErrorResponse": {
+      "ErrorBody": {
+        "description": "Every refusal, as the OpenAPI documents describe it.",
         "properties": {
           "detail": {
             "title": "Detail",
@@ -518,7 +288,7 @@
           "error",
           "detail"
         ],
-        "title": "ErrorResponse",
+        "title": "ErrorBody",
         "type": "object"
       },
       "FlowInputSummary": {
@@ -809,32 +579,6 @@
         "title": "MessageView",
         "type": "object"
       },
-      "MintedPairingResponse": {
-        "description": "The code is in the picture and nowhere else.",
-        "properties": {
-          "expires_at": {
-            "format": "date-time",
-            "title": "Expires At",
-            "type": "string"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "qr_svg": {
-            "title": "Qr Svg",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "expires_at",
-          "qr_svg"
-        ],
-        "title": "MintedPairingResponse",
-        "type": "object"
-      },
       "ModelListResponse": {
         "properties": {
           "items": {
@@ -867,55 +611,6 @@
           "title"
         ],
         "title": "ModelSummary",
-        "type": "object"
-      },
-      "NewApiTokenRequest": {
-        "properties": {
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "NewApiTokenRequest",
-        "type": "object"
-      },
-      "NewApiTokenResponse": {
-        "properties": {
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "expires_at": {
-            "format": "date-time",
-            "title": "Expires At",
-            "type": "string"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "secret": {
-            "title": "Secret",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "created_at",
-          "expires_at",
-          "secret"
-        ],
-        "title": "NewApiTokenResponse",
         "type": "object"
       },
       "NewProjectRequest": {
@@ -986,59 +681,6 @@
         "title": "OpenedConversationResponse",
         "type": "object"
       },
-      "PairingStateView": {
-        "properties": {
-          "state": {
-            "enum": [
-              "waiting",
-              "claimed",
-              "approved"
-            ],
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "state"
-        ],
-        "title": "PairingStateView",
-        "type": "object"
-      },
-      "PairingView": {
-        "properties": {
-          "device": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DeviceDescriptionView"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "expires_at": {
-            "format": "date-time",
-            "title": "Expires At",
-            "type": "string"
-          },
-          "state": {
-            "enum": [
-              "waiting",
-              "claimed",
-              "approved"
-            ],
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "state",
-          "expires_at",
-          "device"
-        ],
-        "title": "PairingView",
-        "type": "object"
-      },
       "ProjectListResponse": {
         "properties": {
           "items": {
@@ -1107,24 +749,6 @@
           "run_id"
         ],
         "title": "ProvenanceView",
-        "type": "object"
-      },
-      "ProviderSummary": {
-        "properties": {
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "title"
-        ],
-        "title": "ProviderSummary",
         "type": "object"
       },
       "RenameRequest": {
@@ -1209,31 +833,6 @@
         "title": "TextContent",
         "type": "object"
       },
-      "TokenBrief": {
-        "properties": {
-          "expires_at": {
-            "format": "date-time",
-            "title": "Expires At",
-            "type": "string"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "expires_at"
-        ],
-        "title": "TokenBrief",
-        "type": "object"
-      },
       "ToolCallContent": {
         "properties": {
           "arguments": {
@@ -1292,135 +891,6 @@
         ],
         "title": "ToolResultContent",
         "type": "object"
-      },
-      "UserSessionResponse": {
-        "properties": {
-          "device": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DeviceSummary"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "flows_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Flows Url"
-          },
-          "local_development": {
-            "default": false,
-            "title": "Local Development",
-            "type": "boolean"
-          },
-          "pairing": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PairingStateView"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "providers": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/ProviderSummary"
-            },
-            "title": "Providers",
-            "type": "array"
-          },
-          "public_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Public Url"
-          },
-          "sign_in": {
-            "title": "Sign In",
-            "type": "boolean"
-          },
-          "token": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/TokenBrief"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "user": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/UserSummary"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "sign_in"
-        ],
-        "title": "UserSessionResponse",
-        "type": "object"
-      },
-      "UserSummary": {
-        "properties": {
-          "email": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Email"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "provider": {
-            "title": "Provider",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "provider"
-        ],
-        "title": "UserSummary",
-        "type": "object"
       }
     }
   },
@@ -1430,9 +900,9 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/api/agents": {
+    "/robinauts/api/agents": {
       "get": {
-        "operationId": "list_agents_api_agents_get",
+        "operationId": "list_agents_robinauts_api_agents_get",
         "responses": {
           "200": {
             "content": {
@@ -1448,7 +918,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -1458,9 +928,9 @@
         "summary": "List Agents"
       }
     },
-    "/api/apps": {
+    "/robinauts/api/apps": {
       "get": {
-        "operationId": "list_apps_api_apps_get",
+        "operationId": "list_apps_robinauts_api_apps_get",
         "parameters": [
           {
             "in": "query",
@@ -1487,7 +957,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -1497,9 +967,9 @@
         "summary": "List Apps"
       }
     },
-    "/api/apps/{server}/tools/{tool}": {
+    "/robinauts/api/apps/{server}/tools/{tool}": {
       "post": {
-        "operationId": "call_app_tool_api_apps__server__tools__tool__post",
+        "operationId": "call_app_tool_robinauts_api_apps__server__tools__tool__post",
         "parameters": [
           {
             "in": "path",
@@ -1545,7 +1015,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -1555,10 +1025,10 @@
         "summary": "Call App Tool"
       }
     },
-    "/api/changes": {
+    "/robinauts/api/changes": {
       "get": {
         "description": "The user's change version: at once without ``after``, else once it differs from\n``after`` or ``timeout`` seconds have passed. It signals and carries nothing else.",
-        "operationId": "changes_api_changes_get",
+        "operationId": "changes_robinauts_api_changes_get",
         "parameters": [
           {
             "in": "query",
@@ -1605,7 +1075,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -1615,9 +1085,9 @@
         "summary": "Changes"
       }
     },
-    "/api/conversations": {
+    "/robinauts/api/conversations": {
       "get": {
-        "operationId": "list_sessions_api_conversations_get",
+        "operationId": "list_sessions_robinauts_api_conversations_get",
         "parameters": [
           {
             "in": "query",
@@ -1661,7 +1131,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -1671,9 +1141,9 @@
         "summary": "List Sessions"
       }
     },
-    "/api/conversations/{conversation_id}": {
+    "/robinauts/api/conversations/{conversation_id}": {
       "delete": {
-        "operationId": "delete_session_api_conversations__conversation_id__delete",
+        "operationId": "delete_session_robinauts_api_conversations__conversation_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -1694,7 +1164,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -1704,7 +1174,7 @@
         "summary": "Delete Session"
       },
       "get": {
-        "operationId": "open_session_api_conversations__conversation_id__get",
+        "operationId": "open_session_robinauts_api_conversations__conversation_id__get",
         "parameters": [
           {
             "in": "path",
@@ -1732,7 +1202,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -1742,7 +1212,7 @@
         "summary": "Open Session"
       },
       "patch": {
-        "operationId": "rename_session_api_conversations__conversation_id__patch",
+        "operationId": "rename_session_robinauts_api_conversations__conversation_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -1780,7 +1250,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -1790,9 +1260,9 @@
         "summary": "Rename Session"
       }
     },
-    "/api/conversations/{conversation_id}/archive": {
+    "/robinauts/api/conversations/{conversation_id}/archive": {
       "post": {
-        "operationId": "archive_session_api_conversations__conversation_id__archive_post",
+        "operationId": "archive_session_robinauts_api_conversations__conversation_id__archive_post",
         "parameters": [
           {
             "in": "path",
@@ -1813,7 +1283,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -1823,9 +1293,9 @@
         "summary": "Archive Session"
       }
     },
-    "/api/conversations/{conversation_id}/fork": {
+    "/robinauts/api/conversations/{conversation_id}/fork": {
       "post": {
-        "operationId": "fork_session_api_conversations__conversation_id__fork_post",
+        "operationId": "fork_session_robinauts_api_conversations__conversation_id__fork_post",
         "parameters": [
           {
             "in": "path",
@@ -1863,7 +1333,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -1873,9 +1343,9 @@
         "summary": "Fork Session"
       }
     },
-    "/api/conversations/{conversation_id}/model": {
+    "/robinauts/api/conversations/{conversation_id}/model": {
       "put": {
-        "operationId": "set_model_api_conversations__conversation_id__model_put",
+        "operationId": "set_model_robinauts_api_conversations__conversation_id__model_put",
         "parameters": [
           {
             "in": "path",
@@ -1913,7 +1383,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -1923,9 +1393,9 @@
         "summary": "Set Model"
       }
     },
-    "/api/conversations/{conversation_id}/runs/{run_id}/cancel": {
+    "/robinauts/api/conversations/{conversation_id}/runs/{run_id}/cancel": {
       "post": {
-        "operationId": "cancel_turn_api_conversations__conversation_id__runs__run_id__cancel_post",
+        "operationId": "cancel_turn_robinauts_api_conversations__conversation_id__runs__run_id__cancel_post",
         "parameters": [
           {
             "in": "path",
@@ -1956,7 +1426,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -1966,9 +1436,9 @@
         "summary": "Cancel Turn"
       }
     },
-    "/api/flows": {
+    "/robinauts/api/flows": {
       "get": {
-        "operationId": "list_flows_api_flows_get",
+        "operationId": "list_flows_robinauts_api_flows_get",
         "responses": {
           "200": {
             "content": {
@@ -1984,7 +1454,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -1994,9 +1464,9 @@
         "summary": "List Flows"
       }
     },
-    "/api/flows/{flow}/runs": {
+    "/robinauts/api/flows/{flow}/runs": {
       "post": {
-        "operationId": "start_flow_run_api_flows__flow__runs_post",
+        "operationId": "start_flow_run_robinauts_api_flows__flow__runs_post",
         "parameters": [
           {
             "in": "path",
@@ -2033,7 +1503,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -2043,9 +1513,9 @@
         "summary": "Start Flow Run"
       }
     },
-    "/api/models": {
+    "/robinauts/api/models": {
       "get": {
-        "operationId": "list_models_api_models_get",
+        "operationId": "list_models_robinauts_api_models_get",
         "responses": {
           "200": {
             "content": {
@@ -2061,7 +1531,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -2071,9 +1541,9 @@
         "summary": "List Models"
       }
     },
-    "/api/projects": {
+    "/robinauts/api/projects": {
       "get": {
-        "operationId": "list_projects_api_projects_get",
+        "operationId": "list_projects_robinauts_api_projects_get",
         "responses": {
           "200": {
             "content": {
@@ -2089,7 +1559,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -2100,7 +1570,7 @@
       },
       "post": {
         "description": "The user's project of that name: a new one, or the one they already had.",
-        "operationId": "create_project_api_projects_post",
+        "operationId": "create_project_robinauts_api_projects_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -2126,7 +1596,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
@@ -2134,400 +1604,6 @@
           }
         },
         "summary": "Create Project"
-      }
-    },
-    "/auth/devices": {
-      "get": {
-        "operationId": "list_devices_auth_devices_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeviceListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "A refusal"
-          }
-        },
-        "summary": "List Devices"
-      }
-    },
-    "/auth/devices/{device_id}": {
-      "delete": {
-        "operationId": "remove_device_auth_devices__device_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "device_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Device Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "A refusal"
-          }
-        },
-        "summary": "Remove Device"
-      }
-    },
-    "/auth/logout": {
-      "post": {
-        "operationId": "sign_out_auth_logout_post",
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "A refusal"
-          }
-        },
-        "summary": "Sign Out"
-      }
-    },
-    "/auth/pairings": {
-      "post": {
-        "operationId": "mint_pairing_auth_pairings_post",
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MintedPairingResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "A refusal"
-          }
-        },
-        "summary": "Mint Pairing"
-      }
-    },
-    "/auth/pairings/claim": {
-      "post": {
-        "operationId": "claim_pairing_auth_pairings_claim_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ClaimRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ClaimResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "A refusal"
-          }
-        },
-        "summary": "Claim Pairing"
-      }
-    },
-    "/auth/pairings/{pairing_id}": {
-      "delete": {
-        "operationId": "refuse_pairing_auth_pairings__pairing_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pairing_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Pairing Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "A refusal"
-          }
-        },
-        "summary": "Refuse Pairing"
-      },
-      "get": {
-        "operationId": "pairing_state_auth_pairings__pairing_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pairing_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Pairing Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PairingView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "A refusal"
-          }
-        },
-        "summary": "Pairing State"
-      }
-    },
-    "/auth/pairings/{pairing_id}/approve": {
-      "post": {
-        "operationId": "approve_pairing_auth_pairings__pairing_id__approve_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pairing_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Pairing Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApproveRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeviceSummary"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "A refusal"
-          }
-        },
-        "summary": "Approve Pairing"
-      }
-    },
-    "/auth/session": {
-      "get": {
-        "operationId": "current_user_session_auth_session_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserSessionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "A refusal"
-          }
-        },
-        "summary": "Current User Session"
-      }
-    },
-    "/auth/tokens": {
-      "get": {
-        "operationId": "list_api_tokens_auth_tokens_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiTokenListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "A refusal"
-          }
-        },
-        "summary": "List Api Tokens"
-      },
-      "post": {
-        "operationId": "mint_api_token_auth_tokens_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NewApiTokenRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NewApiTokenResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "A refusal"
-          }
-        },
-        "summary": "Mint Api Token"
-      }
-    },
-    "/auth/tokens/{token_id}": {
-      "delete": {
-        "operationId": "revoke_api_token_auth_tokens__token_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "token_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Token Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "A refusal"
-          }
-        },
-        "summary": "Revoke Api Token"
       }
     }
   }

@@ -11,11 +11,11 @@ down again:
 this machine has `xdg-open` and a display to open it on — over ssh, and in a
 container, the printed URL is the whole of it.
 
-**It is the local development mode, and it is not a deployment**
-([../docs/deployment.md](../docs/deployment.md)). There is no sign-in at all:
-everything runs as one fixed local user, the server binds the loopback
-interface and refuses any other address, and the interface shows a banner
-saying so. Nothing here is reachable from another machine, nothing is behind a
+**It is oneberth's local mode, and it is not a deployment**
+([../docs/deployment.md](../docs/deployment.md)). There is no identity provider:
+one person, the one at the machine, signs in by the printed URL, which holds a
+ticket that works once, within a minute. The server binds the loopback
+interface and refuses any other address. Nothing here is reachable from another machine, nothing is behind a
 password, and none of it is a way to put Robinauts in front of anybody. For
 that, the guide is the deployment guide.
 

@@ -12,9 +12,10 @@ from typing import Any
 import pytest
 from playwright.sync_api import Page, expect
 
-from util.browser import DID_NOT_FINISH, send
+from util.browser import DID_NOT_FINISH, send, sign_in
 from util.fake_openai import CallTool, FakeLocalGPTServer, FakeModel
 from util.mcp_server import mcp_server
+from util.stack import Server
 
 pytestmark = [pytest.mark.io, pytest.mark.database]
 
@@ -56,9 +57,9 @@ def tools_url() -> Iterator[str]:
         yield url
 
 
-def aux_resume(agent: str, server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+def aux_resume(agent: str, server: Server, page: Page, local_gpt: FakeLocalGPTServer) -> None:
     # 1. Two tool rounds, then the model server refuses: the answer did not finish.
-    page.goto(server)
+    sign_in(page, server)
     page.get_by_role("button", name="New chat").click()
     page.get_by_label("Agent").select_option(agent)
     send(page, "go")
@@ -79,9 +80,9 @@ def aux_resume(agent: str, server: str, page: Page, local_gpt: FakeLocalGPTServe
     expect(page.get_by_text(DID_NOT_FINISH)).to_have_count(0)
 
 
-def test_pydantic_ai_resume(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+def test_pydantic_ai_resume(server: Server, page: Page, local_gpt: FakeLocalGPTServer) -> None:
     aux_resume("pydantic_ai_tools", server, page, local_gpt)
 
 
-def test_langchain_resume(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+def test_langchain_resume(server: Server, page: Page, local_gpt: FakeLocalGPTServer) -> None:
     aux_resume("langchain_tools", server, page, local_gpt)

@@ -10,13 +10,15 @@ the question it answers, and what the engine sent it shows what the engine remem
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from playwright.sync_api import Page, expect
 
 from util import browser
-from util.browser import answers, expect_thread, history, send
+from util.browser import answers, choose_app, expect_thread, history, rail, send, sign_in
 from util.fake_openai import FakeLocalGPTServer
-from util.stack import sent
+from util.stack import Server, sent
 
 pytestmark = [pytest.mark.io, pytest.mark.database]
 
@@ -31,7 +33,9 @@ def history_of(*questions: str) -> list[tuple[str, str]]:
     return [turn for q in answered for turn in (("user", q), ("assistant", q))] + [("user", last)]
 
 
-def aux_master_journey(agent: str, server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+def aux_master_journey(
+    agent: str, server: Server, page: Page, local_gpt: FakeLocalGPTServer
+) -> None:
     """Two conversations walked the way a person would, on the agent with that id.
 
     Every step checks the screen, and every turn also checks the request the model server got
@@ -46,8 +50,9 @@ def aux_master_journey(agent: str, server: str, page: Page, local_gpt: FakeLocal
 
     # --- Conversation A ---------------------------------------------------------------------
 
-    # 1. "New chat" in the panel, then pick the agent in the "Agent" select.
-    page.goto(server)
+    # 1. Signed in, as the launcher's window is: oneberth's rail, with Robinauts chosen.
+    #    "New chat" in the panel, then pick the agent in the "Agent" select.
+    sign_in(page, server)
     page.get_by_role("button", name="New chat").click()
     page.get_by_label("Agent").select_option(agent)
 
@@ -124,9 +129,40 @@ def aux_master_journey(agent: str, server: str, page: Page, local_gpt: FakeLocal
     expect_thread(page, echoed("alpha one", "alpha TWO", "alpha four"))
     last_call("fake-gpt", "alpha one", "alpha TWO", "alpha four")
 
+    # --- The rail ---------------------------------------------------------------------------
+
+    # 10. Write in A and leave it unsent, then choose neorc on the rail: neorc's runs, and
+    #     Robinauts out of sight. Back on Robinauts: A, its thread and what was typed are as
+    #     they were left, and no model call was made.
+    page.get_by_label("Message input").fill("half written")
+    choose_app(page, "neorc")
+    expect(page).to_have_url(re.compile(r"#/neorc$"))
+    expect(page.get_by_role("heading", name="Latest runs")).to_be_visible()
+    expect(page.get_by_label("Message input")).to_be_hidden()
+    choose_app(page, "Robinauts")
+    expect(page).to_have_url(a_url)
+    expect_thread(page, echoed("alpha one", "alpha TWO", "alpha four"))
+    expect(page.get_by_label("Message input")).to_have_value("half written")
+    page.get_by_label("Message input").fill("")
+    assert len(calls) == 8
+
+    # 11. The account button opens the account: "Personal tokens" and "Linked devices" are
+    #     oneberth's pages, under #/account. The rail brings A back.
+    rail(page).get_by_role("button", name="Account").click()
+    page.get_by_role("group", name="Account").get_by_role("link", name="Personal tokens").click()
+    expect(page).to_have_url(re.compile(r"#/account/tokens$"))
+    expect(page.get_by_role("heading", name="Personal tokens")).to_be_visible()
+    rail(page).get_by_role("button", name="Account").click()
+    page.get_by_role("group", name="Account").get_by_role("link", name="Linked devices").click()
+    expect(page).to_have_url(re.compile(r"#/account/devices$"))
+    expect(page.get_by_role("heading", name="Linked devices")).to_be_visible()
+    choose_app(page, "Robinauts")
+    expect(page).to_have_url(a_url)
+    expect_thread(page, echoed("alpha one", "alpha TWO", "alpha four"))
+
     # --- Managing conversations -------------------------------------------------------------
 
-    # 10. Delete B from its row ("Actions for beta one", "Delete"): first "No, keep it", which
+    # 12. Delete B from its row ("Actions for beta one", "Delete"): first "No, keep it", which
     #     keeps it, then "Yes, delete", which takes it out of "Conversations".
     browser.conversation_action(page, "beta one", "Delete")
     page.get_by_role("button", name="No, keep it: beta one").click()
@@ -135,7 +171,7 @@ def aux_master_journey(agent: str, server: str, page: Page, local_gpt: FakeLocal
     page.get_by_role("button", name="Yes, delete: beta one").click()
     expect(history(page)).to_have_text(["alpha one"])
 
-    # 11. Rename A from its row ("Actions for alpha one", "Rename", the "Title" box): first
+    # 13. Rename A from its row ("Actions for alpha one", "Rename", the "Title" box): first
     #     "Cancel the rename", which keeps the old title, then "Save the title", which changes
     #     both the row and the page heading.
     browser.conversation_action(page, "alpha one", "Rename")
@@ -150,14 +186,14 @@ def aux_master_journey(agent: str, server: str, page: Page, local_gpt: FakeLocal
 
     # --- Persistence ------------------------------------------------------------------------
 
-    # 12. Reload the page: title, list, thread and model come back from the database as left.
+    # 14. Reload the page: title, list, thread and model come back from the database as left.
     page.reload()
     expect(page.get_by_role("heading", level=1)).to_have_text("Project alpha")
     expect(history(page)).to_have_text(["Project alpha"])
     expect_thread(page, echoed("alpha one", "alpha TWO", "alpha four"))
     expect(page.get_by_label("Model")).to_have_value("local_gpt")
 
-    # 13. Go to deleted B's address: the page says it is not here. No model call was made
+    # 15. Go to deleted B's address: the page says it is not here. No model call was made
     #     beyond the eight turns above.
     page.goto(b_url)
     expect(page.get_by_role("alert")).to_contain_text("This conversation is not here.")
@@ -165,7 +201,7 @@ def aux_master_journey(agent: str, server: str, page: Page, local_gpt: FakeLocal
 
     # --- Archiving --------------------------------------------------------------------------
 
-    # 14. Archive A from its row (hover it, "Archive"): no question; it leaves "Conversations",
+    # 16. Archive A from its row (hover it, "Archive"): no question; it leaves "Conversations",
     #     and the page goes to a new chat. A reload keeps it off the list.
     browser.open_conversation(page, "Project alpha")
     browser.archive(page, "Project alpha")
@@ -175,7 +211,7 @@ def aux_master_journey(agent: str, server: str, page: Page, local_gpt: FakeLocal
     expect(page.get_by_text("No conversations yet.").first).to_be_visible()
     expect(history(page)).to_have_count(0)
 
-    # 15. Go to A's address: its title and thread are all there. A message goes on from A's
+    # 17. Go to A's address: its title and thread are all there. A message goes on from A's
     #     history, and brings A back to "Conversations".
     page.goto(a_url)
     expect(page.get_by_role("heading", level=1)).to_have_text("Project alpha")
@@ -186,9 +222,13 @@ def aux_master_journey(agent: str, server: str, page: Page, local_gpt: FakeLocal
     expect(history(page)).to_have_text(["Project alpha"])
 
 
-def test_langchain_master_journey(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+def test_langchain_master_journey(
+    server: Server, page: Page, local_gpt: FakeLocalGPTServer
+) -> None:
     aux_master_journey("langchain", server, page, local_gpt)
 
 
-def test_pydantic_ai_master_journey(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+def test_pydantic_ai_master_journey(
+    server: Server, page: Page, local_gpt: FakeLocalGPTServer
+) -> None:
     aux_master_journey("pydantic_ai", server, page, local_gpt)

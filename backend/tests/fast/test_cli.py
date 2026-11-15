@@ -3,39 +3,40 @@
 
 from __future__ import annotations
 
-import argparse
-import hashlib
-import uuid
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import create_autospec
 
 import pytest
-import uvicorn
 
-from robinauts.cli.composition import compose
-from robinauts.cli.main import devices_command, run, serving, worker_broker_url
-from robinauts.controller.contract.domain import (
-    ConfigError,
-    DeviceDescription,
-    DeviceSession,
-    Identity,
-)
-from robinauts.shared_domain.domain import Config, StorageConfig, StorageKind
-from util.aio import asyncio_test
+from robinauts.cli.composition import storage_from
+from robinauts.cli.main import local_url, registry, run, serving
+from robinauts.controller.contract.domain import ConfigError
+from robinauts.shared_domain.domain import StorageConfig, StorageKind
 
-SIGN_IN = {
-    "public_url": "https://robinauts.example.com",
-    "providers": {
-        "okta": {
-            "title": "Okta",
-            "issuer": "https://example.okta.com/oauth2/default",
-            "client_id": "robinauts",
-            "client_secret_env": "ROBINAUTS_OKTA_SECRET",
-        }
-    },
-    "allow": [{"provider": "okta", "everyone": True}],
-}
+ONEBERTH = """
+[apps.robinauts]
+public_url = "https://robinauts.example.com"
+
+[providers.okta]
+title = "Okta"
+issuer = "https://example.okta.com/oauth2/default"
+client_id = "robinauts"
+client_secret_env = "ROBINAUTS_OKTA_SECRET"
+
+[[allow]]
+provider = "okta"
+everyone = true
+"""
+
+DATABASE = {"ROBINAUTS_DATABASE_URL": "postgresql://robinauts.example.com/robinauts"}
+DATA_DIR = {"ROBINAUTS_DATA_DIR": "/home/someone/.robinauts"}
+
+
+@pytest.fixture
+def oneberth(tmp_path: Path) -> dict[str, str]:
+    """``ONEBERTH_CONFIG``, naming a file with one provider, and its secret."""
+    path = tmp_path / "oneberth.toml"
+    path.write_text(ONEBERTH)
+    return {"ONEBERTH_CONFIG": str(path), "ROBINAUTS_OKTA_SECRET": "s"}
 
 
 def test_version_prints_the_version(capsys: pytest.CaptureFixture[str]) -> None:
@@ -43,43 +44,70 @@ def test_version_prints_the_version(capsys: pytest.CaptureFixture[str]) -> None:
     assert capsys.readouterr().out.strip()
 
 
-def test_a_provider_is_served_with_its_sign_in() -> None:
-    database = {"ROBINAUTS_DATABASE_URL": "postgresql://robinauts.example.com/robinauts"}
-    _, _, sign_in = serving(SIGN_IN, database, host="0.0.0.0", dev_no_sign_in=False)
-    assert sign_in is not None
-    assert list(sign_in.providers) == ["okta"]
+def test_a_provider_is_served_with_oneberth_s_configuration(
+    oneberth: dict[str, str],
+) -> None:
+    _, _, config = serving({}, DATABASE | oneberth, host="0.0.0.0", port=8000, local=False)
+    assert list(config.providers) == ["okta"]
+    assert config.app("robinauts").public_url == "https://robinauts.example.com"
 
 
 @pytest.mark.parametrize(
-    ("tables", "host", "mode", "refusal"),
+    ("tables", "environ", "host", "local", "refusal"),
     [
-        ({}, "127.0.0.1", False, "--dev-no-sign-in"),
-        ({}, "0.0.0.0", True, "--host 0.0.0.0"),
-        ({"agent": {}}, "127.0.0.1", True, "agent: unknown key"),
-        ({"orchestration": {}}, "127.0.0.1", True, r"\[orchestration\]: no longer read"),
+        ({}, DATABASE, "127.0.0.1", False, "ONEBERTH_CONFIG names no file"),
+        ({}, {}, "0.0.0.0", True, "--host 0.0.0.0"),
+        ({"agent": {}}, {}, "127.0.0.1", True, "agent: unknown key"),
+        (
+            {"orchestration": {}},
+            {},
+            "127.0.0.1",
+            True,
+            r"\[orchestration\]: no longer read",
+        ),
+        ({"providers": {}}, {}, "127.0.0.1", True, "providers: sign-in is oneberth's"),
+        ({}, DATABASE | DATA_DIR, "127.0.0.1", True, "are both set: set one"),
+        (
+            {},
+            {"ONEBERTH_CONFIG": "/etc/oneberth.toml"},
+            "127.0.0.1",
+            True,
+            "unset ONEBERTH",
+        ),
     ],
 )
 def test_a_start_is_refused_with_its_reason(
-    tables: dict[str, object], host: str, mode: bool, refusal: str
+    tables: dict[str, object],
+    environ: dict[str, str],
+    host: str,
+    local: bool,
+    refusal: str,
 ) -> None:
     with pytest.raises(ConfigError, match=refusal):
-        serving(tables, {}, host=host, dev_no_sign_in=mode)
+        serving(tables, environ, host=host, port=8000, local=local)
 
 
-def test_a_flows_folder_is_served_in_the_local_development_mode_alone() -> None:
-    environ = {
-        "ROBINAUTS_DATABASE_URL": "postgresql://robinauts.example.com/robinauts",
-        "ROBINAUTS_FLOWS_DIR": "/etc/robinauts/flows",
-    }
-    with pytest.raises(ConfigError, match="ROBINAUTS_FLOWS_DIR: neorc is served"):
-        serving(SIGN_IN, environ, host="0.0.0.0", dev_no_sign_in=False)
-    serving({}, environ, host="127.0.0.1", dev_no_sign_in=True)
+def test_sign_in_through_providers_needs_a_database(oneberth: dict[str, str]) -> None:
+    with pytest.raises(ConfigError, match="no database"):
+        serving({}, oneberth, host="127.0.0.1", port=8000, local=False)
+    serving({}, oneberth | DATA_DIR, host="127.0.0.1", port=8000, local=False)
+
+
+def test_the_local_mode_serves_on_every_storage() -> None:
+    for environ in ({}, DATABASE, DATA_DIR):
+        _, _, config = serving({}, environ, host="127.0.0.1", port=8420, local=True)
+        assert config.app("robinauts").public_url == "http://127.0.0.1:8420"
+        assert not config.providers
+    assert storage_from(DATA_DIR) == StorageConfig(
+        StorageKind.LOCAL, path=DATA_DIR["ROBINAUTS_DATA_DIR"]
+    )
+    assert storage_from(DATABASE | DATA_DIR).kind is StorageKind.POSTGRES
+    assert storage_from({}).kind is StorageKind.IN_PROCESS
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost"])
-def test_the_mode_serves_a_loopback_host(host: str) -> None:
-    _, _, sign_in = serving({}, {}, host=host, dev_no_sign_in=True)
-    assert sign_in is None
+def test_the_local_mode_serves_a_loopback_host(host: str) -> None:
+    serving({}, {}, host=host, port=8000, local=True)
 
 
 @pytest.mark.parametrize(
@@ -93,8 +121,8 @@ def test_the_mode_serves_a_loopback_host(host: str) -> None:
         ("10.0.0.7", "http://10.0.0.7:8000"),
     ],
 )
-def test_a_worker_process_reaches_its_server_where_it_listens(host: str, url: str) -> None:
-    assert worker_broker_url(host, 8000) == url
+def test_a_process_on_this_machine_reaches_a_listener_where_it_listens(host: str, url: str) -> None:
+    assert local_url(host, 8000) == url
 
 
 def test_a_refused_start_exits_before_it_binds(
@@ -103,81 +131,27 @@ def test_a_refused_start_exits_before_it_binds(
     path = tmp_path / "robinauts.toml"
     path.write_text('public_url = "https://robinauts.example.com"\n')
     monkeypatch.setenv("ROBINAUTS_CONFIG", str(path))
-    serve = create_autospec(uvicorn.Server.serve, spec_set=True)
-    monkeypatch.setattr(uvicorn.Server, "serve", serve)
     with pytest.raises(SystemExit) as exited:
-        run(["start", "--dev-no-sign-in"])
+        run(["start", "--local"])
     assert exited.value.code == 1
-    assert "cannot be combined" in capsys.readouterr().err
-    serve.assert_not_called()
+    assert "public_url: sign-in is oneberth's" in capsys.readouterr().err
 
 
-def ended(**which: object) -> argparse.Namespace:
-    return argparse.Namespace(
-        devices_command="end",
-        **{"user": None, "device": None, "all": False, **which},
-    )
+def test_the_admin_scripts_know_the_roles_of_the_three_applications() -> None:
+    names = {role.name for role in registry().roles}
+    assert {
+        "oneberth/admin",
+        "robinauts/worker",
+        "robinauts/handler",
+        "neorc/ci",
+    } <= names
 
 
-@asyncio_test
-async def test_the_operator_lists_and_ends_devices(capsys: pytest.CaptureFixture[str]) -> None:
-    composed = compose(Config(), storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get)
-    controller, credentials = composed.controller, composed.credentials
-    ada = await controller.ensure_user(Identity("okta", "ada", email="ada@example.com"))
-    grace = await controller.ensure_user(Identity("okta", "grace", email="grace@example.com"))
-    twin = await controller.ensure_user(Identity("google", "grace", email="Grace@example.com"))
-    now = datetime(2026, 11, 4, 12, 0, tzinfo=UTC)
-    devices = []
-    for n, user in enumerate((ada, ada, grace, twin)):
-        device = DeviceSession(
-            uuid.uuid4(),
-            user.id,
-            DeviceDescription(f"Phone {n}", "android"),
-            hashlib.sha256(f"rbd_{n}".encode()).hexdigest(),
-            now + timedelta(seconds=n),
-            now + timedelta(seconds=n),
-            now + timedelta(days=30),
-        )
-        await credentials.add_device_session(device)
-        devices.append(device)
-
-    assert await devices_command(credentials, argparse.Namespace(devices_command="list")) == 0
-    listed = capsys.readouterr().out.splitlines()
-    assert [line.split("\t")[:3] for line in listed] == [
-        [str(devices[0].id), "ada@example.com", "Phone 0"],
-        [str(devices[1].id), "ada@example.com", "Phone 1"],
-        [str(devices[2].id), "grace@example.com", "Phone 2"],
-        [str(devices[3].id), "Grace@example.com", "Phone 3"],
-    ]
-
-    # An email two users share is refused, and ends nothing.
-    assert await devices_command(credentials, ended(user="grace@example.com")) == 1
-    assert "2 users have the email" in capsys.readouterr().err
-    assert await devices_command(credentials, ended(user="nobody@example.com")) == 1
-    capsys.readouterr()
-
-    assert await devices_command(credentials, ended(user="ADA@example.com")) == 0
-    out = capsys.readouterr().out
-    assert out.count("ended\t") == 2
-    assert "2 device(s) ended" in out
-    assert await devices_command(credentials, ended(device=devices[2].id)) == 0
-    assert str(devices[2].id) in capsys.readouterr().out
-    assert await devices_command(credentials, ended(device=devices[2].id)) == 1
-    capsys.readouterr()
-    assert await devices_command(credentials, ended(all=True)) == 0
-    assert "1 device(s) ended" in capsys.readouterr().out
-    assert await credentials.all_device_sessions() == []
-
-
-def test_the_devices_commands_need_the_database_and_one_choice(
+def test_the_admin_scripts_need_the_database(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.delenv("ROBINAUTS_DATABASE_URL", raising=False)
     with pytest.raises(SystemExit) as exited:
         run(["devices", "list"])
-    assert exited.value.code == 2
-    assert "ROBINAUTS_DATABASE_URL is not set" in capsys.readouterr().err
-    for refused in (["devices", "end"], ["devices", "end", "--all", "--device", str(uuid.uuid4())]):
-        with pytest.raises(SystemExit) as exited:
-            run(refused)
-        assert exited.value.code == 2
+    assert exited.value.code != 0
+    assert "ROBINAUTS_DATABASE_URL" in capsys.readouterr().err

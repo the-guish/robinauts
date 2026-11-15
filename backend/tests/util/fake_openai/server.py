@@ -50,17 +50,23 @@ class FakeModel(Protocol):
 
 
 class FakeLocalGPTServer:
-    def __init__(self, model: FakeModel) -> None:
+    def __init__(self, model: FakeModel, host: str = "127.0.0.1") -> None:
+        """``host`` is the address it listens on: every address, ``0.0.0.0``, for a container
+        that reaches it through the host's gateway name."""
         self.model = model
         self.received: list[dict[str, Any]] = []
         self._lock = threading.Lock()
-        self._http = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(self))
+        self._http = ThreadingHTTPServer((host, 0), _handler_for(self))
         self._thread = threading.Thread(target=self._http.serve_forever, daemon=True)
 
     @property
     def base_url(self) -> str:
         host, port = self._http.server_address[:2]
         return f"http://{host}:{port}/v1"
+
+    @property
+    def port(self) -> int:
+        return int(self._http.server_address[1])
 
     def start(self) -> FakeLocalGPTServer:
         self._thread.start()

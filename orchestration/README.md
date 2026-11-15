@@ -1,18 +1,19 @@
 # Orchestration flows
 
-The neorc flows that Robinauts ships, and their handlers. `robinauts start
---dev-no-sign-in` runs them on the neorc it embeds when `ROBINAUTS_FLOWS_DIR`
+The neorc flows that Robinauts ships, and their handlers. `robinauts start`
+runs them on the neorc composed into its backend when `ROBINAUTS_FLOWS_DIR`
 names a flows folder
 ([docs/architecture/orchestration.md](../docs/architecture/orchestration.md)).
 
 - `flows/`: a flows folder: the flow files, uploaded to neorc's manager at every
   start. It has no `flows.toml`, so its handlers are the ones beside it.
 - `robinauts_tasks.py`: the handlers. They reach the Robinauts API at
-  `ROBINAUTS_API_URL`, which the server hands to neorc's worker, with no
-  credential: the local development mode has none, and every request there is
-  the developer's. Given an API token in `ROBINAUTS_API_TOKEN`, as a neorc
-  started against a server with sign-in on would be, they send it as a
-  bearer. They use the standard library alone.
+  `ROBINAUTS_API_URL`, `…/robinauts`, with the token of `robinauts/handler` in
+  `ROBINAUTS_API_TOKEN`, both of which the server hands to neorc's worker.
+  Each request names the handler's run in `X-Robinauts-Run`, from the step's
+  `run: neorc.flow_run_id`, and the server acts for the person who started it
+  ([docs/architecture/orchestration.md](../docs/architecture/orchestration.md),
+  "Whose a run is"). They use the standard library alone.
 
 ## Trying it
 
@@ -23,21 +24,19 @@ in the process or in the PostgreSQL `ROBINAUTS_DATABASE_URL` names, in the
 schema `neorc`:
 
 ```bash
-ROBINAUTS_FLOWS_DIR=orchestration/flows robinauts start --dev-no-sign-in
+ROBINAUTS_FLOWS_DIR=orchestration/flows robinauts start --local
 ```
 
-Open the **Flows** tab at the top of the left panel: **New run**, then
-`guess_number`, then **Start run**, starts a run from its form, and the run
-opens where the chat would be. Or start one from a shell through the
-server's port:
+Open the printed address, which signs you in, and start `guess_number` from neorc's
+application in the interface. Or start one from a shell, with a personal token from the
+account page:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/flows/guess_number/runs -H 'content-type: application/json' -H 'origin: http://127.0.0.1:8000' -d '{"inputs": {}}'
+curl -X POST http://127.0.0.1:8000/robinauts/api/flows/guess_number/runs -H 'content-type: application/json' -H "authorization: Bearer $TOKEN" -d '{"inputs": {}}'
 ```
 
 It plays the guessing game between two conversations, which show up in the
-history, and needs a model whose id or title holds `haiku`. The run then
-updates live in the frame and in the panel's recent runs.
+history, and needs a model whose id or title holds `haiku`.
 
 ## Code and review
 
@@ -55,7 +54,7 @@ cat > ~/robinauts/flows/flows.toml <<'TOML'
 url = "https://github.com/<owner>/<name>"
 branches = ["main"]
 TOML
-ROBINAUTS_FLOWS_DIR=~/robinauts/flows robinauts start --dev-no-sign-in
+ROBINAUTS_FLOWS_DIR=~/robinauts/flows robinauts start --local
 ```
 
 The agent works in a worktree of the repository, which the extra worker makes

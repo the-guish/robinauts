@@ -15,7 +15,7 @@ from contextlib import contextmanager
 import pytest
 from playwright.sync_api import Locator, Page, expect, sync_playwright
 
-from util.stack import ROOT
+from util.stack import ROOT, Server, ticket_url
 
 # What the interface says of an answer that failed (frontend/src/chat/state.ts).
 DID_NOT_FINISH = "This answer did not finish: something went wrong while it was being produced."
@@ -38,6 +38,27 @@ def browser_page() -> Iterator[Page]:
             assert not violations, violations
         finally:
             browser.close()
+
+
+def sign_in(page: Page, server: Server) -> None:
+    """Sign the local user in with a ticket, as the launcher's window does, and wait for the
+    shell: its rail, with Robinauts chosen."""
+    page.goto(ticket_url(server))
+    expect(rail(page).get_by_role("link", name="Robinauts")).to_have_attribute(
+        "aria-current", "page"
+    )
+
+
+def rail(page: Page) -> Locator:
+    """oneberth's rail: one link per application, the theme toggle and the account button."""
+    return page.get_by_role("navigation", name="Applications")
+
+
+def choose_app(page: Page, title: str) -> None:
+    """Choose an application on the rail, and wait until it is the one shown."""
+    link = rail(page).get_by_role("link", name=title)
+    link.click()
+    expect(link).to_have_attribute("aria-current", "page")
 
 
 def send(page: Page, message: str) -> None:

@@ -4,9 +4,9 @@
 """A page left open follows what another client does through the API (``docs/specs/wire.md``,
 "The change feed"). The page is never reloaded and never navigated in this journey.
 
-Another client is an ``httpx`` client on the same server, which in the local development mode
-is the same user. It needs a model that holds a turn open, and a client beside the browser,
-which the master journey has neither of.
+Another client is an ``httpx`` client on the same server, signed in with a ticket of its own:
+in the local mode it is the same user. It needs a model that holds a turn open, and a client
+beside the browser, which the master journey has neither of.
 """
 
 from __future__ import annotations
@@ -18,8 +18,10 @@ import httpx
 import pytest
 from playwright.sync_api import Page, expect
 
-from util.browser import expect_thread, history, questions, send
+from util import stack
+from util.browser import expect_thread, history, questions, send, sign_in
 from util.fake_openai import FakeModel, HoldingEchoModel
+from util.stack import Server
 
 pytestmark = [pytest.mark.io, pytest.mark.database]
 
@@ -38,21 +40,21 @@ def echoed(*questions: str) -> list[tuple[str, str]]:
 def ask(api: httpx.Client, conversation: str, text: str) -> None:
     """A turn under the end of that conversation, started by the other client and read to its
     end."""
-    last = api.get(f"/api/conversations/{conversation}").json()["messages"][-1]["id"]
+    last = api.get(f"/robinauts/api/conversations/{conversation}").json()["messages"][-1]["id"]
     answered = api.post(
-        f"/api/conversations/{conversation}/turns", json={"parent_id": last, "text": text}
+        f"/robinauts/api/conversations/{conversation}/turns", json={"parent_id": last, "text": text}
     )
     assert answered.status_code == 200, answered.text
 
 
 def test_a_page_left_open_follows_another_client(
-    server: str, page: Page, fake_model: HoldingEchoModel
+    server: Server, page: Page, fake_model: HoldingEchoModel
 ) -> None:
-    api = httpx.Client(base_url=server, timeout=30)
+    api = stack.signed_in(httpx.Client(base_url=server, timeout=30), server)
     running = page.get_by_label("Conversations").get_by_role("img", name="Answering")
 
     # 1. The page starts a conversation of its own and keeps it open.
-    page.goto(server)
+    sign_in(page, server)
     page.get_by_role("button", name="New chat").click()
     page.get_by_label("Agent").select_option(AGENT)
     send(page, "one")
@@ -86,7 +88,7 @@ def test_a_page_left_open_follows_another_client(
     expect_thread(page, echoed("one", "two", "three", "four"))
 
     # 6. The other client starts a conversation: it appears in "Conversations", on top.
-    started = api.post("/api/turns", json={"agent_id": AGENT, "text": "elsewhere"})
+    started = api.post("/robinauts/api/turns", json={"agent_id": AGENT, "text": "elsewhere"})
     assert started.status_code == 200, started.text
     elsewhere = started.headers["x-robinauts-conversation-id"]
     expect(history(page)).to_have_text(["elsewhere", "one"])

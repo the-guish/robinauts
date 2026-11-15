@@ -2,7 +2,7 @@
 # Copyright The Robinauts Authors
 
 """A worker whose ``[workers.<name>]`` table names a command is started with that command in
-place of this build's worker module, and differs in nothing else: it reads its secret on its
+place of this build's worker module, and differs in nothing else: it reads its token on its
 standard input, says ``ready`` on its standard output, runs the turns of its own agents, and
 ``/health`` hears it through its requests to the broker API. Here the command is a shell that
 runs the worker module, which stands for a container: what crosses an ``exec`` is what crosses
@@ -23,7 +23,6 @@ import time
 from pathlib import Path
 
 import asyncpg
-import httpx
 import pytest
 
 from util import stack
@@ -100,20 +99,20 @@ def test_a_worker_started_with_a_command_runs_its_turns_and_is_heard_through_the
     with (
         stack.database(config) as url,
         stack.server(config, url, env=stack.API_KEY, started=started) as server,
-        httpx.Client(base_url=server, timeout=30.0) as api,
+        stack.client(server, timeout=30.0) as api,
     ):
-        done = api.post("/api/turns", json={"agent_id": "special_one", "text": "hello"})
+        done = api.post("/robinauts/api/turns", json={"agent_id": "special_one", "text": "hello"})
         assert '"RUN_FINISHED"' in done.text, done.text
         assert task_of(url, done.headers["x-robinauts-run-id"]) == ("special", "done")
 
         # The server hears the worker through the API: not touched for six minutes, its file
         # says it is gone; its next requests, those of a turn, say it is back.
         activity = Path(tempfile.gettempdir()) / f"robinauts-worker-{started[0].pid}-special.alive"
-        assert api.get("/health").json() == {"status": "ok"}
+        assert api.get("/health").json() == stack.HEALTHY
         six_minutes_ago = time.time() - SIX_MINUTES
         os.utime(activity, (six_minutes_ago, six_minutes_ago))
         assert api.get("/health").status_code == 503
-        again = api.post("/api/turns", json={"agent_id": "special_one", "text": "again"})
+        again = api.post("/robinauts/api/turns", json={"agent_id": "special_one", "text": "again"})
         assert '"RUN_FINISHED"' in again.text, again.text
         assert api.get("/health").status_code == 200
 
@@ -126,20 +125,18 @@ def test_a_worker_with_a_command_runs_in_a_process_of_its_own_beside_the_in_proc
     config.write_text(ECHO.format(python=sys.executable))
     environment = {**os.environ, "ROBINAUTS_CONFIG": str(config)}
     environment.pop("ROBINAUTS_DATABASE_URL", None)
-    port = stack.free_port()
-    command = [str(stack.ROBINAUTS), "start", "--dev-no-sign-in", "--port", str(port)]
-    with subprocess.Popen(command, env=environment, stderr=subprocess.PIPE) as running:
+    running, url = stack.start_local(environment, stderr=subprocess.PIPE)
+    with running:
         try:
-            url = f"http://127.0.0.1:{port}"
             stack.wait_until_up(url, running)
             here = Path(tempfile.gettempdir())
             files = [
                 here / f"robinauts-worker-{running.pid}.alive",
                 here / f"robinauts-worker-{running.pid}-special.alive",
             ]
-            with httpx.Client(base_url=url, timeout=30.0) as api:
-                assert api.get("/health").json() == {"status": "ok"}
-                done = api.post("/api/turns", json={"agent_id": "echo", "text": "hello"})
+            with stack.client(url, timeout=30.0) as api:
+                assert api.get("/health").json() == stack.HEALTHY
+                done = api.post("/robinauts/api/turns", json={"agent_id": "echo", "text": "hello"})
                 assert '"RUN_FINISHED"' in done.text, done.text
                 assert '"delta":"The tool said: "' in done.text, done.text
             assert all(file.exists() for file in files)

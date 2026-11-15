@@ -76,13 +76,13 @@ def searching(
 def raven_api(searching: str, model_server: FakeLocalGPTServer) -> Iterator[httpx.Client]:
     model_server.model = RavenModel()
     model_server.received.clear()
-    with httpx.Client(base_url=searching, timeout=30.0) as client:
+    with stack.client(searching, timeout=30.0) as client:
         yield client
 
 
 def started(api: httpx.Client, agent: str, text: str) -> str:
     """A new conversation with that agent, its turn finished: its id."""
-    response = api.post("/api/turns", json={"agent_id": agent, "text": text})
+    response = api.post("/robinauts/api/turns", json={"agent_id": agent, "text": text})
     assert response.status_code == 200, response.text
     data = [line for line in response.text.splitlines() if line.startswith("data: ")]
     ended = json.loads(data[-1].removeprefix("data: "))
@@ -91,7 +91,7 @@ def started(api: httpx.Client, agent: str, text: str) -> str:
 
 
 def messages_of(api: httpx.Client, cid: str) -> list[dict[str, Any]]:
-    opened = api.get(f"/api/conversations/{cid}")
+    opened = api.get(f"/robinauts/api/conversations/{cid}")
     assert opened.status_code == 200, opened.text
     return opened.json()["messages"]
 

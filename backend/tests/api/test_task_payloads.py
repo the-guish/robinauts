@@ -49,7 +49,7 @@ def api(tmp_path_factory: pytest.TempPathFactory) -> Iterator[httpx.Client]:
     config.write_text(CONFIG)
     env = {"ECHO_API_KEY": "not-a-real-key"}
     with stack.database(config) as url, stack.server(config, url, env=env) as server:
-        with httpx.Client(base_url=server, timeout=30.0, headers={"origin": server}) as client:
+        with stack.client(server, timeout=30.0) as client:
             yield client
 
 
@@ -59,7 +59,7 @@ def said(payload: dict[str, Any]) -> str:
 
 
 def messages(api: httpx.Client, cid: str) -> list[dict[str, Any]]:
-    return api.get(f"/api/conversations/{cid}").json()["messages"]
+    return api.get(f"/robinauts/api/conversations/{cid}").json()["messages"]
 
 
 def text(message: dict[str, Any]) -> str:
@@ -75,10 +75,13 @@ def test_a_payload_is_kept_on_its_question_and_reaches_every_turn_that_answers_i
     api: httpx.Client,
 ) -> None:
     started = ok(
-        api.post("/api/turns", json={"agent_id": "echo", "text": "fix", "task_payload": PAYLOAD})
+        api.post(
+            "/robinauts/api/turns",
+            json={"agent_id": "echo", "text": "fix", "task_payload": PAYLOAD},
+        )
     )
     cid = started.headers["x-robinauts-conversation-id"]
-    turns = f"/api/conversations/{cid}/turns"
+    turns = f"/robinauts/api/conversations/{cid}/turns"
     question, answer = messages(api, cid)
     assert question["task_payload"] == PAYLOAD
     assert answer["task_payload"] is None
@@ -102,7 +105,10 @@ def test_a_payload_is_kept_on_its_question_and_reaches_every_turn_that_answers_i
     # An edit keeps the edited question's payload, unless it gives another.
     ok(api.post(turns, json={"edit": question["id"], "text": "fix, edited"}))
     kept = messages(api, cid)
-    assert (kept[0]["task_payload"], text(kept[1]).endswith(said(PAYLOAD))) == (PAYLOAD, True)
+    assert (kept[0]["task_payload"], text(kept[1]).endswith(said(PAYLOAD))) == (
+        PAYLOAD,
+        True,
+    )
     ok(api.post(turns, json={"edit": kept[0]["id"], "text": "fix", "task_payload": OTHER}))
     replaced = messages(api, cid)
     assert replaced[0]["task_payload"] == OTHER
@@ -120,10 +126,11 @@ def test_a_payload_is_kept_on_its_question_and_reaches_every_turn_that_answers_i
 def test_a_payload_that_is_not_a_task_is_refused_before_anything_is_stored(
     api: httpx.Client, payload: dict[str, Any], detail: str
 ) -> None:
-    before = api.get("/api/conversations").json()["items"]
+    before = api.get("/robinauts/api/conversations").json()["items"]
     refused = api.post(
-        "/api/turns", json={"agent_id": "echo", "text": "fix", "task_payload": payload}
+        "/robinauts/api/turns",
+        json={"agent_id": "echo", "text": "fix", "task_payload": payload},
     )
     assert refused.status_code == 422, refused.text
     assert detail in refused.json()["detail"]
-    assert api.get("/api/conversations").json()["items"] == before
+    assert api.get("/robinauts/api/conversations").json()["items"] == before

@@ -33,7 +33,7 @@ def events(body: str) -> list[dict[str, Any]]:
 
 def start(api: httpx.Client, agent: str, text: str) -> tuple[httpx.Response, str]:
     """A new conversation's first turn, run to its end, and the conversation's id."""
-    started = api.post("/api/turns", json={"agent_id": agent, "text": text})
+    started = api.post("/robinauts/api/turns", json={"agent_id": agent, "text": text})
     assert started.status_code == 200, started.text
     return started, started.headers["x-robinauts-conversation-id"]
 
@@ -43,9 +43,12 @@ def test_a_failed_turn_says_how_it_ended_and_not_why(api: httpx.Client, agent: s
     started, cid = start(api, agent, "poison")
     assert events(started.text)[-1]["type"] == "RUN_ERROR"
 
-    opened = api.get(f"/api/conversations/{cid}").json()
+    opened = api.get(f"/robinauts/api/conversations/{cid}").json()
     ended = opened["ended_badly"]
-    assert (ended["run_id"], ended["state"]) == (started.headers["x-robinauts-run-id"], "failed")
+    assert (ended["run_id"], ended["state"]) == (
+        started.headers["x-robinauts-run-id"],
+        "failed",
+    )
     assert set(ended) == {"run_id", "state", "ended_at"}
     # What the model server said went wrong is the operator's to read, not the user's.
     assert "poisoned" not in started.text
@@ -55,8 +58,8 @@ def test_a_failed_turn_says_how_it_ended_and_not_why(api: httpx.Client, agent: s
 def test_only_a_failed_answer_can_be_retried(api: httpx.Client) -> None:
     started, cid = start(api, "pydantic_ai", "hello")
     assert events(started.text)[-1]["type"] == "RUN_FINISHED"
-    answer = api.get(f"/api/conversations/{cid}").json()["messages"][1]
+    answer = api.get(f"/robinauts/api/conversations/{cid}").json()["messages"][1]
     assert answer["failed"] is False
 
-    refused = api.post(f"/api/conversations/{cid}/turns", json={"retry": answer["id"]})
+    refused = api.post(f"/robinauts/api/conversations/{cid}/turns", json={"retry": answer["id"]})
     assert refused.status_code == 404

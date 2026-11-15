@@ -4,7 +4,8 @@
 """The MCP apps of the side panel over HTTP (``docs/architecture/web.md``, "Apps"): an agent's
 apps are those of the tool servers it names, a view is served under a policy of its own, a
 view's tool call is relayed, and what the agent is not given is refused alike. The tool servers
-are real MCP servers; the one with the apps wants its secret, and no answer carries it."""
+are real MCP servers; the one with the apps wants its secret, and no answer carries it.
+"""
 
 from __future__ import annotations
 
@@ -13,9 +14,9 @@ from typing import TypedDict
 
 import httpx
 import pytest
+from oneberth.web import CONTENT_SECURITY_POLICY
 
-from robinauts.web.apps import NO_SUCH_APP
-from robinauts.web.headers import CONTENT_SECURITY_POLICY, VIEW_CONTENT_SECURITY_POLICY
+from robinauts.web.apps import NO_SUCH_APP, VIEW_CONTENT_SECURITY_POLICY
 from util import stack
 from util.controller_db import requires_postgres
 from util.fake_openai import FakeLocalGPTServer
@@ -140,21 +141,26 @@ def apps_server(
         )
         config.write_text(stack.config_for(model_server.base_url) + tools)
         env = {**stack.API_KEY, "BOARD_SECRET": SECRET}
-        with stack.database(config) as url, stack.server(config, url, env=env) as server:
+        with (
+            stack.database(config) as url,
+            stack.server(config, url, env=env) as server,
+        ):
             yield server
 
 
 @pytest.fixture
-def apps_api(apps_server: str) -> Iterator[httpx.Client]:
+def apps_api(apps_server: stack.Server) -> Iterator[httpx.Client]:
     with httpx.Client(base_url=apps_server, timeout=30.0) as client:
-        yield client
+        yield stack.signed_in(client, apps_server)
 
 
-def test_an_agent_has_the_apps_of_the_servers_it_names_that_answer(apps_api: httpx.Client) -> None:
-    listed = apps_api.get("/api/apps", params={"agent": "with_apps"})
-    alone = apps_api.get("/api/apps", params={"agent": "elsewhere"})
-    without = apps_api.get("/api/apps", params={"agent": "langchain"})
-    unknown = apps_api.get("/api/apps", params={"agent": "nobody"})
+def test_an_agent_has_the_apps_of_the_servers_it_names_that_answer(
+    apps_api: httpx.Client,
+) -> None:
+    listed = apps_api.get("/robinauts/api/apps", params={"agent": "with_apps"})
+    alone = apps_api.get("/robinauts/api/apps", params={"agent": "elsewhere"})
+    without = apps_api.get("/robinauts/api/apps", params={"agent": "langchain"})
+    unknown = apps_api.get("/robinauts/api/apps", params={"agent": "nobody"})
 
     assert listed.status_code == 200
     assert listed.json() == {
@@ -182,7 +188,7 @@ def test_an_agent_has_the_apps_of_the_servers_it_names_that_answer(apps_api: htt
 
 
 def test_a_view_is_served_under_a_policy_of_its_own(apps_api: httpx.Client) -> None:
-    view = apps_api.get("/api/apps/board/board/view", params={"agent": "with_apps"})
+    view = apps_api.get("/robinauts/api/apps/board/board/view", params={"agent": "with_apps"})
     page = apps_api.get("/ui/")
 
     assert view.status_code == 200
@@ -196,10 +202,12 @@ def test_a_view_is_served_under_a_policy_of_its_own(apps_api: httpx.Client) -> N
     assert page.headers["x-frame-options"] == "DENY"
 
 
-def test_a_view_s_tool_call_is_relayed_as_the_server_answered(apps_api: httpx.Client) -> None:
+def test_a_view_s_tool_call_is_relayed_as_the_server_answered(
+    apps_api: httpx.Client,
+) -> None:
     def call(tool: str, arguments: dict[str, object]) -> httpx.Response:
         body = {"agent": "with_apps", "arguments": arguments}
-        return apps_api.post(f"/api/apps/board/tools/{tool}", json=body)
+        return apps_api.post(f"/robinauts/api/apps/board/tools/{tool}", json=body)
 
     added = call("add", {"a": 2, "b": 3})
     shown = call("board", {})
@@ -219,21 +227,21 @@ def test_a_view_s_tool_call_is_relayed_as_the_server_answered(apps_api: httpx.Cl
 @pytest.mark.parametrize(
     ("method", "path", "status"),
     [
-        ("view", "/api/apps/elsewhere/stolen/view", 404),
-        ("view", "/api/apps/nowhere/board/view", 404),
-        ("view", "/api/apps/plain/shout/view", 404),
-        ("view", "/api/apps/board/add/view", 404),
-        ("view", "/api/apps/board/hidden/view", 404),
-        ("view", "/api/apps/board/missing/view", 404),
-        ("view", "/api/apps/gone/board/view", 404),
-        ("view", "/api/apps/locked/board/view", 404),
-        ("call", "/api/apps/elsewhere/tools/stolen", 404),
-        ("call", "/api/apps/sessions/tools/search_sessions", 404),
-        ("call", "/api/apps/board/tools/peek", 404),
-        ("call", "/api/apps/board/tools/hidden", 404),
-        ("call", "/api/apps/board/tools/missing", 404),
-        ("call", "/api/apps/gone/tools/board", 502),
-        ("call", "/api/apps/locked/tools/board", 502),
+        ("view", "/robinauts/api/apps/elsewhere/stolen/view", 404),
+        ("view", "/robinauts/api/apps/nowhere/board/view", 404),
+        ("view", "/robinauts/api/apps/plain/shout/view", 404),
+        ("view", "/robinauts/api/apps/board/add/view", 404),
+        ("view", "/robinauts/api/apps/board/hidden/view", 404),
+        ("view", "/robinauts/api/apps/board/missing/view", 404),
+        ("view", "/robinauts/api/apps/gone/board/view", 404),
+        ("view", "/robinauts/api/apps/locked/board/view", 404),
+        ("call", "/robinauts/api/apps/elsewhere/tools/stolen", 404),
+        ("call", "/robinauts/api/apps/sessions/tools/search_sessions", 404),
+        ("call", "/robinauts/api/apps/board/tools/peek", 404),
+        ("call", "/robinauts/api/apps/board/tools/hidden", 404),
+        ("call", "/robinauts/api/apps/board/tools/missing", 404),
+        ("call", "/robinauts/api/apps/gone/tools/board", 502),
+        ("call", "/robinauts/api/apps/locked/tools/board", 502),
     ],
 )
 def test_what_the_agent_is_not_given_is_refused_alike(
@@ -256,12 +264,12 @@ def test_what_the_agent_is_not_given_is_refused_alike(
 
 def test_no_answer_carries_a_tool_server_s_secret(apps_api: httpx.Client) -> None:
     answers = [
-        apps_api.get("/api/apps", params={"agent": "with_apps"}),
-        apps_api.get("/api/apps/board/board/view", params={"agent": "with_apps"}),
-        apps_api.get("/api/apps/board/peek/view", params={"agent": "with_apps"}),
-        apps_api.post("/api/apps/board/tools/fail", json={"agent": "with_apps"}),
-        apps_api.post("/api/apps/locked/tools/board", json={"agent": "with_apps"}),
-        apps_api.get("/api/agents"),
+        apps_api.get("/robinauts/api/apps", params={"agent": "with_apps"}),
+        apps_api.get("/robinauts/api/apps/board/board/view", params={"agent": "with_apps"}),
+        apps_api.get("/robinauts/api/apps/board/peek/view", params={"agent": "with_apps"}),
+        apps_api.post("/robinauts/api/apps/board/tools/fail", json={"agent": "with_apps"}),
+        apps_api.post("/robinauts/api/apps/locked/tools/board", json={"agent": "with_apps"}),
+        apps_api.get("/robinauts/api/agents"),
     ]
 
     for answer in answers:

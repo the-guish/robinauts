@@ -12,9 +12,9 @@ from __future__ import annotations
 import pytest
 from playwright.sync_api import Page, expect
 
-from util.browser import DID_NOT_FINISH, send
+from util.browser import DID_NOT_FINISH, send, sign_in
 from util.fake_openai import FakeLocalGPTServer, FakeModel, PoisonEchoModel
-from util.stack import sent
+from util.stack import Server, sent
 
 pytestmark = [pytest.mark.io, pytest.mark.database]
 
@@ -26,12 +26,14 @@ def fake_model() -> FakeModel:
     return PoisonEchoModel()
 
 
-def aux_failed_answer(agent: str, server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+def aux_failed_answer(
+    agent: str, server: Server, page: Page, local_gpt: FakeLocalGPTServer
+) -> None:
     calls = local_gpt.received
 
     # 1. "New chat", pick the agent, send "poison": the model server answers 400, and the
     #    answer's place says it did not finish, once.
-    page.goto(server)
+    sign_in(page, server)
     page.get_by_role("button", name="New chat").click()
     page.get_by_label("Agent").select_option(agent)
     send(page, "poison")
@@ -85,9 +87,11 @@ def aux_failed_answer(agent: str, server: str, page: Page, local_gpt: FakeLocalG
     assert len(calls) == 3
 
 
-def test_pydantic_ai_failed_answer(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+def test_pydantic_ai_failed_answer(
+    server: Server, page: Page, local_gpt: FakeLocalGPTServer
+) -> None:
     aux_failed_answer("pydantic_ai", server, page, local_gpt)
 
 
-def test_langchain_failed_answer(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+def test_langchain_failed_answer(server: Server, page: Page, local_gpt: FakeLocalGPTServer) -> None:
     aux_failed_answer("langchain", server, page, local_gpt)

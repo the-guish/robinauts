@@ -3,7 +3,8 @@
 
 """The whole platform for ``tests/api`` and ``tests/e2e``: a real ``robinauts`` server on a
 schema of its own in PostgreSQL, configured with one agent per engine on models that
-``FakeLocalGPTServer`` serves.
+``FakeLocalGPTServer`` serves. The server runs in oneberth's local mode: the test holds its
+launch secret, and ``signed_in`` signs the local user in with a ticket, as the window does.
 
 Given an MCP server, the configuration also has one agent per engine with that server's tools,
 ``<engine>_tools``. The schema is made in the PostgreSQL that ``ROBINAUTS_TEST_DATABASE_URL``
@@ -13,10 +14,12 @@ names and dropped afterwards.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -27,7 +30,9 @@ from pathlib import Path
 from typing import Any
 
 import asyncpg
+import httpx
 import pytest
+from oneberth.identity import CredentialKind, new_secret
 
 from robinauts.cli.lifecycle import WORKER_START_SECONDS
 
@@ -96,6 +101,12 @@ tools = ["tools"]
 
 API_KEY = {"LOCAL_GPT_KEY": "not-a-real-key"}
 
+STOP_SECONDS = 10
+"""How long a stop may take. A long poll, Robinauts' or neorc's, ends when the backend stops."""
+
+HEALTHY = {"status": "ok", "components": {"robinauts": "ok", "neorc": "ok"}}
+"""What ``/health`` answers while every worker is heard from."""
+
 
 def config_for(base_url: str, tools_url: str | None = None) -> str:
     config = CONFIG.format(base_url=base_url, system_prompt=SYSTEM_PROMPT)
@@ -109,6 +120,48 @@ def sent(request: dict[str, Any]) -> list[tuple[str, str]]:
     system, *rest = request["messages"]
     assert (system["role"], system["content"]) == ("system", SYSTEM_PROMPT)
     return [(m["role"], m["content"]) for m in rest]
+
+
+class Server(str):
+    """A running server's URL, and the launch secret it was started with."""
+
+    launch_secret: str
+    worker_url: str
+
+    def __new__(cls, url: str, launch_secret: str, worker_url: str = "") -> Server:
+        made = super().__new__(cls, url)
+        made.launch_secret = launch_secret
+        made.worker_url = worker_url
+        return made
+
+
+def ticket_url(server: Server) -> str:
+    """Where a new ticket signs the local user in, asked for with the launch secret."""
+    request = urllib.request.Request(
+        server + "/auth/tickets",
+        data=b"{}",
+        headers={
+            "authorization": f"Bearer {server.launch_secret}",
+            "content-type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(request) as answer:
+        return str(json.load(answer)["url"])
+
+
+def signed_in(client: httpx.Client, server: Server) -> httpx.Client:
+    """``client``, with the local user's session cookie, and the ``Origin`` a browser sends."""
+    opened = client.get(ticket_url(server))
+    assert opened.status_code == 303, opened.text
+    client.headers["origin"] = server
+    return client
+
+
+@contextmanager
+def client(server: Server, timeout: float = 30.0) -> Iterator[httpx.Client]:
+    """A client of ``server``, the local user signed in."""
+    with httpx.Client(base_url=server, timeout=timeout) as made:
+        yield signed_in(made, server)
 
 
 def free_port() -> int:
@@ -130,6 +183,18 @@ def wait_until_up(url: str, server: subprocess.Popen[bytes]) -> None:
         except OSError:
             time.sleep(0.1)
     raise RuntimeError(f"nothing answered on {url}")
+
+
+def wait_until_ready(server: subprocess.Popen[bytes]) -> None:
+    """Read the server's standard output until it says ``ready``: once both listeners serve
+    and neorc has started. The rest is read and dropped as it comes, so that the server never
+    waits on a full pipe: its access log is on its standard output too."""
+    assert server.stdout is not None
+    for line in server.stdout:
+        if line.strip() == b"ready":
+            threading.Thread(target=server.stdout.read, daemon=True).start()
+            return
+    raise RuntimeError(f"the server ended before it was ready, with {server.wait()}")
 
 
 def with_search_path(url: str, schema: str) -> str:
@@ -160,9 +225,44 @@ def database(config: Path) -> Iterator[str]:
         environment = {**os.environ, "ROBINAUTS_CONFIG": str(config)}
         environment["ROBINAUTS_DATABASE_URL"] = url
         subprocess.run([str(ROBINAUTS), "db", "init"], env=environment, check=True)
+        subprocess.run([str(ROBINAUTS), "store", "init"], env=environment, check=True)
         yield url
     finally:
         asyncio.run(run_statement(given, f'DROP SCHEMA "{schema}" CASCADE'))
+
+
+def launched(
+    command: list[str], environment: Mapping[str, str], launch_secret: str, **popen: Any
+) -> subprocess.Popen[bytes]:
+    """The server's process, its launch secret on its standard input as a launcher writes it."""
+    process = subprocess.Popen(command, env=environment, stdin=subprocess.PIPE, **popen)
+    assert process.stdin is not None
+    process.stdin.write(f"{launch_secret}\n".encode())
+    process.stdin.close()
+    # communicate() flushes the standard input it finds, and Python 3.12 refuses to flush a
+    # closed file: the process has none any more.
+    process.stdin = None
+    return process
+
+
+def start_local(
+    environment: Mapping[str, str], command: list[str] | None = None, **popen: Any
+) -> tuple[subprocess.Popen[bytes], Server]:
+    """A server in the local mode, started with ``command`` in the place of ``robinauts``, and
+    its URL with its launch secret. The caller waits for it and stops it."""
+    port, worker_port = free_port(), free_port()
+    arguments = [
+        "start",
+        "--local",
+        "--port",
+        str(port),
+        "--worker-port",
+        str(worker_port),
+    ]
+    secret = new_secret(CredentialKind.LAUNCH)
+    process = launched([*(command or [str(ROBINAUTS)]), *arguments], environment, secret, **popen)
+    url = Server(f"http://127.0.0.1:{port}", secret, f"http://127.0.0.1:{worker_port}")
+    return process, url
 
 
 @contextmanager
@@ -171,20 +271,22 @@ def server(
     database_url: str,
     env: Mapping[str, str] = {},
     started: list[subprocess.Popen[bytes]] | None = None,
-) -> Iterator[str]:
-    """The URL of a server on that config, without sign-in, stopped afterwards. Its process is
-    added to ``started``, for a test that kills it."""
-    port = free_port()
+) -> Iterator[Server]:
+    """A server on that config, in the local mode, stopped afterwards. Its process is added to
+    ``started``, for a test that kills it."""
+    port, worker_port = free_port(), free_port()
     environment = {**os.environ, **env, "ROBINAUTS_CONFIG": str(config)}
     environment["ROBINAUTS_DATABASE_URL"] = database_url
-    command = [str(ROBINAUTS), "start", "--dev-no-sign-in", "--port", str(port)]
-    with subprocess.Popen(command, env=environment) as running:
+    command = [str(ROBINAUTS), "start", "--local", "--port", str(port)]
+    command += ["--worker-port", str(worker_port)]
+    secret = new_secret(CredentialKind.LAUNCH)
+    with launched(command, environment, secret) as running:
         if started is not None:
             started.append(running)
-        url = f"http://127.0.0.1:{port}"
+        url = Server(f"http://127.0.0.1:{port}", secret, f"http://127.0.0.1:{worker_port}")
         try:
             wait_until_up(url, running)
             yield url
         finally:
             running.terminate()
-            running.wait(timeout=10)
+            running.wait(timeout=STOP_SECONDS)

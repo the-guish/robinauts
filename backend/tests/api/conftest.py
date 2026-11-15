@@ -4,7 +4,8 @@
 """The platform of ``util.stack`` over HTTP: ``tests/e2e`` without the browser.
 
 One model server, one ``robinauts`` server and one schema for the whole run, so a test keeps
-to conversations it opened itself: the listing holds every other test's too. ``fake_model``
+to conversations it opened itself: the listing holds every other test's too. The server runs in
+oneberth's local mode, and ``api`` signs its one user in. ``fake_model``
 is what the model server answers each test with, and a test module overrides it; ``local_gpt``
 is the model server, holding only that test's requests. The ``<engine>_tools`` agents call
 ``shout`` on a real MCP server. The interface is a one-line page, so ``/ui/`` is served
@@ -44,7 +45,9 @@ def tools_url() -> Iterator[str]:
 
 @pytest.fixture(scope="session")
 def server_config(
-    model_server: FakeLocalGPTServer, tools_url: str, tmp_path_factory: pytest.TempPathFactory
+    model_server: FakeLocalGPTServer,
+    tools_url: str,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> Path:
     here = tmp_path_factory.mktemp("api")
     config = here / "robinauts.toml"
@@ -63,7 +66,7 @@ def database_url(server_config: Path) -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
-def server(server_config: Path, database_url: str) -> Iterator[str]:
+def server(server_config: Path, database_url: str) -> Iterator[stack.Server]:
     env = {**stack.API_KEY, "ROBINAUTS_UI_DIR": str(server_config.parent / "ui")}
     with stack.server(server_config, database_url, env=env) as running:
         yield running
@@ -82,6 +85,7 @@ def local_gpt(model_server: FakeLocalGPTServer, fake_model: FakeModel) -> FakeLo
 
 
 @pytest.fixture
-def api(server: str, local_gpt: FakeLocalGPTServer) -> Iterator[httpx.Client]:
+def api(server: stack.Server, local_gpt: FakeLocalGPTServer) -> Iterator[httpx.Client]:
+    """A client of the shared server, the local user signed in."""
     with httpx.Client(base_url=server, timeout=30.0) as client:
-        yield client
+        yield stack.signed_in(client, server)

@@ -10,18 +10,20 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from util import browser
-from util.browser import answers, expect_thread, send
+from util.browser import answers, expect_thread, send, sign_in
 from util.fake_openai import FakeLocalGPTServer
-from util.stack import sent
+from util.stack import Server, sent
 
 pytestmark = [pytest.mark.io, pytest.mark.database]
 
 
-def aux_first_message(agent: str, server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+def aux_first_message(
+    agent: str, server: Server, page: Page, local_gpt: FakeLocalGPTServer
+) -> None:
     calls = local_gpt.received
 
     # 1. "New chat", pick the agent, send two messages.
-    page.goto(server)
+    sign_in(page, server)
     page.get_by_role("button", name="New chat").click()
     page.get_by_label("Agent").select_option(agent)
     send(page, "one")
@@ -49,9 +51,11 @@ def aux_first_message(agent: str, server: str, page: Page, local_gpt: FakeLocalG
     assert len(calls) == 4
 
 
-def test_pydantic_ai_first_message(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+def test_pydantic_ai_first_message(
+    server: Server, page: Page, local_gpt: FakeLocalGPTServer
+) -> None:
     aux_first_message("pydantic_ai", server, page, local_gpt)
 
 
-def test_langchain_first_message(server: str, page: Page, local_gpt: FakeLocalGPTServer) -> None:
+def test_langchain_first_message(server: Server, page: Page, local_gpt: FakeLocalGPTServer) -> None:
     aux_first_message("langchain", server, page, local_gpt)

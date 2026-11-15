@@ -9,7 +9,12 @@ import pytest
 
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.controller.core.config import parse_config
-from robinauts.shared_domain.domain import DEFAULT_WORKER, ProviderKind, ToolServerAuth
+from robinauts.shared_domain.domain import (
+    DEFAULT_WORKER,
+    ContainerConfig,
+    ProviderKind,
+    ToolServerAuth,
+)
 
 AGENT = {"title": "A", "system_prompt": "", "models": ["fast"]}
 
@@ -313,6 +318,20 @@ def test_a_worker_table_names_the_command_that_starts_the_worker() -> None:
     assert parse_config(WORKERS).commands == {}
 
 
+def test_a_worker_table_names_the_image_of_its_container_with_a_command_or_without() -> None:
+    tables = {
+        "special": {"image": "robinauts-base-worker:1", "environment": ["GITHUB_TOKEN"]},
+        "default": {"image": "robinauts-base-worker:1", "command": ["docker", "run", "-i", "w"]},
+    }
+    config = parse_config({**WORKERS, "workers": tables})
+    assert config.containers == {
+        "special": ContainerConfig("robinauts-base-worker:1", ("GITHUB_TOKEN",)),
+        "default": ContainerConfig("robinauts-base-worker:1"),
+    }
+    assert config.commands == {"default": ("docker", "run", "-i", "w")}
+    assert config.for_worker("special").containers == config.containers
+
+
 def test_the_default_worker_may_start_with_a_command_too() -> None:
     config = parse_config({**WORKERS, "workers": {"default": {"command": ["worker"]}}})
     assert config.command_of(DEFAULT_WORKER) == ("worker",)
@@ -338,6 +357,22 @@ def test_an_engine_this_build_lacks_runs_on_a_worker_with_a_command_alone() -> N
         ({"special": {"command": ["x"], "kind": "external"}}, "workers.special: unknown key"),
         ({"nobody": {"command": ["x"]}}, "workers.nobody: no agent names this worker"),
         ({"Bad Name": {"command": ["x"]}}, "workers.Bad Name: worker 'Bad Name' is not"),
+        ({"special": {"image": ""}}, "workers.special: image is not the name of an image"),
+        ({"special": {"image": "-v"}}, "workers.special: image is not the name of an image"),
+        ({"special": {"image": "a b"}}, "workers.special: image is not the name of an image"),
+        ({"special": {"image": 3}}, "workers.special: image is not the name of an image"),
+        (
+            {"special": {"image": "i", "environment": "KEY"}},
+            "workers.special: environment is not a list of variable names",
+        ),
+        (
+            {"special": {"image": "i", "environment": ["A-B"]}},
+            "workers.special: environment is not a list of variable names",
+        ),
+        (
+            {"special": {"command": ["x"], "environment": ["KEY"]}},
+            "workers.special: `environment` is for a worker in a container, with `image`",
+        ),
     ],
 )
 def test_a_worker_table_that_is_wrong_is_refused(table: dict[str, object], problem: str) -> None:
