@@ -36,11 +36,13 @@ Once the backend serves:
    folder are **uploaded**, with a service token of `neorc/ci`, through the backend's own
    front listener in this process;
 5. one **worker**, on the `default` queue, with the handlers in `code_location`, runs in a
-   process of its own: neorc's own command, as installed with it, against the worker listener.
+   process of its own: `robinauts neorc-worker`, which becomes neorc's own command against the
+   worker listener once it holds its tokens.
 
 Robinauts' component does 4 and 5 in its serving, oneberth's moment between the listeners and
 `ready` ([web.md](web.md), "The start and the stop"). The server says `ready` once these have
-started. If the flows are refused or the worker cannot be started, the server stops and exits 1. At a stop, the worker stops first, with SIGTERM and
+started. On the desktop, the backend does 4 alone, and oneberth's launcher starts the worker
+once the backend is ready. If the flows are refused or the worker cannot be started, the server stops and exits 1. At a stop, the worker stops first, with SIGTERM and
 killed after fifteen seconds, while the listeners still serve; then the scheduler, then the
 storage.
 
@@ -220,18 +222,24 @@ neorc's PostgreSQL adapter is on asyncpg: psycopg is LGPL-3.0, which
 
 ### What the worker is handed
 
-The server mints two service tokens for neorc's worker at each start. They live in the
-backend's memory alone, and end with it.
+neorc's worker is started by its supervisor: the server, or the launcher on the desktop. The
+supervisor writes a token of `neorc/worker`, bound to the queue `default`, on its standard
+input. It names the worker listener in `ONEBERTH_WORKER_URL` and the front listener in
+`ONEBERTH_FRONT_URL`. The worker then asks Robinauts for the handlers' token with its own, at
+`POST /robinauts/internal/queues/default/handler-token`. Robinauts gives that token to a holder
+of `neorc/tasks:claim` on the queue `default`, the handlers' queue, and to nobody else. Both
+tokens live in the backend's memory alone, and end with it.
 
 | variable | holds |
 |---|---|
-| `NEORC_API_TOKEN` | a token of `neorc/worker`, bound to the queue `default`: what the worker sends to the manager |
+| `NEORC_API_TOKEN` | the token of `neorc/worker`: what the worker sends to the manager |
 | `ROBINAUTS_API_URL` | Robinauts' API on the front listener: `http://<host>:<port>/robinauts` |
 | `ROBINAUTS_API_TOKEN` | a token of `robinauts/handler`: what the handlers send to Robinauts ([Whose a run is](#whose-a-run-is)) |
 
 neorc's worker is not handed what the agents' configuration keeps from
 everything but the server: the model providers' keys, the tool servers'
 secrets, `ROBINAUTS_DATABASE_URL`, `ROBINAUTS_CONFIG` and `ONEBERTH_CONFIG`.
+It ends with its supervisor on Linux, killed or not.
 
 ### The flows Robinauts ships
 

@@ -113,6 +113,10 @@ OpenRouter key ([demo/README.md](demo/README.md)):
 
     demo/start.sh          # demo/stop.sh takes it down
 
+On one machine, `robinauts desktop` runs it as a desktop application: a
+window, with its data in a folder and no database server
+([docs/deployment.md](docs/deployment.md#the-desktop)).
+
 ## Planned
 
 - Prepare and stress test performance behind a load balancer.

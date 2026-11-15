@@ -29,13 +29,14 @@ conversation this is, are the controller's.
 The component has two moments of oneberth's. Its lifespan opens neorc's storage and the
 controller, and starts the workers. Its serving begins once both listeners serve, before the
 server says `ready`. It uploads the flows and starts neorc's worker, since both call the
-backend's own listeners. A stop ends the serving first, while the listeners still serve: the
+backend's own listeners. On the desktop the launcher starts every worker, neorc's included, and
+the backend starts none: `robinauts desktop-backend` is the backend there. A stop ends the serving first, while the listeners still serve: the
 workers stop there, and end their turns through the listeners. Then the listeners stop, and
 then the lifespan closes the controller and neorc's storage.
 
 The tokens the backend mints for its own parts live in its memory alone: its workers', neorc's
-worker's, the flows' upload's and the handlers'. Each ends with the process, at a stop or a
-crash. The store holds none of them.
+worker's, the flows' upload's and the handlers'. The tokens the launcher has it mint live
+there too. Each ends with the process, at a stop or a crash. The store holds none of them.
 
 A checkout whose interface is not built still serves the API. `/ui/` then answers 404 with a
 page that says the interface is not built, and the log says to run `npm run build` in
@@ -65,6 +66,7 @@ and oneberth refuses a principal that does not hold it with 403.
 | `robinauts/tasks:work` | a worker's tasks, its cancels, a turn's owner |
 | `robinauts/sessions:read` | the sessions and messages a worker's turn reads |
 | `robinauts/turns:write` | the events and the end of a worker's turn |
+| `neorc/tasks:claim`, on the queue `default` | the handlers' token, for neorc's worker |
 
 ## Who a request is for
 
@@ -146,15 +148,16 @@ What a worker in a process of its own reaches the core through: the operations o
 interface's and are not in the OpenAPI document.
 
 - There is one worker process per worker the configuration names (`AgentConfig.worker`,
-  `default` for an agent that names none). The server mints a oneberth service token of
-  `robinauts/worker` for each at its start, bound to the worker's name, and writes it on that
-  worker's process's standard input, which the process reads to its end at its own start; it
+  `default` for an agent that names none). The server, or on the desktop the launcher, mints a
+  oneberth service token of `robinauts/worker` for each at its start, bound to the worker's
+  name, and writes it on that worker's process's standard input, which the process reads to its end at its own start; it
   is in no environment variable and no file. The token lives in the backend's memory, and
   ends with it ([The start and the stop](#the-start-and-the-stop)). A worker started with its table's command is let in the same way: the command carries
   the standard input to wherever the worker runs.
 - oneberth serves these routes on the worker listener, `--worker-host` and `--worker-port`,
   where they are the only routes; they are on the front listener too. A worker reaches
-  `http://<worker listener>/robinauts`, in `ROBINAUTS_WORKER_BROKER_URL`.
+  `http://<worker listener>/robinauts`. The launcher names the listener in
+  `ONEBERTH_WORKER_URL`, and a server names the whole address in `ROBINAUTS_WORKER_BROKER_URL`.
 - Every route needs one of the three worker permissions, and a person or another service is
   403. With no worker process of that name running, the routes answer 404. Each admitted
   request is a sign of life for `/health`, which hears a worker in a process of its own

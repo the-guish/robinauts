@@ -692,6 +692,62 @@ without:
 - **Draining runs on shutdown.** A restart interrupts them.
 - **A container image**, an SBOM and signed releases.
 
+## The desktop
+
+`robinauts desktop` runs Robinauts as a desktop application on one machine. oneberth's launcher
+starts each part as a process: the backend, one process per worker, neorc's worker when a flows
+folder is set, and the window. The window is Chrome or Chromium without an address bar. The
+person lands in it signed in, and types nothing.
+
+```sh
+ROBINAUTS_ANTHROPIC_KEY=… robinauts desktop
+```
+
+- The data directory is `~/.local/share/robinauts` on Linux, or `$XDG_DATA_HOME/robinauts`
+  when that variable is set. On macOS it is `~/Library/Application Support/Robinauts`.
+  `--data-dir` names another, and so does `ROBINAUTS_DATA_DIR`.
+- The configuration is the file `ROBINAUTS_CONFIG` names, else `robinauts.toml` in the data
+  directory. The first start makes that file empty. Its tables are those of step 4, and the
+  example below is one. The keys are read from the environment of the command.
+- `ROBINAUTS_FLOWS_DIR` names a flows folder, as for a server.
+- The desktop needs no database server, no oneberth file and no Docker.
+- The launcher looks for Chrome, Chromium, Edge and Brave. `--browser` names another, and each
+  `--browser-argument` goes to it. Without a browser, the default browser opens the address,
+  and the application then stops on Ctrl-C alone.
+- The window opens on port 8420 at the first start, or on a free port when 8420 is taken.
+  Every later start keeps that port: the browser keeps the theme and the open application per
+  address.
+- Closing the window stops the application. Each worker finishes its turns within ten seconds
+  and ends the rest as interrupted. The workers stop first, and the backend last.
+- A second `robinauts desktop` on the same data directory brings the first one's window
+  forward, and starts nothing.
+
+The data directory holds:
+
+| path | what it is | opened by |
+|---|---|---|
+| `robinauts.toml` | the configuration, when `ROBINAUTS_CONFIG` names none | every part |
+| `robinauts.db`, `neorc.db`, `oneberth.db` | the records: Robinauts', neorc's and the sign-in | the backend alone |
+| `workers/<worker name>/` | a worker's engines' state, one file per engine | that worker alone |
+| `window/` | the window's browser profile | the window |
+| `launcher.lock`, `launcher.json` | the launcher's lock, and the port of the window | the launcher |
+
+What runs as a process, and what each one is given:
+
+| process | command | given |
+|---|---|---|
+| the backend | `robinauts desktop-backend` | the launch secret on its standard input; where each listener is |
+| each worker | `python -m robinauts.cli.worker_process`, or its table's `command` | a token of `robinauts/worker` on its standard input, bound to its name; the worker listener's address; the data directory |
+| neorc's worker | `robinauts neorc-worker` | a token of `neorc/worker` on its standard input, bound to the queue `default`; both listeners' addresses |
+| the window | the browser, with `--app` | the address that signs the person in |
+
+The launcher names everything else in variables that start with `ONEBERTH_`. A worker's
+`command` is started with them, so a `docker run` command passes on `ONEBERTH_WORKER_NAME` and
+`ONEBERTH_WORKER_URL`. The desktop's Docker shape, which starts containers itself, is the next
+step of oneberth's plan. The admin scripts, `robinauts tokens` and the rest, open PostgreSQL
+alone: a desktop has none of them yet. A script reaches the API with a personal token from the
+account page.
+
 ## The local mode
 
 `robinauts start --local` is oneberth's local mode: no identity provider, one person, the one
@@ -726,7 +782,8 @@ folder, which the server makes: `robinauts.db`, `oneberth.db` and `neorc.db`. Ea
 its engines' state in `workers/<worker name>/` in that folder, one file per engine. A
 conversation from before a restart takes new turns ([specs/operations.md](specs/operations.md)).
 
-It is the desktop's mode, and the mode for development. Nothing else in this guide uses it.
+It is the desktop's mode, and the mode for development. `robinauts desktop` starts the
+backend in this mode ([The desktop](#the-desktop)). Nothing else in this guide uses it.
 
 ## What can go wrong
 

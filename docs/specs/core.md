@@ -145,7 +145,10 @@ topic documents listed under [Documents](#documents).
 - **Shape.** One Python backend that also serves the built frontend, one
   PostgreSQL database, or SQLite files in a data directory on the desktop.
   The backend is a oneberth composition of Robinauts' component and neorc's
-  manager. Delivered as one Python wheel.
+  manager. Delivered as one Python wheel. On a server, `robinauts start`
+  starts the backend, and the backend its workers. On the desktop,
+  `robinauts desktop` has oneberth's launcher start the backend, each worker
+  and a browser window as processes.
   [frontend.md](frontend.md), [operations.md](operations.md),
   [web.md](../architecture/web.md).
 - **Sign-in.** oneberth's: Google and Okta over OpenID Connect, an allow list,

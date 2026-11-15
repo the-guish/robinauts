@@ -81,6 +81,25 @@ What an internal platform team deploys and controls.
   its schema, which Anthropic's API refuses. A value that is not a list of
   names is refused at start-up.
 
+## The desktop
+
+- `robinauts desktop` is the desktop as processes (oneberth's `docs/specs/shapes.md`).
+  oneberth's launcher starts the backend, each worker, neorc's worker when there is a flows
+  folder, and the window ([deployment.md](../deployment.md), "The desktop").
+- The backend is `robinauts desktop-backend`: the local mode, local storage in the data
+  directory, its listeners where the launcher says, and the launch secret on its standard
+  input. It starts no worker.
+- Each worker is a process of its own. It reads its token on its standard input and the
+  launcher's variables, and keeps its engines' state in its own folder of the data directory.
+  The backend's process opens none of a worker's files.
+- The data directory is `$XDG_DATA_HOME/robinauts` on Linux, `~/.local/share/robinauts` by
+  default, and `~/Library/Application Support/Robinauts` on macOS. `--data-dir` or
+  `ROBINAUTS_DATA_DIR` names another.
+- Closing the window stops the application: the workers first, each ending its turns, then the
+  backend. One launcher runs per data directory: a second start brings its window forward.
+- A server keeps its own shape: PostgreSQL, sign-in through identity providers, and
+  `robinauts start`, which starts its own workers.
+
 ## Configuration
 
 - Files, version-controllable, with no secret in them: a secret is always
@@ -117,7 +136,8 @@ What an internal platform team deploys and controls.
   ```
 
 - On PostgreSQL each worker is a **process of its own**, which the server spawns at its
-  start and stops at its stop. The server's broker API hands each worker the turns of
+  start and stops at its stop. On the desktop, oneberth's launcher starts each worker, and
+  the backend starts none: it lets each in by the token the launcher had it mint. The server's broker API hands each worker the turns of
   its own agents: a worker is known by the secret the server gave it, not by
   anything it says. A worker builds the engines of its own agents alone.
 - A worker's optional `[workers.<name>]` table names the **command** that starts it, in
