@@ -1,5 +1,9 @@
 # Robinauts
 
+Robinauts is in alpha and under heavy development. Features, interfaces and
+data formats may change without notice, so it is not yet ready for production
+use.
+
 [SonarQube](https://sonarcloud.io/project/overview?id=open-shipyard_robinauts)
 
 An open source AI assistant platform that a company runs on its own
