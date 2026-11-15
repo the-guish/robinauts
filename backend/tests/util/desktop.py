@@ -63,6 +63,23 @@ def open_files(pid: int) -> list[Path]:
     return opened
 
 
+def appeared(
+    variable: str, value: str, seconds: float, beside: Sequence[int] = ()
+) -> dict[int, dict[str, str]]:
+    """The processes whose environment sets ``variable`` to ``value``, each with the environment
+    it showed, as soon as there is one beside ``beside``; none after ``seconds``.
+
+    A process that becomes another program shows no environment for that instant: neorc's
+    worker says ``ready`` and then becomes neorc's own command. One look can fall in it."""
+    deadline = time.monotonic() + seconds
+    while True:
+        shown = {p: environ_of(p) for p in processes_with(variable, value) if p not in beside}
+        found = {p: environ for p, environ in shown.items() if environ.get(variable) == value}
+        if found or time.monotonic() >= deadline:
+            return found
+        time.sleep(0.05)
+
+
 def gone(pids: Sequence[int], seconds: float) -> bool:
     """Whether every one of ``pids`` has ended within ``seconds``."""
     deadline = time.monotonic() + seconds

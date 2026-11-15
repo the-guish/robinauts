@@ -30,7 +30,7 @@ import pytest
 
 from util import stack
 from util.controller_db import NO_DATABASE
-from util.desktop import environ_of, gone, processes_with
+from util.desktop import appeared, gone
 
 pytestmark = pytest.mark.io
 
@@ -155,11 +155,12 @@ def test_neorc_s_worker_ends_with_a_server_that_is_killed(tmp_path: Path) -> Non
     with running:
         try:
             stack.wait_until_ready(running)
-            workers = [p for p in processes_with("ROBINAUTS_TEST_MARK", mark) if p != running.pid]
+            workers = appeared("ROBINAUTS_TEST_MARK", mark, 30, beside=[running.pid])
             assert len(workers) == 1, workers
-            assert environ_of(workers[0])["ONEBERTH_WORKER_NAME"] == "neorc"
+            ((worker, shown),) = workers.items()
+            assert shown["ONEBERTH_WORKER_NAME"] == "neorc"
             running.kill()
-            assert gone(workers, 30)
+            assert gone([worker], 30)
         finally:
             if running.poll() is None:
                 running.kill()
