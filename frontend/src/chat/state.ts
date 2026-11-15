@@ -1133,7 +1133,7 @@ export interface Read {
   runId: string | null;
 }
 
-/** That much of an answer to `GET /api/conversations/{id}`. */
+/** That much of an answer to `GET /robinauts/api/conversations/{id}`. */
 export function lastRead(
   conversationId: string,
   opened: { messages: readonly { id: string }[]; run_id: string | null },

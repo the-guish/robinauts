@@ -4,7 +4,7 @@
 /**
  * What the rest of the application calls a conversation and a message.
  *
- * `GET /api/conversations/{id}` answers **one moment** of a conversation
+ * `GET /robinauts/api/conversations/{id}` answers **one moment** of a conversation
  * (`docs/specs/conversations.md`, "The visible thread"): the one thread it
  * shows, oldest first, and the run in flight or the way the last one ended.
  * The chat is what reads it (`src/chat/runtime.tsx`); what is
@@ -18,7 +18,7 @@ import type { ConversationId } from "../chat";
 export type Conversation = components["schemas"]["ConversationSummary"];
 /** A conversation as the panel's list has it, with whether a turn runs in it. */
 export type ListedConversation = components["schemas"]["ListedConversation"];
-/** What reading one conversation answers (`GET /api/conversations/{id}`). */
+/** What reading one conversation answers (`GET /robinauts/api/conversations/{id}`). */
 export type Opened = components["schemas"]["OpenedConversationResponse"];
 export type Message = components["schemas"]["MessageView"];
 export type Resume = components["schemas"]["ResumeView"];
@@ -54,7 +54,7 @@ export async function cancelRun(
 ): Promise<void> {
   await request(
     "post",
-    "/api/conversations/{conversation_id}/runs/{run_id}/cancel",
+    "/robinauts/api/conversations/{conversation_id}/runs/{run_id}/cancel",
     { path: { conversation_id: id, run_id: runId } },
   );
 }
@@ -69,8 +69,12 @@ export async function setModel(
   id: ConversationId,
   modelId: string,
 ): Promise<Conversation> {
-  return request("put", "/api/conversations/{conversation_id}/model", {
-    path: { conversation_id: id },
-    body: { model_id: modelId },
-  });
+  return request(
+    "put",
+    "/robinauts/api/conversations/{conversation_id}/model",
+    {
+      path: { conversation_id: id },
+      body: { model_id: modelId },
+    },
+  );
 }

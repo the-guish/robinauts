@@ -1129,7 +1129,7 @@ const settle = () =>
 
 test("a first message begins a conversation and says which one", async () => {
   const fetch = stub((call) => {
-    if (call.url === "/api/turns") {
+    if (call.url === "/robinauts/api/turns") {
       return streamed(
         [
           event(
@@ -1148,7 +1148,7 @@ test("a first message begins a conversation and says which one", async () => {
         { headers: streamHeaders(RUN, CONVERSATION) },
       );
     }
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
     return undefined;
@@ -1181,7 +1181,7 @@ test("a first message begins a conversation and says which one", async () => {
 
 test("each tool that answers in a turn is told by its full name", async () => {
   stub((call) => {
-    if (call.url === "/api/turns") {
+    if (call.url === "/robinauts/api/turns") {
       return streamed(
         [
           event(
@@ -1210,7 +1210,7 @@ test("each tool that answers in a turn is told by its full name", async () => {
         { headers: streamHeaders(RUN, CONVERSATION) },
       );
     }
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
     return undefined;
@@ -1229,7 +1229,7 @@ test("each tool that answers in a turn is told by its full name", async () => {
 
 test("a conversation with a run in flight is attached to at resume.after", async () => {
   const fetch = stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(
         opened(conversation(1), [TREE[0]!], {
           run_id: RUN,
@@ -1237,7 +1237,10 @@ test("a conversation with a run in flight is attached to at resume.after", async
         }),
       );
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/runs/${RUN}/events`) {
+    if (
+      call.url ===
+      `/robinauts/api/conversations/${CONVERSATION}/runs/${RUN}/events`
+    ) {
       return streamed(
         [
           event(
@@ -1258,7 +1261,8 @@ test("a conversation with a run in flight is attached to at resume.after", async
   });
   const attaching = fetch.mock.calls.find(
     ([url]) =>
-      String(url) === `/api/conversations/${CONVERSATION}/runs/${RUN}/events`,
+      String(url) ===
+      `/robinauts/api/conversations/${CONVERSATION}/runs/${RUN}/events`,
   );
   expect(
     (attaching?.[1]?.headers as Record<string, string>)["last-event-id"],
@@ -1274,10 +1278,10 @@ test("an edit names the question it replaces", async () => {
   // the backend works out the parent from the question named.
   const deeper = [...TREE, message("m3", "user", "and then?")];
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), deeper));
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`) {
       posts.push(call);
       return streamed(
         [event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 9)],
@@ -1320,7 +1324,7 @@ test("a reply after a tool round hangs under the tool message, not the answer", 
   // the thread is m2 on the screen, and t1 in the store.
   const posts: Call[] = [];
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(
         opened(conversation(1), [
           message("m1", "user", "why?"),
@@ -1331,7 +1335,7 @@ test("a reply after a tool round hangs under the tool message, not the answer", 
         ]),
       );
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`) {
       posts.push(call);
       return streamed(
         [event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 9)],
@@ -1362,7 +1366,7 @@ test("after an interrupted turn, asking again replaces the question", async () =
   // question, which hangs under nothing.
   const posts: Call[] = [];
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(
         opened(conversation(1), [TREE[0]!], {
           ended_badly: {
@@ -1373,7 +1377,7 @@ test("after an interrupted turn, asking again replaces the question", async () =
         }),
       );
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`) {
       posts.push(call);
       return streamed(
         [event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 9)],
@@ -1399,7 +1403,7 @@ test("after an interrupted turn, asking again replaces the question", async () =
 
 test("opening a conversation says what the server says it is", async () => {
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1, "Robins"), TREE));
     }
     return undefined;
@@ -1418,7 +1422,7 @@ test("opening a conversation says what the server says it is", async () => {
 test("what is written and not sent stays with its conversation", async () => {
   stub((call) => {
     for (const n of [1, 2]) {
-      if (call.url === `/api/conversations/${id(n)}`) {
+      if (call.url === `/robinauts/api/conversations/${id(n)}`) {
         return json(opened(conversation(n), TREE));
       }
     }
@@ -1471,10 +1475,10 @@ test("what is written and not sent stays with its conversation", async () => {
 test("regenerating names the answer to produce again, and sends no message", async () => {
   const posts: Call[] = [];
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`) {
       posts.push(call);
       return streamed(
         [event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 9)],
@@ -1504,7 +1508,7 @@ test("regenerating the answer after a tool round takes the whole turn off the sc
   });
   const posts: Call[] = [];
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(
         opened(conversation(1), [
           message("m1", "user", "why?"),
@@ -1516,7 +1520,7 @@ test("regenerating the answer after a tool round takes the whole turn off the sc
         ]),
       );
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`) {
       posts.push(call);
       return response;
     }
@@ -1546,10 +1550,10 @@ test("cancelling posts to the run and waits for the stream to say so", async () 
   });
   const cancels: Call[] = [];
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`)
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`)
       return response;
     if (call.url.endsWith("/cancel")) {
       cancels.push(call);
@@ -1580,7 +1584,7 @@ test("cancelling posts to the run and waits for the stream to say so", async () 
     await settle();
   });
   expect(cancels[0]?.url).toBe(
-    `/api/conversations/${CONVERSATION}/runs/${RUN}/cancel`,
+    `/robinauts/api/conversations/${CONVERSATION}/runs/${RUN}/cancel`,
   );
   // Still running: the run's own end is what ends it, and it comes as the
   // stream's `RUN_FINISHED` with the cancelled outcome.
@@ -1600,10 +1604,10 @@ test("cancelling posts to the run and waits for the stream to say so", async () 
 
 test("a turn a conversation that is answering refuses is said plainly", async () => {
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`) {
       return refusal(
         409,
         "RunAlreadyActiveError",
@@ -1656,7 +1660,7 @@ test("a stream that is lost reads the store and watches the run again", async ()
   // reading whose answer put `run_id` back with nothing watching it, so the
   // thread said it was answering for ever.
   const fetch = inTurn({
-    "/api/turns": [
+    "/robinauts/api/turns": [
       // Two events and then the connection goes: nothing said the run ended.
       () =>
         streamOf(
@@ -1668,7 +1672,7 @@ test("a stream that is lost reads the store and watches the run again", async ()
           event("TEXT_MESSAGE_CONTENT", { messageId: "m2", delta: "half" }, 3),
         ),
     ],
-    [`/api/conversations/${CONVERSATION}/runs/${RUN}/events`]: [
+    [`/robinauts/api/conversations/${CONVERSATION}/runs/${RUN}/events`]: [
       // The client's own tries are spent: a refusal is not one it repeats.
       () => refusal(404, "NotFoundError", "no"),
       // Read again, the run is still in flight, and this watch delivers.
@@ -1684,7 +1688,7 @@ test("a stream that is lost reads the store and watches the run again", async ()
           event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 5),
         ),
     ],
-    [`/api/conversations/${CONVERSATION}`]: [
+    [`/robinauts/api/conversations/${CONVERSATION}`]: [
       () => json(opened(conversation(1), [TREE[0]!], ANSWERING)),
       () => json(opened(conversation(1), TREE)),
     ],
@@ -1707,18 +1711,19 @@ test("a stream that is lost reads the store and watches the run again", async ()
   expect(
     fetch.mock.calls.filter(
       ([url]) =>
-        String(url) === `/api/conversations/${CONVERSATION}/runs/${RUN}/events`,
+        String(url) ===
+        `/robinauts/api/conversations/${CONVERSATION}/runs/${RUN}/events`,
     ),
   ).toHaveLength(2);
 });
 
 test("a second loss is said rather than retried for ever", async () => {
   inTurn({
-    "/api/turns": [() => streamOf()],
-    [`/api/conversations/${CONVERSATION}/runs/${RUN}/events`]: [
+    "/robinauts/api/turns": [() => streamOf()],
+    [`/robinauts/api/conversations/${CONVERSATION}/runs/${RUN}/events`]: [
       () => refusal(404, "NotFoundError", "no"),
     ],
-    [`/api/conversations/${CONVERSATION}`]: [
+    [`/robinauts/api/conversations/${CONVERSATION}`]: [
       () => json(opened(conversation(1), [TREE[0]!], ANSWERING)),
     ],
   });
@@ -1747,7 +1752,7 @@ test("leaving a conversation stops a turn whose request is still in the air", as
   });
   let arrived: (given: Response) => void = () => undefined;
   const fetch = stub((call) => {
-    if (call.url.startsWith("/api/conversations/")) {
+    if (call.url.startsWith("/robinauts/api/conversations/")) {
       return json(opened(conversation(1), TREE));
     }
     return undefined;
@@ -1804,10 +1809,10 @@ test("a first turn that lands after the person moved on does not take them back"
   let arrived: (given: Response) => void = () => undefined;
   const posts: Call[] = [];
   const fetch = stub((call) => {
-    if (call.url === `/api/conversations/${other}`) {
+    if (call.url === `/robinauts/api/conversations/${other}`) {
       return json(opened(conversation(2, "Elsewhere"), TREE));
     }
-    if (call.url === `/api/conversations/${other}/turns`) {
+    if (call.url === `/robinauts/api/conversations/${other}/turns`) {
       posts.push(call);
       return streamOf(
         event("RUN_FINISHED", { threadId: other, runId: RUN }, 9),
@@ -1858,7 +1863,7 @@ test("a first turn that lands after the person moved on does not take them back"
     await result.current.send("and then?");
   });
   expect(posts.map((each) => each.url)).toEqual([
-    `/api/conversations/${other}/turns`,
+    `/robinauts/api/conversations/${other}/turns`,
   ]);
   write(event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 2));
   close();
@@ -1870,7 +1875,7 @@ test("a read that finds a run in flight watches it, whichever read it is", async
   // ever with nothing reading the answer.
   const OTHER_RUN = "22222222-3333-4444-8555-666666666666";
   const fetch = inTurn({
-    [`/api/conversations/${CONVERSATION}/turns`]: [
+    [`/robinauts/api/conversations/${CONVERSATION}/turns`]: [
       () =>
         streamOf(
           event(
@@ -1882,7 +1887,7 @@ test("a read that finds a run in flight watches it, whichever read it is", async
           event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 4),
         ),
     ],
-    [`/api/conversations/${CONVERSATION}`]: [
+    [`/robinauts/api/conversations/${CONVERSATION}`]: [
       () => json(opened(conversation(1), TREE)),
       // The read that ends the turn: somebody else is answering now.
       () =>
@@ -1894,7 +1899,7 @@ test("a read that finds a run in flight watches it, whichever read it is", async
         ),
       () => json(opened(conversation(1), TREE)),
     ],
-    [`/api/conversations/${CONVERSATION}/runs/${OTHER_RUN}/events`]: [
+    [`/robinauts/api/conversations/${CONVERSATION}/runs/${OTHER_RUN}/events`]: [
       () =>
         streamed(
           [
@@ -1924,7 +1929,7 @@ test("a read that finds a run in flight watches it, whichever read it is", async
     fetch.mock.calls.filter(
       ([url]) =>
         String(url) ===
-        `/api/conversations/${CONVERSATION}/runs/${OTHER_RUN}/events`,
+        `/robinauts/api/conversations/${CONVERSATION}/runs/${OTHER_RUN}/events`,
     ),
   ).toHaveLength(1);
   // And the panel was still told, though the turn's own watcher was stopped
@@ -1941,11 +1946,11 @@ test("stopping before the first token leaves the box empty", async () => {
     headers: streamHeaders(RUN, CONVERSATION),
   });
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
     if (call.url.endsWith("/cancel")) return json({ id: RUN });
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`)
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`)
       return response;
     return undefined;
   });
@@ -1990,7 +1995,7 @@ test("a refused message leaves the unanswered question it replaced on the thread
   // The thread ends on a question nobody answered, so a new message takes its
   // place on the screen (`under`). A refusal must put the question back.
   inTurn({
-    [`/api/conversations/${CONVERSATION}`]: [
+    [`/robinauts/api/conversations/${CONVERSATION}`]: [
       () =>
         json(
           opened(conversation(1), [TREE[0]!], {
@@ -2002,7 +2007,7 @@ test("a refused message leaves the unanswered question it replaced on the thread
           }),
         ),
     ],
-    [`/api/conversations/${CONVERSATION}/turns`]: [
+    [`/robinauts/api/conversations/${CONVERSATION}/turns`]: [
       () => refusal(409, "RunAlreadyActiveError", `run ${RUN} is running`),
     ],
   });
@@ -2021,20 +2026,20 @@ test("a refused message leaves the unanswered question it replaced on the thread
 test("the model goes with every turn", async () => {
   const posts: Call[] = [];
   const fetch = stub((call) => {
-    if (call.url === "/api/turns") {
+    if (call.url === "/robinauts/api/turns") {
       return streamed(
         [event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 2)],
         { headers: streamHeaders(RUN, CONVERSATION) },
       );
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`) {
       posts.push(call);
       return streamed(
         [event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 9)],
         { headers: streamHeaders(RUN, CONVERSATION) },
       );
     }
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
     return undefined;
@@ -2048,7 +2053,7 @@ test("the model goes with every turn", async () => {
     (JSON.parse(String(fetch.mock.calls[0]?.[1]?.body)) as { model_id: string })
       .model_id,
   ).toBe("opus");
-  // The shell routes to the conversation, as it does (`Shell.tsx`).
+  // The shell routes to the conversation, as it does (`Workspace.tsx`).
   rerender({
     conversationId: CONVERSATION,
     agentId: "helper",
@@ -2083,10 +2088,10 @@ test("a turn refused because the model has gone says so", async () => {
   // model, and not the conversation, is what stands in the way.
   const answers = (refused: () => Response) =>
     stub((call) => {
-      if (call.url === `/api/conversations/${CONVERSATION}`) {
+      if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
         return json(opened(conversation(1), TREE));
       }
-      if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+      if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`) {
         return refused();
       }
       return undefined;
@@ -2132,10 +2137,10 @@ test("a turn refused because the model has gone says so", async () => {
 
 test("an edit refused because the model has gone goes back into its edit box", async () => {
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`) {
       return refusal(409, "ModelNotOfferedError", "the model is gone");
     }
     return undefined;
@@ -2161,10 +2166,10 @@ test("an edit refused because the model has gone goes back into its edit box", a
 
 test("a regeneration refused because the model has gone says so", async () => {
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`) {
       return refusal(409, "ModelNotOfferedError", "the model is gone");
     }
     return undefined;
@@ -2189,10 +2194,10 @@ test("an edit refused because the conversation is answering goes back into its e
   // Another tab began a run: the server refuses the edit (409), and sending
   // it again once that answer is done has to be an edit still.
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`) {
       return refusal(409, "RunAlreadyActiveError", `run ${RUN} is running`);
     }
     return undefined;
@@ -2216,10 +2221,10 @@ async function answering() {
     headers: streamHeaders(RUN, CONVERSATION),
   });
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`) {
       return response;
     }
     return undefined;
@@ -2261,7 +2266,7 @@ test("an edit whose message has left the thread is kept in the main box", async 
 
 test("a first message refused for its model says so, and hands the model back", async () => {
   stub((call) =>
-    call.url === "/api/turns"
+    call.url === "/robinauts/api/turns"
       ? refusal(422, "UnknownModelError", "body.model_id: is not a model")
       : undefined,
   );
@@ -2281,7 +2286,7 @@ test("a first message refused for its model says so, and hands the model back", 
 test("a first message refused as not there is about its agent, and keeps the text", async () => {
   // No conversation yet, so a 404 is the agent: nothing about the model.
   stub((call) =>
-    call.url === "/api/turns"
+    call.url === "/robinauts/api/turns"
       ? refusal(404, "NotFoundError", "there is nothing here")
       : undefined,
   );
@@ -2302,13 +2307,13 @@ test("a stop that does not reach the server leaves the answer alone", async () =
     headers: streamHeaders(RUN, CONVERSATION),
   });
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
     if (call.url.endsWith("/cancel")) {
       return refusal(500, "InternalError", "something went wrong");
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`)
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`)
       return response;
     return undefined;
   });
@@ -2347,10 +2352,10 @@ test("a turn the backend refuses takes its question back off the screen", async 
   // The 409 a conversation that is already answering makes: another tab
   // started a run between this one's reading and its send.
   inTurn({
-    [`/api/conversations/${CONVERSATION}`]: [
+    [`/robinauts/api/conversations/${CONVERSATION}`]: [
       () => json(opened(conversation(1), TREE)),
     ],
-    [`/api/conversations/${CONVERSATION}/turns`]: [
+    [`/robinauts/api/conversations/${CONVERSATION}/turns`]: [
       () =>
         refusal(409, "RunAlreadyActiveError", `run ${RUN} is running in it`),
     ],
@@ -2380,16 +2385,17 @@ test("a second turn while one is in flight is said, not swallowed", async () => 
     headers: streamHeaders(RUN, CONVERSATION),
   });
   const fetch = stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`)
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`)
       return response;
     return undefined;
   });
   const posted = () =>
     fetch.mock.calls.filter(
-      ([url]) => String(url) === `/api/conversations/${CONVERSATION}/turns`,
+      ([url]) =>
+        String(url) === `/robinauts/api/conversations/${CONVERSATION}/turns`,
     ).length;
   const { result } = chatting({ conversationId: CONVERSATION });
   await waitFor(() => {
@@ -2444,10 +2450,10 @@ test("a second turn while one is in flight is not sent at all", async () => {
   });
   let posted = 0;
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`) {
       posted += 1;
       return response;
     }
@@ -2507,14 +2513,14 @@ test("nothing is running until the run exists", async () => {
   });
   const cancels: Call[] = [];
   const fetch = stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
     if (call.url.endsWith("/cancel")) {
       cancels.push(call);
       return json({ id: RUN, state: "cancelled" });
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`)
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`)
       return response;
     return undefined;
   });
@@ -2558,10 +2564,10 @@ test("nothing is running until the run exists", async () => {
 test("an edit under a question the server has never seen is not sent", async () => {
   const posts: Call[] = [];
   stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), TREE));
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`) {
       posts.push(call);
       return streamOf(
         event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 9),

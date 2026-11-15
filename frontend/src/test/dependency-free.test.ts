@@ -4,9 +4,9 @@
 /**
  * The interface is dependency-free: a guard that it stays so.
  *
- * The shell, the history, the sign-in page and the two pages around them,
- * the chat window and the icons draw their icons from `../icons` and their
- * styles from plain stylesheets over `../tokens.css`. Those packages are no
+ * The application, the history, the side panel, the pages outside
+ * oneberth's shell, the chat window and the icons draw their icons from
+ * `../icons` and their styles from plain stylesheets over oneberth's tokens. Those packages are no
  * longer installed, so the build would refuse an import of `lucide-react`
  * today; but it would accept one again the day the package came back into
  * the tree for any other reason, and a stylesheet's `@import "tailwindcss"`
@@ -24,8 +24,16 @@ import { describe, expect, test } from "vitest";
 const src = resolve(import.meta.dirname, "..");
 
 /** The shell's own sources: these directories, and these files. */
-const SHELL_DIRECTORIES = ["shell", "history", "session", "side"];
-const SHELL_FILES = ["App.tsx", "ErrorBoundary.tsx", "main.tsx"];
+const SHELL_DIRECTORIES = ["shell", "history", "side", "flows"];
+const SHELL_FILES = [
+  "App.tsx",
+  "apps.tsx",
+  "ErrorBoundary.tsx",
+  "LinkPage.tsx",
+  "main.tsx",
+  "page.css",
+  "RobinautsApp.tsx",
+];
 
 function filesUnder(directory: string): string[] {
   return readdirSync(directory).flatMap((name) => {

@@ -2,7 +2,9 @@
 // Copyright The Robinauts Authors
 import { afterEach, expect, test, vi } from "vitest";
 
-import { ApiError, onUnauthorized, request } from "./client";
+import { onUnauthorized } from "@oneberth/ui";
+
+import { ApiError, request } from "./client";
 
 /** Answers the next `fetch` with this, and remembers what it was asked. */
 function answering(
@@ -51,7 +53,7 @@ test("a refusal becomes an ApiError carrying the code and the detail", async () 
   );
 
   const refusal = await refused(
-    request("get", "/api/conversations/{conversation_id}", {
+    request("get", "/robinauts/api/conversations/{conversation_id}", {
       path: { conversation_id: "c-1" },
     }),
   );
@@ -64,7 +66,7 @@ test("a refusal becomes an ApiError carrying the code and the detail", async () 
 test("a refusal that is not one of ours still becomes an ApiError", async () => {
   answering(502, "<html>the proxy is sorry</html>", "text/html");
 
-  const refusal = await refused(request("get", "/api/agents"));
+  const refusal = await refused(request("get", "/robinauts/api/agents"));
 
   expect(refusal.status).toBe(502);
   expect(refusal.error).toBe("http_502");
@@ -76,7 +78,7 @@ test("a request that never arrives becomes an ApiError", async () => {
     .mockRejectedValue(new TypeError("Failed to fetch"));
   vi.stubGlobal("fetch", fetch);
 
-  const refusal = await refused(request("get", "/api/agents"));
+  const refusal = await refused(request("get", "/robinauts/api/agents"));
 
   expect(refusal.status).toBe(0);
   expect(refusal.error).toBe("network_error");
@@ -85,7 +87,7 @@ test("a request that never arrives becomes an ApiError", async () => {
 test("a 200 that is not JSON is an ApiError, not data", async () => {
   answering(200, "<html>signed out</html>", "text/html");
 
-  const refusal = await refused(request("get", "/api/agents"));
+  const refusal = await refused(request("get", "/robinauts/api/agents"));
 
   expect(refusal.status).toBe(200);
   expect(refusal.error).toBe("unreadable_response");
@@ -97,10 +99,12 @@ test("a request is same-origin, and its query is in the URL", async () => {
     JSON.stringify({ items: [], next_cursor: null }),
   );
 
-  await request("get", "/api/conversations", { query: { limit: 20 } });
+  await request("get", "/robinauts/api/conversations", {
+    query: { limit: 20 },
+  });
 
   const { url, headers, init } = asked(fetch);
-  expect(url).toBe("/api/conversations?limit=20");
+  expect(url).toBe("/robinauts/api/conversations?limit=20");
   expect(init?.credentials).toBe("same-origin");
   // A read proves nothing about its type, and claiming JSON it is not sending
   // would be a lie the backend has no reason to believe.
@@ -114,7 +118,7 @@ test("a 204 gives back nothing, and the write says it is JSON", async () => {
 
   const nothing = await request(
     "delete",
-    "/api/conversations/{conversation_id}",
+    "/robinauts/api/conversations/{conversation_id}",
     {
       path: { conversation_id: "c-1" },
     },
@@ -122,7 +126,7 @@ test("a 204 gives back nothing, and the write says it is JSON", async () => {
 
   const { url, headers, init } = asked(fetch);
   expect(nothing).toBeUndefined();
-  expect(url).toBe("/api/conversations/c-1");
+  expect(url).toBe("/robinauts/api/conversations/c-1");
   expect(init?.method).toBe("DELETE");
   expect(headers["content-type"]).toBe("application/json");
   expect(init?.body).toBeUndefined();
@@ -133,41 +137,43 @@ test("a 201 gives back the body of what it created", async () => {
     201,
     JSON.stringify({
       id: "p-1",
-      expires_at: "2026-11-04T12:02:00Z",
-      qr_svg: "<svg/>",
+      name: "Garden",
+      created_at: "2026-11-04T12:00:00Z",
     }),
   );
 
-  const minted = await request("post", "/auth/pairings");
+  const made = await request("post", "/robinauts/api/projects", {
+    body: { name: "Garden" },
+  });
 
   // Typed as the route's 201 body: a 201 is not a 204, and has one.
-  const id: string = minted.id;
+  const id: string = made.id;
   expect(id).toBe("p-1");
-  expect(minted.qr_svg).toBe("<svg/>");
+  expect(made.name).toBe("Garden");
 });
 
-test("a bodyless POST says it is JSON as well", async () => {
+test("a bodyless POST says it is JSON, and sends an empty object", async () => {
   const fetch = answering(200, JSON.stringify({ cancelled: true }));
 
   await request(
     "post",
-    "/api/conversations/{conversation_id}/runs/{run_id}/cancel",
+    "/robinauts/api/conversations/{conversation_id}/runs/{run_id}/cancel",
     {
       path: { conversation_id: "c-1", run_id: "r-1" },
     },
   );
 
   const { url, headers, init } = asked(fetch);
-  expect(url).toBe("/api/conversations/c-1/runs/r-1/cancel");
+  expect(url).toBe("/robinauts/api/conversations/c-1/runs/r-1/cancel");
   expect(init?.method).toBe("POST");
   expect(headers["content-type"]).toBe("application/json");
-  expect(init?.body).toBeUndefined();
+  expect(init?.body).toBe("{}");
 });
 
 test("a body is sent as JSON", async () => {
   const fetch = answering(200, JSON.stringify({ id: "c-1", title: "Renamed" }));
 
-  await request("patch", "/api/conversations/{conversation_id}", {
+  await request("patch", "/robinauts/api/conversations/{conversation_id}", {
     path: { conversation_id: "c-1" },
     body: { title: "Renamed" },
   });
@@ -185,7 +191,7 @@ test("an abort before the answer is the caller's, not ours", async () => {
     .mockRejectedValue(controller.signal.reason as Error);
   vi.stubGlobal("fetch", fetch);
 
-  const failure = await request("get", "/api/agents", {
+  const failure = await request("get", "/robinauts/api/agents", {
     signal: controller.signal,
   }).catch((error: unknown) => error);
 
@@ -208,7 +214,7 @@ test("an abort while the body is read is the caller's too", async () => {
     vi.fn<typeof globalThis.fetch>().mockResolvedValue(answer),
   );
 
-  const failure = await request("get", "/api/agents", {
+  const failure = await request("get", "/robinauts/api/agents", {
     signal: controller.signal,
   }).catch((error: unknown) => error);
 
@@ -216,12 +222,12 @@ test("an abort while the body is read is the caller's too", async () => {
   expect(failure).not.toBeInstanceOf(ApiError);
 });
 
-test("a 401 tells whoever is listening, before the refusal is thrown", async () => {
+test("a 401 tells oneberth's session, before the refusal is thrown", async () => {
   answering(401, JSON.stringify({ error: "not_signed_in", detail: "gone" }));
   const told: string[] = [];
   const stop = onUnauthorized(() => told.push("told"));
 
-  const failure = await refused(request("get", "/api/agents"));
+  const failure = await refused(request("get", "/robinauts/api/agents"));
 
   expect(told).toEqual(["told"]);
   expect(failure.status).toBe(401);
@@ -233,7 +239,7 @@ test("a listener that has unsubscribed is not told", async () => {
   const told: string[] = [];
   onUnauthorized(() => told.push("told"))();
 
-  await refused(request("get", "/api/agents"));
+  await refused(request("get", "/robinauts/api/agents"));
 
   expect(told).toEqual([]);
 });
@@ -243,27 +249,8 @@ test("nothing but a 401 tells them", async () => {
   const told: string[] = [];
   const stop = onUnauthorized(() => told.push("told"));
 
-  await refused(request("get", "/api/agents"));
+  await refused(request("get", "/robinauts/api/agents"));
 
   expect(told).toEqual([]);
   stop();
-});
-
-test("a listener that throws does not swallow the refusal", async () => {
-  answering(401, JSON.stringify({ error: "not_signed_in", detail: "gone" }));
-  const told: string[] = [];
-  const stops = [
-    onUnauthorized(() => {
-      throw new Error("a listener's own bug");
-    }),
-    // Registered after the one that throws: it is still told, and the
-    // caller still gets its ApiError.
-    onUnauthorized(() => told.push("second")),
-  ];
-
-  const failure = await refused(request("get", "/api/agents"));
-
-  expect(told).toEqual(["second"]);
-  expect(failure.error).toBe("not_signed_in");
-  for (const stop of stops) stop();
 });

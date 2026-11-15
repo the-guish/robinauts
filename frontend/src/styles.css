@@ -2,9 +2,10 @@
 /* Copyright The Robinauts Authors */
 
 /*
- * The stylesheet the page loads first: our design tokens, the base every
- * other stylesheet is written against, and the two rules that hold for the
- * whole page.
+ * The stylesheet the page loads first: the base every other stylesheet of
+ * Robinauts' application is written against, and the rules that hold for the
+ * whole page. The design tokens are oneberth's (`@oneberth/ui`), which its
+ * shell brings.
  *
  * **Plain CSS, and no package.** Each area of the interface has a stylesheet
  * of its own, imported by the component that uses it (`./shell/shell.css`,
@@ -13,25 +14,6 @@
  * would ship that package's code with no module graph to see it, which is
  * why `./test/dependency-free.test.ts` refuses one here.
  */
-@import "./tokens.css";
-
-/*
- * The base: what a browser draws differently from one engine to the next,
- * levelled, and nothing more. Every stylesheet in the interface is written
- * against exactly this; anything a component needs beyond it -- a margin, a
- * border, a cursor -- it says itself.
- *
- * The borders are zero and solid in the line colour, so that a component
- * draws one by giving it a width alone; lists lose their bullets, because
- * every list here is a list of controls; and form controls take the text of
- * whatever they sit in, which a browser does not do by itself.
- */
-*,
-::before,
-::after {
-  box-sizing: border-box;
-  border: 0 solid var(--line);
-}
 
 html {
   -webkit-text-size-adjust: 100%;
@@ -47,43 +29,47 @@ body {
   line-height: 1.45;
 }
 
-h1,
-h2,
-h3,
-h4,
-h5,
-h6,
-p,
-figure,
-blockquote,
-dl,
-dd,
-pre,
-ul,
-ol {
+/*
+ * The base: what a browser draws differently from one engine to the next,
+ * levelled, and nothing more. Every stylesheet of Robinauts' application is
+ * written against exactly this; anything a component needs beyond it -- a
+ * margin, a border, a cursor -- it says itself.
+ *
+ * **Inside Robinauts' application alone**: its area (`.shell`), and its panel
+ * (`.panel`), which the shell draws in its drawer on a small screen. The
+ * shell's own parts and neorc's are drawn against the browser's defaults,
+ * and a reset of the whole page would redraw them. `:where` keeps every rule
+ * here as weak as an element's own.
+ *
+ * The borders are zero and solid in the line colour, so that a component
+ * draws one by giving it a width alone; lists lose their bullets, because
+ * every list here is a list of controls; and form controls take the text of
+ * whatever they sit in, which a browser does not do by itself.
+ */
+:where(.shell, .panel, .page),
+:where(.shell, .panel, .page) *,
+:where(.shell, .panel, .page) ::before,
+:where(.shell, .panel, .page) ::after {
+  box-sizing: border-box;
+  border: 0 solid var(--line);
+}
+
+:where(.shell, .panel, .page)
+  :where(h1, h2, h3, h4, h5, h6, p, figure, blockquote, dl, dd, pre, ul, ol) {
   margin: 0;
 }
 
-h1,
-h2,
-h3,
-h4,
-h5,
-h6 {
+:where(.shell, .panel, .page) :where(h1, h2, h3, h4, h5, h6) {
   font-size: inherit;
   font-weight: inherit;
 }
 
-ul,
-ol {
+:where(.shell, .panel, .page) :where(ul, ol) {
   padding: 0;
   list-style: none;
 }
 
-button,
-input,
-select,
-textarea {
+:where(.shell, .panel, .page) :where(button, input, select, textarea) {
   font: inherit;
   color: inherit;
   margin: 0;
@@ -91,35 +77,29 @@ textarea {
   background: transparent;
 }
 
-button,
-[role="button"] {
+:where(.shell, .panel, .page) :where(button, [role="button"]) {
   cursor: pointer;
 }
 
-button:disabled {
+:where(.shell, .panel, .page) :where(button:disabled) {
   cursor: default;
 }
 
-a {
+:where(.shell, .panel, .page) :where(a) {
   color: inherit;
   text-decoration: inherit;
 }
 
-img,
-svg,
-video {
+:where(.shell, .panel, .page) :where(img, svg, video) {
   display: block;
   max-width: 100%;
 }
 
-textarea {
+:where(.shell, .panel, .page) :where(textarea) {
   resize: none;
 }
 
-code,
-kbd,
-pre,
-samp {
+:where(.shell, .panel, .page) :where(code, kbd, pre, samp) {
   font-family: var(--mono);
   font-size: 1em;
 }

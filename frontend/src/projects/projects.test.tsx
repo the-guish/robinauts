@@ -7,7 +7,7 @@
  * project" makes another. Wired as the shell wires it.
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { expect, test, vi } from "vitest";
 
 import { useHistory } from "../history/history";
@@ -40,14 +40,12 @@ function WithProjects({
   const [round, setRound] = useState(0);
   const projects = useProjects(round);
   const folded = useFolded();
-  const closer = useRef<HTMLButtonElement>(null);
   const newProject = useCallback(async (name: string) => {
     await createProject(name);
     setRound((was) => was + 1);
   }, []);
   return (
     <Panel
-      user={null}
       history={history}
       current={null}
       projects={projects.status === "ready" ? projects.items : null}
@@ -56,12 +54,7 @@ function WithProjects({
       onNewProject={newProject}
       collapsed={false}
       onCollapse={() => undefined}
-      drawer={false}
-      onCloseDrawer={() => undefined}
       onNewChat={() => undefined}
-      signOut={() => Promise.resolve()}
-      signInConfigured
-      closeRef={closer}
     />
   );
 }
@@ -71,7 +64,7 @@ function serve(projects: Project[]) {
   const known = [...projects];
   const atWork = { ...conversation(2, "At work"), project_id: WORK.id };
   return stubFetch((call) => {
-    if (call.url.startsWith("/api/projects")) {
+    if (call.url.startsWith("/robinauts/api/projects")) {
       if (call.method === "POST") {
         const { name } = call.body as { name: string };
         if (name === "Refused") {
@@ -167,7 +160,9 @@ test("a new project is made from the panel and drawn, and a refusal is said", as
   expect(
     await screen.findByRole("list", { name: "Holidays" }),
   ).toHaveTextContent("No conversations yet.");
-  expect(callsTo(fetch, "/api/projects", "POST").at(-1)?.body).toEqual({
+  expect(
+    callsTo(fetch, "/robinauts/api/projects", "POST").at(-1)?.body,
+  ).toEqual({
     name: "Holidays",
   });
   expect(screen.getByRole("button", { name: "New project" })).toHaveFocus();

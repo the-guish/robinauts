@@ -80,7 +80,7 @@ test("the view is framed sandboxed, with scripts alone, and hidden until it answ
   const { frame } = tab();
   expect(frame).toHaveAttribute(
     "src",
-    "/api/apps/todo/show_todos/view?agent=planner",
+    "/robinauts/api/apps/todo/show_todos/view?agent=planner",
   );
   expect(frame).toHaveAttribute("sandbox", "allow-scripts");
   expect(screen.getByRole("status")).toHaveTextContent("Loading To-do list…");
@@ -113,7 +113,7 @@ test("the handshake: the theme, then the app's own tool, its input and its resul
   });
   expect(fetch).toHaveBeenCalledOnce();
   const [url, init] = fetch.mock.calls[0] ?? [];
-  expect(url).toBe("/api/apps/todo/tools/show_todos");
+  expect(url).toBe("/robinauts/api/apps/todo/tools/show_todos");
   expect(init?.method).toBe("POST");
   expect(JSON.parse(String(init?.body))).toEqual({
     agent: "planner",
@@ -154,7 +154,9 @@ test("the view's tool calls go through the backend, and nothing else is offered"
       result: LIST,
     });
   });
-  expect(fetch.mock.calls.at(-1)?.[0]).toBe("/api/apps/todo/tools/add_todo");
+  expect(fetch.mock.calls.at(-1)?.[0]).toBe(
+    "/robinauts/api/apps/todo/tools/add_todo",
+  );
   expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body))).toEqual({
     agent: "planner",
     arguments: { text: "milk" },

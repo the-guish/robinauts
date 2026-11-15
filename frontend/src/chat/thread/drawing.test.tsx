@@ -49,7 +49,7 @@ test("each message is drawn once, however many deltas arrive", async () => {
     "fetch",
     vi.fn((input: RequestInfo | URL) =>
       Promise.resolve(
-        String(input) === `/api/conversations/${CONVERSATION}`
+        String(input) === `/robinauts/api/conversations/${CONVERSATION}`
           ? json(
               opened(conversation(1), [
                 message("m1", "user", "Why?"),

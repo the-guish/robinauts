@@ -27,7 +27,7 @@
  *   ordered, unordered and task lists (nested), links and autolinks,
  *   blockquotes, thematic breaks, hard breaks, tables and strikethrough.
  * - Every element carries a class prefixed `md-` and is styled by
- *   `./markdown.css`, over the tokens of `src/tokens.css`. No colour or radius
+ *   `./markdown.css`, over the tokens of `@oneberth/ui`. No colour or radius
  *   is written as a literal.
  *
  * **Memoised.** A streaming answer is drawn again on every few words, and

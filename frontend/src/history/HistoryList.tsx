@@ -57,7 +57,7 @@ import {
   XIcon,
 } from "../icons";
 import type { Folded, Project } from "../projects/projects";
-import { formatRoute, navigate, NEW_CHAT } from "../router";
+import { NEW_CHAT, useRouter } from "../router";
 import type { History } from "./history";
 import "./history.css";
 
@@ -306,6 +306,7 @@ function HistoryItem({
   const actions = useRef<HTMLButtonElement>(null);
   const box = useRef<HTMLInputElement>(null);
   const keep = useRef<HTMLButtonElement>(null);
+  const { navigate, href } = useRouter();
 
   const name = shownTitle(conversation.title);
   /**
@@ -509,7 +510,7 @@ function HistoryItem({
       ) : (
         <div className="history-row">
           <a
-            href={formatRoute({ kind: "conversation", id: conversation.id })}
+            href={href({ kind: "conversation", id: conversation.id })}
             aria-current={isCurrent ? "page" : undefined}
             title={name}
             onClick={onOpened}

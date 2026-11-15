@@ -21,7 +21,7 @@
   position: relative;
   z-index: 20;
   display: grid;
-  height: 100vh;
+  height: 100%;
   flex-shrink: 0;
   grid-template-columns: auto minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);

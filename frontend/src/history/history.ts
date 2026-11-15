@@ -4,11 +4,11 @@
 /**
  * The conversations of whoever is signed in, as the panel lists them.
  *
- * `GET /api/conversations`, most recently updated first, a page at a time
+ * `GET /robinauts/api/conversations`, most recently updated first, a page at a time
  * with the opaque cursor the page before handed back
  * (`docs/specs/conversations.md`, "Listing"). No data-fetching library and no
  * state library: one list, asked for once and again after anything changes
- * it, which is what `src/session/session.ts` already does for the session.
+ * it, which is what oneberth's session store already does for the session.
  *
  * A hook rather than a module store, because there is one of these on the
  * page -- the shell owns it, passes it to the panel, and reads the open
@@ -142,7 +142,7 @@ export function useHistory(): History {
       error: null,
     }));
     try {
-      const page = await request("get", "/api/conversations", {
+      const page = await request("get", "/robinauts/api/conversations", {
         query: { limit: PAGE, cursor: after },
       });
       if (!mounted.current || asked.current !== mine) return;
@@ -193,7 +193,7 @@ export function useHistory(): History {
    */
   const rename = useCallback(
     async (id: ConversationId, title: string): Promise<void> => {
-      await request("patch", "/api/conversations/{conversation_id}", {
+      await request("patch", "/robinauts/api/conversations/{conversation_id}", {
         path: { conversation_id: id },
         body: { title },
       });
@@ -204,9 +204,13 @@ export function useHistory(): History {
 
   const archive = useCallback(
     async (id: ConversationId): Promise<void> => {
-      await request("post", "/api/conversations/{conversation_id}/archive", {
-        path: { conversation_id: id },
-      });
+      await request(
+        "post",
+        "/robinauts/api/conversations/{conversation_id}/archive",
+        {
+          path: { conversation_id: id },
+        },
+      );
       await load(null);
     },
     [load],
@@ -214,9 +218,13 @@ export function useHistory(): History {
 
   const remove = useCallback(
     async (id: ConversationId): Promise<void> => {
-      await request("delete", "/api/conversations/{conversation_id}", {
-        path: { conversation_id: id },
-      });
+      await request(
+        "delete",
+        "/robinauts/api/conversations/{conversation_id}",
+        {
+          path: { conversation_id: id },
+        },
+      );
       await load(null);
     },
     [load],

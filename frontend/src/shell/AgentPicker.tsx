@@ -27,7 +27,7 @@ export const AGENT_KEY = "agent";
 export type Agents = Offered<Agent>;
 
 const askAgents = (signal: AbortSignal) =>
-  request("get", "/api/agents", { signal });
+  request("get", "/robinauts/api/agents", { signal });
 
 /**
  * The agents, asked for once.

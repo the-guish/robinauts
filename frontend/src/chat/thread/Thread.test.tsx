@@ -50,7 +50,7 @@ function turnsIn(fetch: ReturnType<typeof stub>): unknown[] {
   return fetch.mock.calls
     .filter(
       ([url, init]) =>
-        String(url) === `/api/conversations/${CONVERSATION}/turns` &&
+        String(url) === `/robinauts/api/conversations/${CONVERSATION}/turns` &&
         init?.method?.toUpperCase() === "POST",
     )
     .map(([, init]) => JSON.parse(String(init?.body)));
@@ -81,10 +81,10 @@ async function conversationWithStream(messages = TREE): Promise<{
     headers: streamHeaders(RUN, CONVERSATION),
   });
   const fetch = stub((call) => {
-    if (call.url === `/api/conversations/${CONVERSATION}`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
       return json(opened(conversation(1), messages));
     }
-    if (call.url === `/api/conversations/${CONVERSATION}/turns`) {
+    if (call.url === `/robinauts/api/conversations/${CONVERSATION}/turns`) {
       return response;
     }
     if (call.url.endsWith("/cancel")) return json({ id: RUN });
@@ -325,7 +325,7 @@ test("nothing is sent while the conversation is read, and the box keeps its text
     answerRead = done;
   });
   const fetch = vi.fn<typeof globalThis.fetch>((input) =>
-    String(input) === `/api/conversations/${CONVERSATION}`
+    String(input) === `/robinauts/api/conversations/${CONVERSATION}`
       ? reading
       : Promise.reject(new Error(`nothing answers ${String(input)}`)),
   );

@@ -121,7 +121,7 @@ export async function startNewConversation(
 ): Promise<Attached> {
   return attachTo(
     await post(
-      "/api/turns",
+      "/robinauts/api/turns",
       {
         agent_id: agentId,
         model_id: modelId,
@@ -168,7 +168,7 @@ export async function startTurn(
   };
   return attachTo(
     await post(
-      `/api/conversations/${encodeURIComponent(conversationId)}/turns`,
+      `/robinauts/api/conversations/${encodeURIComponent(conversationId)}/turns`,
       body,
       watching,
     ),
@@ -241,7 +241,7 @@ function attachTo(
  * The loop is: read until the stream ends; if it ended with a terminal event
  * the run is over and so is this; otherwise the connection went and the run
  * did not, so wait a moment and open
- * `GET /api/conversations/{id}/runs/{run_id}/events` after the last position
+ * `GET /robinauts/api/conversations/{id}/runs/{run_id}/events` after the last position
  * seen. `Last-Event-ID` is how that position is said, which is
  * what a browser's own `EventSource` would send and what the backend reads
  * whether or not `after` is there as well.
@@ -389,7 +389,7 @@ async function open(
   if (after > 0) headers["last-event-id"] = String(after);
   return answered(
     fetch(
-      `/api/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/events`,
+      `/robinauts/api/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/events`,
       {
         method: "GET",
         headers,

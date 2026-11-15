@@ -32,7 +32,7 @@ export const MODEL_KEY = "model";
 export type Models = Offered<Model>;
 
 const askModels = (signal: AbortSignal) =>
-  request("get", "/api/models", { signal });
+  request("get", "/robinauts/api/models", { signal });
 
 /**
  * The models, asked for once.

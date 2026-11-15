@@ -2,41 +2,30 @@
 // Copyright The Robinauts Authors
 
 /**
- * The shell: the panel on the left, the chat on the right, and no top bar
- * (`docs/specs/frontend.md`).
+ * Robinauts' application, in the area oneberth's shell gives it: the panel on
+ * the left, the chat in the middle, the side panel on the right, and no top
+ * bar (`docs/specs/frontend.md`).
  *
- * Two things about the panel are decided here rather than inside it, because
- * both are about the window and not about the panel's contents:
+ * The rail of applications, the theme toggle, the account and the sign-in
+ * page are the shell's. The panel is ours, and goes where the shell says
+ * (`ShellPanel`): beside the page on a wide screen, where it collapses to a
+ * rail of icons remembered per browser, and in the shell's drawer on a small
+ * one.
  *
- * - **the rail**, remembered per browser, which is what the panel looks like
- *   on a screen wide enough to keep it beside the page;
- * - **the drawer**, which is what it is on a screen that is not. Which of
- *   the two applies is a CSS breakpoint's decision, so the drawer's state is
- *   kept whatever the width is and simply has no effect above `md`.
+ * **Hidden, it stops its long poll** (oneberth's `shell.md`): the change feed
+ * waits while neorc is shown, and reads again as soon as Robinauts is shown.
  *
  * The shape is neorc's, written again for this project; recorded in
  * `docs/legal/ip-clearance.md`.
  */
+import { ShellPanel } from "@oneberth/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Chat, type Drafts } from "../chat";
 import { useChanges } from "../changes/changes";
-import { DevicesPage } from "../devices/DevicesPage";
-import { FlowsPage } from "../flows/FlowsPage";
-import { NewRunPage } from "../flows/NewRunPage";
 import { conversationIn, useHistory } from "../history/history";
-import { MenuIcon, PanelRightIcon } from "../icons";
-import {
-  FLOWS,
-  formatRoute,
-  isOwnFlowsPage,
-  navigate,
-  NEW_CHAT,
-  type Route,
-  useRoute,
-} from "../router";
-import type { Session } from "../session/session";
-import { signOut as endSession } from "../session/session";
+import { PanelRightIcon } from "../icons";
+import { NEW_CHAT, useRouter } from "../router";
 import { shownTitle } from "../conversation/conversation";
 import { AppTab } from "../side/AppTab";
 import { appOf, appOffers, toolResults, useApps } from "../side/apps";
@@ -49,7 +38,6 @@ import {
   useAgents,
   useChosenAgent,
 } from "./AgentPicker";
-import { LocalModeBanner } from "./LocalModeBanner";
 import {
   ConversationModel,
   ModelPicker,
@@ -57,7 +45,7 @@ import {
   useChosenModel,
   useModels,
 } from "./ModelPicker";
-import { PANEL_ID, Panel, type PanelTab } from "./Panel";
+import { Panel } from "./Panel";
 import { ProjectPicker } from "./ProjectPicker";
 import {
   createProject,
@@ -183,33 +171,16 @@ function usePanelCollapsed(): [boolean, (collapsed: boolean) => void] {
   ];
 }
 
-export function Shell({
-  session,
-  signOut = endSession,
+export function Workspace({
+  visible = true,
 }: Readonly<{
-  session: Session;
-  signOut?: () => Promise<void>;
+  /** Whether the shell shows this application: hidden, it polls nothing. */
+  visible?: boolean;
 }>) {
   const [collapsed, setCollapsed] = usePanelCollapsed();
-  const [drawer, setDrawer] = useState(false);
-  // Where the interface is: `#/`, `#/c/<id>` or `#/devices`
+  // Where the application is: the empty chat or a conversation
   // (`src/router.ts`).
-  const route = useRoute();
-  // The orchestrator's page, framed, when the server has one; a flows
-  // route on a server with none is the empty chat, as any unknown hash is.
-  const flowsUrl = session.flows_url ?? null;
-  const flowsView =
-    route.kind === "flows" && flowsUrl !== null ? route.view : null;
-  // The pages that are not about a conversation: no side panel there.
-  const aPage = route.kind === "devices" || flowsView !== null;
-  // The panel's tab this page belongs to, if either.
-  const pageTab: PanelTab | null =
-    route.kind === "new" || route.kind === "conversation"
-      ? "sessions"
-      : flowsView !== null
-        ? "flows"
-        : null;
-  const lastPages = useLastPages(route, pageTab);
+  const { route, navigate } = useRouter();
   const history = useHistory();
   // Something of this user changed in another tab or client: the list is
   // asked for again, and the chat reads its conversation again
@@ -235,7 +206,7 @@ export function Shell({
     },
     [chooseProject],
   );
-  useChanges(changed);
+  useChanges(changed, visible);
   // "New chat" pressed while the empty chat is already up changes no hash
   // and so re-renders nothing; the count is what remounts the area, so
   // nothing typed into it carries over into the next one.
@@ -280,10 +251,8 @@ export function Shell({
     },
     [forgetChosenModel, modelsStale],
   );
-  const opener = useRef<HTMLButtonElement>(null);
-  const closer = useRef<HTMLButtonElement>(null);
-  // The side panel's drawer, on the right: the same as the left one, and
-  // never open at the same time as it.
+  // The side panel's drawer, on the right, below the breakpoint. The left
+  // panel's drawer is the shell's.
   const [sideDrawer, setSideDrawer] = useState(false);
   const sideOpener = useRef<HTMLButtonElement>(null);
   const sideCloser = useRef<HTMLButtonElement>(null);
@@ -291,10 +260,6 @@ export function Shell({
   // Closing puts the focus back on the button that opened it, so a keyboard
   // is never left on an element that has slid off the screen -- or, worse,
   // on <body>, which is where the focus falls when what held it goes away.
-  const close = useCallback(() => {
-    if (drawer) opener.current?.focus();
-    setDrawer(false);
-  }, [drawer]);
   const closeSide = useCallback(() => {
     if (sideDrawer) sideOpener.current?.focus();
     setSideDrawer(false);
@@ -303,23 +268,19 @@ export function Shell({
   // Escape closes the drawer, wherever the focus is inside it, and it is a
   // close like any other: the same `close`, so the focus comes back.
   useEffect(() => {
-    if (!drawer && !sideDrawer) return;
+    if (!sideDrawer) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (drawer) close();
-      if (sideDrawer) closeSide();
+      closeSide();
     };
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
     };
-  }, [drawer, close, sideDrawer, closeSide]);
+  }, [sideDrawer, closeSide]);
 
   // The focus follows the drawer into it when it opens, so a keyboard
   // carries on where the eye is rather than behind the overlay.
-  useEffect(() => {
-    if (drawer) closer.current?.focus();
-  }, [drawer]);
   useEffect(() => {
     if (sideDrawer) sideCloser.current?.focus();
   }, [sideDrawer]);
@@ -419,7 +380,7 @@ export function Shell({
       }
       history.refresh();
     },
-    [history, agentId, modelId],
+    [history, agentId, modelId, navigate],
   );
 
   // The side panel (`../side/`) offers the agent's MCP apps: the
@@ -453,88 +414,54 @@ export function Shell({
 
   return (
     <div className="shell">
-      <Panel
-        user={session.user ?? null}
-        history={history}
-        current={current}
-        projects={projects.status === "ready" ? projects.items : null}
-        folded={folded}
-        onNewChatIn={(project) => {
-          chooseProject(project);
-          navigate(NEW_CHAT);
-          setChat((count) => count + 1);
-        }}
-        onNewProject={newProject}
-        onDevices={route.kind === "devices"}
-        flowsUrl={flowsUrl}
-        flowsView={flowsView}
-        pageTab={pageTab}
-        onTab={(tab) => {
-          const to = lastPages[tab];
-          if (formatRoute(to) !== formatRoute(route)) navigate(to);
-        }}
-        collapsed={collapsed}
-        onCollapse={setCollapsed}
-        drawer={drawer}
-        onCloseDrawer={close}
-        onNewChat={() => {
-          navigate(NEW_CHAT);
-          setChat((count) => count + 1);
-          close();
-        }}
-        signOut={signOut}
-        signInConfigured={session.sign_in}
-        closeRef={closer}
-      />
-      {(drawer || sideDrawer) && (
+      <ShellPanel>
+        <Panel
+          history={history}
+          current={current}
+          projects={projects.status === "ready" ? projects.items : null}
+          folded={folded}
+          onNewChatIn={(project) => {
+            chooseProject(project);
+            navigate(NEW_CHAT);
+            setChat((count) => count + 1);
+          }}
+          onNewProject={newProject}
+          collapsed={collapsed}
+          onCollapse={setCollapsed}
+          onNewChat={() => {
+            navigate(NEW_CHAT);
+            setChat((count) => count + 1);
+          }}
+        />
+      </ShellPanel>
+      {sideDrawer && (
         <div
           data-backdrop=""
           aria-hidden="true"
-          onClick={() => {
-            close();
-            closeSide();
-          }}
+          onClick={closeSide}
           className="shell-backdrop"
         />
       )}
       <div className="shell-column">
-        <LocalModeBanner local={session.local_development ?? false} />
-        {/* The one thing above the chat, and only where the panel is a
+        {/* The one thing above the chat, and only where the side panel is a
             drawer: `docs/specs/frontend.md` says there is no top bar, so
-            above the breakpoint this is gone and nothing replaces it. */}
+            above the breakpoint this is gone and nothing replaces it. The
+            left panel's drawer opens from the shell's own button. */}
         <div className="shell-openers">
           <button
             type="button"
-            ref={opener}
-            title="Open the panel"
-            aria-label="Open the panel"
-            aria-controls={PANEL_ID}
-            aria-expanded={drawer}
+            ref={sideOpener}
+            title="Open the side panel"
+            aria-label="Open the side panel"
+            aria-controls={SIDE_ID}
+            aria-expanded={sideDrawer}
             onClick={() => {
-              setSideDrawer(false);
-              setDrawer(true);
+              setSideDrawer(true);
             }}
             className="shell-opener"
           >
-            <MenuIcon className="shell-icon" />
+            <PanelRightIcon className="shell-icon" />
           </button>
-          {!aPage && (
-            <button
-              type="button"
-              ref={sideOpener}
-              title="Open the side panel"
-              aria-label="Open the side panel"
-              aria-controls={SIDE_ID}
-              aria-expanded={sideDrawer}
-              onClick={() => {
-                setDrawer(false);
-                setSideDrawer(true);
-              }}
-              className="shell-opener"
-            >
-              <PanelRightIcon className="shell-icon" />
-            </button>
-          )}
         </div>
         {/* The heading is the first line of the page, because
             `docs/specs/frontend.md` leaves no top bar to put it in. It is the
@@ -548,106 +475,68 @@ export function Shell({
             `chat` count is what "New chat" remounts it by, so that nothing
             typed into one carries over into the next. */}
         <main className="shell-main">
-          {/* "Linked devices" is a page of the shell: the panel stays, and
-              the page stands where the chat would be. */}
-          {route.kind === "devices" ? (
-            <DevicesPage session={session} />
-          ) : flowsView !== null && isOwnFlowsPage(flowsView) ? (
-            <NewRunPage
-              flow={flowsView.at === "start" ? flowsView.flow : null}
-            />
-          ) : flowsUrl !== null && flowsView !== null ? (
-            <FlowsPage url={flowsUrl} view={flowsView} />
-          ) : (
-            <>
-              <h1 className="shell-title">
-                {route.kind === "conversation"
-                  ? title === null
-                    ? "…"
-                    : shownTitle(title)
-                  : "New chat"}
-              </h1>
-              {/* Who the conversation is with, under its title. The agent
+          <>
+            <h1 className="shell-title">
+              {route.kind === "conversation"
+                ? title === null
+                  ? "…"
+                  : shownTitle(title)
+                : "New chat"}
+            </h1>
+            {/* Who the conversation is with, under its title. The agent
               picker is gone once a conversation exists (`./AgentPicker.tsx`),
               and with it the only thing on the screen that said so; this is
               the fact it left behind, told as a line rather than a control
               that could not be changed. The model is still a choice, so
               beside it is the model picker (`./ModelPicker.tsx`). */}
-              {withAgent !== null && (
-                <div className="shell-about">
-                  <p data-agent="" className="shell-agent">
-                    with {withAgent}
-                  </p>
-                  {current !== null && conversationModel !== null && (
-                    <ConversationModel
-                      key={current}
-                      models={conversationModels}
-                      conversationId={current}
-                      model={conversationModel}
-                      onMoved={modelMoved}
-                      onNotOffered={modelsStale}
-                    />
-                  )}
-                </div>
-              )}
-              <Chat
-                key={chat}
-                conversationId={current}
-                agentId={agentId}
-                projectId={projectId}
-                // The model goes with every turn: an open conversation's is the
-                // one its line's picker shows.
-                modelId={current === null ? modelId : conversationModel}
-                // A first message refused for its model: this browser forgets
-                // it, whether or not the list has come, and asks for the list
-                // again, so the next one goes to a model still offered.
-                onModelRefused={forgetModel}
-                onConversationStarted={startedConversation}
-                onConversationOpened={conversationOpened}
-                onTurnEnded={turnEnded}
-                changes={changes}
-                onToolResult={results.publish}
-                welcome={welcome}
-                drafts={drafts}
-              />
-            </>
-          )}
+            {withAgent !== null && (
+              <div className="shell-about">
+                <p data-agent="" className="shell-agent">
+                  with {withAgent}
+                </p>
+                {current !== null && conversationModel !== null && (
+                  <ConversationModel
+                    key={current}
+                    models={conversationModels}
+                    conversationId={current}
+                    model={conversationModel}
+                    onMoved={modelMoved}
+                    onNotOffered={modelsStale}
+                  />
+                )}
+              </div>
+            )}
+            <Chat
+              key={chat}
+              conversationId={current}
+              agentId={agentId}
+              projectId={projectId}
+              // The model goes with every turn: an open conversation's is the
+              // one its line's picker shows.
+              modelId={current === null ? modelId : conversationModel}
+              // A first message refused for its model: this browser forgets
+              // it, whether or not the list has come, and asks for the list
+              // again, so the next one goes to a model still offered.
+              onModelRefused={forgetModel}
+              onConversationStarted={startedConversation}
+              onConversationOpened={conversationOpened}
+              onTurnEnded={turnEnded}
+              changes={changes}
+              onToolResult={results.publish}
+              welcome={welcome}
+              drafts={drafts}
+            />
+          </>
         </main>
       </div>
-      {/* About the conversation, so not on a page that is not one. */}
-      {!aPage && (
-        <SidePanel
-          conversation={current ?? NEW_CHAT_TABS}
-          offers={offers}
-          renderers={renderers}
-          drawer={sideDrawer}
-          onCloseDrawer={closeSide}
-          closeRef={sideCloser}
-        />
-      )}
+      <SidePanel
+        conversation={current ?? NEW_CHAT_TABS}
+        offers={offers}
+        renderers={renderers}
+        drawer={sideDrawer}
+        onCloseDrawer={closeSide}
+        closeRef={sideCloser}
+      />
     </div>
   );
-}
-
-/**
- * The page last open under each of the panel's tabs, so choosing a tab goes
- * back to it: a conversation or the empty chat under Sessions, an
- * orchestrator's page under Flows. Until one has been open, the empty chat
- * and the runs. Kept while the page is, not remembered by the browser.
- *
- * Followed while rendering, as the panel follows the tab: the page is known
- * by its route, which is one object per address (`../router.ts`).
- */
-function useLastPages(
-  route: Route,
-  tab: PanelTab | null,
-): Readonly<Record<PanelTab, Route>> {
-  const [last, setLast] = useState<Readonly<Record<PanelTab, Route>>>({
-    sessions: NEW_CHAT,
-    flows: FLOWS,
-  });
-  if (tab !== null && last[tab] !== route) {
-    setLast({ ...last, [tab]: route });
-  }
-  return tab === null ? last : { ...last, [tab]: route };
 }

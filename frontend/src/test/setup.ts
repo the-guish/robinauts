@@ -4,8 +4,6 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
-import { resetSession } from "../session/session";
-
 /**
  * What jsdom does not have and the chat window asks a browser for.
  *
@@ -46,6 +44,4 @@ afterEach(() => {
   localStorage.clear();
   // The theme is an attribute on <html>, which `cleanup` does not touch.
   document.documentElement.removeAttribute("data-theme");
-  // The session store is module state, and it is asked for once per page.
-  resetSession();
 });

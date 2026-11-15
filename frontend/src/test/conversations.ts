@@ -122,7 +122,7 @@ export function madeBy(
   return { agent, engine, model: "sonnet", run_id: RUN };
 }
 
-/** A conversation as `GET /api/conversations/{id}` answers it. */
+/** A conversation as `GET /robinauts/api/conversations/{id}` answers it. */
 export function opened(
   summary: Conversation,
   messages: Message[],

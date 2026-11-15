@@ -10,7 +10,7 @@ import { PAGE, useHistory } from "./history";
 /** Let the event loop run once, so every settled promise has been seen. */
 const settled = () => new Promise((done) => setTimeout(done, 0));
 
-/** Answer `GET /api/conversations` with these pages, in order. */
+/** Answer `GET /robinauts/api/conversations` with these pages, in order. */
 function pages(...answers: Response[]) {
   const left = [...answers];
   return stubFetch(() => left.shift() ?? json(page([])));
@@ -29,8 +29,8 @@ test("the first page is asked for with the count and no cursor", async () => {
   const fetch = pages(json(page([conversation(1)])));
   const { result } = await history(fetch);
 
-  expect(callsTo(fetch, "/api/conversations")).toEqual([
-    { url: `/api/conversations?limit=${PAGE}`, body: undefined },
+  expect(callsTo(fetch, "/robinauts/api/conversations")).toEqual([
+    { url: `/robinauts/api/conversations?limit=${PAGE}`, body: undefined },
   ]);
   expect(result.current.status).toBe("ready");
   expect(result.current.items).toHaveLength(1);
@@ -54,8 +54,8 @@ test("a page with a cursor offers another, asked for with that cursor", async ()
   });
   // Appended, not replaced, and in the order the pages arrived.
   expect(result.current.items.map((one) => one.id)).toEqual([id(1), id(2)]);
-  expect(callsTo(fetch, "/api/conversations")[1]?.url).toBe(
-    `/api/conversations?limit=${PAGE}&cursor=cursor-1`,
+  expect(callsTo(fetch, "/robinauts/api/conversations")[1]?.url).toBe(
+    `/robinauts/api/conversations?limit=${PAGE}&cursor=cursor-1`,
   );
 
   await act(async () => {
@@ -106,9 +106,9 @@ test("renaming sends the title and asks for the list again", async () => {
   expect(
     asked.filter((call) => call.method === "PATCH").map((call) => call.body),
   ).toEqual([{ title: "Named" }]);
-  expect(asked[1]?.url).toBe(`/api/conversations/${id(1)}`);
+  expect(asked[1]?.url).toBe(`/robinauts/api/conversations/${id(1)}`);
   // Two listings: the first one, and the one after the write.
-  expect(callsTo(fetch, "/api/conversations")).toHaveLength(2);
+  expect(callsTo(fetch, "/robinauts/api/conversations")).toHaveLength(2);
 });
 
 test("deleting sends a DELETE and asks for the list again", async () => {
@@ -124,7 +124,7 @@ test("deleting sends a DELETE and asks for the list again", async () => {
   expect(
     fetch.mock.calls.filter(([, init]) => init?.method === "DELETE"),
   ).toHaveLength(1);
-  expect(callsTo(fetch, "/api/conversations")).toHaveLength(2);
+  expect(callsTo(fetch, "/robinauts/api/conversations")).toHaveLength(2);
 });
 
 test("a write that is refused is thrown to whoever asked, and changes nothing", async () => {
@@ -140,7 +140,7 @@ test("a write that is refused is thrown to whoever asked, and changes nothing", 
   });
   // The row is still there, and the list was not asked for again.
   expect(result.current.items).toHaveLength(1);
-  expect(callsTo(fetch, "/api/conversations")).toHaveLength(1);
+  expect(callsTo(fetch, "/robinauts/api/conversations")).toHaveLength(1);
 });
 
 test("a first page that is refused leaves the list failed, and it can be asked again", async () => {
@@ -256,7 +256,7 @@ test("a refresh wins over a page asked for while it was in flight", async () => 
     await settled();
   });
   expect(
-    callsTo(fetch, "/api/conversations").some((call) =>
+    callsTo(fetch, "/robinauts/api/conversations").some((call) =>
       call.url.includes("cursor="),
     ),
   ).toBe(false);
