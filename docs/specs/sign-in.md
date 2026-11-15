@@ -76,3 +76,7 @@ robinauts store init
 robinauts tokens create worker-gpu --role robinauts/worker --resource gpu
 robinauts devices end --user ada@example.com
 ```
+
+A service token is created and revoked with `robinauts tokens`, by the launcher, or by an admin
+from a browser session. An admin's bearer is answered 403 there. The backend makes the tokens
+of its own workers and handlers in its own memory.
