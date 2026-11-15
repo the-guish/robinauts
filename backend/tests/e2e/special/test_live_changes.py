@@ -5,8 +5,8 @@
 "The change feed"). The page is never reloaded and never navigated in this journey.
 
 Another client is an ``httpx`` client on the same server, signed in with a ticket of its own:
-in the local mode it is the same user. It needs a model that holds a turn open, and a client beside the browser,
-which the master journey has neither of.
+in the local mode it is the same user. It needs a model that holds a turn open, and a client
+beside the browser, which the master journey has neither of.
 """
 
 from __future__ import annotations
