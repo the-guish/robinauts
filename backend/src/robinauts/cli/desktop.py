@@ -34,6 +34,7 @@ from pathlib import Path, PurePosixPath
 
 from oneberth.launcher import (
     CONTAINER_DATA_DIR,
+    WORKERS_DIRECTORY,
     Application,
     Backend,
     Container,
@@ -42,6 +43,7 @@ from oneberth.launcher import (
     Run,
     Window,
     Worker,
+    worker_directory,
 )
 
 from robinauts.cli.composition import DATA_DIR_VARIABLE, DATABASE_URL_VARIABLE
@@ -134,7 +136,7 @@ def passed_on(names: Iterable[str], environ: Mapping[str, str]) -> dict[str, str
 
 def container_folder(worker: str) -> PurePosixPath:
     """Where a worker's container sees its folder of the data directory."""
-    return PurePosixPath(CONTAINER_DATA_DIR, "workers", worker)
+    return PurePosixPath(CONTAINER_DATA_DIR, WORKERS_DIRECTORY, worker)
 
 
 def worker_container(
@@ -154,7 +156,7 @@ def worker_container(
             "HOME": os.fspath(folder),
             **passed_on(names, environ),
         },
-        mounts=[Mount(f"workers/{worker}", os.fspath(folder))],
+        mounts=[Mount(f"{WORKERS_DIRECTORY}/{worker}", os.fspath(folder))],
     )
 
 
@@ -202,7 +204,7 @@ def copy_configuration(config: Config, config_file: Path, data_dir: Path) -> lis
     copies = []
     for worker in config.workers():
         if worker in config.containers:
-            copy = data_dir / "workers" / worker / WORKER_CONFIG
+            copy = worker_directory(data_dir, worker) / WORKER_CONFIG
             copy.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(config_file, copy)
             copies.append(copy)
