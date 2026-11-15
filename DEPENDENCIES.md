@@ -189,12 +189,11 @@ reads their metadata like any other package's. `oneberth` may be imported by `ro
 and `robinauts.cli` alone, and `neorc` by `robinauts.orchestrator.adapters.neorc` alone
 ([docs/architecture/rules.md](docs/architecture/rules.md)).
 
-`neorc-ui`, which `neorc[manager]` brings, is a Python wheel whose payload is a built
-JavaScript bundle. Robinauts' backend does not serve it: neorc's interface reaches Robinauts'
-from neorc's node package, at build time. The gate reads its metadata, Apache-2.0, and cannot
-see inside the bundle; the wheel carries the notices of what it bundles in
-`neorc_ui/static/THIRD_PARTY_LICENSES.txt`, which neorc's own build writes and refuses to
-write for a licence outside its allowlist.
+neorc's interface reaches Robinauts' from neorc's node package, `@neorc/ui`, with
+`@oneberth/ui`, at build time. Both are packed from the neorc commit `backend/pyproject.toml`
+pins (`scripts/ui-packages-from-source.sh`), and the frontend's gates read them as they read
+any npm package. Robinauts leaves out neorc's `manager` extra, which brings neorc's built
+interface as a Python wheel.
 
 ## Restricted dependencies in use
 

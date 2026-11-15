@@ -163,9 +163,17 @@ are the conversations its handlers open for it.
 ### The interface
 
 neorc's interface is composed into Robinauts' at build time, from neorc's node package, and
-reaches neorc's API at `/neorc/` (oneberth's `docs/specs/shell.md`). The backend serves no
-frame of neorc's: neorc's own built interface is not served, and the session has no
-`flows_url`.
+reaches neorc's API at `/neorc/` (oneberth's `docs/specs/shell.md`). neorc is the second
+application of oneberth's shell, beside Robinauts. The backend serves no frame of neorc's:
+neorc's own built interface is not served, and the session has no `flows_url`.
+
+A run is started from neorc's form, at `/neorc/`. For a flow with a form file the form is
+Robinauts': the interface turns the flow's form, as `GET /robinauts/api/flows` gives it with
+its lists filled, into A2UI v0.9 in neorc's subset (`frontend/src/flows/forms.ts`). Each list
+of values is a choice of its values, and each other input a field of its type. neorc draws its
+own form for a flow with no form file, and for one with an empty list or a datetime input. A
+form sends the flow's inputs to neorc, which checks their types. Robinauts' own checks of a
+form, such as the agent and model pair, run only on `POST /robinauts/api/flows/<name>/runs`.
 
 ### Where neorc may be imported
 
@@ -188,14 +196,16 @@ neorc, even through another module.
 
 ### Installing neorc
 
-Robinauts depends on `neorc[http,manager,postgres]`, `neorc-core` and `oneberth`. Neither
-publishes wheels yet. Robinauts builds them from commits of the-guish/neorc and
+Robinauts depends on `neorc[http,postgres]`, `neorc-core` and `oneberth`. Neither
+publishes wheels yet. neorc's `manager` extra is left out: it brings neorc's built interface,
+which nothing serves here. Robinauts builds them from commits of the-guish/neorc and
 the-guish/oneberth, named in `[tool.uv.sources]` in `backend/pyproject.toml`. The oneberth
 commit is the one the neorc commit pins, so the lock holds one oneberth.
 
 uv builds these packages from those commits. Every other package stays under `--no-build`.
 `scripts/neorc-from-source.sh` builds the wheels of a release, and refuses a commit outside
-neorc's `main`. The extra workers' images leave neorc out.
+neorc's `main`. The extra workers' images leave neorc out. `scripts/ui-packages-from-source.sh`
+packs `@neorc/ui` and `@oneberth/ui` for the interface from the same neorc commit.
 
 When neorc and oneberth publish wheels, take this step out:
 

@@ -42,11 +42,14 @@ dependencies = [
     # neorc, whose manager is composed into the backend beside Robinauts' own
     # component (docs/architecture/orchestration.md), imported by
     # `robinauts.orchestrator.adapters.neorc` alone (the import-linter contract
-    # below). `http` for its client and its worker, `manager` for its component,
-    # `postgres` for its store on asyncpg. neorc-from-source: neorc publishes no
+    # below). `http` for its client and its worker, `postgres` for its store on
+    # asyncpg. Its manager's component needs oneberth's `web` extra, named below;
+    # neorc's `manager` extra would bring its built interface too, which nothing
+    # here serves: Robinauts' interface takes neorc's node package at build time
+    # (scripts/ui-packages-from-source.sh). neorc-from-source: neorc publishes no
     # wheels yet, so the sources below pin a commit of the-guish/neorc, and uv
     # builds it from there.
-    "neorc[http,manager,postgres]",
+    "neorc[http,postgres]",
     "neorc-core",
     # oneberth: sign-in, sessions, tokens, roles, the web application and its
     # server (oneberth's docs/specs/composition.md), imported by `robinauts.web`
@@ -90,7 +93,7 @@ dev = [
 # neorc-from-source: uv builds neorc's packages and oneberth from the commits in
 # [tool.uv.sources]. `--no-build` holds for every other package
 # (docs/architecture/orchestration.md, "Installing neorc").
-no-binary-package = ["neorc", "neorc-core", "neorc-ui", "oneberth"]
+no-binary-package = ["neorc", "neorc-core", "oneberth"]
 # The platforms the project runs on, and the only ones the lock resolves for:
 # Windows is not a target (docs/deployment.md). A package that another platform
 # alone would need is then not locked, and the licence gate reads the lock
@@ -103,7 +106,6 @@ environments = [
 [tool.uv.sources]
 neorc = { git = "https://github.com/the-guish/neorc", rev = "412b062a5e12db91ac06462bbff4c0644e430aa2", subdirectory = "python/neorc" }
 neorc-core = { git = "https://github.com/the-guish/neorc", rev = "412b062a5e12db91ac06462bbff4c0644e430aa2", subdirectory = "python/neorc-core" }
-neorc-ui = { git = "https://github.com/the-guish/neorc", rev = "412b062a5e12db91ac06462bbff4c0644e430aa2", subdirectory = "python/neorc-ui" }
 oneberth = { git = "https://github.com/the-guish/oneberth", rev = "fe4df3b9aca9f1805ba081c5de5a4c42f89c6f6e", subdirectory = "python/oneberth" }
 
 [project.scripts]
@@ -570,7 +572,7 @@ source_modules = [
     "robinauts.orchestrator.contract",
     "robinauts.orchestrator.core.config",
 ]
-forbidden_modules = ["neorc", "neorc_core", "neorc_ui", "oneberth"]
+forbidden_modules = ["neorc", "neorc_core", "oneberth"]
 
 [[tool.importlinter.contracts]]
 name = "nothing imports cli"
@@ -777,7 +779,7 @@ name = "neorc only under orchestrator.adapters.neorc"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["robinauts"]
-forbidden_modules = ["neorc", "neorc_core", "neorc_ui"]
+forbidden_modules = ["neorc", "neorc_core"]
 ignore_imports = [
     "robinauts.orchestrator.adapters.neorc -> *",
     "robinauts.orchestrator.adapters.neorc.** -> *",

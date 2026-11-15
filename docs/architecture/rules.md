@@ -74,4 +74,4 @@ oneberth -> web, cli
 fastapi -> web, cli
 starlette, ag_ui -> web
 uvicorn -> nothing: oneberth serves the backend
-neorc, neorc_core, neorc_ui -> orchestrator.adapters.neorc
+neorc, neorc_core -> orchestrator.adapters.neorc

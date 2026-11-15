@@ -6,10 +6,11 @@
 # Robinauts builds them. `git grep neorc-from-source` lists every part of this
 # step, and docs/architecture/orchestration.md says how to take it out.
 #
-# It builds neorc, neorc-core and neorc-ui, and oneberth, from the commits that
+# It builds neorc and neorc-core, and oneberth, from the commits that
 # backend/pyproject.toml pins, into the directory it is given, and refuses a
 # commit outside the main branch of its repository. It prints one hashed
-# requirement per wheel. Building neorc-ui needs Node.js.
+# requirement per wheel. neorc's interface reaches Robinauts' as a node package
+# (scripts/ui-packages-from-source.sh), so its Python wheel is not built.
 set -eu
 
 if [ "$#" -ne 1 ]; then
@@ -49,7 +50,7 @@ if ! git merge-base --is-ancestor "$revision" origin/main 2>/dev/null; then
 fi
 git checkout --quiet --detach "$revision"
 
-for package in neorc-core neorc-ui neorc; do
+for package in neorc-core neorc; do
     uv build --quiet --package "$package" --wheel --out-dir "$out" >&2
 done
 

@@ -92,7 +92,7 @@ mv "$fresh/$built" "$out/$built"
 # leave an empty requirements file beside a perfectly good wheel
 # (scripts/check-audit.sh says the same about its own export).
 uv export --locked --no-dev --no-emit-project --no-annotate \
-    --no-emit-package neorc --no-emit-package neorc-core --no-emit-package neorc-ui \
+    --no-emit-package neorc --no-emit-package neorc-core \
     --no-emit-package oneberth \
     --format requirements.txt >"$fresh/requirements.txt"
 # neorc-from-source: its wheels and oneberth's, beside this one, and their hashed requirements.
