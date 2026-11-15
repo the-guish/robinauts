@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright The Robinauts Authors
+import { formOf } from "@neorc/ui";
 import { afterEach, expect, test } from "vitest";
 
 import { callsTo, json, stubFetch } from "../test/api";
@@ -68,6 +69,13 @@ test("a form is a column of its title and one control per input, in order", () =
     variant: "h3",
     text: "Code a task",
   });
+});
+
+test("every kind of input makes a form neorc's subset draws", () => {
+  const count: FlowInput = { name: "count", label: "Count", type: "number" };
+  const draft: FlowInput = { name: "draft", label: "Draft", type: "boolean" };
+  const form = a2uiForm(flow([BRANCHES, AGENTS, TASK, count, draft]));
+  expect(formOf({ form })).not.toBeNull();
 });
 
 test("a list of values is a choice of its values, filled, and required", () => {
