@@ -81,11 +81,19 @@ from robinauts.cli.composition import (
 from robinauts.cli.desktop import (
     CONFIG_FILE,
     CONFIG_TEMPLATE,
+    IMAGE,
+    IMAGE_VARIABLE,
     chosen_data_dir,
+    copy_configuration,
     desktop_application,
 )
 from robinauts.cli.lifecycle import Lifecycle, WorkerStartError
-from robinauts.cli.orchestration import NEORC_ROLES, neorc_worker, orchestrator_of
+from robinauts.cli.orchestration import (
+    NEORC_ROLES,
+    handlers_code,
+    neorc_worker,
+    orchestrator_of,
+)
 from robinauts.cli.worker_process import end_with_parent
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.orchestrator.contract.domain import (
@@ -144,6 +152,10 @@ LOCAL_STORAGE = (
 NOT_LAUNCHED = (
     "desktop-backend is the desktop's backend, which the launcher starts: start the desktop"
     " with robinauts desktop"
+)
+IN_A_CONTAINER = (
+    "workers.{}: runs in a container of its image, which robinauts desktop starts; a server"
+    " starts a worker with the `command` its table names"
 )
 STORE_INIT = "robinauts store init"
 NOT_BUILT = (
@@ -407,6 +419,9 @@ def start(
     except ConfigError as refused:
         print(refused, file=sys.stderr)
         return 1
+    if not supervised and (in_a_container := sorted(set(config.containers) - set(config.commands))):
+        print("\n".join(IN_A_CONTAINER.format(name) for name in in_a_container), file=sys.stderr)
+        return 1
     storage = storage_from(environ)
     composed = compose(config, storage=storage, secret_for=secret_for)
     logging.basicConfig(level=logging.INFO)
@@ -487,7 +502,8 @@ def desktop(data_dir: str | None, browser: str | None, arguments: Sequence[str])
     """``robinauts desktop``: the backend, the workers and the window, started by oneberth's
     launcher on the data directory, until the window closes or a signal stops them. The
     configuration is the file ``ROBINAUTS_CONFIG`` names, else ``robinauts.toml`` in the data
-    directory, which a first start makes empty."""
+    directory, which a first start makes empty. A worker in a container puts the desktop in the
+    Docker shape, with the backend in a container of the image ``ROBINAUTS_IMAGE`` names."""
     folder = chosen_data_dir(data_dir, os.environ)
     folder.mkdir(parents=True, exist_ok=True)
     named = os.environ.get("ROBINAUTS_CONFIG")
@@ -496,17 +512,22 @@ def desktop(data_dir: str | None, browser: str | None, arguments: Sequence[str])
         config_file.write_text(CONFIG_TEMPLATE)
         print(f"Robinauts' configuration is {config_file}: it names no agent yet", file=sys.stderr)
     flows_dir = os.environ.get(FLOWS_VARIABLE)
+    flows = Path(flows_dir).absolute() if flows_dir else None
     try:
         config, _ = load(config_file, os.environ)
         application = desktop_application(
             config,
             data_dir=folder,
             config_file=config_file,
-            flows=Path(flows_dir).absolute() if flows_dir else None,
+            flows=flows,
+            code=None if flows is None else handlers_code(flows, default_code=DEFAULT_CODE),
             robinauts=COMMAND,
             browser=browser,
             arguments=arguments,
+            image=os.environ.get(IMAGE_VARIABLE) or IMAGE,
+            environ=os.environ,
         )
+        copy_configuration(config, config_file, folder)
     except (ConfigError, LauncherError, OSError) as refused:
         print(refused, file=sys.stderr)
         return 1

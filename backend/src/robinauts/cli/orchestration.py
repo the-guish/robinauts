@@ -120,6 +120,14 @@ def orchestrator_of(
     )
 
 
+def handlers_code(folder: Path, *, default_code: Path) -> Path:
+    """Where the handlers of the flows folder ``folder`` are: the code location its
+    ``flows.toml`` names, or ``default_code``. ``ConfigError`` for settings that are wrong."""
+    settings = read_settings(folder) if folder.is_dir() else {}
+    described = parse_flows_settings(settings, folder=folder, default_code=default_code)
+    return described.code_location
+
+
 def neorc_worker(environ: Mapping[str, str], *, default_code: Path) -> int:
     """``robinauts neorc-worker``: neorc's worker, as its supervisor starts it, the launcher
     or this backend. It reads its token, a token of ``neorc/worker`` on the handlers' queue,
