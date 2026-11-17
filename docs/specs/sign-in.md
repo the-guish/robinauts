@@ -38,8 +38,10 @@ to it.
   `public_url` under `[apps.robinauts]`. Robinauts' own file, `ROBINAUTS_CONFIG`, holds no
   sign-in key, and refuses one with where it went.
 - **Locally.** `robinauts start --local` is oneberth's local mode: one person, the one at the
-  machine, signed in with a ticket. It needs no oneberth file and refuses one. The front
-  listener is on a loopback address. Development uses this mode too.
+  machine, signed in with a ticket. It needs no oneberth file and refuses one. A browser
+  reaches the front listener on a loopback address. Behind a forward, such as a VM's, the
+  front listener binds `--host` and `--public-host` names that loopback address. Development
+  uses this mode too.
 
 ```toml
 # ONEBERTH_CONFIG

@@ -811,8 +811,10 @@ keys are visible to `docker inspect` on that machine.
 ## The local mode
 
 `robinauts start --local` is oneberth's local mode: no identity provider, one person, the one
-at the machine, on the loopback interface only. It refuses any bind address that is not
-loopback, and a oneberth file. The person signs in with a ticket: a launcher writes a launch
+at the machine, on a loopback address. It refuses a oneberth file. The front listener binds
+`--host`, and a browser reaches it at `--public-host`, `--host` by default. The public host is a
+loopback address. A VM uses both: its front listener binds the VM's interface, and a forward
+on the host's loopback reaches it. The person signs in with a ticket: a launcher writes a launch
 secret on the server's standard input and asks for the ticket; a start by hand prints
 `open http://127.0.0.1:8000/auth/local?ticket=…` after `ready`, and that address signs the
 person in once, within a minute.

@@ -56,7 +56,7 @@ def test_a_provider_is_served_with_oneberth_s_configuration(
     ("tables", "environ", "host", "local", "refusal"),
     [
         ({}, DATABASE, "127.0.0.1", False, "ONEBERTH_CONFIG names no file"),
-        ({}, {}, "0.0.0.0", True, "--host 0.0.0.0"),
+        ({}, {}, "0.0.0.0", True, "0.0.0.0 is not a loopback address"),
         ({"agent": {}}, {}, "127.0.0.1", True, "agent: unknown key"),
         (
             {"orchestration": {}},

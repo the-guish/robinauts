@@ -74,3 +74,36 @@ def test_a_server_refuses_a_worker_that_runs_in_a_container_alone(tmp_path: Path
         "workers.boxed: runs in a container of its image, which robinauts desktop starts; a"
         " server starts a worker with the `command` its table names"
     )
+
+
+def test_the_local_mode_refuses_a_public_host_that_is_not_loopback(tmp_path: Path) -> None:
+    config = tmp_path / "robinauts.toml"
+    config.write_text("")
+    environment = {**os.environ, "ROBINAUTS_CONFIG": str(config)}
+    for variable in ("ROBINAUTS_DATABASE_URL", "ONEBERTH_CONFIG", "ROBINAUTS_DATA_DIR"):
+        environment.pop(variable, None)
+    command = [str(stack.ROBINAUTS), "start", "--local", "--host", "0.0.0.0"]
+    command += ["--public-host", "10.0.0.7", "--port", str(stack.free_port())]
+    started = subprocess.run(command, env=environment, capture_output=True, timeout=30)
+    assert started.returncode == 1
+    assert started.stderr.decode().strip() == (
+        "--local serves this machine alone: 10.0.0.7 is not a loopback address or localhost."
+        " Bind elsewhere with --host, and name the loopback address a browser reaches with"
+        " --public-host"
+    )
+
+
+def test_a_public_host_needs_the_local_mode(tmp_path: Path) -> None:
+    config = tmp_path / "robinauts.toml"
+    config.write_text("")
+    environment = {**os.environ, "ROBINAUTS_CONFIG": str(config)}
+    command = [str(stack.ROBINAUTS), "start", "--public-host", "127.0.0.1"]
+    started = subprocess.run(command, env=environment, capture_output=True, timeout=30)
+    assert started.returncode == 2
+    assert (
+        started.stderr.decode()
+        .strip()
+        .endswith(
+            "--public-host is for --local: with sign-in, the public URL is in ONEBERTH_CONFIG"
+        )
+    )
