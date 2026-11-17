@@ -267,17 +267,43 @@ describe("tables", () => {
     expect(drawn.map((tr) => tr.textContent)).toEqual(["a1", "b"]);
   });
 
-  it("settles the widths once a blank line closes the table", () => {
-    const source =
+  describe("the widths' last look", () => {
+    const body =
       "| Name | Notes |\n|---|---|\n| ab | cd |\n" +
-      "| ab | a much longer note than the others |\n";
+      "| ab | a much longer note than the others |";
+    const within = (prefix: string) =>
+      body
+        .split("\n")
+        .map((line) => prefix + line)
+        .join("\n");
     const widths = (text: string, streaming: boolean) =>
       [...draw(text, streaming).querySelectorAll("col")].map((col) =>
         col.getAttribute("style"),
       );
-    // Two rows is no look of its own; the end of the table is.
-    expect(widths(source, true)).not.toEqual(widths(source, false));
-    expect(widths(`${source}\n`, true)).toEqual(widths(source, false));
+    const settled = () => widths(`${body}\n`, false);
+
+    it("is not taken at a row's end: two rows are no look of their own", () => {
+      expect(widths(`${body}\n`, true)).not.toEqual(settled());
+    });
+
+    it.each([
+      ["at the top", `${body}\n\n`],
+      ["in a quote", `${within("> ")}\n>\n`],
+      ["in a list item", `- x\n\n${within("  ")}\n\n`],
+    ])("is taken once a blank line closes a table %s", (_name, source) => {
+      expect(widths(source, true)).toEqual(settled());
+    });
+
+    it.each([
+      ["a space before the next row", body, " "],
+      ["a quote's marker", within("> "), ">"],
+      ["a list item's indent", within("  "), "  "],
+    ])("is not taken while %s arrives", (_name, table, prefix) => {
+      const lead = table === within("  ") ? "- x\n\n" : "";
+      expect(widths(`${lead}${table}\n${prefix}`, true)).toEqual(
+        widths(`${lead}${table}\n`, true),
+      );
+    });
   });
 
   it("keeps the column widths while a row is being written", () => {

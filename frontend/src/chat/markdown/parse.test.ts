@@ -1137,6 +1137,7 @@ describe("streaming", () => {
     ["a row being typed", "| a |\n|---|\n| 1", { rowOpen: true }],
     ["a row whose line has ended", "| a |\n|---|\n| 1 |\n", {}],
     ["a table a blank line closed", "| a |\n|---|\n| 1 |\n\n", { ended: true }],
+    ["a table whose next line is still arriving", "| a |\n|---|\n| 1 |\n ", {}],
   ])("marks %s", (_name, source, marks) => {
     const [table] = parse(source, streaming);
     expect(table).toMatchObject({ type: "table" });

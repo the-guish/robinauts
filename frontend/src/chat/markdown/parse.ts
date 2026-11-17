@@ -856,7 +856,9 @@ class BlockParser {
 
   private finalize(block: BlockNode): void {
     block.open = false;
-    block.ended = this.streaming && !this.atEnd;
+    // A line that closes the table but has no line break yet may be the
+    // start of the next row: an indent, a `>`, a space before the `|`.
+    block.ended = this.streaming && !this.atEnd && !this.unfinishedLine;
     switch (block.type) {
       case "paragraph": {
         if (block.lines[0]?.startsWith("[") === true) {
