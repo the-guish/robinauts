@@ -182,10 +182,15 @@ function renderTable(
       ? base
       : `${base} ${ALIGN_CLASS[align]}`;
   };
-  // While the table is the one being written, its last row is the line
-  // still arriving: it is drawn once the next one begins, or the table ends.
-  const rows = cursor ? block.rows.slice(0, -1) : block.rows;
-  const columns = tableColumns(block.head, rows, !cursor);
+  // A row whose line is still arriving is drawn once that line ends; the
+  // widths take their last look once the table is over (`./columns.ts`).
+  const open = cursor && block.rowOpen === true;
+  const rows = open ? block.rows.slice(0, -1) : block.rows;
+  const columns = tableColumns(
+    block.head,
+    rows,
+    !cursor || block.ended === true,
+  );
   const lastRow = rows.length - 1;
   const lastColumn = block.head.length - 1;
   return (

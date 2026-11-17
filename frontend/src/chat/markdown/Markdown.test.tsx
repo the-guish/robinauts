@@ -241,14 +241,43 @@ describe("tables", () => {
     expect(draw("|a|\n|-|").querySelector("tbody")).toBeNull();
   });
 
-  it("holds back the row still arriving while streaming", () => {
-    const source = "| k | v |\n|---|---|\n| a | 1 |\n| b";
-    const rows = (streaming: boolean) =>
-      [...draw(source, streaming).querySelectorAll("tbody tr")].map(
-        (tr) => tr.textContent,
+  const table = "| k | v |\n|---|---|\n| a | 1 |";
+  it.each([
+    ["a row being typed", `${table}\n| b`, ["a1"]],
+    ["a row whose line has ended", `${table}\n`, ["a1"]],
+    ["a table a blank line closed", `${table}\n\n`, ["a1"]],
+    ["the next row just begun", `${table}\n|`, ["a1"]],
+    [
+      "a table in a list item",
+      `- x\n\n  ${table.replaceAll("\n", "\n  ")}\n`,
+      ["a1"],
+    ],
+    [
+      "a row being typed in a quote",
+      `> ${table.replaceAll("\n", "\n> ")}\n> | b`,
+      ["a1"],
+    ],
+  ])("draws the finished rows of %s while streaming", (_name, source, rows) => {
+    const drawn = [...draw(source, true).querySelectorAll("tbody tr")];
+    expect(drawn.map((tr) => tr.textContent)).toEqual(rows);
+  });
+
+  it("draws every row once the stream ends", () => {
+    const drawn = [...draw(`${table}\n| b`).querySelectorAll("tbody tr")];
+    expect(drawn.map((tr) => tr.textContent)).toEqual(["a1", "b"]);
+  });
+
+  it("settles the widths once a blank line closes the table", () => {
+    const source =
+      "| Name | Notes |\n|---|---|\n| ab | cd |\n" +
+      "| ab | a much longer note than the others |\n";
+    const widths = (text: string, streaming: boolean) =>
+      [...draw(text, streaming).querySelectorAll("col")].map((col) =>
+        col.getAttribute("style"),
       );
-    expect(rows(true)).toEqual(["a1"]);
-    expect(rows(false)).toEqual(["a1", "b"]);
+    // Two rows is no look of its own; the end of the table is.
+    expect(widths(source, true)).not.toEqual(widths(source, false));
+    expect(widths(`${source}\n`, true)).toEqual(widths(source, false));
   });
 
   it("keeps the column widths while a row is being written", () => {
