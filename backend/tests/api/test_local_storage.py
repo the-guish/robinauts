@@ -4,7 +4,8 @@
 """oneberth's local mode on local storage: the server makes ``robinauts.db``, ``oneberth.db`` and
 ``neorc.db`` in the data directory, and its worker keeps its engines' state in its folder there.
 The one person signs in with a ticket. A second start on that directory finds the conversations
-of the first, and each engine remembers them."""
+of the first, and each engine remembers them. Behind a forward, the front listener binds every
+address and the browser reaches it on a loopback one."""
 
 from __future__ import annotations
 
@@ -52,7 +53,7 @@ def environment_of(config: Path, data: Path) -> dict[str, str]:
     return environment
 
 
-def command_of(port: int) -> list[str]:
+def command_of(port: int, *more: str) -> list[str]:
     worker = str(stack.free_port())
     return [
         str(stack.ROBINAUTS),
@@ -62,16 +63,19 @@ def command_of(port: int) -> list[str]:
         str(port),
         "--worker-port",
         worker,
+        *more,
     ]
 
 
 @contextmanager
-def api(config: Path, data: Path) -> Iterator[httpx.Client]:
+def api(config: Path, data: Path, *more: str) -> Iterator[httpx.Client]:
     """A client of a server in the local mode on ``data``, the local user signed in with a
-    ticket its launch secret asked for, stopped afterwards."""
+    ticket its launch secret asked for, stopped afterwards. ``more`` are more arguments of
+    ``start``."""
     port = stack.free_port()
     secret = new_secret(CredentialKind.LAUNCH)
-    with stack.launched(command_of(port), environment_of(config, data), secret) as running:
+    command = command_of(port, *more)
+    with stack.launched(command, environment_of(config, data), secret) as running:
         url = stack.Server(f"http://127.0.0.1:{port}", secret)
         try:
             stack.wait_until_up(url, running)
@@ -177,3 +181,19 @@ def test_each_engine_remembers_a_conversation_across_a_restart(
                 ("assistant", "hello"),
                 ("user", "again"),
             ], agent
+
+
+def test_a_server_behind_a_forward_binds_every_address_and_signs_in_on_loopback(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "robinauts.toml"
+    config.write_text(CONFIG)
+    data = tmp_path / "data"
+    with api(config, data, "--host", "0.0.0.0", "--public-host", "127.0.0.1") as client:
+        session = client.get("/auth/session").json()
+        assert session["mode"] == "local"
+        # A write with the session cookie passes the Origin check: the public URL is the
+        # loopback address the browser reached.
+        started = client.post("/robinauts/api/turns", json={"agent_id": "echo", "text": "hi"})
+        assert started.status_code == 200, started.text
+        assert '"RUN_FINISHED"' in started.text

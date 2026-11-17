@@ -15,7 +15,7 @@ What an internal platform team deploys and controls.
   listener, `--host` and `--port`, and a worker listener, `--worker-host` and
   `--worker-port`, the front's port plus one by default.
 - oneberth's local mode, `--local`, signs the one person at the machine in
-  with a ticket, on the loopback interface only ([sign-in.md](sign-in.md)).
+  with a ticket, on a loopback address ([sign-in.md](sign-in.md)).
   It is the desktop's mode and the mode for development.
 - Local storage: the records are then in files of the data directory, which
   `ROBINAUTS_DATA_DIR` names: Robinauts' in `robinauts.db`, oneberth's in

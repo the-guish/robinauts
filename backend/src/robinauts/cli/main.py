@@ -19,9 +19,11 @@ Two files configure it. ``ROBINAUTS_CONFIG`` names Robinauts' own: the models, t
 tool servers and the workers. ``ONEBERTH_CONFIG`` names oneberth's: the sign-in through
 identity providers, the allow list, the grants and the backend's public URL, under
 ``[apps.robinauts]``. ``--local`` is oneberth's local mode in its place: one person, the one at
-the machine, signed in with a ticket, on a loopback address, and no oneberth file. Its launch
-secret is the first line of standard input; a start by hand has none there, makes one, and
-prints the address that signs the person in.
+the machine, signed in with a ticket, on a loopback address, and no oneberth file. Behind a
+forward, such as a VM's port on its host's loopback, ``--public-host`` names that address and
+``--host`` the one the front listener binds. Its launch secret is the first line of standard
+input; a start by hand has none there, makes one, and prints the address that signs the person
+in.
 
 Storage is the PostgreSQL ``ROBINAUTS_DATABASE_URL`` names, with oneberth's store in its schema
 ``oneberth`` and neorc's in ``neorc``; or the data directory ``ROBINAUTS_DATA_DIR`` names, with
@@ -145,6 +147,9 @@ NO_DATABASE = (
 )
 TWO_STORAGES = f"{DATABASE_URL_VARIABLE} and {DATA_DIR_VARIABLE} are both set: set one"
 LOCAL_MODE = "oneberth's local mode: one person, signed in with a ticket, on a loopback address"
+PUBLIC_HOST_IS_LOCAL = (
+    f"--public-host is for --local: with sign-in, the public URL is in {ONEBERTH_CONFIG_VARIABLE}"
+)
 LOCAL_STORAGE = (
     "the records are in %s: robinauts.db, oneberth.db and neorc.db; each worker's engines keep"
     " their state in its folder under workers/ there"
@@ -210,8 +215,9 @@ def serving(
             problems.append(LOCAL_HAS_NO_FILE)
         if not is_loopback(host):
             problems.append(
-                f"--local serves this machine alone: --host {host} is not a loopback address"
-                " or localhost"
+                f"--local serves this machine alone: {host} is not a loopback address or"
+                " localhost. Bind elsewhere with --host, and name the loopback address a browser"
+                " reaches with --public-host"
             )
         else:
             oneberth = local_config(NAME, port=port, host=host)
@@ -612,6 +618,14 @@ def run(argv: Sequence[str] | None = None) -> None:
         action="store_true",
         help="oneberth's local mode: the one person at this machine, signed in with a ticket",
     )
+    serve_command.add_argument(
+        "--public-host",
+        default=None,
+        help=(
+            "with --local: the loopback address a browser reaches the front listener at, when"
+            " a forward on that address reaches --host; --host by default"
+        ),
+    )
     desktop_command = commands.add_parser(
         "desktop", help="start the desktop: the backend, the workers and the window"
     )
@@ -640,12 +654,15 @@ def run(argv: Sequence[str] | None = None) -> None:
     )
     arguments = parser.parse_args(argv)
     if arguments.command == "start":
+        if arguments.public_host is not None and not arguments.local:
+            parser.error(PUBLIC_HOST_IS_LOCAL)
         status = start(
             arguments.host,
             arguments.port,
             arguments.worker_host,
             arguments.worker_port,
             local=arguments.local,
+            public_host=arguments.public_host,
         )
     elif arguments.command == "desktop":
         status = desktop(arguments.data_dir, arguments.browser, arguments.browser_argument)
