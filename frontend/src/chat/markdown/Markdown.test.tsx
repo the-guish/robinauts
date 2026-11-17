@@ -229,10 +229,37 @@ describe("tables", () => {
     expect(cells.map((c) => c.textContent)).toEqual(["Robin", "loud", "3"]);
     expect(cells[2]).toHaveClass("md-td", "md-align-right");
     expect(root.querySelector("table")).not.toHaveAttribute("style");
+    // The only style is the widths, which are numbers (`./columns.ts`).
+    const cols = [...root.querySelectorAll("colgroup > col")];
+    expect(cols).toHaveLength(3);
+    for (const col of cols) {
+      expect(col.getAttribute("style")).toMatch(/^width: [\d.]+%;$/);
+    }
   });
 
   it("draws no body for a table with only a header", () => {
     expect(draw("|a|\n|-|").querySelector("tbody")).toBeNull();
+  });
+
+  it("holds back the row still arriving while streaming", () => {
+    const source = "| k | v |\n|---|---|\n| a | 1 |\n| b";
+    const rows = (streaming: boolean) =>
+      [...draw(source, streaming).querySelectorAll("tbody tr")].map(
+        (tr) => tr.textContent,
+      );
+    expect(rows(true)).toEqual(["a1"]);
+    expect(rows(false)).toEqual(["a1", "b"]);
+  });
+
+  it("keeps the column widths while a row is being written", () => {
+    const head = "| Name | Notes |\n|---|---|\n| LangGraph | Graph |\n";
+    const widths = (source: string) =>
+      [...draw(source, true).querySelectorAll("col")].map((col) =>
+        col.getAttribute("style"),
+      );
+    expect(widths(`${head}| Pydantic AI | Typed agents with a long n`)).toEqual(
+      widths(`${head}| Pyd`),
+    );
   });
 });
 
@@ -491,7 +518,8 @@ describe("streaming", () => {
       ["- a\n\n- b", "li:last-child > p"],
       ["> q\n> > deep", "blockquote blockquote > p"],
       ["```js\nconst a", "pre > code"],
-      ["|a|b|\n|-|-|\n|1|2", "tbody tr:last-child > td:last-child"],
+      ["|a|b|\n|-|-|\n|1|2\n|3", "tbody tr:last-child > td:last-child"],
+      ["|a|b|\n|-|-|\n|1|2", "thead th:last-child"],
       ["|a|b|\n|-", "thead th:last-child"],
       ["- [ ]", "li"],
     ];

@@ -19,7 +19,9 @@
  *   Content-Security-Policy allows no remote image anyway.
  * - **Streaming input is normal input.** While `streaming` is true the text is
  *   still arriving; an unclosed fence, emphasis or table is drawn as far as it
- *   goes and never throws. Parsing is linear in the size of the text. While
+ *   goes and never throws, but for a table's row still being written, which
+ *   waits for its line to end, and its column widths, which move only now
+ *   and then (`./columns.ts`). Parsing is linear in the size of the text. While
  *   streaming, a `<span class="md-cursor" aria-hidden="true">` follows the
  *   last text drawn: the pulsing dot that says the answer is not finished.
  * - What it draws: paragraphs, headings, emphasis and strong, inline code,
