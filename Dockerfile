@@ -6,23 +6,33 @@
 # manager, the image the desktop's Docker shape runs the backend from (docs/deployment.md, "The
 # desktop with Docker"). It serves the desktop alone for now. `robinauts desktop` starts it as
 # `robinauts desktop-backend`, the data directory mounted at /data. Build from the repository
-# root, after scripts/ui-packages-from-source.sh has packed the node packages of neorc and
-# oneberth into frontend/vendor/, which the interface's lock names:
+# root:
 #
-#     scripts/ui-packages-from-source.sh
 #     docker build -t robinauts .
+#
+# The interface stage packs the node packages of neorc and oneberth itself, with
+# scripts/ui-packages-from-source.sh. The build needs nothing but the repository, so a commit
+# alone builds it: docker build https://github.com/the-guish/robinauts.git#<commit>
 #
 # The image carries the same build of robinauts as the `robinauts desktop` that starts it: the
 # workers on the host parse the same configuration and speak a wire with no version handshake.
 
 # The interface, built from its lock as scripts/check-frontend.sh builds it.
 FROM node:24-slim AS interface
+# git, which scripts/ui-packages-from-source.sh fetches neorc and oneberth with.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/robinauts/src
 # The licence policy the build checks the bundle against, and the API it types the client with.
 COPY DEPENDENCIES.md ./
 COPY backend/openapi.json backend/
+# The pin of neorc, which names the commit the node packages come from.
+COPY backend/pyproject.toml backend/
+COPY scripts/ui-packages-from-source.sh scripts/
 COPY frontend frontend
-RUN cd frontend && npm ci --ignore-scripts && CHECK_BUNDLED=1 npm run build
+RUN scripts/ui-packages-from-source.sh \
+    && cd frontend && npm ci --ignore-scripts && CHECK_BUNDLED=1 npm run build
 
 FROM python:3.12-slim
 

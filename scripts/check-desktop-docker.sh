@@ -19,8 +19,6 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 if [ -z "${ROBINAUTS_TEST_IMAGE:-}" ]; then
-    # The interface's lock names the node packages of neorc and oneberth, packed here.
-    "$root/scripts/ui-packages-from-source.sh"
     ROBINAUTS_TEST_IMAGE=robinauts:check
     docker build --quiet -f "$root/Dockerfile" -t "$ROBINAUTS_TEST_IMAGE" "$root"
 fi
