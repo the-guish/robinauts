@@ -1349,8 +1349,8 @@ wheels = [
 
 [[package]]
 name = "neorc"
-version = "0.1.dev189+gfe4b2aa40"
-source = { git = "https://github.com/the-guish/neorc?subdirectory=python%2Fneorc&rev=fe4b2aa40edcc46c0069b331d691c8caa17d555a#fe4b2aa40edcc46c0069b331d691c8caa17d555a" }
+version = "0.1.dev193+g992ec7566"
+source = { git = "https://github.com/the-guish/neorc?subdirectory=python%2Fneorc&rev=992ec75662a0260df894503f3841494b2893d96a#992ec75662a0260df894503f3841494b2893d96a" }
 dependencies = [
     { name = "neorc-core" },
     { name = "oneberth" },
@@ -1367,8 +1367,8 @@ postgres = [
 
 [[package]]
 name = "neorc-core"
-version = "0.1.dev189+gfe4b2aa40"
-source = { git = "https://github.com/the-guish/neorc?subdirectory=python%2Fneorc-core&rev=fe4b2aa40edcc46c0069b331d691c8caa17d555a#fe4b2aa40edcc46c0069b331d691c8caa17d555a" }
+version = "0.1.dev193+g992ec7566"
+source = { git = "https://github.com/the-guish/neorc?subdirectory=python%2Fneorc-core&rev=992ec75662a0260df894503f3841494b2893d96a#992ec75662a0260df894503f3841494b2893d96a" }
 dependencies = [
     { name = "pyyaml" },
 ]
@@ -2052,8 +2052,8 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.6.2,<1.7.5" },
     { name = "langgraph", specifier = ">=1.2,<2" },
     { name = "langsmith", specifier = ">=0.3.45,<1" },
-    { name = "neorc", extras = ["http", "postgres"], git = "https://github.com/the-guish/neorc?subdirectory=python%2Fneorc&rev=fe4b2aa40edcc46c0069b331d691c8caa17d555a" },
-    { name = "neorc-core", git = "https://github.com/the-guish/neorc?subdirectory=python%2Fneorc-core&rev=fe4b2aa40edcc46c0069b331d691c8caa17d555a" },
+    { name = "neorc", extras = ["http", "postgres"], git = "https://github.com/the-guish/neorc?subdirectory=python%2Fneorc&rev=992ec75662a0260df894503f3841494b2893d96a" },
+    { name = "neorc-core", git = "https://github.com/the-guish/neorc?subdirectory=python%2Fneorc-core&rev=992ec75662a0260df894503f3841494b2893d96a" },
     { name = "oneberth", extras = ["web", "postgres", "providers"], git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=52da9dfb0499426c5265316378c89d405455a4a0" },
     { name = "openai", specifier = ">=3.14.1,<3.38" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "mcp", "openai"], specifier = ">=2.47,<3" },
