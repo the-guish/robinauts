@@ -83,7 +83,9 @@ On GitHub Actions, all blocking, all present from day zero:
   a vulnerability audit.
 - JavaScript: the build-time licence allowlist; the committed list of
   bundled packages compared with the build; `npm audit`;
-  `npm audit signatures`.
+  `npm audit signatures`. An advisory that no release fixes yet may be
+  recorded by name, for a development-only package and until a date
+  (`DEPENDENCIES.md`, "Advisories with no fix"); every other one fails.
 - `reuse lint`; a DCO check; the architecture contracts
   ([architecture/rules.md](../architecture/rules.md)); the lint rule that
   keeps the chat behind its seam. Secret scanning is planned.

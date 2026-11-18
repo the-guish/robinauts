@@ -82,8 +82,8 @@ It is still held to the same policy, because `DEPENDENCIES.md` asks the same
 questions of a development dependency as of any other. What is not plainly on
 the allowed list is excepted by name and version in the **"JavaScript build
 tooling"** table of [../../DEPENDENCIES.md](../../DEPENDENCIES.md) — the one
-place an npm exception may be written; there is no exception list in this
-file. `frontend/scripts/check-licences.mjs` enforces it over everything the
+place an npm licence exception may be written; there is no exception list in
+this file. `frontend/scripts/check-licences.mjs` enforces it over everything the
 lockfile pins and npm installed: no row, a row naming another version, a row
 naming another licence, a row for a package that no longer needs one, and the
 build is red. A forbidden licence fails whatever a row says, and the list of
@@ -132,10 +132,26 @@ licence again and writes down what they read.
   their registry dependencies (`frontend/scripts/registry-tree.mjs`).
 - Dependency changes go in a pull request of their own, never as a side
   effect of a feature. One pull request may change several dependencies.
-- CI runs `npm audit --audit-level=low` for known advisories on everything
-  installed, and `npm audit signatures --omit=dev` for registry signatures and
-  provenance on what ships: the registry does not hold attestations for every
-  dev-only package.
+- CI runs `npm audit` for known advisories on everything installed, and
+  `npm audit signatures --omit=dev` for registry signatures and provenance on
+  what ships: the registry does not hold attestations for every dev-only
+  package.
+- **An advisory fails the build, and the answer is the release that fixes
+  it** — in a pull request of its own, with an `overrides` entry when the
+  packages in between still ask for an older version. Not
+  `npm audit fix --force`: when no release has the fix, what it offers is an
+  older release of one of our own dependencies, from before it declared the
+  vulnerable package. That is a move back, and it can leave the same code in
+  place where the audit no longer sees it: Vite 6 carries picomatch compiled
+  into its own files.
+- An advisory **no release fixes yet** is the one that may be recorded
+  instead, in the **"Advisories with no fix"** table of
+  [../../DEPENDENCIES.md](../../DEPENDENCIES.md): by name, for the version the
+  lock pins, in a development-only package, with a date to read it again by
+  that is at most 30 days away. `frontend/scripts/check-advisories.mjs` runs
+  the audit and holds every row to that; it fails a row the day npm reports a
+  fix that moves forward, the day after its date, and when npm no longer
+  reports the advisory. An advisory in what ships is recorded nowhere.
 - Node.js at the version in `frontend/.nvmrc`.
 
 ## In the browser
@@ -161,6 +177,10 @@ assets are never committed, and a bundle built on a laptop is never released.
   installed, the exceptions table of `DEPENDENCIES.md`, the scopes, and the
   exact pins. Its own refusals are tested in
   `frontend/src/test/licence-gate.test.ts`.
+- `frontend/scripts/check-advisories.mjs`: `npm audit` over everything the
+  lockfile pins, the "Advisories with no fix" table of `DEPENDENCIES.md`, and
+  that npm looked at every pinned package. Its own refusals are tested in
+  `frontend/src/test/advisory-gate.test.ts`.
 - `frontend/.npmrc`: exact versions and no install scripts.
 - `frontend/eslint.config.js`: the seam in front of the chat
   ([../adr/0006-chat-ui-on-react-alone.md](../adr/0006-chat-ui-on-react-alone.md)),
