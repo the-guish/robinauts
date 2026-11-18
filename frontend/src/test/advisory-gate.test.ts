@@ -2,16 +2,10 @@
 // Copyright The Robinauts Authors
 
 /**
- * The npm advisory gate, tested on its own parts.
- *
- * `scripts/check-advisories.mjs` passing over this tree proves that this tree
- * passes; it proves nothing about what the gate would refuse. These are the
- * refusals, over fixtures, and none of them asks the registry anything.
- *
- * The last part runs the script itself against stand-in `npm` commands that
- * fail, or answer for too little, as
- * `backend/tests/tooling/test_check_scripts.py` does for the Python audit: a
- * gate that passes when its own tooling fails is worse than no gate.
+ * What `scripts/check-advisories.mjs` refuses, over fixtures: nothing here
+ * asks the registry anything. The last part runs the script against stand-in
+ * `npm` commands that fail, as `backend/tests/tooling/test_check_scripts.py`
+ * does for the Python audit.
  */
 import { spawnSync } from "node:child_process";
 import {
@@ -46,8 +40,8 @@ const TODAY = "2026-11-18";
 /** The lockfile's packages: a matcher three tools bring, and one of them. */
 const LOCKED = {
   "": { version: "0.0.0" },
-  "node_modules/matcher": { version: "4.0.7", dev: true },
-  "node_modules/builder": { version: "8.3.5", dev: true },
+  "node_modules/matcher": { version: "4.0.7" },
+  "node_modules/builder": { version: "8.3.5" },
 };
 
 /** What npm says of an advisory nobody has fixed: a move back, or nothing. */
@@ -90,14 +84,13 @@ const FINDING = {
   version: "4.0.7",
   title: "matcher is slow on purpose-built patterns",
   severity: "high",
-  development: true,
   fix: null as string | null,
 };
 const ROW = {
   advisory: ADVISORY,
   name: "matcher",
   version: "4.0.7",
-  review: "2026-12-02",
+  review: "2026-11-25",
 };
 type Finding = typeof FINDING;
 type Row = typeof ROW;
@@ -113,10 +106,7 @@ describe("what npm reported, as advisories", () => {
   test("a package pinned at two versions is held at both", () => {
     const locked = {
       ...LOCKED,
-      "node_modules/builder/node_modules/matcher": {
-        version: "3.0.1",
-        dev: true,
-      },
+      "node_modules/builder/node_modules/matcher": { version: "3.0.1" },
     };
     const twice = report();
     twice.vulnerabilities.matcher.nodes.push(
@@ -128,19 +118,28 @@ describe("what npm reported, as advisories", () => {
     ]);
   });
 
-  test("development only means every copy at that version is", () => {
+  test("two copies at one version are one finding", () => {
     const locked = {
       ...LOCKED,
-      // The same version again, reached from the runtime dependencies.
-      "node_modules/shipped/node_modules/matcher": { version: "4.0.7" },
+      "node_modules/builder/node_modules/matcher": { version: "4.0.7" },
     };
     const twice = report();
     twice.vulnerabilities.matcher.nodes.push(
-      "node_modules/shipped/node_modules/matcher",
+      "node_modules/builder/node_modules/matcher",
     );
-    const findings = findingsIn(twice, locked);
-    expect(findings).toHaveLength(1);
-    expect(findings[0]?.development).toBe(false);
+    expect(findingsIn(twice, locked)).toEqual([FINDING]);
+  });
+
+  test("a package the runtime dependencies reach is judged like any other", () => {
+    // The lockfile's `dev` mark changes nothing: one rule for what ships and
+    // for build tooling.
+    const development = {
+      ...LOCKED,
+      "node_modules/matcher": { version: "4.0.7", dev: true },
+    };
+    expect(findingsIn(report(), development)).toEqual(
+      findingsIn(report(), LOCKED),
+    );
   });
 
   test("an advisory with no identifier is still an advisory", () => {
@@ -247,16 +246,6 @@ describe("the table, against what npm reported", () => {
     expect(problems[1]).toMatch(/GHSA-xxxx-yyyy-zzzz.*remove the row/);
   });
 
-  test("what ships is excepted nowhere", () => {
-    const shipped = { ...FINDING, development: false };
-    const outcome = judge({ findings: [shipped], rows: [ROW], today: TODAY });
-    expect(outcome.problems).toHaveLength(1);
-    expect(outcome.problems[0]).toMatch(
-      /no row may except an advisory in what ships/,
-    );
-    expect(outcome.excepted).toEqual([]);
-  });
-
   test("an exception ends the day a fix can be reached", () => {
     const fixed = { ...FINDING, fix: "npm reports a fix" };
     expect(problemsOf([fixed], [ROW])[0]).toMatch(
@@ -265,19 +254,19 @@ describe("the table, against what npm reported", () => {
   });
 
   test("a review date that has passed fails", () => {
-    expect(problemsOf([FINDING], [ROW], "2026-12-03")[0]).toMatch(
-      /was to be reviewed by 2026-12-02, which has passed/,
+    expect(problemsOf([FINDING], [ROW], "2026-11-26")[0]).toMatch(
+      /was to be reviewed by 2026-11-25, which has passed/,
     );
     // The day itself is still inside it.
-    expect(problemsOf([FINDING], [ROW], "2026-12-02")).toEqual([]);
+    expect(problemsOf([FINDING], [ROW], "2026-11-25")).toEqual([]);
   });
 
   test("a review date too far away is not a review date", () => {
-    expect(REVIEW_WITHIN_DAYS).toBe(30);
+    expect(REVIEW_WITHIN_DAYS).toBe(7);
     const row = (review: string) => [{ ...ROW, review }];
-    expect(problemsOf([FINDING], row("2026-12-18"))).toEqual([]);
-    expect(problemsOf([FINDING], row("2026-12-19"))[0]).toMatch(
-      /more than 30 days after today, 2026-11-18/,
+    expect(problemsOf([FINDING], row("2026-11-25"))).toEqual([]);
+    expect(problemsOf([FINDING], row("2026-11-26"))[0]).toMatch(
+      /more than 7 days after today, 2026-11-18/,
     );
     expect(problemsOf([FINDING], row("2099-01-01"))).toHaveLength(1);
   });
@@ -308,7 +297,7 @@ describe("the shape of the table", () => {
     expect(
       table(
         HEADER +
-          `| ${ADVISORY} | \`matcher\`, \`matcher-linux-x64\` | 4.0.7 | 2026-12-02 | read |\n`,
+          `| ${ADVISORY} | \`matcher\`, \`matcher-linux-x64\` | 4.0.7 | 2026-11-25 | read |\n`,
       )(),
     ).toEqual([ROW, { ...ROW, name: "matcher-linux-x64" }]);
   });
@@ -317,9 +306,8 @@ describe("the shape of the table", () => {
     expect(table(HEADER)()).toEqual([]);
   });
 
-  test("the real document parses, and names what the lockfile pins as dev", () => {
-    // Not the registry's answer, and not today's date: those are the gate's
-    // to check when it runs. What a row says of the lockfile is checked here.
+  test("the real document parses, and names what the lockfile pins", () => {
+    // The registry's answer and today's date are the gate's to check.
     const rows = readRows(readFileSync(`${ROOT}/DEPENDENCIES.md`, "utf8"));
     const locked = Object.entries(readLock());
     for (const row of rows) {
@@ -329,7 +317,6 @@ describe("the shape of the table", () => {
           entry.version === row.version,
       );
       expect(copies.length, `${row.name} ${row.version}`).toBeGreaterThan(0);
-      expect(copies.every(([, entry]) => entry.dev === true)).toBe(true);
     }
   });
 
@@ -350,14 +337,14 @@ describe("the shape of the table", () => {
 
   test("a row that cannot be read stops the gate", () => {
     const row = (cells: string) => table(`${HEADER}| ${cells} |\n`);
-    expect(row("CVE-2026-1 | `matcher` | 4.0.7 | 2026-12-02 | read")).toThrow(
+    expect(row("CVE-2026-1 | `matcher` | 4.0.7 | 2026-11-25 | read")).toThrow(
       /not a GHSA identifier/,
     );
-    expect(row(`${ADVISORY} | matcher | 4.0.7 | 2026-12-02 | read`)).toThrow(
+    expect(row(`${ADVISORY} | matcher | 4.0.7 | 2026-11-25 | read`)).toThrow(
       /names no package in backticks/,
     );
     expect(
-      row(`${ADVISORY} | \`matcher\` | ^4.0.7 | 2026-12-02 | read`),
+      row(`${ADVISORY} | \`matcher\` | ^4.0.7 | 2026-11-25 | read`),
     ).toThrow(/not an exact version/);
     expect(row(`${ADVISORY} | \`matcher\` | 4.0.7 | soon | read`)).toThrow(
       /not a day written YYYY-MM-DD/,
@@ -367,7 +354,7 @@ describe("the shape of the table", () => {
       row(`${ADVISORY} | \`matcher\` | 4.0.7 | 2026-02-30 | read`),
     ).toThrow(/not a day written YYYY-MM-DD/);
     // An exception is a signature, not a switch.
-    expect(row(`${ADVISORY} | \`matcher\` | 4.0.7 | 2026-12-02 | `)).toThrow(
+    expect(row(`${ADVISORY} | \`matcher\` | 4.0.7 | 2026-11-25 | `)).toThrow(
       /does not say why/,
     );
   });

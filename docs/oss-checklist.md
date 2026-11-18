@@ -61,9 +61,7 @@ them from the start.
       which the `frontend` job runs, plus `frontend/scripts/check-licences.mjs`
       — the licence policy over the whole installed tree, not the bundle
       alone, with the development exceptions named in `DEPENDENCIES.md`. The
-      size budget is set. `npm audit` is read by
-      `frontend/scripts/check-advisories.mjs`, which lets through only an
-      advisory with no fixed release that `DEPENDENCIES.md` records by name.
+      size budget is set.
 - [x] `reuse lint`; a DCO check over the commits of the pull request
       **(neorc gap)**. Making them required statuses is branch protection,
       below.

@@ -5,35 +5,13 @@
 /**
  * The npm advisory gate: `npm audit` over everything the lockfile pins.
  *
- * A known advisory fails the build, whatever its severity, as it did when
- * this step was `npm audit` alone. One thing is added: an advisory that
- * **nobody can fix yet** -- no release of the package is clear of it -- may be
- * recorded by name in the "Advisories with no fix" table of DEPENDENCIES.md,
- * and then it does not fail the build, for as long as all of this holds:
- *
- * - the row names the advisory, the package and the version the lock pins;
- * - the package is development only: the lockfile marks it `dev`. An
- *   advisory in what ships is excepted nowhere;
- * - npm still reports no fix that moves forward. A fix `npm audit fix` would
- *   take, or a newer release of one of our own dependencies that is clear of
- *   it, ends the exception the day it is published;
- * - the row's `review by` date has not passed, and is no further away than
- *   REVIEW_WITHIN_DAYS. A fix npm cannot see -- a new major that the
- *   packages in between do not ask for yet -- is found by the person who
- *   reads the advisory again on that day.
- *
- * A row whose advisory npm no longer reports fails too, so the table cannot
- * outlive what it records.
- *
- * The node standard library and nothing else, like the licence gate, which
- * this one borrows its reading of DEPENDENCIES.md from.
+ * An advisory fails the build unless the "Advisories with no fix" table of
+ * DEPENDENCIES.md records it. That section says what a row is held to.
  *
  *     node scripts/check-advisories.mjs
  *
  * Exit 1 is "an advisory fails the policy"; exit 2 is "the gate could not do
- * its work" -- npm did not answer, or answered for less than the lock pins.
- * An audit of nothing passes everything, so it is not an audit
- * (scripts/check-audit.sh says the same of pip-audit).
+ * its work": npm did not answer, or answered for less than the lock pins.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -51,11 +29,8 @@ import {
 
 export const TABLE_HEADING = "Advisories with no fix";
 
-/**
- * How far ahead a row's `review by` may be. An exception is somebody having
- * read the advisory; this is how long that reading is believed.
- */
-export const REVIEW_WITHIN_DAYS = 30;
+/** How far ahead a row's `review by` may be. */
+export const REVIEW_WITHIN_DAYS = 7;
 
 /** A GitHub advisory identifier, which is what a row names. */
 const ADVISORY = /^GHSA(?:-[0-9a-z]{4}){3}$/;
@@ -95,10 +70,8 @@ function later(from, days) {
 /** @typedef {{advisory: string, name: string, version: string, review: string}} Row */
 
 /**
- * The rows under the fixed heading of DEPENDENCIES.md.
- *
- * A row that cannot be read stops the gate rather than failing a dependency:
- * the table is the gate's own input.
+ * The rows under the fixed heading of DEPENDENCIES.md. A row that cannot be
+ * read stops the gate: the table is the gate's own input.
  *
  * @param {string} document
  * @returns {Row[]}
@@ -144,7 +117,6 @@ export function readRows(document) {
           `"${cell("review by")}", which is not a day written YYYY-MM-DD`,
       );
     }
-    // An exception is a signature, not a switch: what was read is part of it.
     if (cell(why) === "") {
       throw new GateError(
         `the ${advisory} row of the ${TABLE_HEADING} table does not say why it ` +
@@ -160,7 +132,7 @@ export function readRows(document) {
 
 /**
  * The lockfile's packages, by their path in the tree.
- * @typedef {Record<string, {version?: unknown, dev?: unknown, link?: unknown}>} Locked
+ * @typedef {Record<string, {version?: unknown, link?: unknown}>} Locked
  */
 
 /**
@@ -196,10 +168,9 @@ export function pinnedIn(locked) {
 /**
  * What `npm audit --json` printed, as a report this gate can judge.
  *
- * Neither npm's exit status nor a report that parses says the audit
- * happened. A registry that did not answer prints an error where the report
- * should be; a tree npm could not load is a report on fewer packages than
- * the lock pins. Each is the gate not having done its work.
+ * An audit of nothing passes everything, so a report is held to covering
+ * every package the lock pins (scripts/check-audit.sh does the same for
+ * pip-audit).
  *
  * @param {string} printed
  * @param {number | null} status npm's exit status
@@ -265,10 +236,7 @@ export function readReport(printed, status, pinned) {
 
 /**
  * Whether one version is newer than another, by the three numbers of each.
- *
- * A version that cannot be read is taken to be newer: what the answer
- * decides is whether a person is sent to look, and not knowing is a reason
- * to look.
+ * A version that cannot be read is taken to be newer, so that a person looks.
  *
  * @param {string} one
  * @param {string} other
@@ -290,13 +258,10 @@ export function isNewer(one, other) {
  * The fix npm reports for a vulnerable package, if it is one that moves
  * forward, as words; null when there is none.
  *
- * npm's `fixAvailable` is `true` when `npm audit fix` would clear it within
- * the ranges already asked for, `false` when nothing would, and otherwise the
- * one of our own dependencies it would move, and to which version. That last
- * one is whatever release is clear of the advisory, and when no release with
- * the fix exists it is an *older* one, from before the dependency was
- * declared: a move back is not a fix, and is what `npm audit fix --force`
- * would do.
+ * npm's `fixAvailable` is `true` when `npm audit fix` would clear it, `false`
+ * when nothing would, and otherwise the one of our own dependencies it would
+ * move, and to which version. When no release has the fix, that version is an
+ * older one, from before the dependency was declared: not a fix.
  *
  * @param {unknown} offered
  * @param {Locked} locked
@@ -314,7 +279,6 @@ export function forwardFix(offered, locked) {
     return "npm reports a fix the gate cannot read";
   }
   const pinned = locked[`node_modules/${name}`]?.version;
-  // Not knowing what is pinned is a reason to look, as in `isNewer`.
   if (typeof pinned !== "string") {
     return `npm reports that ${name} ${version} is clear of it`;
   }
@@ -327,23 +291,20 @@ export function forwardFix(offered, locked) {
 /**
  * One advisory against one pinned version of one package.
  * @typedef {{advisory: string, name: string, version: string,
- *            title: string, severity: string, development: boolean,
- *            fix: string | null}} Finding
+ *            title: string, severity: string, fix: string | null}} Finding
  */
 
 /**
  * Every advisory the report names, against each version the lock pins of the
  * package it is about.
  *
- * npm reports thirteen "vulnerabilities" for one advisory in a package twelve
- * others depend on. Only the entry the advisory is *about* carries it, as an
- * object in `via`; the dependents name the package, and follow from it. So
- * the advisories are judged, and what depends on them is not judged again.
+ * npm counts every package that depends on a vulnerable one as a
+ * vulnerability too. Only the entry an advisory is about carries it, as an
+ * object in `via`, and only those are judged.
  *
- * Where a package is pinned at two versions and npm marks both, every
- * advisory of the package is held against both: telling which version an
- * advisory's range covers would take a semver implementation, and holding
- * one too many fails closed.
+ * Where a package is pinned at two versions and npm marks both, each advisory
+ * is held against both: telling them apart would take a semver
+ * implementation, and holding one too many fails closed.
  *
  * @param {{vulnerabilities: Record<string, Record<string, unknown>>}} report
  * @param {Locked} locked
@@ -356,20 +317,16 @@ export function findingsIn(report, locked) {
     const via = Array.isArray(entry.via) ? entry.via : [];
     const nodes = Array.isArray(entry.nodes) ? entry.nodes.map(String) : [];
     const fix = forwardFix(entry.fixAvailable, locked);
-    /** @type {Map<string, boolean>} */
-    const versions = new Map();
+    /** @type {Set<string>} */
+    const versions = new Set();
     for (const where of nodes) {
-      const pinned = locked[where];
-      if (pinned === undefined || typeof pinned.version !== "string") {
+      const pinned = locked[where]?.version;
+      if (typeof pinned !== "string") {
         throw new GateError(
           `npm audit reports ${name} at ${where}, which the lockfile does not pin`,
         );
       }
-      // Development only when *every* copy at that version is.
-      versions.set(
-        pinned.version,
-        (versions.get(pinned.version) ?? true) && pinned.dev === true,
-      );
+      versions.add(pinned);
     }
     for (const one of via) {
       if (one === null || typeof one !== "object") continue;
@@ -384,16 +341,14 @@ export function findingsIn(report, locked) {
             "tree it applies to",
         );
       }
-      for (const [version, development] of versions) {
+      for (const version of versions) {
         findings.push({
-          // An advisory with no identifier a row could name is still an
-          // advisory: it is reported under whatever npm gave, and fails.
+          // An advisory no row could name is still one, and fails.
           advisory: ADVISORY.test(advisory) ? advisory : String(url ?? title),
           name,
           version,
           title: String(title ?? ""),
           severity: String(severity ?? "unknown"),
-          development,
           fix,
         });
       }
@@ -428,8 +383,7 @@ export function judge({ findings, rows, today }) {
   const used = new Set();
 
   for (const finding of findings) {
-    const { advisory, name, version, title, severity, development, fix } =
-      finding;
+    const { advisory, name, version, title, severity, fix } = finding;
     const called = `${advisory}, in ${name} ${version}`;
     const candidates = rows.filter(
       (row) => row.advisory === advisory && row.name === name,
@@ -451,13 +405,6 @@ export function judge({ findings, rows, today }) {
     }
     used.add(key(row));
     const before = problems.length;
-    if (!development) {
-      fail(
-        `${called}: the lockfile does not mark ${name} ${version} dev, so the ` +
-          "runtime dependencies reach it and it is shipped code; no row may " +
-          "except an advisory in what ships",
-      );
-    }
     if (fix !== null) {
       fail(
         `${called}: DEPENDENCIES.md records it as having no fix, and ${fix}; ` +
@@ -482,7 +429,6 @@ export function judge({ findings, rows, today }) {
     }
   }
 
-  // A row that no longer earns its keep is a row nobody will read again.
   for (const row of rows) {
     if (!used.has(key(row))) {
       fail(
@@ -503,8 +449,7 @@ function main() {
     const locked = readLock();
     pinned = pinnedIn(locked);
     const rows = readRows(readPolicy());
-    // Whatever its severity: `npm audit` exits 1 from `low` up, and the
-    // report is read rather than the status, so nothing is below the bar.
+    // The report is read, not the exit status: every severity counts.
     const audit = spawnSync("npm", ["audit", "--json"], {
       cwd: FRONTEND,
       encoding: "utf8",

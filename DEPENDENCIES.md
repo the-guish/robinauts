@@ -103,11 +103,8 @@ allowed list or nothing, enforced at build time by `rollup-plugin-license`.
 What that gate can and cannot see is written out under
 ["JavaScript build tooling"](#javascript-build-tooling) below.
 
-A fifth table is of another kind, and excepts no licence:
-["Advisories with no fix"](#advisories-with-no-fix) records a known
-vulnerability that no release fixes yet, in npm's development-only packages
-and for a bounded time. `frontend/scripts/check-advisories.mjs` reads it
-against what `npm audit` reports.
+A fifth table, ["Advisories with no fix"](#advisories-with-no-fix), excepts
+no licence: it is npm's, and about known vulnerabilities.
 
 An exception is a signature, not a switch. It can cover metadata that names
 a licence family and no more — the trove classifier
@@ -405,52 +402,26 @@ then, the by-hand list is the record.
 
 ## Advisories with no fix
 
-A known vulnerability in a locked package fails the build: `pip-audit` reads
-the Python locked set, and `npm audit` reads `frontend/package-lock.json`. The
-answer to one is the release that fixes it, taken in a pull request of its
-own.
+A known advisory in a package `frontend/package-lock.json` pins fails the
+build, and the answer is the release that fixes it. One that no release fixes
+yet may be recorded here instead, by the project owner.
 
-Some advisories are published before any release fixes them, and then there is
-nothing to take. That is the one case this table is for, and it is npm's
-alone: the Python gate has no such table. A row records an advisory that **no
-release of the package is clear of**, in a package that is **development
-only**, for a **bounded time**. It is a signature under what somebody read,
-like every exception in this file, and not a way to quiet an audit: an
-advisory that has a fix is never recorded here, and neither is one in anything
-the runtime dependencies reach. What ships is excepted nowhere. A row is the
-project owner's to add, and its date the project owner's to move.
+`frontend/scripts/check-advisories.mjs` runs `npm audit` and fails on:
 
-The gate is `frontend/scripts/check-advisories.mjs`, which runs `npm audit`
-and reads this table against what it reports, whatever the severity. An
-advisory with no row fails the build, as it always did. One with a row is
-held to all of this, and fails on any of it:
+- an advisory with no row;
+- a row naming another version than the lockfile pins;
+- a row whose advisory has a fix: one `npm audit fix` would take, or a newer
+  release of one of `package.json`'s own dependencies;
+- a row whose **review by** date has passed, or is more than 7 days away;
+- a row whose advisory npm no longer reports.
 
-- the **version** is the one the lockfile pins: a row holds for the version
-  it names;
-- the lockfile marks the package `dev`, everywhere it pins that version. npm
-  marks a package `dev` only when every path to it is a development
-  dependency;
-- npm still reports **no fix that moves forward**. The day a release clear of
-  the advisory can be reached — by `npm audit fix`, or by a newer release of
-  one of `package.json`'s own dependencies — the build fails until the fix is
-  taken and the row removed. What `npm audit fix --force` offers before that
-  day is a move *back*, to a release from before the dependency was declared,
-  and that is not a fix;
-- the **review by** date has not passed, and is at most 30 days away. npm
-  cannot see every fix: one published as a new major, which the packages in
-  between do not ask for yet, is taken with an `overrides` entry, as
-  `minimatch` 11 was. So somebody reads the advisory again by that date, and
-  either takes the fix or writes the new date and what they found;
-- npm still reports the advisory. A row for one it no longer reports fails
-  until it is removed, so the table cannot outlive what it records.
-
-Under a row, every package that depends on the vulnerable one is quiet too:
-npm counts each of them as a vulnerability, and they follow from the advisory
-rather than adding to it.
+npm cannot see a fix published as a new major that the packages in between do
+not ask for yet. The review date is for that one, and an `overrides` entry
+takes it, as for `minimatch` 11.
 
 | advisory | package | version | review by | why it is accepted |
 |---|---|---|---|---|
-| GHSA-fc5q-39xc-vjpf | `picomatch` | 4.0.7 | 2026-12-16 | a regular expression denial of service (CVE-2026-112366, high): a glob *pattern* such as `+(*)` makes matching a short string take exponential time. Published 2026-10-19 against every release — `<=4.0.7`, and 4.0.7 is the newest — and no release fixes it (read 2026-11-18). The glob matcher of the build, test and lint tooling: `vite` and `vitest` ask for it, and so do `tinyglobby` and `fdir`, which `typescript-eslint` and `rollup-plugin-license` bring as well. None of it is in the bundle or the wheel. The patterns it is given are the ones written in this repository's configuration and in those tools' defaults, so somebody who could choose one could already change the build. What `npm audit fix --force` offers is Vite 6.2.7 and Vitest 3.1.4, two majors back; Vite 6.2.7 carries the same picomatch compiled into its own files, where the audit does not see it |
+| GHSA-fc5q-39xc-vjpf | `picomatch` | 4.0.7 | 2026-11-25 | a denial of service on a crafted glob pattern (CVE-2026-112366, high). It covers every release, `<=4.0.7`, and none fixes it (read 2026-11-18). The glob matcher of `vite`, `vitest`, `typescript-eslint` and `rollup-plugin-license`; the patterns it is given are this repository's own. `npm audit fix --force` offers Vite 6.2.7, which carries the same code compiled into its own files |
 
 
 ## Known exclusions

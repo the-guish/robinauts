@@ -384,11 +384,7 @@ const SCOPES = new Set(["development", "runtime"]);
 
 /**
  * The rows of the table under a heading of DEPENDENCIES.md, each as its cells
- * by column name, written as the document has them.
- *
- * The exception tables of that document are all read this way, by their
- * column headings, so that a column may be added to one without a gate
- * reading the wrong cell (`scripts/check-advisories.mjs` reads another).
+ * by column name. `scripts/check-advisories.mjs` reads its table with it too.
  *
  * @param {string} document
  * @param {string} heading
