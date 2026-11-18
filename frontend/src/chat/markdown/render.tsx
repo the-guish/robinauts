@@ -18,6 +18,7 @@ import { Fragment, type ReactNode } from "react";
 import { CheckIcon, CopyIcon } from "../../icons";
 import { IconButton } from "../IconButton";
 import { useCopied } from "../useCopied";
+import { tableColumns } from "./columns";
 import {
   fenceLanguage,
   safeHref,
@@ -181,11 +182,25 @@ function renderTable(
       ? base
       : `${base} ${ALIGN_CLASS[align]}`;
   };
-  const lastRow = block.rows.length - 1;
+  // A row whose line is still arriving is drawn once that line ends; the
+  // widths take their last look once the table is over (`./columns.ts`).
+  const open = cursor && block.rowOpen === true;
+  const rows = open ? block.rows.slice(0, -1) : block.rows;
+  const columns = tableColumns(
+    block.head,
+    rows,
+    !cursor || block.ended === true,
+  );
+  const lastRow = rows.length - 1;
   const lastColumn = block.head.length - 1;
   return (
     <div key={key} className="md-table-wrap">
       <table className="md-table">
+        <colgroup>
+          {columns.map((width, column) => (
+            <col key={column} style={{ width: `${width}%` }} />
+          ))}
+        </colgroup>
         <thead>
           <tr>
             {block.head.map((cell, column) => (
@@ -196,9 +211,9 @@ function renderTable(
             ))}
           </tr>
         </thead>
-        {block.rows.length > 0 && (
+        {rows.length > 0 && (
           <tbody>
-            {block.rows.map((row, at) => (
+            {rows.map((row, at) => (
               <tr key={at}>
                 {row.map((cell, column) => (
                   <td key={column} className={cellClass("md-td", column)}>

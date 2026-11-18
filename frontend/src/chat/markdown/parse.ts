@@ -34,6 +34,9 @@
  * last line is still being typed are held back: a partial closing fence is
  * not shown as a line of code, a lone `-` or `=` is not yet a heading
  * underline, and a partial table delimiter row already makes the table.
+ * A streamed table also says whether its last row is that unfinished line
+ * (`rowOpen`), and whether a blank line has already closed it (`ended`), so
+ * that the drawing can hold the one back and settle the other.
  *
  * Where this differs from CommonMark 0.31 / GFM 0.29, on purpose:
  *
@@ -106,7 +109,16 @@ export type Block =
       items: ListItem[];
     }
   | { type: "thematicBreak" }
-  | { type: "table"; align: Align[]; head: Inline[][]; rows: Inline[][][] };
+  | {
+      type: "table";
+      align: Align[];
+      head: Inline[][];
+      rows: Inline[][][];
+      /** Streaming only: the last row is the line still being typed. */
+      rowOpen?: true;
+      /** Streaming only: a blank line has closed the table already. */
+      ended?: true;
+    };
 
 interface ParseOptions {
   /** The text is still arriving: see the module comment. */
@@ -576,6 +588,10 @@ interface BlockNode {
   align: Align[];
   head: string[];
   rows: string[][];
+  /** A table's last row came from the unfinished last line. */
+  rowOpen: boolean;
+  /** A table was closed by the input, not by the end of it. */
+  ended: boolean;
 }
 
 function blockNode(
@@ -604,6 +620,8 @@ function blockNode(
     align: [],
     head: [],
     rows: [],
+    rowOpen: false,
+    ended: false,
   };
 }
 
@@ -704,6 +722,8 @@ class BlockParser {
   private lineNumber = 0;
   /** This is the last line and no line break has arrived after it yet. */
   private unfinishedLine = false;
+  /** The input is over, and what is still open is being closed. */
+  private atEnd = false;
   private offset = 0;
   private column = 0;
   private nextNonspace = 0;
@@ -724,6 +744,7 @@ class BlockParser {
       this.unfinishedLine = unfinished && i === lines.length - 1;
       this.incorporate(lines[i]!);
     }
+    this.atEnd = true;
     let block: BlockNode | null = this.tip;
     while (block !== null) {
       const parent: BlockNode | null = block.parent;
@@ -825,12 +846,19 @@ class BlockParser {
     } else {
       text = this.line.slice(this.offset);
     }
-    if (this.tip.type === "table") this.tip.rows.push(splitRow(text));
-    else this.tip.lines.push(text);
+    if (this.tip.type === "table") {
+      this.tip.rows.push(splitRow(text));
+      this.tip.rowOpen = this.streaming && this.unfinishedLine;
+    } else {
+      this.tip.lines.push(text);
+    }
   }
 
   private finalize(block: BlockNode): void {
     block.open = false;
+    // A line that closes the table but has no line break yet may be the
+    // start of the next row: an indent, a `>`, a space before the `|`.
+    block.ended = this.streaming && !this.atEnd && !this.unfinishedLine;
     switch (block.type) {
       case "paragraph": {
         if (block.lines[0]?.startsWith("[") === true) {
@@ -1376,6 +1404,8 @@ function convertBlocks(nodes: BlockNode[], ctx: Context): Block[] {
             }
             return cells;
           }),
+          ...(node.rowOpen ? { rowOpen: true as const } : {}),
+          ...(node.ended ? { ended: true as const } : {}),
         });
         break;
       }

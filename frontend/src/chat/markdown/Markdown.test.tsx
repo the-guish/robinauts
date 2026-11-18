@@ -229,10 +229,92 @@ describe("tables", () => {
     expect(cells.map((c) => c.textContent)).toEqual(["Robin", "loud", "3"]);
     expect(cells[2]).toHaveClass("md-td", "md-align-right");
     expect(root.querySelector("table")).not.toHaveAttribute("style");
+    // The only style is the widths, which are numbers (`./columns.ts`).
+    const cols = [...root.querySelectorAll("colgroup > col")];
+    expect(cols).toHaveLength(3);
+    for (const col of cols) {
+      expect(col.getAttribute("style")).toMatch(/^width: [\d.]+%;$/);
+    }
   });
 
   it("draws no body for a table with only a header", () => {
     expect(draw("|a|\n|-|").querySelector("tbody")).toBeNull();
+  });
+
+  const table = "| k | v |\n|---|---|\n| a | 1 |";
+  it.each([
+    ["a row being typed", `${table}\n| b`, ["a1"]],
+    ["a row whose line has ended", `${table}\n`, ["a1"]],
+    ["a table a blank line closed", `${table}\n\n`, ["a1"]],
+    ["the next row just begun", `${table}\n|`, ["a1"]],
+    [
+      "a table in a list item",
+      `- x\n\n  ${table.replaceAll("\n", "\n  ")}\n`,
+      ["a1"],
+    ],
+    [
+      "a row being typed in a quote",
+      `> ${table.replaceAll("\n", "\n> ")}\n> | b`,
+      ["a1"],
+    ],
+  ])("draws the finished rows of %s while streaming", (_name, source, rows) => {
+    const drawn = [...draw(source, true).querySelectorAll("tbody tr")];
+    expect(drawn.map((tr) => tr.textContent)).toEqual(rows);
+  });
+
+  it("draws every row once the stream ends", () => {
+    const drawn = [...draw(`${table}\n| b`).querySelectorAll("tbody tr")];
+    expect(drawn.map((tr) => tr.textContent)).toEqual(["a1", "b"]);
+  });
+
+  describe("the widths' last look", () => {
+    const body =
+      "| Name | Notes |\n|---|---|\n| ab | cd |\n" +
+      "| ab | a much longer note than the others |";
+    const within = (prefix: string) =>
+      body
+        .split("\n")
+        .map((line) => prefix + line)
+        .join("\n");
+    const widths = (text: string, streaming: boolean) =>
+      [...draw(text, streaming).querySelectorAll("col")].map((col) =>
+        col.getAttribute("style"),
+      );
+    const settled = () => widths(`${body}\n`, false);
+
+    it("is not taken at a row's end: two rows are no look of their own", () => {
+      expect(widths(`${body}\n`, true)).not.toEqual(settled());
+    });
+
+    it.each([
+      ["at the top", `${body}\n\n`],
+      ["in a quote", `${within("> ")}\n>\n`],
+      ["in a list item", `- x\n\n${within("  ")}\n\n`],
+    ])("is taken once a blank line closes a table %s", (_name, source) => {
+      expect(widths(source, true)).toEqual(settled());
+    });
+
+    it.each([
+      ["a space before the next row", body, " "],
+      ["a quote's marker", within("> "), ">"],
+      ["a list item's indent", within("  "), "  "],
+    ])("is not taken while %s arrives", (_name, table, prefix) => {
+      const lead = table === within("  ") ? "- x\n\n" : "";
+      expect(widths(`${lead}${table}\n${prefix}`, true)).toEqual(
+        widths(`${lead}${table}\n`, true),
+      );
+    });
+  });
+
+  it("keeps the column widths while a row is being written", () => {
+    const head = "| Name | Notes |\n|---|---|\n| LangGraph | Graph |\n";
+    const widths = (source: string) =>
+      [...draw(source, true).querySelectorAll("col")].map((col) =>
+        col.getAttribute("style"),
+      );
+    expect(widths(`${head}| Pydantic AI | Typed agents with a long n`)).toEqual(
+      widths(`${head}| Pyd`),
+    );
   });
 });
 
@@ -491,7 +573,8 @@ describe("streaming", () => {
       ["- a\n\n- b", "li:last-child > p"],
       ["> q\n> > deep", "blockquote blockquote > p"],
       ["```js\nconst a", "pre > code"],
-      ["|a|b|\n|-|-|\n|1|2", "tbody tr:last-child > td:last-child"],
+      ["|a|b|\n|-|-|\n|1|2\n|3", "tbody tr:last-child > td:last-child"],
+      ["|a|b|\n|-|-|\n|1|2", "thead th:last-child"],
       ["|a|b|\n|-", "thead th:last-child"],
       ["- [ ]", "li"],
     ];

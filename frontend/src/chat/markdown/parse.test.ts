@@ -1133,6 +1133,25 @@ describe("streaming", () => {
     expect(parse("| a | b |\n| --\n", streaming)[0]?.type).toBe("paragraph");
   });
 
+  it.each([
+    ["a row being typed", "| a |\n|---|\n| 1", { rowOpen: true }],
+    ["a row whose line has ended", "| a |\n|---|\n| 1 |\n", {}],
+    ["a table a blank line closed", "| a |\n|---|\n| 1 |\n\n", { ended: true }],
+    ["a table whose next line is still arriving", "| a |\n|---|\n| 1 |\n ", {}],
+  ])("marks %s", (_name, source, marks) => {
+    const [table] = parse(source, streaming);
+    expect(table).toMatchObject({ type: "table" });
+    expect({
+      rowOpen: (table as { rowOpen?: true }).rowOpen,
+      ended: (table as { ended?: true }).ended,
+    }).toEqual({ rowOpen: undefined, ended: undefined, ...marks });
+  });
+
+  it("marks nothing when not streaming", () => {
+    expect(parse("| a |\n|---|\n| 1")[0]).not.toHaveProperty("rowOpen");
+    expect(parse("| a |\n|---|\n| 1 |\n\n")[0]).not.toHaveProperty("ended");
+  });
+
   it("keeps a half link as text, with the bare URL GFM finds in it", () => {
     expect(parse("see [docs](https://a.te", streaming)).toEqual([
       {
