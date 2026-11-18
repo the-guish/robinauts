@@ -773,7 +773,6 @@ Build Robinauts' image and the worker's from the root of the repository, from th
 checkout as the `robinauts` command that starts them:
 
 ```sh
-scripts/ui-packages-from-source.sh
 docker build -t robinauts .
 docker build -f extra-workers/claude-code-worker/Dockerfile -t robinauts-claude-code-worker .
 ```
