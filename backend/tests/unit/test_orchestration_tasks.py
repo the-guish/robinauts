@@ -80,10 +80,12 @@ def test_a_server_without_the_model_is_refused_with_what_it_offers(
         tasks.model_named(MODELS, "sonnet")
 
 
-def message(role: str, *texts: str, failed: bool = False) -> dict[str, object]:
+def message(
+    role: str, *texts: str, failed: bool = False, stopped: bool = False
+) -> dict[str, object]:
     parts: list[dict[str, object]] = [{"kind": "tool_call", "call_id": "1", "name": "t"}]
     parts += [{"kind": "text", "text": text} for text in texts]
-    return {"id": f"{role}-id", "role": role, "parts": parts, "failed": failed}
+    return {"id": f"{role}-id", "role": role, "parts": parts, "failed": failed, "stopped": stopped}
 
 
 def opened(*messages: dict[str, object]) -> dict[str, object]:
@@ -105,6 +107,7 @@ def test_an_answer_is_carried_as_it_is_its_text_parts_joined(tasks: ModuleType) 
         (),
         (message("user", "here is the guess: 4"),),
         (message("user", "hi"), message("assistant", "TOO", failed=True)),
+        (message("user", "hi"), message("assistant", "TOO", stopped=True)),
     ],
 )
 def test_a_conversation_whose_last_turn_gave_no_answer_has_nothing_to_carry(

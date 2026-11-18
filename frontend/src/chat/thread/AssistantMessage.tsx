@@ -192,6 +192,12 @@ export const AssistantMessage = memo(function AssistantMessage({
             <span className="chat-error-text">{message.detail ?? ""}</span>
           </div>
         )}
+        {message.state === "cancelled" && message.detail !== undefined && (
+          // Under what the answer had done when somebody stopped it. A stop
+          // is not a failure (`docs/specs/wire.md`) and is what the person
+          // just did, so it is a quiet line and no alert.
+          <p className="chat-stopped">{message.detail}</p>
+        )}
       </div>
       <div className="chat-answer-footer">
         {!running && !placeholder && (

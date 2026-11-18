@@ -71,7 +71,7 @@ MESSAGE_KEYS = frozenset(
     }
 )
 
-MESSAGE_OPTIONAL_KEYS = frozenset({"failed", "task_payload"})
+MESSAGE_OPTIONAL_KEYS = frozenset({"failed", "stopped", "task_payload"})
 """Written only when set, so that the messages stored before them read the same."""
 PART_KEYS: Mapping[str, frozenset[str]] = {
     "text": frozenset({"kind", "text"}),
@@ -271,6 +271,7 @@ def message_to_document(message: Message) -> dict[str, Any]:
             "parts": [part_to_document(part) for part in message.parts],
         }
         | ({"failed": True} if message.failed else {})
+        | ({"stopped": True} if message.stopped else {})
         | (
             {}
             if message.task_payload is None
@@ -304,7 +305,8 @@ def message_from_document(document: object) -> Message:
         model=_read_optional_text(read["model"], "a message's model"),
         checkpoint_id=_read_optional_text(read["checkpoint_id"], "a message's checkpoint_id"),
         turn_id=_read_optional_id(read["turn_id"], "a message's turn_id"),
-        failed=_read_failed(read.get("failed", False)),
+        failed=_read_flag(read.get("failed", False), "failed"),
+        stopped=_read_flag(read.get("stopped", False), "stopped"),
         task_payload=_read_task_payload(read.get("task_payload")),
     )
 
@@ -320,9 +322,9 @@ def _read_task_payload(value: object) -> dict[str, Any] | None:
     return dict(value)
 
 
-def _read_failed(value: object) -> bool:
+def _read_flag(value: object, name: str) -> bool:
     if value is not True and value is not False:
-        raise InvalidValueError(f"a message's failed is not true or false: {value!r}")
+        raise InvalidValueError(f"a message's {name} is not true or false: {value!r}")
     return value
 
 

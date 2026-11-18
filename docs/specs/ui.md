@@ -111,3 +111,55 @@ cut short runs again. When the engine saved nothing, the question runs again fro
 Resume is for a long turn that failed or was interrupted, such as by a crash or a deploy.
 Nothing resumes on its own. The conversation waits until the user, or another system through
 the API, picks Refresh or Resume.
+
+
+## Stopped turn
+
+The user presses Stop while the agent is answering. That is not a failure, and it is not shown as one.
+
+What the agent did before the stop is kept as the answer to that message: the tool calls it made, their results, and the text it had written. A quiet line under them says the answer was stopped. A tool call the stop cut short shows as cancelled.
+
+After a stop, the user can proceed with the same three flows:
+1. Edit their message.
+2. Reply with a new message.
+3. Press the Refresh button on the stopped answer.
+
+
+### Edit their message
+
+The same as any edit: everything below that message is discarded, the stopped answer included, and the LLM sees none of it. This is how the user says "forget that attempt".
+
+
+### Reply with a new message
+
+The new message goes under the stopped answer, which stays in the thread.
+
+The LLM will see the first message, the tool calling of the stopped turn with its results and the text it had written (best-effort, as for a failed turn), that the user stopped it, and the new message. A tool call that already ran is not hidden from it, so it does not run it again without knowing.
+
+
+**Example**
+
+
+User Message 1: Find the capital of France and save it to my notes.
+The agent searches, finds Paris, and starts to answer. The user presses Stop.
+User Message 2: Do not save it, just tell me.
+
+
+The LLM should see:
+
+User Message 1: Find the capital of France and save it to my notes.
+The tool calling from the stopped turn, and what it had written
+Some app message: The user stopped that answer before it finished.
+User Message 2: Do not save it, just tell me.
+
+
+### Refresh
+
+On a stopped answer the Refresh button is a regeneration, as on a normal response: the stopped answer is left out of the LLM view, and the message is answered again from the start.
+
+A stopped answer has no Resume.
+
+
+### Stopped before the agent began
+
+A turn stopped before the agent began to answer keeps nothing, and the thread says it was stopped. There is nothing to tell the LLM: the next message replaces the unanswered one, as an edit of it would.

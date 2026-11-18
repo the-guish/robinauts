@@ -555,6 +555,11 @@
             "title": "Role",
             "type": "string"
           },
+          "stopped": {
+            "default": false,
+            "title": "Stopped",
+            "type": "boolean"
+          },
           "task_payload": {
             "anyOf": [
               {

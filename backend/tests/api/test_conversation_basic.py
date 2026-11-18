@@ -68,6 +68,13 @@ def test_a_conversation_with_a_cancel_an_edit_and_a_regeneration(
         run,
         "cancelled",
     )
+    # What the turn had done is kept as an answer marked stopped, which is not a failed one:
+    # neither a retry nor a resume takes it.
+    stopped = opened["messages"][-1]
+    assert (stopped["role"], stopped["stopped"], stopped["failed"]) == ("assistant", True, False)
+    assert stopped["provenance"]["run_id"] == run
+    for again in ("retry", "resume"):
+        assert api.post(turns, json={again: stopped["id"]}).status_code == 404
 
     assert_finished(api.post(turns, json={"edit": second_question, "text": "second, edited"}))
     edited = api.get(f"/robinauts/api/conversations/{cid}").json()["messages"]

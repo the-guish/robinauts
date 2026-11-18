@@ -348,6 +348,8 @@ class MessageView(BaseModel):
     provenance: ProvenanceView | None
     failed: bool = False
     """An answer whose turn failed: what it streamed before the failure."""
+    stopped: bool = False
+    """An answer whose turn somebody stopped: what it streamed before the stop."""
     task_payload: dict[str, Any] | None = None
     """A question's structured data beside its text, as it was asked with it."""
 
@@ -458,6 +460,7 @@ def message_view(message: Message, session: Session) -> MessageView:
         parts=[content(p) for p in message.parts if not isinstance(p, ReasoningPart)],
         provenance=provenance,
         failed=message.failed,
+        stopped=message.stopped,
         task_payload=(None if message.task_payload is None else dict(message.task_payload)),
     )
 

@@ -14,9 +14,9 @@
  *   else's conversation answers as well (`docs/specs/privacy.md`). There is
  *   no thread to show, so this stands in place of one.
  * - **A sentence about the last run** where no message carries it: a run that
- *   ended before it said anything, a cancellation, a turn the server refused
- *   (`docs/specs/wire.md`). Where there **is** a message, the thread shows it
- *   under that message itself and this says nothing.
+ *   ended or was stopped before it announced an answer, a turn the server
+ *   refused (`docs/specs/wire.md`). Where there **is** a message, the thread
+ *   shows it under that message itself and this says nothing.
  * - **A notice about what the person just did**, which is a different thing
  *   and outlives the run that follows it: a message that was not sent, a
  *   stop that did not reach the server. Only their next turn clears it.

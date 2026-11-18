@@ -272,24 +272,25 @@ class Worker:
             await engine.create(session_id)
         by_id = {m.id: m for m in await load_messages(self._broker, owner, session_id)}
         question = by_id[turn.follows]
-        # The nearest answer up the thread that has a checkpoint: a failed answer has
-        # none, and continuing from nothing would start the engine's state again.
+        # The nearest answer up the thread that has a checkpoint: a failed or stopped answer
+        # has none, and continuing from nothing would start the engine's state again.
         checkpoint_id = None
         above = question.parent_id
         while above is not None and checkpoint_id is None:
             checkpoint_id = by_id[above].checkpoint_id
             above = by_id[above].parent_id
         agent_config = self._config.agents[session.agent]
-        # The failed exchanges between the last answer that finished and this question,
-        # oldest first: the engine remembers none of them, so the prompt carries them.
+        # The exchanges between the last answer that finished and this question whose answer
+        # failed or was stopped, oldest first: the engine remembers none of them, so the
+        # prompt carries them.
         earlier: list[tuple[str, Message]] = []
         above = question.parent_id
-        while above is not None and by_id[above].failed:
-            failed = by_id[above]
-            asked = by_id[failed.parent_id] if failed.parent_id is not None else None
+        while above is not None and (by_id[above].failed or by_id[above].stopped):
+            unfinished = by_id[above]
+            asked = by_id[unfinished.parent_id] if unfinished.parent_id is not None else None
             if asked is None:
                 break
-            earlier.insert(0, (_text(asked), failed))
+            earlier.insert(0, (_text(asked), unfinished))
             above = asked.parent_id
         retried = None if turn.retries_message_id is None else by_id[turn.retries_message_id]
         # On a resume the engine goes on from what it saved, and needs the prompt only if it

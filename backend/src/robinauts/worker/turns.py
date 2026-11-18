@@ -36,7 +36,11 @@ from robinauts.controller.contract.broker.documents import (
     stored_message,
 )
 from robinauts.controller.contract.broker.domain import StoredEvent
-from robinauts.controller.contract.broker.partial import failed_answer, with_text
+from robinauts.controller.contract.broker.partial import (
+    failed_answer,
+    stopped_answer,
+    with_text,
+)
 from robinauts.controller.contract.broker.ports import TurnBroker
 from robinauts.shared_domain.domain import (
     ArgumentsPiece,
@@ -257,7 +261,10 @@ async def run_turn(
             failed = failed_answer(answer_id, session, turn, parts, datetime.now(UTC))
             await _end(writer, TurnState.FAILED, STALLED_ERROR, failed)
         else:
-            await _end(writer, TurnState.CANCELLED, None)
+            # Somebody stopped it: what it streamed is kept, as an answer marked stopped, so
+            # that the next turn can tell the model what this one had done.
+            stopped = stopped_answer(answer_id, session, turn, parts, datetime.now(UTC))
+            await _end(writer, TurnState.CANCELLED, None, stopped)
         raise
     except Exception as exc:
         failed = failed_answer(answer_id, session, turn, parts, datetime.now(UTC))

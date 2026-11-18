@@ -62,6 +62,7 @@ export function message(
     parts: [{ kind: "text", text }],
     provenance,
     failed: false,
+    stopped: false,
   };
 }
 
@@ -90,6 +91,7 @@ export function calling(
     ],
     provenance,
     failed: false,
+    stopped: false,
   };
 }
 
@@ -111,6 +113,7 @@ export function results(
     })),
     provenance: null,
     failed: false,
+    stopped: false,
   };
 }
 

@@ -283,7 +283,9 @@ the client sees the terminal event and stops.
   - **AWS:** an `UpdateItem`.
 
   The runner also sees the flag at its next lease tick, so a lost `NOTIFY` costs a
-  tick. It cancels the engine's stream, and the turn ends as `cancelled`.
+  tick. It cancels the engine's stream, and the turn ends as `cancelled`. It stores
+  what the turn streamed as an answer marked stopped, which the next turn's prompt
+  tells the model about.
 - **The runner dies**, whether the process crashed or the Lambda was killed. Its lease
   runs out. The next read that finds the turn (`open_session`, `watch_turn`,
   `queue_turn`, `cancel_turn`, `delete_session`), or the sweep, ends it as `interrupted`

@@ -268,6 +268,9 @@ class Message:
     """The turn that produced an answer, which web shows as the run id; ``None`` on a question."""
     failed: bool = False
     """An answer whose turn failed: what it streamed before it failed, and no checkpoint."""
+    stopped: bool = False
+    """An answer whose turn somebody stopped: what it streamed before the stop, and no
+    checkpoint. Never with ``failed``: a stop is not a failure."""
     task_payload: Mapping[str, Any] | None = None
     """A question's structured data beside its text, for the engine rather than the model: a
     JSON object whose ``task_key`` names the kind of task; untyped past that. ``None`` on an

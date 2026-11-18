@@ -622,6 +622,15 @@
   line-clamp: 2;
 }
 
+/* An answer somebody stopped says so under what it had done: a quiet line,
+   since a stop is not a failure. */
+.chat-stopped {
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
 /* --------------------------------------------------------- the disclosures */
 
 /* What opens one: thinking, a group of calls, a call. */

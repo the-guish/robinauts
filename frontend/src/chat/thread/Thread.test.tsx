@@ -487,6 +487,40 @@ test("a failed answer says so quietly, and the last one can be resumed", async (
   close();
 });
 
+test("a stopped answer says so under what it did, and a reply goes under it", async () => {
+  const stopped = {
+    ...message("m2", "assistant", "Half an answer"),
+    stopped: true,
+  };
+  const { fetch, write, close } = await conversationWithStream([
+    TREE[0]!,
+    stopped,
+  ]);
+  const said = screen.getByText(/This answer was stopped/);
+  // In the answer, under what it had written, and no alert: a stop is not a
+  // failure, and it is what the person did.
+  expect(said.closest('[data-role="assistant"]')).not.toBeNull();
+  expect(screen.getByText("Half an answer")).toBeInTheDocument();
+  expect(said.closest('[role="alert"]')).toBeNull();
+  // Said once: by the answer, not again under the thread.
+  expect(screen.getAllByText(/This answer was stopped/)).toHaveLength(1);
+  // Resume is a failed answer's.
+  expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
+
+  const box = screen.getByRole("textbox", { name: "Message input" });
+  fireEvent.change(box, { target: { value: "Not that way." } });
+  fireEvent.keyDown(box, { key: "Enter" });
+  await settle();
+  // A reply under the stopped answer, which stays where it is; not an edit
+  // of the question it was answering.
+  expect(turnsIn(fetch)).toEqual([
+    { text: "Not that way.", parent_id: "m2", model_id: "sonnet" },
+  ]);
+  expect(screen.getByText(/This answer was stopped/)).toBeInTheDocument();
+  write(event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 2));
+  close();
+});
+
 test("Refresh on a failed answer is a retry, and Resume is the last answer's alone", async () => {
   const failed = {
     ...message("m2", "assistant", "Half an answer"),

@@ -88,11 +88,20 @@ def test_a_message_round_trips_through_its_document() -> None:
     assert message_from_document(document) == answer()
 
 
-@pytest.mark.parametrize(("failed", "written"), [(True, {"failed": True}), (False, {})])
-def test_failed_is_written_only_when_set(failed: bool, written: dict[str, bool]) -> None:
-    message = dataclasses.replace(answer(), checkpoint_id=None, failed=failed)
+@pytest.mark.parametrize(
+    ("ended", "written"),
+    [
+        ({"failed": True}, {"failed": True}),
+        ({"stopped": True}, {"stopped": True}),
+        ({}, {}),
+    ],
+)
+def test_failed_and_stopped_are_written_only_when_set(
+    ended: dict[str, bool], written: dict[str, bool]
+) -> None:
+    message = dataclasses.replace(answer(), checkpoint_id=None, **ended)
     document = message_to_document(message)
-    assert {k: v for k, v in document.items() if k == "failed"} == written
+    assert {k: v for k, v in document.items() if k in ("failed", "stopped")} == written
     assert message_from_document(document) == message
 
 
@@ -196,6 +205,7 @@ def test_a_number_json_cannot_write_is_refused() -> None:
         (lambda d: d.update(role="system"), "role is not a role"),
         (lambda d: d["parts"][0].pop("text"), "lacks a key: text"),
         (lambda d: d.update(failed="yes"), "failed is not true or false"),
+        (lambda d: d.update(stopped=1), "stopped is not true or false"),
         (lambda d: d.update(task_payload=["x"]), "task_payload is not an object"),
         (lambda d: d.update(task_payload={"branch": "x"}), "task_payload has no task_key"),
     ],

@@ -33,7 +33,9 @@ import {
   useChat,
 } from "./runtime";
 import {
+  askedIn,
   EMPTY,
+  ENDED_BADLY,
   reduce,
   ONE_AT_A_TIME,
   ONE_AT_A_TIME_ANSWER,
@@ -50,6 +52,7 @@ import {
 const RUN = "11111111-2222-4333-8444-555555555555";
 const CONVERSATION = id(1);
 const ANSWER = "aaaaaaaa-0000-4000-8000-000000000001";
+const STOPPED = ENDED_BADLY.get("cancelled") ?? "";
 
 // ---------------------------------------------------------------- the reducer
 
@@ -839,9 +842,59 @@ test("a cancellation is not a failure", () => {
   );
   const stopped = state.messages.find((each) => each.id === ANSWER);
   expect(stopped?.state).toBe("cancelled");
-  // What was produced before it stays (`docs/specs/runs.md`).
+  // What was produced before it stays, and is stored (`docs/specs/ui.md`).
   expect(parts(state, ANSWER)).toEqual([["text", "half"]]);
-  expect(state.ended).toBe("This answer was stopped before it was finished.");
+  // Said once, by the answer that was stopped: the read that follows finds
+  // it stored saying the same.
+  expect(stopped?.detail).toBe(STOPPED);
+  expect(state.ended).toBeNull();
+});
+
+test("a run stopped before it said anything is said by the thread", () => {
+  const state = after(
+    asked,
+    started,
+    sent({ type: "RUN_FINISHED", runId: RUN, cancelled: true }),
+  );
+  expect(state.ended).toBe(STOPPED);
+  expect(state.messages.map((each) => each.state)).toEqual(["stored"]);
+});
+
+test("opened, a stopped answer says so itself and the next message goes under it", () => {
+  const stopped = {
+    ...calling("m2", "Let me look.", [
+      { call_id: "toolu_01", name: "github__search", arguments: {} },
+    ]),
+    stopped: true,
+  };
+  const state = after({
+    kind: "opened",
+    conversationId: CONVERSATION,
+    messages: [message("m1", "user", "why?"), stopped],
+    runId: null,
+    endedBadly: STOPPED,
+    endedState: "cancelled",
+  });
+  // Its call was cut short, and is drawn as cancelled with the answer.
+  expect(state.messages[1]?.state).toBe("cancelled");
+  expect(state.messages[1]?.detail).toBe(STOPPED);
+  // Said once: by the answer, not again under the thread.
+  expect(state.ended).toBeNull();
+  // **A reply, not an edit of the question**: the stopped answer stays on the
+  // path, so the model is told what it had done (`docs/specs/ui.md`).
+  expect(askedIn(state, "not that one")).toEqual({
+    text: "not that one",
+    parentId: "m2",
+  });
+  // With a run in flight it is still the stopped answer, not one arriving.
+  const later = after({
+    kind: "opened",
+    conversationId: CONVERSATION,
+    messages: [message("m1", "user", "why?"), stopped],
+    runId: RUN,
+    endedBadly: null,
+  });
+  expect(later.messages[1]?.state).toBe("cancelled");
 });
 
 test("opening a conversation is the thread, in the order it was sent", () => {

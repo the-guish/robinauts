@@ -19,6 +19,8 @@ from util.stack import ROOT, Server, ticket_url
 
 # What the interface says of an answer that failed (frontend/src/chat/state.ts).
 DID_NOT_FINISH = "This answer did not finish: something went wrong while it was being produced."
+# And of one somebody stopped.
+STOPPED = "This answer was stopped before it was finished."
 # What Chromium's console says of what the Content-Security-Policy blocked.
 CSP = "Content Security Policy"
 

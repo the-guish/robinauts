@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""What a turn had answered when its runner went away, rebuilt from the events it stored."""
+"""What a turn that did not finish keeps of its answer: built by its runner, or rebuilt from
+the events it stored when the runner went away."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import uuid
 from collections.abc import Iterable, Sequence
@@ -56,6 +58,15 @@ def failed_answer(
         turn_id=turn.id,
         failed=True,
     )
+
+
+def stopped_answer(
+    answer_id: uuid.UUID, session: Session, turn: Turn, parts: Sequence[MessagePart], at: datetime
+) -> Message:
+    """What a turn somebody stopped keeps: the same, marked stopped and not failed. The next
+    turn's prompt tells the model what it had done (``worker.failures``)."""
+    answer = failed_answer(answer_id, session, turn, parts, at)
+    return dataclasses.replace(answer, failed=False, stopped=True)
 
 
 def partial_answer(events: Iterable[Document]) -> tuple[uuid.UUID | None, tuple[MessagePart, ...]]:

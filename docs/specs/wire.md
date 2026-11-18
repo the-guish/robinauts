@@ -131,6 +131,9 @@ documented here, which is what "documented with the API" means for them.
   `RUN_FINISHED` with AG-UI's `cancelled` outcome — "stopped before it
   completed, by whoever was running it, and did not fail" — and not a
   `RUN_ERROR`, which a stock client shows as something having gone wrong.
+  What it had streamed is kept as its answer, `stopped` on the conversation's
+  messages as a failed turn's is `failed`, and a reply hangs under it
+  ([ui.md](ui.md)).
 - `RUN_ERROR` carries a `code`: the turn's state where it ended in an error
   (`failed`, or `interrupted` — the deployment stopped with the turn in it,
   which is not AG-UI's *interrupt* outcome). Its message is **a fixed

@@ -71,7 +71,10 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   `failed`, with no checkpoint; a reply hangs under it, and the next turn continues
   from the nearest answer above it that has a checkpoint. An interrupted turn stores
   the same. Its runner writes it on a shutdown; after a crash, whoever ends the turn
-  rebuilds it from its events. A cancelled turn stores none.
+  rebuilds it from its events. A cancelled turn stores what it streamed too, as an
+  answer marked `stopped` and not `failed`, with no checkpoint, once its runner has
+  claimed it; cancelled before that, it stores none. The next turn's prompt tells the
+  model what a failed or stopped answer above it did (`docs/specs/ui.md`).
   Every answer comes from exactly one turn.
 - **A turn has its events**, numbered from 1.
 
@@ -119,7 +122,7 @@ user 1 ── N session 1 ── N message ── parent_id ──► message (s
   plus a retention of hours. Ending a turn touches none of its events. The answer is
   in `messages` and the outcome is in `turns`, so after a turn ends nothing reads its
   events but a late watcher. Until they expire, they are the only copy of a turn's
-  reasoning, and of what a cancelled turn streamed.
+  reasoning.
 - **A task holds a lease.** `lease_until` is written with the task, as its creation
   plus 48 hours: how long a task may wait queued. The claim sets it to `lease_seconds`
   from then, and sets `claimed_at`. The process that runs the task renews it every
@@ -215,14 +218,16 @@ same write. The decoder reads the document alone.
 | `parent_id` | the message it follows, or `null` for the first | the question |
 | `role` | `user` | `assistant` |
 | `agent`, `engine`, `model` | what it was asked with | what answered |
-| `checkpoint_id` | `null` | the engine's checkpoint after this answer; `null` on a failed one |
+| `checkpoint_id` | `null` | the engine's checkpoint after this answer; `null` on a failed or stopped one |
 | `turn_id` | `null` | the turn that produced it, which web shows as the run id |
 | `failed` | absent | `true` on an answer whose turn failed; absent otherwise |
+| `stopped` | absent | `true` on an answer whose turn somebody stopped; absent otherwise |
 | `task_payload` | the JSON object it was asked with beside its text, whose `task_key` names the kind of task; absent when none | absent |
 
-Every field but `failed` and `task_payload` is present on every message; one that does
-not apply is `null`. `failed` is written only when it is `true`, and `task_payload` only
-when a question has one, so the messages stored before them read the same. A
+Every field but `failed`, `stopped` and `task_payload` is present on every message; one
+that does not apply is `null`. `failed` and `stopped` are each written only when `true`,
+and `task_payload` only when a question has one, so the messages stored before them read
+the same. A
 `task_payload` without its `task_key` string is refused, as any document that does not
 read. `tool` is a reserved role: no message has it yet.
 
@@ -287,7 +292,7 @@ written for one would make nonsense of the other.
 
 - **Additive changes keep the version:** a new kind of part or of event, a new
   role, and a new key written only when it is set and read as unset when absent
-  (`failed`). A build that does not know a kind, or such a key, refuses **the
+  (`failed`, `stopped`). A build that does not know a kind, or such a key, refuses **the
   document holding it**, by name, and reads every other. A message is refused whole,
   since a message shown without part of itself is one misread.
 - **Anything else moves it:** a key every document must have, or a change to the

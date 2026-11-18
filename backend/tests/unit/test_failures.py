@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""What the prompt tells the model about answers that failed."""
+"""What the prompt tells the model about answers that failed, or that somebody stopped."""
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from datetime import UTC, datetime
 
@@ -34,6 +35,10 @@ def failed(*parts: MessagePart) -> Message:
         created_at=datetime.now(UTC),
         failed=True,
     )
+
+
+def stopped(*parts: MessagePart) -> Message:
+    return dataclasses.replace(failed(*parts), failed=False, stopped=True)
 
 
 @pytest.mark.parametrize(
@@ -102,6 +107,8 @@ EXCHANGE = [
     "The user was told it failed.",
 ]
 NEW = ["", "---", "The user's new message:", "", "Was it my fault?"]
+EARLIER = "Earlier messages in this conversation got no finished answer:"
+PARIS = ToolResultPart("c1", "Paris", is_error=False)
 
 
 @pytest.mark.parametrize(
@@ -112,7 +119,7 @@ NEW = ["", "---", "The user's new message:", "", "Was it my fault?"]
             [("Capital of France?", failed(CALL, ERROR))],
             None,
             [
-                "Earlier messages in this conversation got no answer, because answering failed:",
+                EARLIER,
                 "",
                 "Message: Capital of France?",
                 *EXCHANGE,
@@ -123,7 +130,7 @@ NEW = ["", "---", "The user's new message:", "", "Was it my fault?"]
             [("Capital of France?", failed()), ("And of Spain?", failed(CALL, ERROR))],
             None,
             [
-                "Earlier messages in this conversation got no answer, because answering failed:",
+                EARLIER,
                 "",
                 "Message: Capital of France?",
                 "Your answer to it failed before it finished.",
@@ -138,7 +145,7 @@ NEW = ["", "---", "The user's new message:", "", "Was it my fault?"]
             [("Capital of France?", failed())],
             failed(),
             [
-                "Earlier messages in this conversation got no answer, because answering failed:",
+                EARLIER,
                 "",
                 "Message: Capital of France?",
                 "Your answer to it failed before it finished.",
@@ -150,9 +157,55 @@ NEW = ["", "---", "The user's new message:", "", "Was it my fault?"]
                 CLOSING,
             ],
         ),
+        (
+            # Stopped, not failed: what it had done, and who stopped it.
+            [("Capital of France?", stopped(CALL, PARIS, TextPart("The capital is")))],
+            None,
+            [
+                EARLIER,
+                "",
+                "Message: Capital of France?",
+                "The user stopped your answer to it before it finished.",
+                "Before it was stopped, it made these tool calls:",
+                '- search({"q": "capital"}) -> result, tool output: "Paris"',
+                'It had written: "The capital is"',
+                *NEW,
+            ],
+        ),
+        (
+            # A call the stop cut short has no result; an answer stopped at once did nothing.
+            [("Capital of France?", stopped(CALL)), ("And of Spain?", stopped())],
+            None,
+            [
+                EARLIER,
+                "",
+                "Message: Capital of France?",
+                "The user stopped your answer to it before it finished.",
+                "Before it was stopped, it made these tool calls:",
+                '- search({"q": "capital"}) -> no result',
+                "",
+                "Message: And of Spain?",
+                "The user stopped your answer to it before it finished.",
+                *NEW,
+            ],
+        ),
+        (
+            [("Capital of France?", failed(CALL, ERROR)), ("And of Spain?", stopped())],
+            None,
+            [
+                EARLIER,
+                "",
+                "Message: Capital of France?",
+                *EXCHANGE,
+                "",
+                "Message: And of Spain?",
+                "The user stopped your answer to it before it finished.",
+                *NEW,
+            ],
+        ),
     ],
 )
-def test_earlier_failed_exchanges_come_before_the_question(
+def test_earlier_unfinished_exchanges_come_before_the_question(
     earlier: list[tuple[str, Message]], retried: Message | None, expected: list[str]
 ) -> None:
     assert prompt_after_failures("Was it my fault?", earlier, retried).split("\n") == expected

@@ -101,7 +101,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   parts: ChatPart[];
   state: ChatMessageState;
-  /** The sentence to show on a message whose run failed. */
+  /** The sentence to show on a message whose run failed, or was stopped. */
   detail?: string;
   /**
    * The tool message that answered this answer's calls, if one has.
@@ -263,9 +263,10 @@ export function saidFor(code: string): string {
  * What a new question goes after: the end of the thread, or just before it.
  *
  * Usually the end itself. **Unless the end is a question nobody answered** --
- * what a cancelled or interrupted run leaves behind; a failed one stores its
- * answer -- and then it is the message before that question: the new one
- * stands where the unanswered one stood.
+ * what a run stopped before it began to answer leaves behind; one that had
+ * begun stores what it did, as a failed run does (`docs/specs/ui.md`) -- and
+ * then it is the message before that question: the new one stands where the
+ * unanswered one stood.
  */
 export function under(state: ChatState): string | null {
   const tail = state.messages.at(-1);
@@ -430,8 +431,8 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
         sending: false,
         writing: null,
         thinking: null,
-        // Said once: by the failed answer when there is one at the end.
-        ended: messages.at(-1)?.state === "failed" ? null : action.endedBadly,
+        // Said once: by the answer at the end, when it failed or was stopped.
+        ended: saysHowItEnded(messages.at(-1)) ? null : action.endedBadly,
         before: null,
       };
     }
@@ -753,10 +754,15 @@ function applied(state: ChatState, event: AguiEvent): ChatState {
       // same -- an ending is never something to ignore while something is
       // waiting to be told it is over.
       if (state.runId === null && !anyRunning(state)) return state;
-      return {
-        ...ending(state, event.cancelled ? "cancelled" : "stored"),
-        ended: event.cancelled ? (ENDED_BADLY.get("cancelled") ?? null) : null,
-      };
+      if (!event.cancelled) return { ...ending(state, "stored"), ended: null };
+      // **The answer that was stopped says so itself**, as a failed one does:
+      // it is stored with what it did (`docs/specs/ui.md`), and the read that
+      // follows finds it saying the same. A run stopped before it announced
+      // an answer has no message to put the sentence on, so the thread says it.
+      const said = ENDED_BADLY.get("cancelled");
+      return anyRunning(state)
+        ? { ...ending(state, "cancelled", said), ended: null }
+        : { ...ending(state, "cancelled"), ended: said ?? null };
     }
 
     case "RUN_ERROR": {
@@ -773,6 +779,19 @@ function applied(state: ChatState, event: AguiEvent): ChatState {
 /** Whether an answer is still being written. */
 function anyRunning(state: ChatState): boolean {
   return state.messages.some((message) => message.state === "running");
+}
+
+/**
+ * Whether that message carries the sentence about how its run ended: an
+ * answer that failed, or one that was stopped and stored as such (`held`).
+ * An answer merely left open -- nothing watching it, a batch never answered
+ * -- is closed as cancelled with no sentence, and the thread says why.
+ */
+function saysHowItEnded(message: ChatMessage | undefined): boolean {
+  return (
+    message?.state === "failed" ||
+    (message?.state === "cancelled" && message.detail !== undefined)
+  );
 }
 
 /** A `TEXT_MESSAGE_START` for a message whose start never arrived. */
@@ -1032,7 +1051,7 @@ function sameData(one: unknown, other: unknown): boolean {
  * a run is in flight (its results are what the stream will bring), and
  * otherwise over the way the run was -- interrupted, with the sentence that
  * says so, or cancelled -- so that its calls are drawn as what they are. An
- * answer whose turn failed says so itself (`held`).
+ * answer whose turn failed or was stopped says so itself (`held`).
  */
 function folded(
   messages: readonly Message[],
@@ -1053,7 +1072,7 @@ function folded(
     thread[thread.length - 1] = answered(answer, message);
   }
   return thread.map((message, at) => {
-    if (message.role !== "assistant" || message.state === "failed") {
+    if (message.role !== "assistant" || message.state !== "stored") {
       return message;
     }
     if (!unanswered(message)) return message;
@@ -1116,10 +1135,16 @@ function held(message: Message): ChatMessage {
       return [];
     }),
     // **An answer whose turn failed is stored**, with what it did before it
-    // failed, and it says so where the answer is (`docs/specs/ui.md`).
+    // failed, and it says so where the answer is (`docs/specs/ui.md`). **So
+    // is one somebody stopped**, which is not a failure and says that.
     ...(message.failed
       ? { state: "failed" as const, detail: ENDED_BADLY.get("failed") ?? "" }
-      : { state: "stored" as const }),
+      : message.stopped
+        ? {
+            state: "cancelled" as const,
+            detail: ENDED_BADLY.get("cancelled") ?? "",
+          }
+        : { state: "stored" as const }),
   };
 }
 

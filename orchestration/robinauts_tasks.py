@@ -237,10 +237,10 @@ def _run_turn(path: str, body: dict[str, Any]) -> str:
 
 def answer_of(opened: dict[str, Any]) -> tuple[str, str]:
     """The id and the text of a conversation's last message, which must be an answer that
-    did not fail."""
+    finished: not one that failed, nor one somebody stopped."""
     messages = opened["messages"]
     last = messages[-1] if messages else None
-    if last is None or last["role"] != "assistant" or last.get("failed"):
+    if last is None or last["role"] != "assistant" or last.get("failed") or last.get("stopped"):
         ended = opened.get("ended_badly") or {}
         raise RuntimeError(
             f"conversation {opened['conversation']['id']} has no answer to carry: its last turn"
