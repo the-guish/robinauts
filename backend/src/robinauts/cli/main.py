@@ -71,7 +71,6 @@ from robinauts.cli.backend import (
 from robinauts.cli.composition import (
     DATA_DIR_VARIABLE,
     DATABASE_URL_VARIABLE,
-    ENGINE_REFUSALS,
     compose,
     init_database,
     load,
@@ -86,7 +85,7 @@ from robinauts.cli.desktop import (
     copy_configuration,
     desktop_application,
 )
-from robinauts.cli.lifecycle import Lifecycle, WorkerStartError
+from robinauts.cli.lifecycle import Lifecycle
 from robinauts.cli.orchestration import (
     NEORC_ROLES,
     handlers_code,
@@ -95,8 +94,8 @@ from robinauts.cli.orchestration import (
 )
 from robinauts.cli.worker_process import end_with_parent
 from robinauts.controller.contract.domain import ConfigError
-from robinauts.orchestrator.contract.domain import FLOWS_VARIABLE, OrchestrationStartError
-from robinauts.shared_domain.domain import Config, ControllerError, StorageKind
+from robinauts.orchestrator.contract.domain import FLOWS_VARIABLE
+from robinauts.shared_domain.domain import Config, StorageKind
 from robinauts.web.app import NAME
 from robinauts.web.roles import ROBINAUTS_ROLES
 
@@ -207,23 +206,20 @@ def start(
             log.info("worker %r is started elsewhere, with a token the operator created", name)
     try:
         backend = Backend(parts, ui_dir=ui_dir)
-        # Until SIGINT or SIGTERM; it says why and exits 1 when the backend did not start.
-        run_server(backend.composition, front, worker)
-        return 0
-    except (
-        ControllerError,
-        OneberthConfigError,
-        *ENGINE_REFUSALS,
-        WorkerStartError,
-        OrchestrationStartError,
-    ) as refused:
-        # A database or an engine's file that will not open or is not this build's, an engine
-        # the build lacks or a secret missing, a worker process or neorc that did not start:
-        # said before anything listens.
+    except OneberthConfigError as refused:
+        # A grant in oneberth's file names a role no component gives a person: said before
+        # anything listens.
         print(refused, file=sys.stderr)
         return 1
+    try:
+        # Until SIGINT or SIGTERM. A backend that did not start exits 1, and oneberth's last
+        # line says why: the component that failed, with what its error says. That is a
+        # database or an engine's file that will not open or is not this build's, a worker
+        # process that ended, or flows that neorc refused.
+        run_server(backend.composition, front, worker)
     except KeyboardInterrupt:
         return 130
+    return 0
 
 
 def desktop_backend() -> int:
