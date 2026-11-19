@@ -15,6 +15,7 @@ roles, and what it starts and stops. `new_robinauts_webapp` in `web/app.py` buil
 | `/robinauts/internal/worker/…` | the workers' routes, on both listeners |
 | `/robinauts/openapi.json` | Robinauts' OpenAPI document, `backend/openapi.json` |
 | `/neorc/…` | neorc's manager |
+| `/<name>/…` | an extra application's component, below |
 | `/auth/…` | oneberth: sign-in, the session, tokens, pairing, devices, service tokens |
 | `/ui/` | the built interface, or a page that says it is not built |
 | `/health` | oneberth, from each component's state |
@@ -41,6 +42,27 @@ there too. Each ends with the process, at a stop or a crash. The store holds non
 A checkout whose interface is not built still serves the API. `/ui/` then answers 404 with a
 page that says the interface is not built, and the log says to run `npm run build` in
 `frontend/`. A wheel always holds the interface.
+
+### Extra applications
+
+A deployment adds applications of its own beside Robinauts and neorc. Each has a component for
+the backend and an application for the rail.
+
+- `ROBINAUTS_COMPONENTS` names the components, separated by commas, each
+  `<module>:<function>`. The server's Python finds the module, such as one on `PYTHONPATH`.
+- The function takes the server's environment and returns a oneberth `Component`. The backend
+  composes the components after Robinauts' own and neorc's, in the variable's order.
+- An extra component is served under `/<name>/`, behind oneberth's checks. Its roles are its
+  own, and the local user holds each one a person may hold.
+- The environment names the storage. With `ROBINAUTS_DATA_DIR`, an application keeps a file of
+  its own in that folder, beside `robinauts.db`.
+- A name that gives no component stops the start. A component oneberth cannot compose, such as
+  a second one named `neorc`, stops it too.
+- The rail shows an extra application when the interface's build holds it
+  ([frontend.md](../specs/frontend.md), "The interface").
+- The admin scripts know oneberth's roles, Robinauts' and neorc's.
+
+`cli/extra.py` reads the variable.
 
 ## Roles and permissions
 

@@ -157,7 +157,8 @@ topic documents listed under [Documents](#documents).
   person signs in locally. Robinauts declares its roles: user, admin, worker
   and handler. [sign-in.md](sign-in.md).
 - **Interface.** oneberth's shell, with two applications on its rail:
-  Robinauts and neorc. Robinauts' has neorc's layout: a collapsible left
+  Robinauts and neorc. A deployment adds applications of its own below
+  them. Robinauts' has neorc's layout: a collapsible left
   navigation panel that this project owns, and the chat in the middle; it
   opens on an empty chat. [frontend.md](frontend.md).
 - **Conversations.** A tree of messages in the platform's own format —

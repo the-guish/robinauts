@@ -17,6 +17,11 @@
 # The image carries the same build of robinauts as the `robinauts desktop` that starts it: the
 # workers on the host parse the same configuration and speak a wire with no version handshake.
 
+# A build's extra applications, shown and served beside Robinauts and neorc (docs/deployment.md,
+# "Extra applications"): none here. A build names their folder as the context `extra`, which
+# takes this stage's place: docker build --build-context extra=<folder> -t robinauts .
+FROM scratch AS extra
+
 # The interface, built from its lock as scripts/check-frontend.sh builds it.
 FROM node:24-slim AS interface
 # git, which scripts/ui-packages-from-source.sh fetches neorc and oneberth with.
@@ -31,6 +36,8 @@ COPY backend/openapi.json backend/
 COPY backend/pyproject.toml backend/
 COPY scripts/ui-packages-from-source.sh scripts/
 COPY frontend frontend
+# The extra applications of the rail: their index.ts takes the place of the empty one.
+COPY --from=extra / frontend/src/extra/
 RUN scripts/ui-packages-from-source.sh \
     && cd frontend && npm ci --ignore-scripts && CHECK_BUNDLED=1 npm run build
 
@@ -60,6 +67,9 @@ COPY backend/src backend/src
 COPY orchestration orchestration
 COPY --from=interface /opt/robinauts/src/frontend/dist frontend/dist
 RUN cd backend && uv sync --locked --no-dev
+# The extra applications' folder, whole. A deployment names their Python packages there in
+# PYTHONPATH, and their components in ROBINAUTS_COMPONENTS.
+COPY --from=extra / /opt/robinauts/extra/
 
 # Nothing runs as root. The launcher runs the container as the person's own user, whom the image
 # does not know: everything here is readable by any user, and the backend writes in /data alone.

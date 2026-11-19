@@ -24,6 +24,13 @@
   runs, flows and queues, and its pages. Each application keeps its state
   while the other is shown: the conversation on the screen, what was typed
   and the scroll position.
+- **Extra applications.** A build adds applications to the rail, below neorc.
+  `src/extra/index.ts` exports them in the rail's order, and Robinauts ships
+  none. A build puts a folder of its own in that place: its `index.ts`, and
+  each application's files beside it. The files are TypeScript over React and
+  `@oneberth/ui`, which this build compiles, as it compiles neorc's package.
+  The backend serves each one's API under its own name
+  ([architecture/web.md](../architecture/web.md), "Extra applications").
 - **The form that starts a run** is Robinauts' where the flow has a form
   file (oneberth's `docs/specs/neorc-in-robinauts.md`). The backend reads
   the file and fills its lists (`GET /robinauts/api/flows`), and the

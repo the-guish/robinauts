@@ -13,7 +13,8 @@ The backend is a oneberth composition of two components: Robinauts' own, served 
 ``/robinauts/``, and neorc's manager, under ``/neorc/`` (``docs/architecture/web.md``). oneberth
 serves ``/auth``, the interface under ``/ui/`` and ``/health``, on the front listener
 (``--host``, ``--port``), and the workers' routes on the worker listener (``--worker-host``,
-``--worker-port``).
+``--worker-port``). ``ROBINAUTS_COMPONENTS`` names the components of a deployment's extra
+applications, composed after the two (``cli/extra.py``).
 
 Two files configure it. ``ROBINAUTS_CONFIG`` names Robinauts' own: the models, the agents, the
 tool servers and the workers. ``ONEBERTH_CONFIG`` names oneberth's: the sign-in through
@@ -63,7 +64,7 @@ from oneberth.identity import (
 from oneberth.identity.memory import MemoryIdentityStore
 from oneberth.launcher import LaunchedBackend, LauncherError, launch
 from oneberth.stores import opened_store
-from oneberth.web import Component, Context, Listen, compose_app
+from oneberth.web import Component, CompositionError, Context, Listen, compose_app
 from oneberth.web import run as run_server
 
 from robinauts.cli.composition import (
@@ -89,6 +90,7 @@ from robinauts.cli.desktop import (
     copy_configuration,
     desktop_application,
 )
+from robinauts.cli.extra import extra_components
 from robinauts.cli.lifecycle import Lifecycle, WorkerStartError
 from robinauts.cli.orchestration import (
     NEORC_ROLES,
@@ -292,7 +294,8 @@ class LateTransport(httpx.AsyncBaseTransport):
 
 class Backend:
     """What ``robinauts start`` serves: the composition of Robinauts' component and neorc's,
-    the lifecycle of the controller and the workers, and neorc's start.
+    the lifecycle of the controller and the workers, and neorc's start. ``extra`` are the
+    components of the deployment's extra applications, composed after the two.
 
     Robinauts' component starts first and stops last. Its lifespan opens neorc's storage and
     the controller, and starts the workers. Its serving begins once both listeners serve: it
@@ -311,6 +314,7 @@ class Backend:
         store: Callable[[], AbstractAsyncContextManager[Any]] | IdentityStore,
         ui_dir: Path | None = None,
         local: bool = False,
+        extra: Sequence[Component] = (),
     ) -> None:
         self.composed = composed
         self.lifecycle = lifecycle
@@ -333,7 +337,7 @@ class Backend:
         neorc = orchestrator.component
         assert isinstance(neorc, Component)
         self.composition = compose_app(
-            [self.component, neorc],
+            [self.component, neorc, *extra],
             config=oneberth,
             store=store,
             interface=ui_dir,
@@ -422,6 +426,7 @@ def start(
             program=(*COMMAND, "neorc-worker"),
             supervised=supervised,
         )
+        extra = extra_components(environ)
     except ConfigError as refused:
         print(refused, file=sys.stderr)
         return 1
@@ -443,6 +448,8 @@ def start(
             log.info("worker %r starts with the command: %s", name, shlex.join(command))
         for name in sorted(config.externals):
             log.info("worker %r is started elsewhere, with a token the operator created", name)
+    for component in extra:
+        log.info("extra application %r is composed after Robinauts and neorc", component.name)
     lifecycle = Lifecycle(
         composed,
         broker_url=f"{local_url(worker_host, worker_port)}/{NAME}",
@@ -461,6 +468,7 @@ def start(
             store=store_of(environ),
             ui_dir=ui_dir,
             local=local,
+            extra=extra,
         )
         # Until SIGINT or SIGTERM; it says why and exits 1 when the backend did not start.
         run_server(backend.composition, Listen(host, port), Listen(worker_host, worker_port))
@@ -468,13 +476,14 @@ def start(
     except (
         ControllerError,
         OneberthConfigError,
+        CompositionError,
         *ENGINE_REFUSALS,
         WorkerStartError,
         OrchestrationStartError,
     ) as refused:
         # A database or an engine's file that will not open or is not this build's, an engine
-        # the build lacks or a secret missing, a worker process or neorc that did not start:
-        # said before anything listens.
+        # the build lacks or a secret missing, a worker process or neorc that did not start,
+        # an extra application oneberth cannot compose: said before anything listens.
         print(refused, file=sys.stderr)
         return 1
     except KeyboardInterrupt:

@@ -5,7 +5,7 @@
  * The interface: oneberth's shell with two applications, Robinauts and neorc
  * (oneberth's `shell.md`). The shell holds the session, the sign-in page,
  * the rail, the theme toggle, the account button and the account pages;
- * `./apps.tsx` registers the two applications.
+ * `./apps.tsx` registers the two applications, and a build's extra ones.
  *
  * **One page stands outside the shell**: `#/link`, the page a pairing code
  * opens in a browser (`./LinkPage.tsx`). It is shown whatever the session

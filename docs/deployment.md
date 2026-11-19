@@ -807,6 +807,24 @@ Not in this version: an untrusted worker, a worker on the `sandbox` network, the
 that holds the real keys, a worker in a VM, and the narrower worker routes. A trusted worker's
 keys are visible to `docker inspect` on that machine.
 
+### Extra applications
+
+A deployment adds applications of its own beside Robinauts and neorc
+([architecture/web.md](architecture/web.md), "Extra applications"). Robinauts' image takes them
+from a folder, the build context `extra`:
+
+```sh
+docker build --build-context extra=<folder> -t robinauts .
+```
+
+- `<folder>/index.ts` exports the applications of the rail, and each application's interface
+  stands beside it. The folder's files go over `frontend/src/extra/` before the interface is
+  built.
+- The image holds the whole folder at `/opt/robinauts/extra/`. `PYTHONPATH` names the folders
+  of its Python packages there, and `ROBINAUTS_COMPONENTS` names their components.
+- A server from a wheel takes the components the same way. Its interface is the one the wheel
+  holds, or the built one `ROBINAUTS_UI_DIR` names.
+
 ## The local mode
 
 `robinauts start --local` is oneberth's local mode: no identity provider, one person, the one

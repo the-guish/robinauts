@@ -2,8 +2,10 @@
 // Copyright The Robinauts Authors
 
 /**
- * The two applications of the shell, in the order of the rail: Robinauts,
- * then neorc (oneberth's `shell.md`, "An application in the shell").
+ * The applications of the shell, in the order of the rail: Robinauts, then
+ * neorc (oneberth's `shell.md`, "An application in the shell"), then the
+ * extra applications of the build (`./extra/index.ts`), of which Robinauts
+ * ships none.
  *
  * Each loads the first time its icon is chosen, so neither application's
  * code is in the entry. neorc is given the address of its API, which this
@@ -13,6 +15,7 @@
 import { neorcApp } from "@neorc/ui";
 import type { ShellApp } from "@oneberth/ui";
 
+import { EXTRA_APPS } from "./extra";
 import type { FormRequest } from "./flows/forms";
 import { MessageSquareIcon } from "./icons";
 
@@ -31,4 +34,4 @@ const neorc = neorcApp({
   },
 });
 
-export const APPS: readonly ShellApp[] = [robinauts, neorc];
+export const APPS: readonly ShellApp[] = [robinauts, neorc, ...EXTRA_APPS];

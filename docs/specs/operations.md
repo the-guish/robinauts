@@ -127,6 +127,9 @@ What an internal platform team deploys and controls.
   model providers, models, agents and the MCP tool servers agents may use;
   limits and retention (below). A sign-in key in Robinauts' file is refused,
   with where it went.
+- `ROBINAUTS_COMPONENTS` names the components of a deployment's extra
+  applications
+  ([architecture/web.md](../architecture/web.md), "Extra applications").
 - Unknown keys are errors, and all problems are reported at once, at
   start-up.
 
