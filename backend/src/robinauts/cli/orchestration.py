@@ -3,7 +3,8 @@
 
 """neorc, built: its manager composed into this backend on storage of the backend's kind, and,
 with a flows folder, the folder's flows as forms, uploaded and served by a worker of neorc's.
-``cli/main.py`` alone imports this module. It is apart from ``cli/composition.py`` because a
+``cli/backend.py`` and ``cli/main.py`` alone import this module. It is apart from
+``cli/composition.py`` because a
 worker in a process of its own imports that one, and the extra workers' images leave neorc out:
 nothing a worker imports may reach neorc (a contract in ``backend/pyproject.toml``).
 """

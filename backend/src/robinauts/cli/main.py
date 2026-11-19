@@ -13,7 +13,8 @@ The backend is a oneberth composition of two components: Robinauts' own, served 
 ``/robinauts/``, and neorc's manager, under ``/neorc/`` (``docs/architecture/web.md``). oneberth
 serves ``/auth``, the interface under ``/ui/`` and ``/health``, on the front listener
 (``--host``, ``--port``), and the workers' routes on the worker listener (``--worker-host``,
-``--worker-port``).
+``--worker-port``). ``cli/backend.py`` builds the two components and wires them. This module
+composes them alone, and a host with applications of its own composes them beside its own.
 
 Two files configure it. ``ROBINAUTS_CONFIG`` names Robinauts' own: the models, the agents, the
 tool servers and the workers. ``ONEBERTH_CONFIG`` names oneberth's: the sign-in through
@@ -43,41 +44,37 @@ import logging
 import os
 import shlex
 import sys
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from collections.abc import Mapping, Sequence
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
 import httpx
 from oneberth.admin import PostgresConnector, add_admin_commands
-from oneberth.config import Config as OneberthConfig
 from oneberth.config import ConfigError as OneberthConfigError
-from oneberth.config import is_loopback, load_config, local_config
-from oneberth.identity import (
-    ONEBERTH_ROLES,
-    Access,
-    IdentityStore,
-    Registry,
-)
-from oneberth.identity.memory import MemoryIdentityStore
+from oneberth.config import local_config
+from oneberth.identity import ONEBERTH_ROLES, Registry
 from oneberth.launcher import LaunchedBackend, LauncherError, launch
-from oneberth.stores import opened_store
-from oneberth.web import Component, Context, Listen, compose_app
+from oneberth.web import Listen, compose_app
 from oneberth.web import run as run_server
 
+from robinauts.cli.backend import (
+    COMMAND,
+    DEFAULT_CODE,
+    ONEBERTH_CONFIG_VARIABLE,
+    REPO,
+    Parts,
+    local_url,
+    robinauts_parts,
+    store_of,
+)
 from robinauts.cli.composition import (
-    CONTROLLER_TABLES,
     DATA_DIR_VARIABLE,
     DATABASE_URL_VARIABLE,
     ENGINE_REFUSALS,
-    Composed,
-    SecretLookup,
     compose,
-    configure,
     init_database,
     load,
-    read_tables,
     storage_from,
 )
 from robinauts.cli.desktop import (
@@ -98,54 +95,15 @@ from robinauts.cli.orchestration import (
 )
 from robinauts.cli.worker_process import end_with_parent
 from robinauts.controller.contract.domain import ConfigError
-from robinauts.orchestrator.contract.domain import (
-    FLOWS_VARIABLE,
-    MOVED,
-    TABLE,
-    OrchestrationStartError,
-    Orchestrator,
-)
+from robinauts.orchestrator.contract.domain import FLOWS_VARIABLE, OrchestrationStartError
 from robinauts.shared_domain.domain import Config, ControllerError, StorageKind
-from robinauts.web.app import NAME, new_robinauts_webapp
-from robinauts.web.roles import ROBINAUTS_ROLES, WORKER_ROLE
-
-REPO = Path(__file__).resolve().parents[4]
-DEFAULT_CODE = REPO / "orchestration"
-"""Where the handlers Robinauts ships are, when the flows' settings name no other place."""
-
-COMMAND = (sys.executable, "-m", "robinauts.cli")
-"""This build's ``robinauts`` command, as this interpreter runs it."""
+from robinauts.web.app import NAME
+from robinauts.web.roles import ROBINAUTS_ROLES
 
 DEFAULT_PORT = 8000
 WORKER_PORT_OFFSET = 1
 """The worker listener's port, when none is given: the front listener's, plus this."""
 
-ONEBERTH_CONFIG_VARIABLE = "ONEBERTH_CONFIG"
-
-SIGN_IN_KEYS = frozenset(
-    {"public_url", "session_hours", "device_days", "providers", "allow", "admin"}
-)
-"""The keys Robinauts' file held for sign-in before oneberth held it: refused with ``MOVED_TO``."""
-MOVED_TO = (
-    "{}: sign-in is oneberth's: its configuration is the file ONEBERTH_CONFIG names, with the"
-    " backend's public_url under [apps.robinauts]"
-)
-NO_PROVIDER = (
-    "no identity provider is configured: name one in the file ONEBERTH_CONFIG names, or start"
-    " with --local, oneberth's local mode, for the one person at this machine"
-)
-NO_ONEBERTH_CONFIG = (
-    f"{ONEBERTH_CONFIG_VARIABLE} names no file: it holds the sign-in, or start with --local"
-)
-LOCAL_HAS_NO_FILE = (
-    f"--local signs the one person at this machine in with a ticket: unset"
-    f" {ONEBERTH_CONFIG_VARIABLE}"
-)
-NO_DATABASE = (
-    f"no database: set {DATABASE_URL_VARIABLE} to the PostgreSQL this deployment uses, or"
-    f" {DATA_DIR_VARIABLE} to its data directory"
-)
-TWO_STORAGES = f"{DATABASE_URL_VARIABLE} and {DATA_DIR_VARIABLE} are both set: set one"
 LOCAL_MODE = "oneberth's local mode: one person, signed in with a ticket, on a loopback address"
 PUBLIC_HOST_IS_LOCAL = (
     f"--public-host is for --local: with sign-in, the public URL is in {ONEBERTH_CONFIG_VARIABLE}"
@@ -157,10 +115,6 @@ LOCAL_STORAGE = (
 NOT_LAUNCHED = (
     "desktop-backend is the desktop's backend, which the launcher starts: start the desktop"
     " with robinauts desktop"
-)
-IN_A_CONTAINER = (
-    "workers.{}: runs in a container of its image, which robinauts desktop starts; a server"
-    " starts a worker with the `command` its table names"
 )
 STORE_INIT = "robinauts store init"
 NOT_BUILT = (
@@ -188,204 +142,23 @@ def interface() -> Path | None:
     return None
 
 
-def serving(
-    tables: Mapping[str, Any],
-    environ: Mapping[str, str],
-    *,
-    host: str,
-    port: int,
-    local: bool,
-) -> tuple[Config, SecretLookup, OneberthConfig]:
-    """What ``start`` serves with: the controller's configuration, how a secret is read, and
-    oneberth's configuration: the file ``ONEBERTH_CONFIG`` names, or the local mode's.
-    ``ConfigError`` names every problem of a start that is refused."""
-    problems = []
-    for key in tables:
-        if key == TABLE:
-            problems.append(MOVED)
-        elif key in SIGN_IN_KEYS:
-            problems.append(MOVED_TO.format(key))
-        elif key not in CONTROLLER_TABLES:
-            problems.append(f"{key}: unknown key, not a table of the controller's")
-    if environ.get(DATABASE_URL_VARIABLE) and environ.get(DATA_DIR_VARIABLE):
-        problems.append(TWO_STORAGES)
-    oneberth = OneberthConfig()
-    if local:
-        if environ.get(ONEBERTH_CONFIG_VARIABLE):
-            problems.append(LOCAL_HAS_NO_FILE)
-        if not is_loopback(host):
-            problems.append(
-                f"--local serves this machine alone: {host} is not a loopback address or"
-                " localhost. Bind elsewhere with --host, and name the loopback address a browser"
-                " reaches with --public-host"
-            )
-        else:
-            oneberth = local_config(NAME, port=port, host=host)
-    else:
-        if not environ.get(ONEBERTH_CONFIG_VARIABLE):
-            problems.append(NO_ONEBERTH_CONFIG)
-        else:
-            try:
-                oneberth = load_config(environ=environ)
-                oneberth.app(NAME)
-            except OneberthConfigError as refused:
-                problems += refused.problems
-            else:
-                if not oneberth.providers:
-                    problems.append(NO_PROVIDER)
-        if not environ.get(DATABASE_URL_VARIABLE) and not environ.get(DATA_DIR_VARIABLE):
-            problems.append(NO_DATABASE)
-    try:
-        config, secret_for = configure(tables, environ)
-    except ConfigError as refused:
-        problems.append(str(refused))
-    if problems:
-        raise ConfigError("\n".join(problems))
-    return config, secret_for, oneberth
-
-
-def local_url(host: str, port: int) -> str:
-    """Where a process on this machine reaches a listener on ``host``: a loopback address for a
-    listener on every address, else that host."""
-    if host in ("", "0.0.0.0"):
-        host = "127.0.0.1"
-    elif host == "::":
-        host = "::1"
-    if ":" in host:
-        host = f"[{host}]"
-    return f"http://{host}:{port}"
-
-
-def store_of(
-    environ: Mapping[str, str],
-) -> Callable[[], AbstractAsyncContextManager[Any]]:
-    """What opens oneberth's store for the life of the backend: the schema ``oneberth`` of the
-    PostgreSQL, which ``robinauts store init`` makes; the file ``oneberth.db`` in the data
-    directory, which the backend makes; or a store in this process."""
-    url = environ.get(DATABASE_URL_VARIABLE)
-    folder = environ.get(DATA_DIR_VARIABLE)
-    if url:
-        return lambda: opened_store(database_url=url)
-    if folder:
-        Path(folder).mkdir(parents=True, exist_ok=True)
-        return lambda: opened_store(data_dir=folder, setup=True)
-
-    @asynccontextmanager
-    async def in_memory() -> AsyncIterator[IdentityStore]:
-        store = MemoryIdentityStore()
-        await store.setup()
-        yield store
-
-    return in_memory
-
-
-class LateTransport(httpx.AsyncBaseTransport):
-    """An httpx transport to an ASGI application named after it is built: how a part of the
-    backend reaches the backend's own front listener, in its own process."""
-
-    def __init__(self) -> None:
-        self.app: Any = None
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        return await httpx.ASGITransport(app=self.app).handle_async_request(request)
-
-
 class Backend:
-    """What ``robinauts start`` serves: the composition of Robinauts' component and neorc's,
-    the lifecycle of the controller and the workers, and neorc's start.
+    """What ``robinauts start`` serves: Robinauts' parts composed alone, its own component and
+    neorc's (``cli/backend.py``), with the built interface in ``ui_dir``."""
 
-    Robinauts' component starts first and stops last. Its lifespan opens neorc's storage and
-    the controller, and starts the workers. Its serving begins once both listeners serve: it
-    uploads the flows and starts neorc's worker, which call the backend's own listeners. It
-    ends while the listeners still serve, and stops every worker. The tokens the backend mints
-    for its own parts live in its memory alone, and end with it."""
-
-    def __init__(
-        self,
-        composed: Composed,
-        lifecycle: Lifecycle,
-        orchestrator: Orchestrator,
-        *,
-        oneberth: OneberthConfig,
-        secret_for: SecretLookup,
-        store: Callable[[], AbstractAsyncContextManager[Any]] | IdentityStore,
-        ui_dir: Path | None = None,
-        local: bool = False,
-    ) -> None:
-        self.composed = composed
-        self.lifecycle = lifecycle
-        self.orchestrator = orchestrator
-        self.transport = LateTransport()
-        self._access: Access | None = None
-        self.component = new_robinauts_webapp(
-            composed.controller,
-            composed.brokers,
-            worker_access=lifecycle.access,
-            feed=lifecycle.feed,
-            config=composed.config,
-            secret_for=secret_for,
-            lifespan=self._lifespan,
-            serving=self._serving,
-            health=self._healthy,
-            flows=orchestrator.flows(self.transport),
-            starter_of=orchestrator.starter_of,
-        )
-        neorc = orchestrator.component
-        assert isinstance(neorc, Component)
+    def __init__(self, parts: Parts, *, ui_dir: Path | None = None) -> None:
+        self.parts = parts
+        self.composed = parts.composed
+        self.lifecycle = parts.lifecycle
+        self.orchestrator = parts.orchestrator
         self.composition = compose_app(
-            [self.component, neorc],
-            config=oneberth,
-            store=store,
+            list(parts.components),
+            config=parts.oneberth,
+            store=parts.store,
             interface=ui_dir,
-            local=local,
+            local=parts.local,
         )
-        self.transport.app = self.composition.front
-
-    async def _healthy(self) -> bool:
-        return self.lifecycle.healthy()
-
-    async def _mint(self, name: str, role: str, resource: str | None) -> str:
-        """A token of this backend's own, in its memory: it ends when the backend stops."""
-        assert self._access is not None, "the backend is not started"
-        secret, _ = await self._access.create_own_token(name, role, resource=resource)
-        return secret
-
-    @asynccontextmanager
-    async def _lifespan(self, context: Context) -> AsyncIterator[None]:
-        """Open neorc's storage, then the controller, then start the workers; and the
-        reverse at the stop. neorc's component starts after this, and stops before."""
-        self._access = context.access
-        await self.orchestrator.open()
-        try:
-            await self.lifecycle.start(
-                lambda name: self._mint(f"robinauts-worker-{name}", WORKER_ROLE, name)
-            )
-            try:
-                yield
-            finally:
-                # The serving stopped them, unless it never began.
-                self.lifecycle.feed.close()
-                try:
-                    await self.orchestrator.stop()
-                finally:
-                    await self.lifecycle.stop()
-        finally:
-            await self.orchestrator.close()
-
-    @asynccontextmanager
-    async def _serving(self, context: Context) -> AsyncIterator[None]:
-        """Once both listeners serve: upload the flows and start neorc's worker. At the end,
-        while the listeners still serve, stop the workers: one in a process of its own ends
-        its turns through them. The change feed's polls end first."""
-        await self.orchestrator.start(self._mint, self.transport)
-        try:
-            yield
-        finally:
-            self.lifecycle.feed.close()
-            try:
-                await self.orchestrator.stop()
-            finally:
-                await self.lifecycle.stop_worker()
+        parts.composed_into(self.composition)
 
 
 def start(
@@ -404,32 +177,21 @@ def start(
     ``public_host`` is where a browser reaches the front listener, ``host`` by default. A
     ``supervised`` backend starts no worker: its supervisor, the launcher, starts every one."""
     environ = os.environ if environ is None else environ
-    public_host = host if public_host is None else public_host
-    config_path = Path(environ["ROBINAUTS_CONFIG"])
-    tables = read_tables(config_path)
-    worker_port = port + WORKER_PORT_OFFSET if worker_port is None else worker_port
+    front = Listen(host, port)
+    worker = Listen(worker_host, port + WORKER_PORT_OFFSET if worker_port is None else worker_port)
     try:
-        config, secret_for, oneberth = serving(
-            tables, environ, host=public_host, port=port, local=local
-        )
-        orchestrator = orchestrator_of(
+        parts = robinauts_parts(
             environ,
-            config,
-            default_code=DEFAULT_CODE,
-            public_url=oneberth.app(NAME).public_url,
-            api_url=local_url(host, port),
-            worker_url=local_url(worker_host, worker_port),
-            program=(*COMMAND, "neorc-worker"),
+            front=front,
+            worker=worker,
+            local=local,
+            public_host=public_host,
             supervised=supervised,
         )
     except ConfigError as refused:
         print(refused, file=sys.stderr)
         return 1
-    if not supervised and (in_a_container := sorted(set(config.containers) - set(config.commands))):
-        print("\n".join(IN_A_CONTAINER.format(name) for name in in_a_container), file=sys.stderr)
-        return 1
-    storage = storage_from(environ)
-    composed = compose(config, storage=storage, secret_for=secret_for)
+    composed, config, storage = parts.composed, parts.composed.config, storage_from(environ)
     logging.basicConfig(level=logging.INFO)
     ui_dir = interface()
     if local:
@@ -443,27 +205,10 @@ def start(
             log.info("worker %r starts with the command: %s", name, shlex.join(command))
         for name in sorted(config.externals):
             log.info("worker %r is started elsewhere, with a token the operator created", name)
-    lifecycle = Lifecycle(
-        composed,
-        broker_url=f"{local_url(worker_host, worker_port)}/{NAME}",
-        # A store in this process is this process's alone, and so is a SQLite file: its workers
-        # run here, but for one that starts with a command of its own.
-        in_process=storage.kind is not StorageKind.POSTGRES,
-        outside=composed.workers if supervised else config.externals,
-    )
     try:
-        backend = Backend(
-            composed,
-            lifecycle,
-            orchestrator,
-            oneberth=oneberth,
-            secret_for=secret_for,
-            store=store_of(environ),
-            ui_dir=ui_dir,
-            local=local,
-        )
+        backend = Backend(parts, ui_dir=ui_dir)
         # Until SIGINT or SIGTERM; it says why and exits 1 when the backend did not start.
-        run_server(backend.composition, Listen(host, port), Listen(worker_host, worker_port))
+        run_server(backend.composition, front, worker)
         return 0
     except (
         ControllerError,
@@ -571,13 +316,15 @@ def openapi_document() -> dict[str, Any]:
         worker_url=url,
     )
     backend = Backend(
-        composed,
-        Lifecycle(composed),
-        orchestrator,
-        oneberth=local_config(NAME, port=DEFAULT_PORT),
-        secret_for={}.get,
-        store=store_of({}),
-        local=True,
+        Parts(
+            composed,
+            Lifecycle(composed),
+            orchestrator,
+            oneberth=local_config(NAME, port=DEFAULT_PORT),
+            secret_for={}.get,
+            store=store_of({}),
+            local=True,
+        )
     )
 
     async def read() -> dict[str, Any]:
