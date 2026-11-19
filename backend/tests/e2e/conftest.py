@@ -38,7 +38,7 @@ def local_gpt(fake_model: FakeModel) -> Iterator[FakeLocalGPTServer]:
 
 @pytest.fixture
 def server(local_gpt: FakeLocalGPTServer, tools_url: str | None, tmp_path: Path) -> Iterator[str]:
-    """The URL of a real server on the configuration of ``util.stack``, and a schema of its own."""
+    """The URL of a real server on the configuration of ``util.stack``, on a database of its own."""
     config = tmp_path / "robinauts.toml"
     config.write_text(stack.config_for(local_gpt.base_url, tools_url))
     with (

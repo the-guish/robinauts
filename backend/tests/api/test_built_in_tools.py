@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import httpx
 import pytest
 
-from util import stack
+from util import shared_server, stack
 from util.controller_db import requires_postgres
 from util.fake_openai import CallTool, FakeLocalGPTServer
 from util.fake_openai.echo_model import last_question
@@ -58,18 +59,16 @@ class RavenModel:
         return question
 
 
-@pytest.fixture(scope="module")
-def searching(
-    model_server: FakeLocalGPTServer, tmp_path_factory: pytest.TempPathFactory
-) -> Iterator[str]:
-    config = tmp_path_factory.mktemp("sessions") / "robinauts.toml"
-    agents = SEARCHING.format(system_prompt=stack.SYSTEM_PROMPT)
-    config.write_text(stack.config_for(model_server.base_url) + agents)
-    with (
-        stack.database(config) as url,
-        stack.server(config, url, env=stack.API_KEY) as server,
-    ):
-        yield server
+@shared_server.contributes
+@contextmanager
+def searching_agents() -> Iterator[shared_server.Contribution]:
+    yield shared_server.Contribution(SEARCHING.format(system_prompt=stack.SYSTEM_PROMPT))
+
+
+@pytest.fixture
+def searching(server: stack.Server) -> str:
+    """The shared server: its ``<engine>_sessions`` agents are this module's."""
+    return server
 
 
 @pytest.fixture

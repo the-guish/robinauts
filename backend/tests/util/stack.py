@@ -2,12 +2,12 @@
 # Copyright The Robinauts Authors
 
 """The whole platform for ``tests/api`` and ``tests/e2e``: a real ``robinauts`` server on a
-schema of its own in PostgreSQL, configured with one agent per engine on models that
+database of its own in PostgreSQL, configured with one agent per engine on models that
 ``FakeLocalGPTServer`` serves. The server runs in oneberth's local mode: the test holds its
 launch secret, and ``signed_in`` signs the local user in with a ticket, as the window does.
 
 Given an MCP server, the configuration also has one agent per engine with that server's tools,
-``<engine>_tools``. The schema is made in the PostgreSQL that ``ROBINAUTS_TEST_DATABASE_URL``
+``<engine>_tools``. The database is made in the PostgreSQL that ``ROBINAUTS_TEST_DATABASE_URL``
 names and dropped afterwards.
 """
 
@@ -197,13 +197,6 @@ def wait_until_ready(server: subprocess.Popen[bytes]) -> None:
     raise RuntimeError(f"the server ended before it was ready, with {server.wait()}")
 
 
-def with_search_path(url: str, schema: str) -> str:
-    """``url`` with every connection made from it working in ``schema``."""
-    parts = urllib.parse.urlsplit(url)
-    query = urllib.parse.parse_qsl(parts.query) + [("search_path", schema)]
-    return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query)))
-
-
 async def run_statement(url: str, statement: str) -> None:
     connection = await asyncpg.connect(url)
     try:
@@ -213,22 +206,37 @@ async def run_statement(url: str, statement: str) -> None:
 
 
 @contextmanager
-def database(config: Path) -> Iterator[str]:
-    """The URL of a new schema, with this build's tables in it, dropped afterwards."""
+def new_database(prefix: str = "robinauts_stack_") -> Iterator[str]:
+    """The URL of a new, empty database on the PostgreSQL ``ROBINAUTS_TEST_DATABASE_URL``
+    names, dropped afterwards with whatever is still connected to it.
+
+    A database rather than a schema: oneberth keeps its store in a schema named ``oneberth``
+    and neorc in one named ``neorc``, whatever the ``search_path``, and neorc's notifications
+    go on channels of fixed names. Two servers on one database would share those -- a local
+    start ends every session in ``oneberth.sessions``, its own and the other server's alike.
+    A database of its own keeps a server's every table and channel apart from the rest, so
+    that servers can run side by side, as ``pytest-xdist``'s workers run them."""
     given = os.environ.get("ROBINAUTS_TEST_DATABASE_URL")
     if not given:
         pytest.fail("no ROBINAUTS_TEST_DATABASE_URL: set it to a PostgreSQL these tests may use")
-    schema = "robinauts_stack_" + uuid.uuid4().hex
-    asyncio.run(run_statement(given, f'CREATE SCHEMA "{schema}"'))
+    name = prefix + uuid.uuid4().hex
+    asyncio.run(run_statement(given, f'CREATE DATABASE "{name}"'))
     try:
-        url = with_search_path(given, schema)
+        yield str(httpx.URL(given).copy_with(path=f"/{name}"))
+    finally:
+        asyncio.run(run_statement(given, f'DROP DATABASE "{name}" WITH (FORCE)'))
+
+
+@contextmanager
+def database(config: Path) -> Iterator[str]:
+    """The URL of a new database (``new_database``), with this build's tables and oneberth's
+    store in it, dropped afterwards."""
+    with new_database() as url:
         environment = {**os.environ, "ROBINAUTS_CONFIG": str(config)}
         environment["ROBINAUTS_DATABASE_URL"] = url
         subprocess.run([str(ROBINAUTS), "db", "init"], env=environment, check=True)
         subprocess.run([str(ROBINAUTS), "store", "init"], env=environment, check=True)
         yield url
-    finally:
-        asyncio.run(run_statement(given, f'DROP SCHEMA "{schema}" CASCADE'))
 
 
 def launched(

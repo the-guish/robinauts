@@ -6,15 +6,16 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import httpx
 import pytest
 
-from util import stack
+from util import shared_server, stack
 from util.controller_db import requires_postgres
-from util.fake_openai import EchoModel, FakeLocalGPTServer, FakeModel
+from util.fake_openai import EchoModel, FakeModel
 
 pytestmark = requires_postgres
 
@@ -26,6 +27,12 @@ models = ["local_gpt"]
 engine = "pydantic-ai"
 turn_timeout_seconds = 1
 """
+
+
+@shared_server.contributes
+@contextmanager
+def hasty_agent() -> Iterator[shared_server.Contribution]:
+    yield shared_server.Contribution(HASTY)
 
 
 class SlowEchoModel(EchoModel):
@@ -47,15 +54,6 @@ def last_event(api: httpx.Client, agent: str) -> str:
     return [line for line in started.text.splitlines() if line.startswith("data: ")][-1]
 
 
-def test_only_the_agent_with_a_short_timeout_runs_out_of_time(
-    local_gpt: FakeLocalGPTServer, tmp_path: Path
-) -> None:
-    config = tmp_path / "robinauts.toml"
-    config.write_text(stack.config_for(local_gpt.base_url) + HASTY)
-    with (
-        stack.database(config) as url,
-        stack.server(config, url, env=stack.API_KEY) as server,
-        stack.client(server, timeout=30.0) as api,
-    ):
-        assert '"RUN_ERROR"' in last_event(api, "hasty")
-        assert '"RUN_FINISHED"' in last_event(api, "pydantic_ai")
+def test_only_the_agent_with_a_short_timeout_runs_out_of_time(api: httpx.Client) -> None:
+    assert '"RUN_ERROR"' in last_event(api, "hasty")
+    assert '"RUN_FINISHED"' in last_event(api, "pydantic_ai")

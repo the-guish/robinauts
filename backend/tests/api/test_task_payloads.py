@@ -5,20 +5,22 @@
 beside a question's text, stored on the question and handed to the engine at every turn that
 answers it.
 
-The server is its own, on the echo engine, which says a turn's task payload back after its
-answer: what shows the payload reached the engine, through the store and the worker."""
+The agent is the shared server's ``echo``, which this module adds to it: on the echo engine,
+which says a turn's task payload back after its answer, what shows the payload reached the
+engine, through the store and the worker."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import httpx
 import pytest
 
 from robinauts.agent_engines.echo_engine.engine import TASK_PAYLOAD
-from util import stack
+from util import shared_server
 from util.controller_db import requires_postgres
 
 pytestmark = requires_postgres
@@ -43,14 +45,10 @@ PAYLOAD = {"task_key": "code_task/1", "repositories": {"app": {"branch": "develo
 OTHER = {"task_key": "code_task/1", "repositories": {"app": {"branch": "main"}}}
 
 
-@pytest.fixture(scope="module")
-def api(tmp_path_factory: pytest.TempPathFactory) -> Iterator[httpx.Client]:
-    config = tmp_path_factory.mktemp("payloads") / "robinauts.toml"
-    config.write_text(CONFIG)
-    env = {"ECHO_API_KEY": "not-a-real-key"}
-    with stack.database(config) as url, stack.server(config, url, env=env) as server:
-        with stack.client(server, timeout=30.0) as client:
-            yield client
+@shared_server.contributes
+@contextmanager
+def echo_agent() -> Iterator[shared_server.Contribution]:
+    yield shared_server.Contribution(CONFIG, {"ECHO_API_KEY": "not-a-real-key"})
 
 
 def said(payload: dict[str, Any]) -> str:

@@ -11,13 +11,14 @@ import asyncio
 import json
 import uuid
 from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import asyncpg
 import httpx
 import pytest
 
-from util import stack
+from util import shared_server, stack
 from util.controller_db import requires_postgres
 from util.fake_openai import CallTool, FakeLocalGPTServer, RateLimited
 from util.fake_openai.echo_model import text_of
@@ -102,20 +103,19 @@ class FailsAfterTwoRounds:
         raise RuntimeError("refused")
 
 
-@pytest.fixture(scope="module")
-def flaky_stack(
-    model_server: FakeLocalGPTServer, tmp_path_factory: pytest.TempPathFactory
-) -> Iterator[tuple[str, str]]:
-    """The server's URL and its database's, on a configuration with the flaky agents."""
+@shared_server.contributes
+@contextmanager
+def flaky_agents() -> Iterator[shared_server.Contribution]:
     with mcp_server(fail, nap, shout) as tools_url:
-        config = tmp_path_factory.mktemp("flaky") / "robinauts.toml"
-        flaky = FLAKY.format(tools_url=tools_url, system_prompt=stack.SYSTEM_PROMPT)
-        config.write_text(stack.config_for(model_server.base_url) + flaky)
-        with (
-            stack.database(config) as url,
-            stack.server(config, url, env=stack.API_KEY) as server,
-        ):
-            yield server, url
+        yield shared_server.Contribution(
+            FLAKY.format(tools_url=tools_url, system_prompt=stack.SYSTEM_PROMPT)
+        )
+
+
+@pytest.fixture
+def flaky_stack(server: stack.Server, database_url: str) -> tuple[str, str]:
+    """The shared server's URL and its database's: its flaky agents are this module's."""
+    return server, database_url
 
 
 def turn(server: str, agent: str) -> httpx.Response:

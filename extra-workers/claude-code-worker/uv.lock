@@ -1865,6 +1865,7 @@ dev = [
     { name = "playwright", specifier = ">=1.50" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-cov", specifier = ">=7.1" },
+    { name = "pytest-xdist", specifier = ">=3.8" },
     { name = "ruff", specifier = ">=0.6" },
 ]
 

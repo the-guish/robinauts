@@ -21,4 +21,7 @@ cd "$root/backend"
 PYTHONDONTWRITEBYTECODE=1
 export PYTHONDONTWRITEBYTECODE
 
-uv run --locked --no-build pytest "$@"
+# One pytest-xdist worker per core. `loadfile` keeps a module on one worker, so that
+# a module that starts a server of its own starts it once; each worker starts its own
+# shared server for tests/api, on a database of its own (tests/util/shared_server.py).
+uv run --locked --no-build pytest -n auto --dist loadfile "$@"

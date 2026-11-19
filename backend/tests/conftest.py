@@ -32,7 +32,6 @@ diagnosis at worst.
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from collections.abc import Iterator
 from typing import Any
@@ -102,23 +101,43 @@ def pytest_runtest_call(item: Any) -> None:
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    """Fail a run that was told to prove the database and did not."""
+    """Fail a run that was told to prove the database and did not.
+
+    Under `pytest-xdist` the tests run in workers, each with a count of its own. A worker
+    hands its count to the controller and decides nothing; the controller adds them up in
+    `pytest_testnodedown`, which xdist calls before this, and decides for the whole run.
+    """
     # Imported here rather than at the top: this file is loaded before the
     # `pythonpath` of pyproject.toml puts `tests/` on the path.
     from util.postgres import REQUIRE_POSTGRES, database_required, database_tests_missing
 
+    workeroutput = getattr(session.config, "workeroutput", None)
+    if workeroutput is not None:
+        workeroutput[_WORKER_COUNT] = _DATABASE_TESTS_RUN
+        return
     if session.config.option.collectonly or exitstatus not in _SPEAKS_FOR_ITSELF:
         return
     problem = database_tests_missing(
         required=database_required(REQUIRE_POSTGRES),
         ran=_DATABASE_TESTS_RUN,
         narrowed=_was_narrowed(session.config),
-        distributed=_was_distributed(session.config),
     )
     if problem is None:
         return
     print(f"\nERROR: {problem}.", file=sys.stderr)
     session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+_WORKER_COUNT = "robinauts_database_tests_run"
+"""The key a worker's count travels under, in the `workeroutput` xdist hands back."""
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node: Any, error: Any) -> None:
+    """Add a finished worker's count to the controller's. A worker that crashed hands back
+    nothing, and adds nothing: its tests are failures of their own already."""
+    global _DATABASE_TESTS_RUN
+    _DATABASE_TESTS_RUN += getattr(node, "workeroutput", {}).get(_WORKER_COUNT, 0)
 
 
 def _was_narrowed(config: Any) -> bool:
@@ -131,19 +150,3 @@ def _was_narrowed(config: Any) -> bool:
     if config.option.markexpr or config.option.keyword:
         return True
     return list(config.args) != list(config.getini("testpaths"))
-
-
-def _was_distributed(config: Any) -> bool:
-    """Whether this run is split across processes.
-
-    `pytest-xdist` is not a dependency and this does not make it one: the
-    counter above lives in one process, so under xdist it would read zero
-    however many database tests ran, and a confident wrong answer is worse
-    than none. Asked three ways because a worker, the controller and a run
-    that merely passed `-n` each show it differently.
-    """
-    return bool(
-        os.environ.get("PYTEST_XDIST_WORKER")
-        or hasattr(config, "workerinput")
-        or getattr(config.option, "numprocesses", None)
-    )
