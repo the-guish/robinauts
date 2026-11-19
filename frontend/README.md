@@ -161,6 +161,7 @@ or one at a time, from here:
     npm run typecheck       # tsc, in strict mode
     npm test -- --run       # vitest
     npm run build           # the bundle, its licence gate and its size budget
+    node scripts/check-advisories.mjs   # npm audit
 
 `npm run format` rewrites what `check-format` complains about.
 

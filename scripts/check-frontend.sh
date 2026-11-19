@@ -88,7 +88,10 @@ CHECK_BUNDLED=1 npm run build
 # Advisories for everything installed; signatures and provenance for what
 # ships. The registry does not serve attestations for every dev-only package,
 # and a 404 there is not a reason to fail.
-npm audit --audit-level=low
+#
+# `npm audit`, read by a script: an advisory fails unless DEPENDENCIES.md
+# records it as having no fix.
+node scripts/check-advisories.mjs
 # The registry has neither @neorc/ui nor @oneberth/ui, which are packed from the
 # pinned neorc commit, and `npm audit signatures` stops at a package it cannot
 # find there. What they bring from the registry ships, so the signatures are

@@ -383,19 +383,19 @@ export const restrictedLicences = () => policy().restricted;
 const SCOPES = new Set(["development", "runtime"]);
 
 /**
- * The rows under the fixed heading of DEPENDENCIES.md.
- *
- * Kept as a list rather than a map, because one tree can hold two versions of
- * a package and the licence of the one is no statement about the other.
+ * The rows of the table under a heading of DEPENDENCIES.md, each as its cells
+ * by column name. `scripts/check-advisories.mjs` reads its table with it too.
  *
  * @param {string} document
- * @returns {Row[]}
+ * @param {string} heading
+ * @param {string[]} columns the columns the table must have
+ * @returns {Map<string, string>[]}
  */
-export function readTable(document) {
-  const section = sectionOf(document, TABLE_HEADING);
+export function tableUnder(document, heading, columns) {
+  const section = sectionOf(document, heading);
   /** @type {string[] | null} */
   let header = null;
-  /** @type {Row[]} */
+  /** @type {Map<string, string>[]} */
   const rows = [];
   for (const line of section.split("\n")) {
     const text = line.trim();
@@ -407,25 +407,57 @@ export function readTable(document) {
     if (cells.every((cell) => /^:?-{2,}:?$/.test(cell))) continue;
     if (header === null) {
       header = cells.map((cell) => cell.toLowerCase());
-      for (const wanted of ["package", "version", "licence", "scope"]) {
+      for (const wanted of columns) {
         if (!header.includes(wanted)) {
-          throw new GateError(
-            `the ${TABLE_HEADING} table has no "${wanted}" column`,
-          );
+          throw new GateError(`the ${heading} table has no "${wanted}" column`);
         }
       }
       continue;
     }
     if (cells.length !== header.length) {
       throw new GateError(
-        `a row of the ${TABLE_HEADING} table has ${cells.length} of ` +
+        `a row of the ${heading} table has ${cells.length} of ` +
           `${header.length} cells`,
       );
     }
-    const names = header;
+    rows.push(new Map(header.map((name, at) => [name, cells[at] ?? ""])));
+  }
+  if (header === null) {
+    throw new GateError(`the ${heading} section has no table`);
+  }
+  return rows;
+}
+
+/**
+ * The packages a cell names, each in backticks: one row may answer for
+ * several, as the `lightningcss` row does for its platforms' binaries.
+ * @param {string} cell
+ * @returns {string[]}
+ */
+export function namedIn(cell) {
+  return [...cell.matchAll(/`([^`]+)`/g)].map((match) => match[1] ?? "");
+}
+
+/**
+ * The rows under the fixed heading of DEPENDENCIES.md.
+ *
+ * Kept as a list rather than a map, because one tree can hold two versions of
+ * a package and the licence of the one is no statement about the other.
+ *
+ * @param {string} document
+ * @returns {Row[]}
+ */
+export function readTable(document) {
+  /** @type {Row[]} */
+  const rows = [];
+  for (const cells of tableUnder(document, TABLE_HEADING, [
+    "package",
+    "version",
+    "licence",
+    "scope",
+  ])) {
     /** @param {string} name */
-    const cell = (name) =>
-      (cells[names.indexOf(name)] ?? "").replaceAll("`", "").trim();
+    const cell = (name) => (cells.get(name) ?? "").replaceAll("`", "").trim();
     const scope = cell("scope").toLowerCase();
     if (!SCOPES.has(scope)) {
       throw new GateError(
@@ -433,9 +465,7 @@ export function readTable(document) {
           `is not one of ${[...SCOPES].join(", ")}`,
       );
     }
-    const packages = [
-      ...(cells[names.indexOf("package")] ?? "").matchAll(/`([^`]+)`/g),
-    ].map((match) => match[1] ?? "");
+    const packages = namedIn(cells.get("package") ?? "");
     if (packages.length === 0) {
       throw new GateError(
         `a row of the ${TABLE_HEADING} table names no package in backticks`,
@@ -449,9 +479,6 @@ export function readTable(document) {
         scope,
       });
     }
-  }
-  if (header === null) {
-    throw new GateError(`the ${TABLE_HEADING} section has no table`);
   }
   return rows;
 }

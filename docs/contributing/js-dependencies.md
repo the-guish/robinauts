@@ -82,8 +82,8 @@ It is still held to the same policy, because `DEPENDENCIES.md` asks the same
 questions of a development dependency as of any other. What is not plainly on
 the allowed list is excepted by name and version in the **"JavaScript build
 tooling"** table of [../../DEPENDENCIES.md](../../DEPENDENCIES.md) — the one
-place an npm exception may be written; there is no exception list in this
-file. `frontend/scripts/check-licences.mjs` enforces it over everything the
+place an npm licence exception may be written; there is no exception list in
+this file. `frontend/scripts/check-licences.mjs` enforces it over everything the
 lockfile pins and npm installed: no row, a row naming another version, a row
 naming another licence, a row for a package that no longer needs one, and the
 build is red. A forbidden licence fails whatever a row says, and the list of
@@ -132,10 +132,11 @@ licence again and writes down what they read.
   their registry dependencies (`frontend/scripts/registry-tree.mjs`).
 - Dependency changes go in a pull request of their own, never as a side
   effect of a feature. One pull request may change several dependencies.
-- CI runs `npm audit --audit-level=low` for known advisories on everything
-  installed, and `npm audit signatures --omit=dev` for registry signatures and
-  provenance on what ships: the registry does not hold attestations for every
-  dev-only package.
+- CI runs `npm audit` for known advisories on everything installed, and
+  `npm audit signatures --omit=dev` for registry signatures and provenance on
+  what ships: the registry does not hold attestations for every dev-only
+  package. An advisory fails the build unless the "Advisories with no fix"
+  table of [../../DEPENDENCIES.md](../../DEPENDENCIES.md) records it.
 - Node.js at the version in `frontend/.nvmrc`.
 
 ## In the browser
@@ -161,6 +162,8 @@ assets are never committed, and a bundle built on a laptop is never released.
   installed, the exceptions table of `DEPENDENCIES.md`, the scopes, and the
   exact pins. Its own refusals are tested in
   `frontend/src/test/licence-gate.test.ts`.
+- `frontend/scripts/check-advisories.mjs`: the `npm audit` step. Its own
+  refusals are tested in `frontend/src/test/advisory-gate.test.ts`.
 - `frontend/.npmrc`: exact versions and no install scripts.
 - `frontend/eslint.config.js`: the seam in front of the chat
   ([../adr/0006-chat-ui-on-react-alone.md](../adr/0006-chat-ui-on-react-alone.md)),
