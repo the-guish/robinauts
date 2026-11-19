@@ -1165,8 +1165,8 @@ wheels = [
 
 [[package]]
 name = "neorc"
-version = "0.1.dev193+g992ec7566"
-source = { git = "https://github.com/the-guish/neorc?subdirectory=python%2Fneorc&rev=992ec75662a0260df894503f3841494b2893d96a#992ec75662a0260df894503f3841494b2893d96a" }
+version = "0.1.dev195+g7d0440fd8"
+source = { git = "https://github.com/the-guish/neorc?subdirectory=python%2Fneorc&rev=7d0440fd838d35277dce0cea382e16c5d44da09c#7d0440fd838d35277dce0cea382e16c5d44da09c" }
 dependencies = [
     { name = "neorc-core" },
     { name = "oneberth" },
@@ -1183,16 +1183,16 @@ postgres = [
 
 [[package]]
 name = "neorc-core"
-version = "0.1.dev193+g992ec7566"
-source = { git = "https://github.com/the-guish/neorc?subdirectory=python%2Fneorc-core&rev=992ec75662a0260df894503f3841494b2893d96a#992ec75662a0260df894503f3841494b2893d96a" }
+version = "0.1.dev195+g7d0440fd8"
+source = { git = "https://github.com/the-guish/neorc?subdirectory=python%2Fneorc-core&rev=7d0440fd838d35277dce0cea382e16c5d44da09c#7d0440fd838d35277dce0cea382e16c5d44da09c" }
 dependencies = [
     { name = "pyyaml" },
 ]
 
 [[package]]
 name = "oneberth"
-version = "0.1.dev9+g52da9dfb0"
-source = { git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=52da9dfb0499426c5265316378c89d405455a4a0#52da9dfb0499426c5265316378c89d405455a4a0" }
+version = "0.1.dev12+g1a6f63ce1"
+source = { git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=1a6f63ce10c1904ac91958dbe2065c5c8a683362#1a6f63ce10c1904ac91958dbe2065c5c8a683362" }
 
 [package.optional-dependencies]
 postgres = [
@@ -1850,9 +1850,9 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.6.2,<1.7.5" },
     { name = "langgraph", specifier = ">=1.2,<2" },
     { name = "langsmith", specifier = ">=0.3.45,<1" },
-    { name = "neorc", extras = ["http", "postgres"], git = "https://github.com/the-guish/neorc?subdirectory=python%2Fneorc&rev=992ec75662a0260df894503f3841494b2893d96a" },
-    { name = "neorc-core", git = "https://github.com/the-guish/neorc?subdirectory=python%2Fneorc-core&rev=992ec75662a0260df894503f3841494b2893d96a" },
-    { name = "oneberth", extras = ["web", "postgres", "providers"], git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=52da9dfb0499426c5265316378c89d405455a4a0" },
+    { name = "neorc", extras = ["http", "postgres"], git = "https://github.com/the-guish/neorc?subdirectory=python%2Fneorc&rev=7d0440fd838d35277dce0cea382e16c5d44da09c" },
+    { name = "neorc-core", git = "https://github.com/the-guish/neorc?subdirectory=python%2Fneorc-core&rev=7d0440fd838d35277dce0cea382e16c5d44da09c" },
+    { name = "oneberth", extras = ["web", "postgres", "providers"], git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=1a6f63ce10c1904ac91958dbe2065c5c8a683362" },
     { name = "openai", specifier = ">=3.14.1,<3.38" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "mcp", "openai"], specifier = ">=2.47,<3" },
 ]
