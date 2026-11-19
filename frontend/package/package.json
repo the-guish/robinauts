@@ -1,0 +1,30 @@
+{
+  "name": "@robinauts/ui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Robinauts' interface as a package: its application for oneberth's shell, and neorc as it registers neorc",
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": [
+    "*.css"
+  ],
+  "exports": {
+    ".": "./src/apps.tsx",
+    "./styles.css": "./src/styles.css"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "!src/test",
+    "!src/main.tsx",
+    "LICENSE",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "@neorc/ui": "0.0.0",
+    "@oneberth/ui": "0.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

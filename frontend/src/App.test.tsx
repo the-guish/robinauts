@@ -5,6 +5,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 
 import { App } from "./App";
+import { APPS, neorcWithForms, robinautsApp } from "./apps";
 import { json, stubFetch } from "./test/api";
 import { page } from "./test/conversations";
 
@@ -94,4 +95,16 @@ test("signed in: the rail of two applications, and Robinauts first", async () =>
   expect(
     await screen.findByRole("heading", { level: 1, name: "New chat" }),
   ).toBeVisible();
+});
+
+test("the two applications, as a host of its own registers them", async () => {
+  // What `@robinauts/ui` exports: each call gives the application anew.
+  expect(APPS.map((app) => app.name)).toEqual(["robinauts", "neorc"]);
+  expect(robinautsApp()).toMatchObject({
+    name: "robinauts",
+    title: "Robinauts",
+  });
+  expect(neorcWithForms()).toMatchObject({ name: "neorc", title: "neorc" });
+  const loaded = await robinautsApp().load();
+  expect(typeof loaded.default).toBe("function");
 });

@@ -32,7 +32,8 @@ the platform, packed from the neorc commit `backend/pyproject.toml` pins by
 ```
 src/
   main.tsx, App.tsx    oneberth's shell, and the page a pairing code opens
-  apps.tsx             the two applications of the shell: Robinauts and neorc
+  apps.tsx             the two applications of the shell: Robinauts and neorc;
+                       the entry of the package, @robinauts/ui (../package/)
   RobinautsApp.tsx     Robinauts' root component, as the shell loads it
   router.ts            Robinauts' routes, from the shell's route
   styles.css           the body, the focus outline and Robinauts' base reset

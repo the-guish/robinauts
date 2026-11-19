@@ -47,6 +47,8 @@ path = [
     "frontend/src/icons/README.md",
     "frontend/package.json",
     "frontend/package-lock.json",
+    "frontend/package/package.json",
+    "frontend/package/README.md",
     "frontend/tsconfig.json",
     "frontend/tsconfig.app.json",
     "frontend/tsconfig.tools.json",

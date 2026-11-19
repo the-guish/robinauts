@@ -15,7 +15,7 @@
  * the record, so that the two are checked against the same short list. A
  * change to either list is a decision, and this is where it is written down.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { expect, test } from "vitest";
 
@@ -60,4 +60,19 @@ test("the bundle's record names those, and what they bring", () => {
     .filter((line) => line !== "" && !line.startsWith("#"))
     .map((line) => line.split(" ")[0]);
   expect(named.sort()).toEqual(BUNDLED);
+});
+
+test("the package names the same four as its peers, and its entries are here", () => {
+  // `@robinauts/ui`, the interface for a host with applications of its own
+  // (`package/package.json`): the host brings what the application depends on.
+  const manifest = JSON.parse(readFileSync("package/package.json", "utf8")) as {
+    peerDependencies?: Record<string, string>;
+    dependencies?: Record<string, string>;
+    exports?: Record<string, string>;
+  };
+  expect(Object.keys(manifest.peerDependencies ?? {}).sort()).toEqual(RUNTIME);
+  expect(manifest.dependencies).toBeUndefined();
+  const entries = Object.values(manifest.exports ?? {});
+  expect(entries).toEqual(["./src/apps.tsx", "./src/styles.css"]);
+  for (const entry of entries) expect(existsSync(entry)).toBe(true);
 });

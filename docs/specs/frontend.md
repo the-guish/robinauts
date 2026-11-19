@@ -106,6 +106,28 @@
 - `#/link`, the address in a pairing's QR code, stands outside the shell. It
   says to open the code in the Robinauts app, whatever the session.
 
+## The interface as a package
+
+- Robinauts' interface is also a node package, `@robinauts/ui`, for a host
+  with applications of its own. The host gives Robinauts' two applications to
+  oneberth's shell beside its own.
+- The package exports `robinautsApp()`, Robinauts' application, and
+  `neorcWithForms()`, neorc's with Robinauts' forms to start a run. It also
+  exports `styles.css`, the page's base, which the host imports first.
+- The package ships its TypeScript source, as neorc's does, and the host's
+  build compiles it. React, React DOM, `@oneberth/ui` and `@neorc/ui` are its
+  peers.
+- `scripts/robinauts-ui-pack.sh` packs it from a checkout, with the API's
+  types generated. No package is published.
+- `frontend/package/package.json` is the package's manifest. The
+  application's `frontend/package.json` keeps its dependencies as they are:
+  the licence gate, the audit and the lock read them.
+- Robinauts' own interface registers the same two applications
+  (`src/apps.tsx`). The page a pairing code opens and the error page are the
+  application's own, outside the package's entries.
+- The backend has the same shape
+  ([architecture/web.md](../architecture/web.md), "Robinauts as a part").
+
 ## The chat window
 
 - Written in this repository, on React alone
