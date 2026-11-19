@@ -6,8 +6,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from oneberth.web import Listen
 
-from robinauts.cli.backend import local_url, serving
+from robinauts.cli.backend import local_url, robinauts_parts, serving
 from robinauts.cli.composition import storage_from
 from robinauts.cli.main import registry, run
 from robinauts.controller.contract.domain import ConfigError
@@ -156,3 +157,11 @@ def test_the_admin_scripts_need_the_database(
         run(["devices", "list"])
     assert exited.value.code != 0
     assert "ROBINAUTS_DATABASE_URL" in capsys.readouterr().err
+
+
+def test_the_one_call_refuses_a_configuration_that_is_not_there(tmp_path: Path) -> None:
+    # What a host of its own catches: the same error as for a configuration that is wrong.
+    listen = Listen("127.0.0.1", 8000)
+    for environ in ({}, {"ROBINAUTS_CONFIG": str(tmp_path / "nowhere.toml")}):
+        with pytest.raises(ConfigError, match="^ROBINAUTS_CONFIG"):
+            robinauts_parts(environ, front=listen, worker=listen, local=True)

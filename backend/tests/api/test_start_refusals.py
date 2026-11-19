@@ -107,3 +107,30 @@ def test_a_public_host_needs_the_local_mode(tmp_path: Path) -> None:
             "--public-host is for --local: with sign-in, the public URL is in ONEBERTH_CONFIG"
         )
     )
+
+
+@pytest.mark.parametrize(
+    ("named", "content", "refusal"),
+    [
+        (None, None, "ROBINAUTS_CONFIG names no file: it holds the models, the agents"),
+        ("nowhere.toml", None, "nowhere.toml: No such file or directory"),
+        ("robinauts.toml", "this is = not [toml", "robinauts.toml: Expected '=' after a key"),
+    ],
+)
+def test_a_start_without_a_configuration_it_can_read_says_so_in_one_line(
+    tmp_path: Path, named: str | None, content: str | None, refusal: str
+) -> None:
+    environment = {**os.environ}
+    for variable in ("ROBINAUTS_CONFIG", "ROBINAUTS_DATABASE_URL", "ONEBERTH_CONFIG"):
+        environment.pop(variable, None)
+    if named is not None:
+        environment["ROBINAUTS_CONFIG"] = str(tmp_path / named)
+    if content is not None:
+        (tmp_path / "robinauts.toml").write_text(content)
+    command = [str(stack.ROBINAUTS), "start", "--local", "--port", str(stack.free_port())]
+    started = subprocess.run(command, env=environment, capture_output=True, timeout=30)
+    assert started.returncode == 1
+    said = started.stderr.decode().strip()
+    assert said.startswith("ROBINAUTS_CONFIG"), said
+    assert len(said.splitlines()) == 1, said
+    assert refusal in said
