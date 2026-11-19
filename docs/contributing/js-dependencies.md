@@ -130,6 +130,9 @@ licence again and writes down what they read.
   the neorc pin means packing again and updating the lock in the same change.
   `npm audit signatures` reads the tree with the two tarballs replaced by
   their registry dependencies (`frontend/scripts/registry-tree.mjs`).
+- `frontend/package/package.json` is the manifest of `@robinauts/ui`, the
+  interface as a package. Its peers are the application's four runtime
+  dependencies, by name, and a test compares the two lists.
 - Dependency changes go in a pull request of their own, never as a side
   effect of a feature. One pull request may change several dependencies.
 - CI runs `npm audit` for known advisories on everything installed, and

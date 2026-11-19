@@ -84,6 +84,11 @@ npm test -- --run
 # bundle fails here rather than being silently recorded. Writing it is what a
 # plain `npm run build` does, which is how the line gets into the diff.
 CHECK_BUNDLED=1 npm run build
+# The interface as a package, @robinauts/ui: packed, and looked inside by the
+# script that packs it.
+packed=$(mktemp -d)
+"$root/scripts/robinauts-ui-pack.sh" "$packed" >/dev/null
+rm -rf "$packed"
 
 # Advisories for everything installed; signatures and provenance for what
 # ships. The registry does not serve attestations for every dev-only package,
