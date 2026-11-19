@@ -6,7 +6,9 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import subprocess
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -134,3 +136,25 @@ def test_a_start_without_a_configuration_it_can_read_says_so_in_one_line(
     assert said.startswith("ROBINAUTS_CONFIG"), said
     assert len(said.splitlines()) == 1, said
     assert refusal in said
+
+
+def test_a_component_that_refuses_its_start_says_why_in_the_last_line(tmp_path: Path) -> None:
+    config = tmp_path / "robinauts.toml"
+    config.write_text("")
+    data = tmp_path / "data"
+    data.mkdir()
+    with closing(sqlite3.connect(data / "robinauts.db")) as database:
+        database.execute("CREATE TABLE another_application (x)")
+    environment = {
+        **os.environ,
+        "ROBINAUTS_CONFIG": str(config),
+        "ROBINAUTS_DATA_DIR": str(data),
+    }
+    for variable in ("ROBINAUTS_DATABASE_URL", "ONEBERTH_CONFIG"):
+        environment.pop(variable, None)
+    command = [str(stack.ROBINAUTS), "start", "--local", "--port", str(stack.free_port())]
+    started = subprocess.run(command, env=environment, capture_output=True, timeout=60)
+    assert started.returncode == 1
+    last = started.stderr.decode().strip().splitlines()[-1]
+    assert last.startswith("component robinauts failed to start: "), last
+    assert "holds tables that are not Robinauts' (another_application)" in last, last

@@ -57,6 +57,8 @@ host with applications of its own composes them beside its own.
   The parts reach that backend's front listener in its own process, for the flows.
 - A configuration that is refused raises `ConfigError`, which names every problem. So does
   one that is not there or cannot be read.
+- A component that refuses its start ends the run with one line: the component's name, then
+  its sentence. oneberth's `run` prints that line for every host.
 
 ```python
 parts = robinauts_parts(os.environ, front=front, worker=worker, local=True)
