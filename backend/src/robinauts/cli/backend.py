@@ -25,6 +25,7 @@ them beside its own::
 from __future__ import annotations
 
 import sys
+import tomllib
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
@@ -51,7 +52,7 @@ from robinauts.cli.composition import (
     storage_from,
 )
 from robinauts.cli.lifecycle import Lifecycle
-from robinauts.cli.orchestration import orchestrator_of
+from robinauts.cli.orchestration import CONFIG_VARIABLE, orchestrator_of
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.orchestrator.contract.domain import MOVED, TABLE, Orchestrator
 from robinauts.shared_domain.domain import Config, StorageKind
@@ -95,10 +96,28 @@ IN_A_CONTAINER = (
     "workers.{}: runs in a container of its image, which robinauts desktop starts; a server"
     " starts a worker with the `command` its table names"
 )
+NO_CONFIG = (
+    f"{CONFIG_VARIABLE} names no file: it holds the models, the agents, the tool servers and"
+    " the workers"
+)
 NOT_COMPOSED = (
     "Robinauts' parts reach the backend they are composed into, and were told of none: call"
     " Parts.composed_into with the composition"
 )
+
+
+def tables_of(environ: Mapping[str, str]) -> dict[str, Any]:
+    """The tables of the file ``ROBINAUTS_CONFIG`` names. ``ConfigError`` for a variable that
+    names none, a file that cannot be read, and a file that is not TOML."""
+    named = environ.get(CONFIG_VARIABLE)
+    if not named:
+        raise ConfigError(NO_CONFIG)
+    try:
+        return read_tables(Path(named))
+    except OSError as unreadable:
+        raise ConfigError(f"{CONFIG_VARIABLE}: {named}: {unreadable.strerror}") from unreadable
+    except tomllib.TOMLDecodeError as malformed:
+        raise ConfigError(f"{CONFIG_VARIABLE}: {named}: {malformed}") from malformed
 
 
 def serving(
@@ -322,9 +341,10 @@ def robinauts_parts(
     ``front`` and whose worker listener is ``worker``. ``local`` is oneberth's local mode.
     ``public_host`` is where a browser reaches the front listener, its own host by default. A
     ``supervised`` backend starts no worker: its supervisor, the launcher, starts every one.
-    ``ConfigError`` names every problem of a configuration that is refused."""
+    ``ConfigError`` names every problem of a configuration that is refused, and a configuration
+    that is not there or cannot be read."""
     public_host = front.host if public_host is None else public_host
-    tables = read_tables(Path(environ["ROBINAUTS_CONFIG"]))
+    tables = tables_of(environ)
     config, secret_for, oneberth = serving(
         tables, environ, host=public_host, port=front.port, local=local
     )

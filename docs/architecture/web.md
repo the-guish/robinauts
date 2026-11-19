@@ -55,7 +55,8 @@ host with applications of its own composes them beside its own.
   composes them with, `oneberth`, `store` and `local`.
 - The host composes them with `compose_app`, then names the composition: `composed_into`.
   The parts reach that backend's front listener in its own process, for the flows.
-- A configuration that is refused raises `ConfigError`, which names every problem.
+- A configuration that is refused raises `ConfigError`, which names every problem. So does
+  one that is not there or cannot be read.
 
 ```python
 parts = robinauts_parts(os.environ, front=front, worker=worker, local=True)
