@@ -6,8 +6,9 @@ The operations Robinauts' backend offers the interface, the phone and the worker
 
 Robinauts' backend is a oneberth composition (oneberth's `docs/specs/composition.md`).
 Robinauts gives oneberth a component named `robinauts`: its routes, written on FastAPI, its
-roles, and what it starts and stops. `new_robinauts_webapp` in `web/app.py` builds it, and
-`robinauts start` composes it with neorc's manager (`docs/architecture/orchestration.md`).
+roles, and what it starts and stops. `new_robinauts_webapp` in `web/app.py` builds it,
+`cli/backend.py` wires it with neorc's manager, and `robinauts start` composes the two
+(`docs/architecture/orchestration.md`).
 
 | address | served by |
 |---|---|
@@ -41,6 +42,33 @@ there too. Each ends with the process, at a stop or a crash. The store holds non
 A checkout whose interface is not built still serves the API. `/ui/` then answers 404 with a
 page that says the interface is not built, and the log says to run `npm run build` in
 `frontend/`. A wheel always holds the interface.
+
+### Robinauts as a part
+
+Robinauts' two components are parts of a backend. `robinauts start` composes them alone. A
+host with applications of its own composes them beside its own.
+
+- `robinauts_parts` in `cli/backend.py` is the one call. It reads the environment as
+  `robinauts start` does: the configuration, the sign-in, the storage and the flows folder.
+- The host gives it the two listeners' addresses, and whether the mode is the local one.
+- It returns the `Parts`: `components`, Robinauts' and then neorc's, and what oneberth
+  composes them with, `oneberth`, `store` and `local`.
+- The host composes them with `compose_app`, then names the composition: `composed_into`.
+  The parts reach that backend's front listener in its own process, for the flows.
+- A configuration that is refused raises `ConfigError`, which names every problem.
+
+```python
+parts = robinauts_parts(os.environ, front=front, worker=worker, local=True)
+composition = compose_app(
+    [*parts.components, mine],
+    config=parts.oneberth, store=parts.store, interface=built, local=parts.local,
+)
+parts.composed_into(composition)
+run(composition, front, worker)
+```
+
+The interface has the same shape: [frontend.md](../specs/frontend.md), "The interface as a
+package".
 
 ## Roles and permissions
 

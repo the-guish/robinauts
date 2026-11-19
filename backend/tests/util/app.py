@@ -17,9 +17,10 @@ from oneberth.config import Config as OneberthConfig
 from oneberth.config import local_config
 from oneberth.web import testing
 
+from robinauts.cli.backend import Parts, store_of
 from robinauts.cli.composition import Composed, SecretLookup
 from robinauts.cli.lifecycle import Lifecycle
-from robinauts.cli.main import Backend, store_of
+from robinauts.cli.main import Backend
 from robinauts.cli.orchestration import orchestrator_of
 from robinauts.web.app import NAME
 
@@ -58,13 +59,15 @@ def backend_of(
         supervised=True,
     )
     return Backend(
-        composed,
-        Lifecycle(composed),
-        orchestrator,
-        oneberth=local_config(NAME, port=PORT) if oneberth is None else oneberth,
-        secret_for=secret_for,
-        store=store_of(environ or {}),
-        local=oneberth is None,
+        Parts(
+            composed,
+            Lifecycle(composed),
+            orchestrator,
+            oneberth=local_config(NAME, port=PORT) if oneberth is None else oneberth,
+            secret_for=secret_for,
+            store=store_of(environ or {}),
+            local=oneberth is None,
+        )
     )
 
 

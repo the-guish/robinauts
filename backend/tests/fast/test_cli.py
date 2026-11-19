@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from robinauts.cli.backend import local_url, serving
 from robinauts.cli.composition import storage_from
-from robinauts.cli.main import local_url, registry, run, serving
+from robinauts.cli.main import registry, run
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.shared_domain.domain import StorageConfig, StorageKind
 

@@ -185,9 +185,10 @@ In `orchestrator/adapters/neorc/` alone (an import-linter contract in
 `backend/pyproject.toml`, and [rules.md](rules.md)). The orchestrator is a
 sibling of the controller: it may see the controller's contract, and the
 controller sees nothing of it. `cli/orchestration.py` builds it, and
-`cli/main.py` alone imports that module; `cli/main.py` otherwise sees the
-orchestrator's contract alone, an `Orchestrator` whose component it composes, which it opens,
-starts and stops, and the `Flows` that `web/` serves. `web/` sees that contract and nothing else.
+`cli/backend.py` and `cli/main.py` alone import that module; they otherwise see the
+orchestrator's contract alone, an `Orchestrator` whose component is composed, which
+`cli/backend.py` opens, starts and stops, and the `Flows` that `web/` serves. `web/` sees that
+contract and nothing else.
 Taking neorc out is taking out that package and `cli/orchestration.py`.
 
 `cli/orchestration.py` is apart from `cli/composition.py` because a worker in
