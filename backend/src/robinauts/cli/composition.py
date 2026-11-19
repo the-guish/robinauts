@@ -20,7 +20,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from robinauts.agent_engines.contract.domain import StorageRefusedError
 from robinauts.agent_engines.contract.ports import EngineFactory, installed
 from robinauts.agent_engines.contract.ports import StorageConfig as EngineStorage
 from robinauts.agent_engines.contract.ports import StorageKind as EngineStorageKind
@@ -75,11 +74,6 @@ CONTROLLER_TABLES = frozenset(
 SCHEMA_READY = "the database is at schema version {version} (schema.sql {digest})"
 """What `db init` says whether it created the schema or found it there: the command's
 promise is the state of the database, not the work it did."""
-
-
-ENGINE_REFUSALS = (StorageRefusedError,)
-"""What an engine raises at its setup for storage it will not use: what the shell says and
-stops on, as it does on a database that is not this build's."""
 
 
 def storage_from(environ: Mapping[str, str]) -> StorageConfig:
