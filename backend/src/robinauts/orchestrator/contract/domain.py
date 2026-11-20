@@ -140,6 +140,10 @@ class OptionPage:
 PersonsOptions = Callable[[], Awaitable[Sequence[Option]]]
 """The values of a list that is the person's own, read when it is asked: their projects."""
 
+ProjectsOf = Callable[[uuid.UUID], Awaitable[Sequence[Option]]]
+"""The projects of the person of that id, as they are stored: none for a person this server
+holds nothing of. A start names its starter by id alone."""
+
 
 @dataclass(frozen=True, slots=True)
 class FlowForm:
@@ -176,7 +180,8 @@ class BranchesUnreadableError(FlowRefused):
 
 
 class Flows(ABC):
-    """The flows a person may start, as forms, and the start of one."""
+    """The flows a person may start, as forms; what holds a start to its flow's form; and the
+    start of one through Robinauts."""
 
     @abstractmethod
     async def forms(self) -> tuple[FlowForm, ...]:
@@ -197,19 +202,33 @@ class Flows(ABC):
         ``NoSuchListError``, ``BranchesUnreadableError``."""
 
     @abstractmethod
+    async def check(
+        self,
+        flow: str,
+        inputs: Mapping[str, Any],
+        *,
+        projects: PersonsOptions | None,
+    ) -> None:
+        """Hold a start of ``flow`` with ``inputs`` to the flow's form: every input there, none
+        it does not have, each value with a list of values one of them. A branch is checked
+        against its repository as it is now, and a project against ``projects``, the starter's
+        own: ``None`` when no person starts the run, and a project is then refused. A flow the
+        flows folder does not hold has no form, and nothing is checked. neorc's manager asks
+        this before every start, wherever the start came from. ``InvalidInputsError``,
+        ``BranchesUnreadableError``."""
+
+    @abstractmethod
     async def start(
         self,
         flow: str,
         inputs: Mapping[str, Any],
         *,
         credential: str | None,
-        projects: PersonsOptions,
     ) -> str:
-        """Start a run of ``flow`` with ``inputs``, which are passed on as they are once they
-        fit its form, and return the run's id. The start is sent to neorc with ``credential``,
-        the person's own, so that neorc records the run as theirs. A branch is checked against
-        its repository as it is now, and a project against the person's ``projects``.
-        ``NoSuchFlowError``, ``InvalidInputsError``, ``BranchesUnreadableError``."""
+        """Start a run of ``flow`` with ``inputs``, and return the run's id. The start is sent
+        to neorc with ``credential``, the person's own, so that neorc records the run as
+        theirs; neorc's manager holds it to the flow's form there (``check``), as it holds a
+        start that reaches it any other way. ``NoSuchFlowError``, ``InvalidInputsError``."""
 
 
 class OrchestrationStartError(RuntimeError):
@@ -264,5 +283,8 @@ class Orchestrator(ABC):
         hold, or one a service started. A sub-flow's run has its tree's starter."""
 
     @abstractmethod
-    def flows(self, transport: object) -> Flows | None:
-        """The flows folder's flows, started through ``transport``: none without a folder."""
+    def flows(self, transport: object, projects_of: ProjectsOf) -> Flows | None:
+        """The flows folder's flows, started through ``transport``: none without a folder. From
+        this call on, neorc's manager holds every start of a run to its flow's form, with the
+        starter's projects from ``projects_of``. With a folder, a start before this call is
+        refused."""

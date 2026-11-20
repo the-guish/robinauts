@@ -5,7 +5,9 @@
 the conversations its handlers open for it (``docs/architecture/orchestration.md``, "Whose a
 run is"). neorc records the starter on the run. A handler holds a token of
 ``robinauts/handler`` and names its run in ``X-Robinauts-Run``; the server acts for the person
-neorc records, and for nobody else, after a restart too.
+neorc records, and for nobody else, after a restart too. A project among a run's inputs is its
+starter's own, on neorc's own route as on Robinauts': neorc's manager holds every start to the
+flow's form ("Where a start is checked").
 
 On a backend that signs two people in through a provider, with neorc's manager composed; the
 handler's requests are made here, as neorc's worker would make them."""
@@ -182,3 +184,65 @@ async def test_a_run_started_on_neorc_s_own_form_is_its_starter_s_after_a_restar
         assert again.status_code == 200, again.text
         adas = (await ada.get(f"/{NAME}/api/conversations")).json()["items"]
         assert {c["id"] for c in adas} == {cid, again.headers["x-robinauts-conversation-id"]}
+
+
+SHIP = """
+name: ship
+version: 0.1.0
+inputs:
+  project: string
+steps:
+  pick:
+    queue: default
+    handler: robinauts_tasks:pick_number
+"""
+SHIP_FORM = """
+[inputs.project]
+lov = "project"
+"""
+
+
+@asyncio_test
+async def test_a_project_among_a_run_s_inputs_is_its_starter_s_own_on_neorc_s_route_too(
+    tmp_path: Path,
+) -> None:
+    """neorc's route is the one its page and a script with a token reach. A person starts a
+    run there with a project of their own and with no one else's, and a service, which is no
+    person, with none."""
+    flows = tmp_path / "flows"
+    flows.mkdir()
+    (flows / "ship.yaml").write_text(SHIP)
+    (flows / "ship.form.toml").write_text(SHIP_FORM)
+    environ = {"ROBINAUTS_FLOWS_DIR": str(flows), "PATH": os.environ.get("PATH", "")}
+    composed = compose(CONFIG, storage=StorageConfig(StorageKind.IN_PROCESS), secret_for={}.get)
+    backend = backend_of(
+        composed, secret_for={}.get, environ=environ, oneberth=testing.config_for(NAME)
+    )
+    composition = backend.composition
+    manager = backend.orchestrator.manager  # type: ignore[attr-defined]
+    async with (
+        testing.running(composition) as ada,
+        testing.client_of(composition) as bob,
+        testing.client_of(composition) as script,
+    ):
+        await manager.declare_queue("default", QueueKind.WORKER)
+        await DirectManagerClient(manager).upload_flows(read_flows(flows))
+        await testing.signed_in(composition, ada, Identity("test", "ada"))
+        await testing.signed_in(composition, bob, Identity("test", "bob"))
+        token = testing.bearer(await testing.service_token(composition, "neorc/external-trigger"))
+        made = await ada.post(f"/{NAME}/api/projects", json={"name": "Ship it"})
+        assert made.status_code in (200, 201), made.text
+        inputs = {"inputs": {"project": made.json()["id"]}}
+
+        hers = await ada.post("/neorc/flows/ship/runs", json=inputs)
+        his = await bob.post("/neorc/flows/ship/runs", json=inputs)
+        through_robinauts = await bob.post(f"/{NAME}/api/flows/ship/runs", json=inputs)
+        nobodys = await script.post("/neorc/flows/ship/runs", json=inputs, headers=token)
+
+    assert hers.status_code == 201, hers.text
+    assert hers.json()["inputs"] == inputs["inputs"]
+    for refused in (his, through_robinauts):
+        assert refused.status_code == 422, refused.text
+        assert "is not one of your projects" in refused.json()["detail"]
+    assert nobodys.status_code == 422, nobodys.text
+    assert "no person starts this run" in nobodys.json()["detail"]

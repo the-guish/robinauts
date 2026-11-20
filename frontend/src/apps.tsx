@@ -43,10 +43,6 @@ export function neorcWithForms(): ShellApp {
       const { searchOptions } = await import("./flows/forms");
       return searchOptions(asked);
     },
-    start: async (flow: string, inputs: Record<string, unknown>) => {
-      const { startRun } = await import("./flows/forms");
-      return startRun(flow, inputs);
-    },
   });
 }
 

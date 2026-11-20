@@ -24,6 +24,8 @@ one place in Robinauts that imports neorc, beside ``cli.orchestration``, which w
   credential, in this process, through the backend's own front listener. neorc records the
   person as the run's starter, as it does for a run started on its own form, and Robinauts
   reads the starter from the manager.
+- the manager is neorc's, **held** to Robinauts' forms (``held.py``): before it starts a run,
+  the flow's form checks the inputs, whichever way the start reached it.
 
 The worker is a process of its own, not a task in this one, for three reasons. neorc puts the
 code location first on ``sys.path``, so a handler module could shadow a package this server
@@ -54,15 +56,14 @@ from neorc.manager import new_manager_webapp
 from neorc_core import (
     FlowNotFoundError,
     InvalidValueError,
-    Manager,
     NeorcError,
     QueueKind,
     RunNotFoundError,
-    StarterKind,
 )
 from neorc_core.flows import flow_files, load_flow_yaml, read_flows, read_queues
 from neorc_core.local import MemoryStore, MemoryTaskNotifier
 
+from robinauts.orchestrator.adapters.neorc.held import HeldManager, person_of
 from robinauts.orchestrator.contract.domain import (
     FLOWS_VARIABLE,
     HANDLER_QUEUE,
@@ -75,6 +76,7 @@ from robinauts.orchestrator.contract.domain import (
     OrchestrationConfig,
     OrchestrationStartError,
     Orchestrator,
+    ProjectsOf,
     TokenMinter,
 )
 from robinauts.orchestrator.ports.engine import FlowEngine
@@ -308,6 +310,9 @@ class ComposedNeorc(Orchestrator):
         self._stack = AsyncExitStack()
         self._open: Callable[[], Awaitable[None]] | None = None
         self._where = "in this process"
+        # With a flows folder, the manager starts no run its flow's form has not checked.
+        self._held = orchestration is not None and make_flows is not None
+        self.manager: HeldManager
         if database_url is not None:
             self.manager = self._on_postgres(database_url)
             self._where = "on PostgreSQL"
@@ -315,8 +320,11 @@ class ComposedNeorc(Orchestrator):
             self.manager = self._on_sqlite(database_file)
             self._where = f"in {database_file}"
         else:
-            self.manager = Manager(
-                MemoryStore(), tasks=MemoryTaskNotifier(), events=MemoryTaskNotifier()
+            self.manager = HeldManager(
+                MemoryStore(),
+                tasks=MemoryTaskNotifier(),
+                events=MemoryTaskNotifier(),
+                held=self._held,
             )
         self._component = new_manager_webapp(manager=self.manager, scheduler=True)
         self._worker: asyncio.subprocess.Process | None = None
@@ -326,12 +334,13 @@ class ComposedNeorc(Orchestrator):
     def component(self) -> object:
         return self._component
 
-    def flows(self, transport: object) -> Flows | None:
+    def flows(self, transport: object, projects_of: ProjectsOf) -> Flows | None:
         if self._make_flows is None or self.orchestration is None:
             return None
         if self._flows is None:
             engine = NeorcFlowEngine(self._public_url, cast(httpx.AsyncBaseTransport, transport))
             self._flows = self._make_flows(engine)
+        self.manager.hold_to(self._flows, projects_of)
         return self._flows
 
     async def starter_of(self, run: str) -> uuid.UUID | None:
@@ -339,15 +348,9 @@ class ComposedNeorc(Orchestrator):
             found = await self.manager.get_run(uuid.UUID(run))
         except (ValueError, RunNotFoundError):
             return None
-        starter = found.started_by
-        if starter is None or starter.kind is not StarterKind.USER:
-            return None
-        try:
-            return uuid.UUID(starter.id)
-        except ValueError:
-            return None
+        return person_of(found.started_by)
 
-    def _on_postgres(self, database_url: str) -> Manager:
+    def _on_postgres(self, database_url: str) -> HeldManager:
         from neorc.postgres import PostgresStore, PostgresTaskNotifier, create_schema
         from neorc.postgres._notifier import EVENTS_CHANNEL, TASKS_CHANNEL
 
@@ -361,9 +364,9 @@ class ComposedNeorc(Orchestrator):
                 await self._stack.enter_async_context(part)
 
         self._open = open_
-        return Manager(store, tasks=tasks, events=events)
+        return HeldManager(store, tasks=tasks, events=events, held=self._held)
 
-    def _on_sqlite(self, path: Path) -> Manager:
+    def _on_sqlite(self, path: Path) -> HeldManager:
         from neorc.sqlite import SqliteStore
 
         store = SqliteStore(path)
@@ -374,7 +377,9 @@ class ComposedNeorc(Orchestrator):
 
         self._open = open_
         # SQLite has no notifications across processes: the manager runs in this one alone.
-        return Manager(store, tasks=MemoryTaskNotifier(), events=MemoryTaskNotifier())
+        return HeldManager(
+            store, tasks=MemoryTaskNotifier(), events=MemoryTaskNotifier(), held=self._held
+        )
 
     async def open(self) -> None:
         if self._open is None:

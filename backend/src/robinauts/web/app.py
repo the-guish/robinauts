@@ -712,9 +712,7 @@ def new_robinauts_webapp(
             raise NoSuchFlowError(f"no flow {flow!r}: this server runs no orchestrator")
         # Sent on with the person's own credential: the run is then theirs at neorc.
         credential = credential_of(request)
-        started = await flows.start(
-            flow, body.inputs, credential=credential, projects=projects_of(user)
-        )
+        started = await flows.start(flow, body.inputs, credential=credential)
         return FlowRunStarted(id=started)
 
     # --- MCP apps, for the side panel: web/apps.py -------------------------------

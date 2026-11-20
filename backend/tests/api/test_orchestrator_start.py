@@ -31,6 +31,7 @@ import pytest
 from util import stack
 from util.controller_db import NO_DATABASE
 from util.desktop import appeared, gone
+from util.repositories import add_branches, bare_repository
 
 pytestmark = pytest.mark.io
 
@@ -396,6 +397,10 @@ def test_a_flow_with_a_form_is_listed_with_its_values_and_started_with_them(
             missing = api.post(
                 "/robinauts/api/flows/intake_probe/runs", json={"inputs": {"task": "x"}}
             )
+            # neorc's own route, which its page and a script reach: the form holds it too.
+            at_neorc = api.post(
+                "/neorc/flows/intake_probe/runs", json={"inputs": {**inputs, "model": "gpt"}}
+            )
             unknown = api.post("/robinauts/api/flows/nothing/runs", json={"inputs": {}})
             begun = api.post("/robinauts/api/flows/intake_probe/runs", json={"inputs": inputs})
             assert begun.status_code == 201, begun.text
@@ -427,6 +432,8 @@ def test_a_flow_with_a_form_is_listed_with_its_values_and_started_with_them(
     }
     assert wrong.status_code == 422
     assert "'gpt' is not one of its model values" in wrong.json()["detail"]
+    assert at_neorc.status_code == 422, at_neorc.text
+    assert "'gpt' is not one of its model values" in at_neorc.json()["detail"]
     assert missing.status_code == 422
     assert unknown.status_code == 404
     assert run["inputs"] == inputs
@@ -457,46 +464,14 @@ lov = "project"
 """
 
 
-def bare_repository(path: Path, *branches: str) -> Path:
-    """A repository on disk with one commit, and ``branches`` at it."""
-    identity = {"GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@example.com"}
-    environment = {
-        **os.environ,
-        **identity,
-        "GIT_COMMITTER_NAME": "T",
-        "GIT_COMMITTER_EMAIL": "t@example.com",
-    }
-
-    def git(*args: str, given: str = "") -> str:
-        done = subprocess.run(
-            ["git", *args],
-            cwd=path,
-            input=given,
-            capture_output=True,
-            text=True,
-            check=True,
-            env=environment,
-        )
-        return done.stdout.strip()
-
-    path.mkdir()
-    git("init", "--bare", "--quiet")
-    commit = git("commit-tree", git("hash-object", "-t", "tree", "-w", "--stdin"), "-m", "first")
-    add_branches(path, commit, *branches)
-    return path
-
-
-def add_branches(path: Path, commit: str, *branches: str) -> None:
-    lines = "".join(f"create refs/heads/{name} {commit}\n" for name in branches)
-    subprocess.run(["git", "update-ref", "--stdin"], cwd=path, input=lines, text=True, check=True)
-
-
 def test_a_branch_and_a_project_are_searched_as_they_are_now_and_checked_at_the_start(
     tmp_path: Path,
 ) -> None:
     """A branch is one of a repository's own, among a thousand, that its settings offer; a
     project is one of the person's. Both lists change while the server runs, and are searched
-    and checked as they are, with no restart."""
+    and checked as they are, with no restart. The start is held to the form on Robinauts'
+    route and on neorc's own, which neorc's page and a script reach: no route starts a run the
+    form would refuse."""
     config = tmp_path / "robinauts.toml"
     config.write_text(CONFIG)
     app = bare_repository(
@@ -517,8 +492,8 @@ def test_a_branch_and_a_project_are_searched_as_they_are_now_and_checked_at_the_
             def options(kind: str, **query: Any) -> httpx.Response:
                 return api.get(f"/robinauts/api/lovs/{kind}/options", params=query)
 
-            def start(**inputs: str) -> httpx.Response:
-                return api.post("/robinauts/api/flows/ship_probe/runs", json={"inputs": inputs})
+            def start(route: str = "/robinauts/api/flows", **inputs: str) -> httpx.Response:
+                return api.post(f"{route}/ship_probe/runs", json={"inputs": inputs})
 
             [form] = api.get("/robinauts/api/flows").json()["items"]
             narrowed = options("branch", after="app", q="feature/09", limit=5).json()
@@ -549,10 +524,27 @@ def test_a_branch_and_a_project_are_searched_as_they_are_now_and_checked_at_the_
                     repo="app", branch="main", project=str(uuid.uuid4())
                 ),
             }
+            refused_at_neorc = {
+                "a branch its settings do not offer": start(
+                    "/neorc/flows", repo="app", branch="other", project=project["id"]
+                ),
+                "a branch of the other repository": start(
+                    "/neorc/flows", repo="docs", branch="feature/0001", project=project["id"]
+                ),
+                "a repository the settings do not name": start(
+                    "/neorc/flows", repo="nowhere", branch="main", project=project["id"]
+                ),
+                "a project that is not the person's": start(
+                    "/neorc/flows", repo="app", branch="main", project=str(uuid.uuid4())
+                ),
+            }
             inputs = {"repo": "app", "branch": "feature/pushed-now", "project": project["id"]}
             begun = start(**inputs)
             assert begun.status_code == 201, begun.text
             run = api.get(f"/neorc/runs/{begun.json()['id']}").json()
+            # neorc's own route starts what the form takes, as its page does.
+            at_neorc = start("/neorc/flows", **{**inputs, "branch": "main"})
+            assert at_neorc.status_code == 201, at_neorc.text
     fields = {field["name"]: field for field in form["inputs"]}
     assert fields["repo"]["options"] == [
         {"value": "app", "label": "app", "models": None},
@@ -571,9 +563,11 @@ def test_a_branch_and_a_project_are_searched_as_they_are_now_and_checked_at_the_
     assert no_repository.status_code == 404
     assert no_list.status_code == 404
     assert projects["items"] == [{"value": project["id"], "label": "Ship it", "models": None}]
-    for case, answer in refused.items():
+    for case, answer in (*refused.items(), *refused_at_neorc.items()):
         assert answer.status_code == 422, (case, answer.text)
-    assert "not one of your projects" in refused["a project that is not the person's"].text
+    for answers in (refused, refused_at_neorc):
+        assert "not one of your projects" in answers["a project that is not the person's"].text
+    assert at_neorc.json()["inputs"] == {**inputs, "branch": "main"}
     assert run["inputs"] == inputs
 
 

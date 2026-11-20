@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import sys
 import tomllib
+import uuid
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
@@ -54,7 +55,8 @@ from robinauts.cli.composition import (
 from robinauts.cli.lifecycle import Lifecycle
 from robinauts.cli.orchestration import CONFIG_VARIABLE, orchestrator_of
 from robinauts.controller.contract.domain import ConfigError
-from robinauts.orchestrator.contract.domain import MOVED, TABLE, Orchestrator
+from robinauts.controller.contract.ports import Controller
+from robinauts.orchestrator.contract.domain import MOVED, TABLE, Option, Orchestrator, ProjectsOf
 from robinauts.shared_domain.domain import Config, StorageKind
 from robinauts.web.app import NAME, new_robinauts_webapp
 from robinauts.web.roles import WORKER_ROLE
@@ -224,6 +226,17 @@ class LateTransport(httpx.AsyncBaseTransport):
         return await httpx.ASGITransport(app=self.app).handle_async_request(request)
 
 
+def stored_projects(controller: Controller) -> ProjectsOf:
+    """A person's projects as a list of values, by the person's id: what neorc's manager holds
+    the start of a run to, which names its starter by id alone."""
+
+    async def projects_of(person: uuid.UUID) -> tuple[Option, ...]:
+        stored = await controller.projects_of(person)
+        return tuple(Option(value=str(p.id), label=p.name) for p in stored)
+
+    return projects_of
+
+
 class Parts:
     """Robinauts in a backend: its own component and neorc's manager, the lifecycle of the
     controller and the workers, and neorc's start. A host composes ``components`` with
@@ -265,7 +278,7 @@ class Parts:
             lifespan=self._lifespan,
             serving=self._serving,
             health=self._healthy,
-            flows=orchestrator.flows(self.transport),
+            flows=orchestrator.flows(self.transport, stored_projects(composed.controller)),
             starter_of=orchestrator.starter_of,
         )
 

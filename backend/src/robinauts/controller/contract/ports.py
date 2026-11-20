@@ -95,6 +95,13 @@ class Controller(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def projects_of(self, owner: uuid.UUID) -> tuple[Project, ...]:
+        """The projects of the person of that id as they are stored, oldest first: none for a
+        person this server holds nothing of. Nothing is made. For a caller that has a person's
+        id alone, as the start of a flow's run has its starter's."""
+        raise NotImplementedError
+
+    @abstractmethod
     async def create_project(self, user: User, name: str) -> Project:
         """The user's project of that name, made if there was none. ``InvalidValueError`` for
         a name empty or out of bounds."""

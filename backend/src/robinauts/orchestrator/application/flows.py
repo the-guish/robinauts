@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The flows a person may start, as forms, and the start of one: the inputs are checked against
-the flow's form and then handed to the engine as they came, with the person's own credential.
-The engine records the run as that person's, and a flow's handler acts for them
-(``docs/architecture/orchestration.md``, "Whose a run is"). A list of values too long or too
-changing to list, a repository's branches or the person's projects, is searched as the person
-types, and checked anew at the start.
+"""The flows a person may start, as forms; the check that holds a start to its flow's form; and
+the start of one through Robinauts, handed to the engine as it came, with the person's own
+credential. The engine records the run as that person's, and a flow's handler acts for them
+(``docs/architecture/orchestration.md``, "Whose a run is"). The engine asks the check before
+every start, whichever route the start reached it by. A list of values too long or too changing
+to list, a repository's branches or the person's projects, is searched as the person types,
+and checked anew at the start.
 """
 
 from __future__ import annotations
@@ -91,26 +92,36 @@ class FlowForms(Flows):
             )
         return repository
 
+    async def check(
+        self,
+        flow: str,
+        inputs: Mapping[str, Any],
+        *,
+        projects: PersonsOptions | None,
+    ) -> None:
+        form = self._by_name.get(flow)
+        if form is None:
+            return
+        problems = check_inputs(form, inputs)
+        if not problems:
+            problems = await self._live_problems(form, inputs, projects)
+        if problems:
+            raise InvalidInputsError(f"{flow}: " + "; ".join(problems))
+
     async def start(
         self,
         flow: str,
         inputs: Mapping[str, Any],
         *,
         credential: str | None,
-        projects: PersonsOptions,
     ) -> str:
-        form = self._by_name.get(flow)
-        if form is None:
+        if flow not in self._by_name:
             raise NoSuchFlowError(f"no flow {flow!r}")
-        problems = check_inputs(form, inputs)
-        if not problems:
-            problems = await self._live_problems(form, inputs, projects)
-        if problems:
-            raise InvalidInputsError(f"{flow}: " + "; ".join(problems))
+        # The manager holds the start to the form, as it holds every other start.
         return await self._engine.start_run(flow, inputs, credential=credential)
 
     async def _live_problems(
-        self, form: FlowForm, inputs: Mapping[str, Any], projects: PersonsOptions
+        self, form: FlowForm, inputs: Mapping[str, Any], projects: PersonsOptions | None
     ) -> list[str]:
         """What keeps the values of the lists that are searched from starting the run, checked
         as each list is now: the inputs fit the form otherwise."""
@@ -123,7 +134,9 @@ class FlowForms(Flows):
             if not isinstance(value, str):
                 problems.append(f"{here} is not one of its {field.lov} values")
             elif field.lov is LovKind.PROJECT:
-                if value not in [p.value for p in await projects()]:
+                if projects is None:
+                    problems.append(f"{here} is a person's project, and no person starts this run")
+                elif value not in [p.value for p in await projects()]:
                     problems.append(f"{here} is not one of your projects")
             else:
                 # The form's check put a repository of the settings in the input it is of.

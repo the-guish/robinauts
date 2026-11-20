@@ -10,7 +10,6 @@ import {
   forgetFlows,
   formFor,
   searchOptions,
-  startRun,
   type Flow,
   type FlowInput,
 } from "./forms";
@@ -277,27 +276,24 @@ test("a search asks the backend for the list the choice names", async () => {
   expect(project?.searchParams.has("after")).toBe(false);
 });
 
-test("a run starts through the backend, and its refusal is the backend's words", async () => {
-  const fetch = stubFetch(({ body }) =>
-    (body as { inputs: { branch: string } }).inputs.branch === "gone"
-      ? refusal(
-          422,
-          "InvalidInputs",
-          "code_task: input 'branch': 'gone' is not a branch of app",
-        )
-      : json({ id: "run-1" }, 201),
+test("a search the backend refuses is refused in the backend's words", async () => {
+  stubFetch(() =>
+    refusal(
+      502,
+      "BadGateway",
+      "the branches of app could not be read: its server did not answer",
+    ),
   );
-  expect(await startRun("code_task", { repo: "app", branch: "main" })).toEqual({
-    id: "run-1",
-  });
   await expect(
-    startRun("code_task", { repo: "app", branch: "gone" }),
+    searchOptions({
+      flow: "code_task",
+      source: "branch",
+      after: "app",
+      query: "",
+      limit: 50,
+      signal: new AbortController().signal,
+    }),
   ).rejects.toThrow(
-    /^code_task: input 'branch': 'gone' is not a branch of app$/,
+    /^the branches of app could not be read: its server did not answer$/,
   );
-  expect(
-    callsTo(fetch, "/robinauts/api/flows/code_task/runs", "POST")[0]?.body,
-  ).toEqual({
-    inputs: { repo: "app", branch: "main" },
-  });
 });

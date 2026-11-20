@@ -17,8 +17,9 @@
  * A list too long or too changing to list, a repository's branches or the
  * person's projects, is a choice whose options neorc asks for as the person
  * types (`optionsFrom`): `searchOptions` answers from
- * `GET /robinauts/api/lovs/<lov>/options`. A run of a flow with a form starts
- * here too (`startRun`), where the backend checks those choices anew.
+ * `GET /robinauts/api/lovs/<lov>/options`. neorc starts the run at its own
+ * route, as it starts any run: the backend holds every start to the flow's
+ * form inside neorc's manager, so this page hands neorc no way to start one.
  *
  * neorc draws its own form for a flow this answers `null` for: a flow with no
  * form file, one the backend does not list, and one this cannot say in the
@@ -193,25 +194,6 @@ export async function searchOptions(asked: OptionRequest): Promise<OptionPage> {
         ...(asked.after === null ? {} : { after: asked.after }),
       },
       signal: asked.signal,
-    });
-  } catch (failure) {
-    throw said(failure);
-  }
-}
-
-/**
- * A run of a flow Robinauts gave the form for, started through Robinauts:
- * the backend checks its inputs against the form, the searched lists as they
- * are now, then starts it at neorc as the person's.
- */
-export async function startRun(
-  flow: string,
-  inputs: Record<string, unknown>,
-): Promise<{ id: string }> {
-  try {
-    return await request("post", "/robinauts/api/flows/{flow}/runs", {
-      path: { flow },
-      body: { inputs },
     });
   } catch (failure) {
     throw said(failure);
