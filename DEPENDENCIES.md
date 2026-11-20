@@ -421,7 +421,6 @@ takes it, as for `minimatch` 11.
 
 | advisory | package | version | review by | why it is accepted |
 |---|---|---|---|---|
-| GHSA-fc5q-39xc-vjpf | `picomatch` | 4.0.7 | 2026-11-25 | a denial of service on a crafted glob pattern (CVE-2026-112366, high). It covers every release, `<=4.0.7`, and none fixes it (read 2026-11-18). The glob matcher of `vite`, `vitest`, `typescript-eslint` and `rollup-plugin-license`; the patterns it is given are this repository's own. `npm audit fix --force` offers Vite 6.2.7, which carries the same code compiled into its own files |
 
 
 ## Known exclusions
