@@ -51,10 +51,13 @@ from robinauts.orchestrator.contract.domain import (
     HANDLER_QUEUE,
     HANDLER_QUEUE_PERMISSION,
     HANDLER_TOKEN_PATH,
+    BranchesUnreadableError,
     FlowForm,
     Flows,
     InvalidInputsError,
     NoSuchFlowError,
+    NoSuchListError,
+    Option,
 )
 from robinauts.shared_domain.domain import (
     Config,
@@ -103,6 +106,13 @@ NOT_A_PERSON = (
     f"a service acts for a person only as a flow's handler, which names its run in {RUN_HEADER}"
 )
 UNKNOWN_RUN = "neorc holds no run of that id that a person started"
+MAX_SEARCH = 200
+"""The longest text a search of a list of values takes, and a repository's id with it."""
+DEFAULT_OPTIONS = 50
+"""The values a search answers when it asks for no number."""
+MAX_OPTIONS = 100
+"""The most values a search answers."""
+
 NOT_THE_HANDLERS_QUEUE = (
     f"the handlers that call Robinauts run on the queue {HANDLER_QUEUE!r} alone"
 )
@@ -122,6 +132,8 @@ STATUS_OF: dict[type[Exception], int] = {
     UnansweredCallError: 502,
     NoSuchFlowError: 404,
     InvalidInputsError: 422,
+    NoSuchListError: 404,
+    BranchesUnreadableError: 502,
 }
 """The status of each error a route raises; a subclass takes its nearest base's."""
 
@@ -131,6 +143,8 @@ ERROR_NAMES: dict[type[Exception], str] = {
     UnansweredCallError: "BadGateway",
     NoSuchFlowError: "NotFound",
     InvalidInputsError: "InvalidInputs",
+    NoSuchListError: "NotFound",
+    BranchesUnreadableError: "BadGateway",
 }
 """The ``error`` of the answer, where it is not the class's own name."""
 
@@ -183,9 +197,22 @@ class FlowInputSummary(BaseModel):
     type: str
     """The type the flow declares: ``string``, ``number``, ``boolean`` or ``datetime``."""
     lov: str | None = None
-    """The list of values it takes its value from: ``repo_branch``, ``model`` or ``agent``."""
+    """The list of values it takes its value from: ``repo_branch``, ``model``, ``agent``,
+    ``repository``, ``branch`` or ``project``."""
     options: list[FlowOptionSummary] | None = None
-    """The values it may take, when it has a list of values."""
+    """The values it may take, when it has a list of values that is listed."""
+    live: bool = False
+    """Whether its list of values is searched as the person types, rather than listed:
+    ``GET /api/lovs/<lov>/options``. ``branch`` and ``project`` are."""
+    of: str | None = None
+    """A branch's: the input whose repository it is a branch of, the search's ``after``."""
+
+
+class OptionPageResponse(BaseModel):
+    items: list[FlowOptionSummary]
+    """The values that match, at most the limit asked."""
+    more: bool
+    """Whether other values match too: a longer search narrows them."""
 
 
 class FlowSummary(BaseModel):
@@ -221,6 +248,8 @@ def flow_summary(form: FlowForm) -> FlowSummary:
                 label=field.label,
                 type=field.type,
                 lov=None if field.lov is None else str(field.lov),
+                live=field.live,
+                of=field.of,
                 options=(
                     None
                     if field.options is None
@@ -637,6 +666,35 @@ def new_robinauts_webapp(
 
     # --- flows, as forms: the orchestrator's (orchestrator/) ---------------------
 
+    def projects_of(user: User) -> Callable[[], Awaitable[tuple[Option, ...]]]:
+        """The person's projects, as a list of values, read when the orchestrator asks."""
+
+        async def projects() -> tuple[Option, ...]:
+            listed = await controller.list_projects(user)
+            return tuple(Option(value=str(p.id), label=p.name) for p in listed)
+
+        return projects
+
+    @router.get("/api/lovs/{kind}/options", dependencies=[permit(roles.FLOWS_READ)])
+    async def search_options(
+        kind: str,
+        q: Annotated[str, Query(max_length=MAX_SEARCH)] = "",
+        after: Annotated[str | None, Query(max_length=MAX_SEARCH)] = None,
+        limit: Annotated[int, Query(ge=1, le=MAX_OPTIONS)] = DEFAULT_OPTIONS,
+        user: User = asking,
+    ) -> OptionPageResponse:
+        """The values of a list that is searched, ``branch`` or ``project``, that match ``q``:
+        a branch of the repository ``after`` names, or one of the person's projects."""
+        if flows is None:
+            raise NoSuchListError(f"no list of values {kind!r}: this server runs no orchestrator")
+        page = await flows.options(
+            kind, after=after, query=q, limit=limit, projects=projects_of(user)
+        )
+        return OptionPageResponse(
+            items=[FlowOptionSummary(value=o.value, label=o.label) for o in page.items],
+            more=page.more,
+        )
+
     @router.get("/api/flows", dependencies=[permit(roles.FLOWS_READ)])
     async def list_flows() -> FlowListResponse:
         forms = () if flows is None else await flows.forms()
@@ -654,7 +712,9 @@ def new_robinauts_webapp(
             raise NoSuchFlowError(f"no flow {flow!r}: this server runs no orchestrator")
         # Sent on with the person's own credential: the run is then theirs at neorc.
         credential = credential_of(request)
-        started = await flows.start(flow, body.inputs, credential=credential)
+        started = await flows.start(
+            flow, body.inputs, credential=credential, projects=projects_of(user)
+        )
         return FlowRunStarted(id=started)
 
     # --- MCP apps, for the side panel: web/apps.py -------------------------------

@@ -3,12 +3,14 @@
 import { formOf } from "@neorc/ui";
 import { afterEach, expect, test } from "vitest";
 
-import { callsTo, json, stubFetch } from "../test/api";
+import { callsTo, json, refusal, stubFetch } from "../test/api";
 import {
   a2uiForm,
   CATALOG,
   forgetFlows,
   formFor,
+  searchOptions,
+  startRun,
   type Flow,
   type FlowInput,
 } from "./forms";
@@ -19,6 +21,7 @@ const BRANCHES: FlowInput = {
   name: "repo_branch",
   label: "Repository",
   type: "string",
+  live: false,
   lov: "repo_branch",
   options: [
     { value: "app@main", label: "app · main" },
@@ -29,10 +32,39 @@ const AGENTS: FlowInput = {
   name: "agent",
   label: "Agent",
   type: "string",
+  live: false,
   lov: "agent",
   options: [{ value: "helper", label: "Helper", models: ["sonnet"] }],
 };
-const TASK: FlowInput = { name: "task", label: "Task", type: "string" };
+const TASK: FlowInput = {
+  name: "task",
+  label: "Task",
+  type: "string",
+  live: false,
+};
+const REPOSITORY: FlowInput = {
+  name: "repo",
+  label: "Repository",
+  type: "string",
+  live: false,
+  lov: "repository",
+  options: [{ value: "app", label: "app" }],
+};
+const BRANCH: FlowInput = {
+  name: "branch",
+  label: "Branch",
+  type: "string",
+  live: true,
+  lov: "branch",
+  of: "repo",
+};
+const PROJECT: FlowInput = {
+  name: "project",
+  label: "Project",
+  type: "string",
+  live: true,
+  lov: "project",
+};
 
 function flow(inputs: FlowInput[], has_form = true): Flow {
   return { name: "code_task", title: "Code a task", has_form, inputs };
@@ -72,8 +104,18 @@ test("a form is a column of its title and one control per input, in order", () =
 });
 
 test("every kind of input makes a form neorc's subset draws", () => {
-  const count: FlowInput = { name: "count", label: "Count", type: "number" };
-  const draft: FlowInput = { name: "draft", label: "Draft", type: "boolean" };
+  const count: FlowInput = {
+    name: "count",
+    label: "Count",
+    type: "number",
+    live: false,
+  };
+  const draft: FlowInput = {
+    name: "draft",
+    label: "Draft",
+    type: "boolean",
+    live: false,
+  };
   const form = a2uiForm(flow([BRANCHES, AGENTS, TASK, count, draft]));
   expect(formOf({ form })).not.toBeNull();
 });
@@ -121,11 +163,11 @@ test.each([
     },
   ],
   [
-    { name: "tries", label: "Tries", type: "number" },
+    { name: "tries", label: "Tries", type: "number", live: false },
     { component: "TextField", variant: "number" },
   ],
   [
-    { name: "draft", label: "Draft", type: "boolean" },
+    { name: "draft", label: "Draft", type: "boolean", live: false },
     { component: "CheckBox" },
   ],
 ])("an input of its type: %o", (input, expected) => {
@@ -139,7 +181,7 @@ test.each([
 
 test.each([
   [{ ...BRANCHES, options: [] }],
-  [{ name: "when", label: "When", type: "datetime" }],
+  [{ name: "when", label: "When", type: "datetime", live: false }],
 ])("a form the subset cannot say is none: %o", (input) => {
   expect(a2uiForm(flow([TASK, input]))).toBeNull();
 });
@@ -171,4 +213,91 @@ test("a read that failed is asked again", async () => {
   const asked = () => formFor({ name: "code_task", version: "1", content: {} });
   await expect(asked()).rejects.toThrow("not yet");
   components(await asked());
+});
+
+test("a list that is searched is a choice that names it, after the input it is of", () => {
+  const form = a2uiForm(flow([REPOSITORY, BRANCH, PROJECT]));
+  const drawn = components(form);
+  expect(drawn.get("input-branch")).toEqual({
+    id: "input-branch",
+    component: "ChoicePicker",
+    label: "Branch",
+    variant: "mutuallyExclusive",
+    optionsFrom: { source: "branch", after: { path: "/repo" } },
+    value: { path: "/branch" },
+    checks: [
+      {
+        condition: { call: "required", args: { value: { path: "/branch" } } },
+        message: "Choose a value for Branch.",
+      },
+    ],
+  });
+  expect(drawn.get("input-project")).toMatchObject({
+    optionsFrom: { source: "project" },
+  });
+  // neorc draws it with a source of options, and only then.
+  expect(formOf({ form }, undefined, { search: true })).not.toBeNull();
+  expect(formOf({ form })).toBeNull();
+});
+
+test("a search asks the backend for the list the choice names", async () => {
+  const fetch = stubFetch(() =>
+    json({ items: [{ value: "main", label: "main" }], more: true }),
+  );
+  const found = await searchOptions({
+    flow: "code_task",
+    source: "branch",
+    after: "app",
+    query: "ma in",
+    limit: 50,
+    signal: new AbortController().signal,
+  });
+  await searchOptions({
+    flow: "code_task",
+    source: "project",
+    after: null,
+    query: "",
+    limit: 10,
+    signal: new AbortController().signal,
+  });
+  expect(found).toEqual({
+    items: [{ value: "main", label: "main" }],
+    more: true,
+  });
+  const [branch, project] = fetch.mock.calls.map(
+    ([input]) => new URL(String(input), location.href),
+  );
+  expect(branch?.pathname).toBe("/robinauts/api/lovs/branch/options");
+  expect(Object.fromEntries(branch?.searchParams ?? [])).toEqual({
+    q: "ma in",
+    limit: "50",
+    after: "app",
+  });
+  expect(project?.pathname).toBe("/robinauts/api/lovs/project/options");
+  expect(project?.searchParams.has("after")).toBe(false);
+});
+
+test("a run starts through the backend, and its refusal is the backend's words", async () => {
+  const fetch = stubFetch(({ body }) =>
+    (body as { inputs: { branch: string } }).inputs.branch === "gone"
+      ? refusal(
+          422,
+          "InvalidInputs",
+          "code_task: input 'branch': 'gone' is not a branch of app",
+        )
+      : json({ id: "run-1" }, 201),
+  );
+  expect(await startRun("code_task", { repo: "app", branch: "main" })).toEqual({
+    id: "run-1",
+  });
+  await expect(
+    startRun("code_task", { repo: "app", branch: "gone" }),
+  ).rejects.toThrow(
+    /^code_task: input 'branch': 'gone' is not a branch of app$/,
+  );
+  expect(
+    callsTo(fetch, "/robinauts/api/flows/code_task/runs", "POST")[0]?.body,
+  ).toEqual({
+    inputs: { repo: "app", branch: "main" },
+  });
 });

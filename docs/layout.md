@@ -30,7 +30,8 @@ robinauts/
       orchestrator/     flows and their runs, a sibling of the controller that
                         sees its contract alone: contract/, ports/, core/,
                         application/, adapters/ (adapters/neorc/ is the one
-                        place neorc is imported)
+                        place neorc is imported; adapters/git/ reads a
+                        repository's branches)
       worker/           runs the turns; of the controller it sees
                         contract/broker/ alone
       web/              Robinauts' component for oneberth: its routes, its

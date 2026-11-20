@@ -12,6 +12,7 @@ from typing import Any
 
 from robinauts.orchestrator.contract.domain import (
     FORM_SUFFIX,
+    LIVE_KINDS,
     FlowForm,
     FormInput,
     FormSpec,
@@ -20,10 +21,11 @@ from robinauts.orchestrator.contract.domain import (
     Option,
     Repository,
 )
+from robinauts.orchestrator.core.search import named
 from robinauts.shared_domain.domain import Config
 
 FORM_KEYS = frozenset({"title", "inputs"})
-INPUT_KEYS = frozenset({"label", "lov"})
+INPUT_KEYS = frozenset({"label", "lov", "of"})
 LOV_TYPE = "string"
 """The declared type of an input with a list of values: each value is a string."""
 
@@ -58,10 +60,34 @@ def parse_form(flow: str, table: Mapping[str, Any]) -> tuple[FormSpec | None, li
             known = ", ".join(LovKind)
             problems.append(f"{here} lov: {lov!r} is not one of {known}")
             continue
-        specs[name] = InputSpec(label=label, lov=None if lov is None else LovKind(lov))
+        of = entry.get("of")
+        if of is not None and (not isinstance(of, str) or not of):
+            problems.append(f"{here} of: the name of another input of the form")
+            continue
+        specs[name] = InputSpec(label=label, lov=None if lov is None else LovKind(lov), of=of)
+    problems += _of_problems(where, specs)
     if problems:
         return None, problems
     return FormSpec(title=title, inputs=specs), []
+
+
+def _of_problems(where: str, specs: Mapping[str, InputSpec]) -> list[str]:
+    """What is wrong with the inputs' ``of``: a branch names an input of the form that is a
+    repository, and no other input names one."""
+    problems = []
+    for name, spec in specs.items():
+        here = f"{where} [inputs.{name}] of"
+        if spec.lov is not LovKind.BRANCH:
+            if spec.of is not None:
+                problems.append(f"{here}: only a branch names the input it is of")
+            continue
+        target = None if spec.of is None else specs.get(spec.of)
+        if target is None or target.lov is not LovKind.REPOSITORY:
+            problems.append(
+                f"{here}: a branch names an input of the form whose lov is"
+                f" {LovKind.REPOSITORY.value!r}"
+            )
+    return problems
 
 
 def check_forms(forms: Mapping[str, FormSpec], declared: DeclaredInputs) -> list[str]:
@@ -88,13 +114,19 @@ def check_forms(forms: Mapping[str, FormSpec], declared: DeclaredInputs) -> list
 def options_of(
     kind: LovKind, *, repositories: tuple[Repository, ...], config: Config
 ) -> tuple[Option, ...]:
-    """The values a list of values offers, in the order their configuration gives them."""
+    """The values a list of values offers, in the order their configuration gives them; none
+    for a list that is searched rather than listed (``LIVE_KINDS``)."""
+    if kind in LIVE_KINDS:
+        return ()
     if kind is LovKind.REPO_BRANCH:
+        # A pattern of the settings names no one branch: a branch input searches it.
         return tuple(
             Option(value=f"{r.id}@{branch}", label=f"{r.id} · {branch}")
             for r in repositories
-            for branch in r.branches
+            for branch in named(r.branches)
         )
+    if kind is LovKind.REPOSITORY:
+        return tuple(Option(value=r.id, label=r.id) for r in repositories)
     if kind is LovKind.MODEL:
         return tuple(Option(value=m.id, label=m.title or m.id) for m in config.models.values())
     return tuple(
@@ -123,12 +155,17 @@ def build_forms(
             spec = specs.get(name, InputSpec(label=name))
             options = (
                 None
-                if spec.lov is None
+                if spec.lov is None or spec.lov in LIVE_KINDS
                 else options_of(spec.lov, repositories=repositories, config=config)
             )
             fields.append(
                 FormInput(
-                    name=name, label=spec.label, type=inputs[name], lov=spec.lov, options=options
+                    name=name,
+                    label=spec.label,
+                    type=inputs[name],
+                    lov=spec.lov,
+                    options=options,
+                    of=spec.of,
                 )
             )
         title = flow if form is None else form.title
