@@ -22,6 +22,8 @@ Do not:
   another library, or write the code.
 - run `npm install`. Installs are `npm ci`; `save-exact` and `ignore-scripts`
   stay on in `.npmrc`.
+- run `npm audit fix --force`, or add or extend a row of "Advisories with no
+  fix" in `../DEPENDENCIES.md` unless the project owner asked for it.
 - commit `dist/`, `src/api/schema.d.ts` or `node_modules/`. The assets are
   built by CI and by the wheel build.
 - edit `bundled-packages.txt` by hand. The build writes it; a change in it is

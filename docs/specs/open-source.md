@@ -82,8 +82,8 @@ On GitHub Actions, all blocking, all present from day zero:
   licences too — save the by-name, by-version licence-text exception above;
   a vulnerability audit.
 - JavaScript: the build-time licence allowlist; the committed list of
-  bundled packages compared with the build; `npm audit`;
-  `npm audit signatures`.
+  bundled packages compared with the build; `npm audit`, save the advisories
+  `DEPENDENCIES.md` records as having no fix; `npm audit signatures`.
 - `reuse lint`; a DCO check; the architecture contracts
   ([architecture/rules.md](../architecture/rules.md)); the lint rule that
   keeps the chat behind its seam. Secret scanning is planned.

@@ -103,6 +103,9 @@ allowed list or nothing, enforced at build time by `rollup-plugin-license`.
 What that gate can and cannot see is written out under
 ["JavaScript build tooling"](#javascript-build-tooling) below.
 
+A fifth table, ["Advisories with no fix"](#advisories-with-no-fix), excepts
+no licence: it is npm's, and about known vulnerabilities.
+
 An exception is a signature, not a switch. It can cover metadata that names
 a licence family and no more — the trove classifier
 `License :: OSI Approved :: BSD License` names no version of the BSD licence,
@@ -395,6 +398,30 @@ build still refuses what it can judge without resolving anything: CSS Modules,
 any stylesheet language but plain `.css`, and a `<style>` block in
 `index.html`. A scanner that agrees with the resolver is future work; until
 then, the by-hand list is the record.
+
+
+## Advisories with no fix
+
+A known advisory in a package `frontend/package-lock.json` pins fails the
+build, and the answer is the release that fixes it. One that no release fixes
+yet may be recorded here instead, by the project owner.
+
+`frontend/scripts/check-advisories.mjs` runs `npm audit` and fails on:
+
+- an advisory with no row;
+- a row naming another version than the lockfile pins;
+- a row whose advisory has a fix: one `npm audit fix` would take, or a newer
+  release of one of `package.json`'s own dependencies;
+- a row whose **review by** date has passed, or is more than 7 days away;
+- a row whose advisory npm no longer reports.
+
+npm cannot see a fix published as a new major that the packages in between do
+not ask for yet. The review date is for that one, and an `overrides` entry
+takes it, as for `minimatch` 11.
+
+| advisory | package | version | review by | why it is accepted |
+|---|---|---|---|---|
+| GHSA-fc5q-39xc-vjpf | `picomatch` | 4.0.7 | 2026-11-25 | a denial of service on a crafted glob pattern (CVE-2026-112366, high). It covers every release, `<=4.0.7`, and none fixes it (read 2026-11-18). The glob matcher of `vite`, `vitest`, `typescript-eslint` and `rollup-plugin-license`; the patterns it is given are this repository's own. `npm audit fix --force` offers Vite 6.2.7, which carries the same code compiled into its own files |
 
 
 ## Known exclusions
