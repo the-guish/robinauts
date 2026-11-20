@@ -2,9 +2,9 @@
 # Copyright The Robinauts Authors
 
 """The branches of a repository, as ``git ls-remote`` reads them from its server. A read serves
-for a short while; after it, the next search is answered from it while a new read runs. A
-branch the last read did not have is asked of the server alone, so a branch pushed a moment ago
-starts a run."""
+for a short while; after it, the next search is answered from it while a new read runs. Whether
+one branch exists is answered from a read only while it is fresh, and asked of the server
+otherwise: a branch pushed a moment ago starts a run, and one deleted an hour ago does not."""
 
 from __future__ import annotations
 
@@ -100,16 +100,21 @@ class GitBranches(BranchNames):
         kept = self._reads.get(repository.url)
         if kept is None:
             return await self._read(repository)
-        if self._clock() - kept.at >= self._fresh_for:
+        if not self._fresh(kept):
             # Answered from the last read; the next search has the new one.
             self._reading_task(repository)
         return kept.names
 
     async def exists(self, repository: Repository, branch: str) -> bool:
         kept = self._reads.get(repository.url)
-        if kept is not None and branch in kept.names:
+        # A read vouches for a branch only while it is fresh: nothing but a search renews it,
+        # and a start may come long after the last one.
+        if kept is not None and self._fresh(kept) and branch in kept.names:
             return True
         return branch in await self._ls_remote(repository, f"{HEADS}{branch}")
+
+    def _fresh(self, read: _Read) -> bool:
+        return self._clock() - read.at < self._fresh_for
 
     async def _read(self, repository: Repository) -> tuple[str, ...]:
         """Every branch, as one read shared by every search that waits for it."""
@@ -160,13 +165,16 @@ class GitBranches(BranchNames):
         try:
             out, err = await asyncio.wait_for(process.communicate(), self._timeout)
         except TimeoutError:
-            with contextlib.suppress(ProcessLookupError):
-                process.kill()
-            await process.wait()
             raise BranchesUnreadableError(
                 f"the branches of {repository.id} could not be read: its server did not answer"
                 f" within {self._timeout:g} s"
             ) from None
+        finally:
+            # Out of time, or the request that asked was cancelled: git does not outlive it.
+            if process.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    process.kill()
+                await process.wait()
         if process.returncode != 0:
             reason = reason_of(err.decode(errors="replace"), process.returncode)
             raise BranchesUnreadableError(

@@ -115,6 +115,47 @@ async def test_a_stale_read_serves_once_more_while_a_new_one_runs(remote: Remote
 
 
 @asyncio_test
+async def test_a_branch_deleted_exists_only_while_the_read_that_had_it_is_fresh(
+    remote: Remote,
+) -> None:
+    clock = Clock()
+    branches = GitBranches(fresh_for=60, clock=clock)
+    await branches.listed(remote.repository)
+    git("update-ref", "-d", "refs/heads/feature/0007", cwd=remote.path)
+
+    while_fresh = await branches.exists(remote.repository, "feature/0007")
+    # Hours later, with no search in between to renew the read.
+    clock.now = 10_000
+    once_stale = await branches.exists(remote.repository, "feature/0007")
+
+    assert while_fresh
+    assert not once_stale
+    assert await branches.exists(remote.repository, "feature/0008")
+
+
+@asyncio_test
+async def test_a_read_that_is_cancelled_ends_git(tmp_path: Path) -> None:
+    said = tmp_path / "pid"
+    slow = tmp_path / "git"
+    slow.write_text(f"#!/bin/sh\necho $$ > {said}\nexec sleep 60\n")
+    slow.chmod(0o755)
+    branches = GitBranches(git=str(slow), timeout=60)
+    asking = asyncio.create_task(branches.exists(Repository("app", "file:///x", ("*",)), "main"))
+    for _ in range(400):
+        if said.exists() and said.read_text().strip():
+            break
+        await asyncio.sleep(0.02)
+    pid = int(said.read_text())
+
+    asking.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asking
+
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+
+@asyncio_test
 async def test_searches_that_wait_for_the_first_read_share_it(remote: Remote) -> None:
     branches = GitBranches(clock=Clock())
 

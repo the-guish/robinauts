@@ -21,5 +21,6 @@ class BranchNames(ABC):
 
     @abstractmethod
     async def exists(self, repository: Repository, branch: str) -> bool:
-        """Whether ``repository`` has ``branch`` now: asked of its server when the last read
-        did not have it, for a branch pushed since. ``BranchesUnreadableError``."""
+        """Whether ``repository`` has ``branch`` now: answered from a read while it is fresh,
+        and asked of its server otherwise, so a branch pushed since the last read exists and
+        one deleted long ago does not. ``BranchesUnreadableError``."""
