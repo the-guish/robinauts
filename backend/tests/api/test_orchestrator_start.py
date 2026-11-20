@@ -212,6 +212,89 @@ def test_a_start_whose_flows_are_refused_is_refused_before_it_says_ready(
     assert b"neorc refused the flows in" in refused.stderr, refused.stderr
 
 
+ASK = """
+name: ask
+version: 1.0.0
+inputs:
+  question: string
+output: tasks.answer
+steps:
+  answer:
+    queue: editors
+    handler: answer-the-question
+    params:
+      question: inputs.question
+"""
+"""A flow whose one task waits for a person, on an external queue."""
+
+
+def test_a_task_of_a_queue_of_queues_toml_waits_for_a_person_s_answer(tmp_path: Path) -> None:
+    flows = tmp_path / "flows"
+    flows.mkdir()
+    (flows / "ask.yaml").write_text(ASK)
+    (flows / "queues.toml").write_text('[queues.editors]\nkind = "external"\n')
+    config = tmp_path / "robinauts.toml"
+    config.write_text(CONFIG)
+    with started(config, environment_for(config, flows)) as (url, _):
+        with stack.client(url) as api:
+            queues = {q["name"]: q["kind"] for q in api.get("/neorc/queues").json()["queues"]}
+            assert queues == {"default": "worker", "editors": "external"}
+            begun = api.post("/neorc/flows/ask/runs", json={"inputs": {"question": "Ready?"}})
+            assert begun.status_code == 201, begun.text
+            deadline = time.monotonic() + RUN_SECONDS
+            waiting: list[dict[str, Any]] = []
+            # As a person reads the queue's page: its tasks, then one with its inputs.
+            while not waiting and time.monotonic() < deadline:
+                listed = api.get("/neorc/queues/editors/tasks/recent", params={"status": "pending"})
+                assert listed.status_code == 200, listed.text
+                waiting = listed.json()["tasks"]
+                time.sleep(0.2)
+            assert len(waiting) == 1, waiting
+            shown = api.get(f"/neorc/tasks/{waiting[0]['task']['id']}/inputs")
+            assert shown.status_code == 200, shown.text
+            assert shown.json()["inputs"] == {"question": "Ready?"}, shown.text
+            # The run waits for the person, and ends with what they answer.
+            assert api.get(f"/neorc/runs/{begun.json()['id']}").json()["status"] == "active"
+            answered = api.post(
+                f"/neorc/tasks/{waiting[0]['task']['id']}/complete", json={"result": "Ready."}
+            )
+            assert answered.status_code == 204, answered.text
+            run = finished_run(api, begun.json()["id"])
+            assert (run["status"], run["output"]) == ("succeeded", "Ready."), run
+
+
+@pytest.mark.parametrize(
+    ("queues", "said"),
+    [
+        # The worker's queue stays a worker queue.
+        ('[queues.default]\nkind = "external"\n', b"queue 'default' is a worker queue"),
+        # A step on a queue nobody declared.
+        ("", b"editors"),
+        ('[queues.editors]\nkind = "sometimes"\n', b"queues.toml [queues.editors]"),
+    ],
+)
+def test_a_start_whose_queues_do_not_fit_is_refused_before_it_says_ready(
+    tmp_path: Path, queues: str, said: bytes
+) -> None:
+    flows = tmp_path / "flows"
+    flows.mkdir()
+    (flows / "ask.yaml").write_text(ASK)
+    (flows / "queues.toml").write_text(queues)
+    config = tmp_path / "robinauts.toml"
+    config.write_text(CONFIG)
+    start = [str(stack.ROBINAUTS), "start", "--local", "--port", str(stack.free_port())]
+    refused = subprocess.run(
+        start,
+        env=environment_for(config, flows),
+        capture_output=True,
+        timeout=60,
+        stdin=subprocess.DEVNULL,
+    )
+    assert refused.returncode == 1
+    assert b"neorc refused the flows in" in refused.stderr, refused.stderr
+    assert said in refused.stderr, refused.stderr
+
+
 def test_a_folder_of_one_s_own_flows_is_served_as_its_flows_toml_says(
     tmp_path: Path,
 ) -> None:

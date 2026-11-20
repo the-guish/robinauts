@@ -11,8 +11,9 @@ one place in Robinauts that imports neorc, beside ``cli.orchestration``, which w
   ``neorc.db`` in the data directory, or a schema of its own, ``neorc``, on the PostgreSQL.
 - its **scheduler** runs in this process, a part of the component.
 - once the backend serves, the flows of the flows folder are **uploaded** with a service token
-  of ``neorc/ci``, after the ``default`` queue is declared as a worker queue. This backend is
-  the operator here, and declares the queue on the manager directly.
+  of ``neorc/ci``, after the ``default`` queue is declared as a worker queue, and the queues
+  of the folder's ``queues.toml`` with their kinds. This backend is the operator here, and
+  declares the queues on the manager directly.
 - one **worker**, on the ``default`` queue, runs in a process of its own: ``robinauts
   neorc-worker``, which becomes neorc's own command (``neorc_worker``). Its supervisor starts
   it: the launcher on the desktop (``supervised``), this backend on a server. It reaches the
@@ -59,7 +60,7 @@ from neorc_core import (
     RunNotFoundError,
     StarterKind,
 )
-from neorc_core.flows import flow_files, load_flow_yaml, read_flows
+from neorc_core.flows import flow_files, load_flow_yaml, read_flows, read_queues
 from neorc_core.local import MemoryStore, MemoryTaskNotifier
 
 from robinauts.orchestrator.contract.domain import (
@@ -415,12 +416,14 @@ class ComposedNeorc(Orchestrator):
         token: str,
         transport: httpx.AsyncBaseTransport,
     ) -> None:
-        """Declare the worker's queue, then upload the flows with ``token``. neorc refuses a
-        flow on a queue nobody declared. A kind already declared is kept."""
+        """Declare the worker's queue and the queues of the folder's ``queues.toml``, then
+        upload the flows with ``token``. neorc refuses a flow on a queue nobody declared. A
+        kind already declared is kept, and a file that names another kind for it is refused."""
         flows = orchestration.flows
         try:
-            if await self.manager.queue_kind(DEFAULT_QUEUE) is None:
-                await self.manager.declare_queue(DEFAULT_QUEUE, QueueKind.WORKER)
+            # The worker's queue first: a file that names it with another kind is then refused.
+            for name, kind in [(DEFAULT_QUEUE, QueueKind.WORKER), *read_queues(flows).items()]:
+                await self.manager.add_queue(name, kind)
             contents = read_flows(flows)
             client = HttpManagerClient(
                 self._public_url, token=token, allow_insecure=True, transport=transport

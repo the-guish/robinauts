@@ -32,9 +32,9 @@ manager (oneberth's `docs/specs/neorc-in-robinauts.md`, "Composed";
 A flows folder adds the rest (below, [Two configurations](#two-configurations-agents-and-flows)).
 Once the backend serves:
 
-4. the `default` queue is declared as a worker queue on the manager, and the flows in the flows
-   folder are **uploaded**, with a service token of `neorc/ci`, through the backend's own
-   front listener in this process;
+4. the `default` queue is declared as a worker queue on the manager, with the queues of the
+   flows folder's `queues.toml`, and the flows in the flows folder are **uploaded**, with a
+   service token of `neorc/ci`, through the backend's own front listener in this process;
 5. one **worker**, on the `default` queue, with the handlers in `code_location`, runs in a
    process of its own: `robinauts neorc-worker`, which becomes neorc's own command against the
    worker listener once it holds its tokens.
@@ -53,7 +53,7 @@ The agents and the flows are configured apart, each in a place of its own:
 | | named by | holds |
 |---|---|---|
 | **agents** | `ROBINAUTS_CONFIG`, a TOML file | model providers, models, tool servers, agents, workers: everything Robinauts has without neorc |
-| **flows** | `ROBINAUTS_FLOWS_DIR`, a folder | the flow files (`*.yaml`, `*.yml`), uploaded to neorc as they are; their forms, `<flow>.form.toml`; and `flows.toml`, their settings and repositories |
+| **flows** | `ROBINAUTS_FLOWS_DIR`, a folder | the flow files (`*.yaml`, `*.yml`), uploaded to neorc as they are; their forms, `<flow>.form.toml`; `flows.toml`, their settings and repositories; and `queues.toml`, their queues beside `default` |
 
 Without `ROBINAUTS_FLOWS_DIR`, neorc's manager serves no flow of Robinauts', and no worker of
 neorc's runs. The agents' file knows nothing of the flows: an `[orchestration]` table in it, where the flows'
@@ -73,6 +73,25 @@ default:
 ```bash
 ROBINAUTS_FLOWS_DIR=~/robinauts/flows robinauts start --local
 ```
+
+### Queues a person answers
+
+`queues.toml` is optional, and is neorc's own file: it names each queue of the folder's flows
+beside `default`, with its kind (neorc's `docs/specs/task-completion.md`).
+
+```toml
+[queues.editors]
+kind = "external"
+```
+
+- The server declares each queue of the file before it uploads the flows. A flow names
+  declared queues alone, so a step on a queue the file lacks is refused at the start.
+- A task of an external queue waits for a person. The person answers it under Queues in
+  neorc's interface, on the step's form when the step names one.
+- A queue keeps the kind it was declared with. A file that names another kind for it is
+  refused at the start, and so is one that names `default` as external.
+- Robinauts' worker serves `default` alone. A worker queue of the file needs a worker of its
+  operator's own.
 
 ### Flows as forms
 
