@@ -17,7 +17,9 @@ They cover less frequent cases that deserve special attention and do not fit mas
 ## API tests
 
 They use a real Postgres DB and the same fake HTTP server as of e2e. The start-up refusal tests need neither.
-Most API tests share one server and one database per run. A test that needs its own configuration starts its own. A test must use only data it creates.
+Most API tests share one server and one database per run. A test that needs agents, models or tool servers of its own adds them to the shared server under names of its own (`tests/util/shared_server.py`). Only a test that changes what every agent does (`[work]`, the workers), or that starts, restarts, signals or kills a server, starts its own. A test must use only data it creates.
+
+The run is spread over the machine's cores with `pytest-xdist` (`scripts/check-tests.sh`), at most four workers so that a stock PostgreSQL's 100 connections suffice, one module per worker. Each worker has its own shared server, on a database of its own in the same PostgreSQL (oneberth and neorc keep their tables in schemas of fixed names, so a schema of its own would not keep two servers apart), so no two tests that run at the same time share a server or its data.
 
 The only difference is that they skip the browser. They exercise API behavior that the UI cannot trigger or cannot show.
 

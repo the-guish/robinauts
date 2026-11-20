@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
 
-from util import stack
+from util import shared_server, stack
 from util.controller_db import requires_postgres
 from util.fake_openai import CallTool, FakeLocalGPTServer
 from util.fake_openai.echo_model import text_of
@@ -84,19 +85,19 @@ class SmallWindowModel:
         return "done"
 
 
-@pytest.fixture(scope="module")
-def small_window(
-    model_server: FakeLocalGPTServer, tmp_path_factory: pytest.TempPathFactory
-) -> Iterator[str]:
+@shared_server.contributes
+@contextmanager
+def small_window_agents() -> Iterator[shared_server.Contribution]:
     with mcp_server(read) as tools_url:
-        config = tmp_path_factory.mktemp("small") / "robinauts.toml"
-        small = SMALL.format(tools_url=tools_url, system_prompt=stack.SYSTEM_PROMPT)
-        config.write_text(stack.config_for(model_server.base_url) + small)
-        with (
-            stack.database(config) as url,
-            stack.server(config, url, env=stack.API_KEY) as server,
-        ):
-            yield server
+        yield shared_server.Contribution(
+            SMALL.format(tools_url=tools_url, system_prompt=stack.SYSTEM_PROMPT)
+        )
+
+
+@pytest.fixture
+def small_window(server: stack.Server) -> str:
+    """The shared server: its small model and ``<engine>_pages`` agents are this module's."""
+    return server
 
 
 @pytest.mark.parametrize("agent", ["langchain_pages", "pydantic_ai_pages"])

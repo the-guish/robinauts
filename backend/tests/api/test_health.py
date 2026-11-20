@@ -18,6 +18,15 @@ from util.fake_openai import FakeLocalGPTServer
 
 pytestmark = requires_postgres
 
+QUIET = """
+[work]
+heartbeat_seconds = 600
+lease_seconds = 1200
+"""
+"""No heartbeat of the workers' own while the test runs: a beat would touch the file the test
+has just made old, and ``/health`` would answer for the beat rather than for the test. A
+heartbeat comes every 30 seconds otherwise, and a start on a busy machine can reach one."""
+
 
 def test_health_is_the_age_of_the_workers_activity(
     model_server: FakeLocalGPTServer, tmp_path: Path
@@ -29,6 +38,7 @@ def test_health_is_the_age_of_the_workers_activity(
             'engine = "pydantic-ai"\nworker = "special"\n',
             1,
         )
+        + QUIET
     )
     started: list[subprocess.Popen[bytes]] = []
     with (

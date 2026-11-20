@@ -192,9 +192,10 @@ checked at the end of the run, on what actually happened: a run with the
 variable set in which no database test ran is failed, and so is one narrowed
 with `-m`, `-k` or a path argument, since such a run cannot show anything
 about the tests it did not select. Narrow your runs freely — just without
-the variable. A run split across processes with `-n` is refused for the same
-reason rather than guessed at: the count is kept in one process, and
-`pytest-xdist` is not a dependency of this project. Unset, empty, `0`, `false`, `no` and `off` all mean "a skip is
+the variable. `scripts/check-tests.sh` splits the run across the machine's
+cores with `pytest-xdist` (`-n auto`, at most 4 workers, so that a stock
+PostgreSQL's 100 connections suffice): each worker hands its count to the
+controller, which adds them up before it decides. Unset, empty, `0`, `false`, `no` and `off` all mean "a skip is
 fine".
 
 No package that starts a PostgreSQL is a dependency of this project;

@@ -434,21 +434,6 @@ def test_the_flows_settings_in_the_agents_file_are_refused_with_where_they_went(
     assert b"ROBINAUTS_FLOWS_DIR" in refused.stderr
 
 
-@contextmanager
-def a_database() -> Iterator[str]:
-    """A new database on the test PostgreSQL, dropped afterwards. neorc's schema has a fixed
-    name, so a schema of the test's own, as the other tests use, would not keep two runs
-    apart: a database of its own does."""
-    given = os.environ["ROBINAUTS_TEST_DATABASE_URL"]
-    name = "robinauts_neorc_" + uuid.uuid4().hex
-    asyncio.run(stack.run_statement(given, f'CREATE DATABASE "{name}"'))
-    try:
-        parts = httpx.URL(given)
-        yield str(parts.copy_with(path=f"/{name}"))
-    finally:
-        asyncio.run(stack.run_statement(given, f'DROP DATABASE "{name}" WITH (FORCE)'))
-
-
 @pytest.mark.database
 @pytest.mark.skipif(os.environ.get("ROBINAUTS_TEST_DATABASE_URL") is None, reason=NO_DATABASE)
 def test_on_postgresql_neorc_keeps_its_tables_in_a_schema_of_its_own(
@@ -456,7 +441,7 @@ def test_on_postgresql_neorc_keeps_its_tables_in_a_schema_of_its_own(
 ) -> None:
     config = tmp_path / "robinauts.toml"
     config.write_text(CONFIG)
-    with a_database() as database_url:
+    with stack.new_database("robinauts_neorc_") as database_url:
         environment = environment_for(config)
         environment["ROBINAUTS_DATABASE_URL"] = database_url
         subprocess.run([str(stack.ROBINAUTS), "db", "init"], env=environment, check=True)

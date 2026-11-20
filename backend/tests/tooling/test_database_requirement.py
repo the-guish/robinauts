@@ -91,18 +91,3 @@ def test_a_narrowed_run_cannot_be_the_one_that_proves_the_database() -> None:
 
 def test_a_whole_run_that_exercised_the_database_is_believed() -> None:
     assert database_tests_missing(required=True, ran=1, narrowed=False) is None
-
-
-def test_a_run_split_across_processes_says_so_rather_than_guessing() -> None:
-    # The count lives in one process and the tests run in others, so it
-    # would read zero however many ran. A wrong diagnosis, confidently
-    # given, is worse than "I cannot tell".
-    problem = database_tests_missing(required=True, ran=0, narrowed=False, distributed=True)
-
-    assert problem is not None
-    assert "without -n" in problem
-    assert "not one test marked" not in problem
-
-
-def test_nothing_is_said_about_a_split_run_that_needs_no_database() -> None:
-    assert database_tests_missing(required=False, ran=0, narrowed=False, distributed=True) is None

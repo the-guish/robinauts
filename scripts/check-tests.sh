@@ -21,4 +21,12 @@ cd "$root/backend"
 PYTHONDONTWRITEBYTECODE=1
 export PYTHONDONTWRITEBYTECODE
 
-uv run --locked --no-build pytest "$@"
+# One pytest-xdist worker per core, and no more than 4. `loadfile` keeps a module on one
+# worker, so that a module that starts a server of its own starts it once; each worker
+# starts its own shared server for tests/api, on a database of its own
+# (tests/util/shared_server.py).
+#
+# The cap is PostgreSQL's: a server holds about 10 connections, and a stock PostgreSQL
+# allows 100. Four workers peak near 80; sixteen reach the limit, and servers die at their
+# start with "too many clients already". 4 is also what CI's runner has.
+uv run --locked --no-build pytest -n auto --maxprocesses 4 --dist loadfile "$@"

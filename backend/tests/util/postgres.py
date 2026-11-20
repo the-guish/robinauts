@@ -51,9 +51,7 @@ def no_database_reason(url: str | None = DATABASE_URL) -> str | None:
     return None if url else NO_DATABASE
 
 
-def database_tests_missing(
-    *, required: bool, ran: int, narrowed: bool, distributed: bool = False
-) -> str | None:
+def database_tests_missing(*, required: bool, ran: int, narrowed: bool) -> str | None:
     """Why this run cannot be believed about the database, or ``None``.
 
     The variable being set proves that somebody meant the database tests to
@@ -67,20 +65,11 @@ def database_tests_missing(
     refused rather than believed. CI never narrows; a laptop that does
     simply does not set the variable.
 
-    ``distributed`` is a run split across processes. The count is kept in
-    one process and the tests run in others, so it would always be zero and
-    the answer would be a confident lie. Saying "I cannot tell" is the only
-    honest thing left; supporting it properly would mean a dependency this
-    project does not have.
+    A run split across processes by ``pytest-xdist`` is counted as one: each worker hands
+    its count to the controller, which adds them up before it asks (``tests/conftest.py``).
     """
     if not required:
         return None
-    if distributed:
-        return (
-            "a database is required (ROBINAUTS_REQUIRE_POSTGRES), and this run is split"
-            " across processes, where the tests that ran cannot be counted. Run it"
-            " without -n, or unset the variable"
-        )
     if narrowed:
         return (
             "a database is required (ROBINAUTS_REQUIRE_POSTGRES), but this run was narrowed"

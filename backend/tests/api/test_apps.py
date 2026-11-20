@@ -10,6 +10,7 @@ are real MCP servers; the one with the apps wants its secret, and no answer carr
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import TypedDict
 
 import httpx
@@ -17,9 +18,8 @@ import pytest
 from oneberth.web import CONTENT_SECURITY_POLICY
 
 from robinauts.web.apps import NO_SUCH_APP, VIEW_CONTENT_SECURITY_POLICY
-from util import stack
+from util import shared_server, stack
 from util.controller_db import requires_postgres
-from util.fake_openai import FakeLocalGPTServer
 from util.mcp_server import View, mcp_server
 
 pytestmark = requires_postgres
@@ -122,11 +122,9 @@ tools = ["elsewhere"]
 """
 
 
-@pytest.fixture(scope="module")
-def apps_server(
-    model_server: FakeLocalGPTServer, tmp_path_factory: pytest.TempPathFactory
-) -> Iterator[str]:
-    config = tmp_path_factory.mktemp("apps") / "robinauts.toml"
+@shared_server.contributes
+@contextmanager
+def apps_agents() -> Iterator[shared_server.Contribution]:
     with (
         mcp_server(add, fail, views=VIEWS, token=SECRET) as board_url,
         mcp_server(shout) as plain_url,
@@ -139,13 +137,13 @@ def apps_server(
             elsewhere_url=elsewhere_url,
             system_prompt=stack.SYSTEM_PROMPT,
         )
-        config.write_text(stack.config_for(model_server.base_url) + tools)
-        env = {**stack.API_KEY, "BOARD_SECRET": SECRET}
-        with (
-            stack.database(config) as url,
-            stack.server(config, url, env=env) as server,
-        ):
-            yield server
+        yield shared_server.Contribution(tools, {"BOARD_SECRET": SECRET})
+
+
+@pytest.fixture
+def apps_server(server: stack.Server) -> stack.Server:
+    """The shared server: its ``with_apps`` and ``elsewhere`` agents are this module's."""
+    return server
 
 
 @pytest.fixture
