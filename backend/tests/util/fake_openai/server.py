@@ -9,7 +9,9 @@ provider's ``base_url`` should be set to. Every request body is kept in
 asks the client to run a tool and send its result back. A model that raises is
 answered ``400``, as the vendor refuses a call for good. A model that raises ``Overloaded`` is
 answered ``503``, a hiccup the client retries. A model that raises ``RateLimited`` is answered
-``429``, with a ``retry-after-ms`` of 10 so that the client retries at once.
+``429``, with a ``retry-after-ms`` of 10 so that the client retries at once. A model that
+answers ``HeldText`` has its text streamed and the stream held open before its end, until the
+test releases it.
 """
 
 from __future__ import annotations
@@ -43,8 +45,24 @@ class CallTool:
     call_id: str = "call_fake"
 
 
+@dataclass(frozen=True)
+class HeldText:
+    """A text answer whose stream stops before its end until ``release`` is set.
+
+    The whole text is sent, so it is on the screen while the turn is still running. ``sent`` is
+    set once it is. Held for 30 seconds at most.
+    """
+
+    text: str
+    sent: threading.Event
+    release: threading.Event
+
+
+Answer = str | CallTool | HeldText
+
+
 class FakeModel(Protocol):
-    def reply(self, messages: list[dict[str, Any]]) -> str | CallTool:
+    def reply(self, messages: list[dict[str, Any]]) -> Answer:
         """The answer, given the request's ``messages`` as the client sent them."""
         ...
 
@@ -88,7 +106,7 @@ class FakeLocalGPTServer:
     ) -> None:
         self.stop()
 
-    def answer(self, request: dict[str, Any]) -> str | CallTool:
+    def answer(self, request: dict[str, Any]) -> Answer:
         with self._lock:
             self.received.append(request)
         return self.model.reply(request["messages"])
@@ -144,7 +162,9 @@ def _handler_for(server: FakeLocalGPTServer) -> type[BaseHTTPRequestHandler]:
             else:
                 self._send_json(200, self._completion(answer, model))
 
-        def _completion(self, answer: str | CallTool, model: str) -> dict[str, Any]:
+        def _completion(self, answer: Answer, model: str) -> dict[str, Any]:
+            if isinstance(answer, HeldText):
+                answer = answer.text
             if isinstance(answer, CallTool):
                 message = {"role": "assistant", "content": None, "tool_calls": [_tool_call(answer)]}
                 finish, usage = "tool_calls", _usage("")
@@ -160,7 +180,10 @@ def _handler_for(server: FakeLocalGPTServer) -> type[BaseHTTPRequestHandler]:
                 "usage": usage,
             }
 
-        def _stream(self, request: dict[str, Any], answer: str | CallTool, model: str) -> None:
+        def _stream(self, request: dict[str, Any], answer: Answer, model: str) -> None:
+            held = answer if isinstance(answer, HeldText) else None
+            if held is not None:
+                answer = held.text
             if isinstance(answer, CallTool):
                 # The call's id and name first, then its arguments, as the vendor streams one.
                 call = _tool_call(answer)
@@ -172,8 +195,8 @@ def _handler_for(server: FakeLocalGPTServer) -> type[BaseHTTPRequestHandler]:
                     _chunk(
                         model, {"tool_calls": [{"index": 0, "function": {"arguments": arguments}}]}
                     ),
-                    _chunk(model, {}, "tool_calls"),
                 ]
+                end = [_chunk(model, {}, "tool_calls")]
                 text = ""
             else:
                 # One chunk per word, each keeping the whitespace after it, so they join back.
@@ -181,13 +204,25 @@ def _handler_for(server: FakeLocalGPTServer) -> type[BaseHTTPRequestHandler]:
                 chunks = [
                     _chunk(model, {"role": "assistant", "content": ""}),
                     *(_chunk(model, {"content": piece}) for piece in pieces),
-                    _chunk(model, {}, "stop"),
                 ]
+                end = [_chunk(model, {}, "stop")]
                 text = answer
             if (request.get("stream_options") or {}).get("include_usage"):
-                chunks.append({**_chunk(model, {}), "choices": [], "usage": _usage(text)})
-            body = "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
-            self._send(200, "text/event-stream", body.encode())
+                end.append({**_chunk(model, {}), "choices": [], "usage": _usage(text)})
+            body = "".join(f"data: {json.dumps(c)}\n\n" for c in chunks)
+            ending = "".join(f"data: {json.dumps(c)}\n\n" for c in end) + "data: [DONE]\n\n"
+            if held is None:
+                self._send(200, "text/event-stream", (body + ending).encode())
+                return
+            # Without a length, the body ends when the connection closes (HTTP/1.0).
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.wfile.write(body.encode())
+            self.wfile.flush()
+            held.sent.set()
+            held.release.wait(30)
+            self.wfile.write(ending.encode())
 
         def _send_json(
             self, status: int, payload: dict[str, Any], headers: Mapping[str, str] = {}

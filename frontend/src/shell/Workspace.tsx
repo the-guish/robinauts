@@ -157,6 +157,42 @@ function freshest(listed: Opened | null, about: Opened | null): Opened | null {
   return later(listed, about);
 }
 
+/** A model picked on an open conversation, and the conversation it is for. */
+export interface Pick {
+  id: string;
+  model: string;
+}
+
+/**
+ * The model the open conversation's next turn runs on.
+ *
+ * **A pick holds until a read of the conversation has it on that model.** The
+ * conversation has no model of its own: its model is its last message's
+ * (`docs/specs/wire.md`). A pick made while a run is going is dated before
+ * that run ends, and the run's end still has the old model, so dates alone
+ * would put the old model back and the next turn would run on it.
+ */
+export function shownModel(
+  pick: Pick | null,
+  id: string | null,
+  known: string | null,
+): string | null {
+  return pick !== null && pick.id === id ? pick.model : known;
+}
+
+/**
+ * The pick after a read of a conversation. A read with the conversation on the
+ * picked model shows that a turn ran on it, and ends the pick. Another
+ * read leaves it, a read of another conversation included.
+ */
+export function pickAfterRead(
+  pick: Pick | null,
+  read: Conversation,
+): Pick | null {
+  if (pick === null) return null;
+  return pick.id === read.id && pick.model === read.model ? null : pick;
+}
+
 /** The rail, as this browser last left it. */
 function usePanelCollapsed(): [boolean, (collapsed: boolean) => void] {
   const [collapsed, setCollapsed] = useState(
@@ -307,10 +343,16 @@ export function Workspace({
     () => (listed === null ? null : openedFrom(listed)),
     [listed],
   );
-  const conversationModel =
-    freshest(listedAs, about)?.model ?? listed?.model ?? null;
+  // The model picked on a conversation and not yet run on (`shownModel`).
+  const [pick, setPick] = useState<Pick | null>(null);
+  const conversationModel = shownModel(
+    pick,
+    current,
+    freshest(listedAs, about)?.model ?? listed?.model ?? null,
+  );
   const conversationOpened = useCallback((conversation: Conversation) => {
     setOpened((was) => later(was, openedFrom(conversation)));
+    setPick((was) => pickAfterRead(was, conversation));
   }, []);
   // Which conversation is on the screen when an answer lands, which is not
   // necessarily the one it was on when the render that asked was made.
@@ -328,8 +370,14 @@ export function Workspace({
   // in the air, and that read -- answered before the change was saved --
   // must then meet the change's answer and lose to it (`later`). It is never
   // written over another conversation the page has moved on to.
+  //
+  // **The answer is also the pick**, held until a read has the conversation
+  // on it (`shownModel`): a run that ends later still carries the old model.
   const modelMoved = useCallback(
     (moved: Conversation) => {
+      if (moved.id === onScreen.current) {
+        setPick({ id: moved.id, model: moved.model });
+      }
       setOpened((was) =>
         was?.id === moved.id
           ? later(was, openedFrom(moved))

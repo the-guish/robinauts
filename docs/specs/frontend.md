@@ -41,7 +41,9 @@
   so it is shown as a line. The
   model stays a choice, so the model picker sits on that line, showing the
   conversation's model; changing it applies from the next turn, a run in
-  flight included. A model the deployment no longer offers is shown as
+  flight included. A run that ends after a pick still carries the old model.
+  The picker keeps the pick until a read of the conversation shows it on the
+  picked model. A model the deployment no longer offers is shown as
   such, and a turn refused for it says so and keeps what was written — an
   edit in its own box. A first message refused because its model or its
   agent is no longer offered says which, and keeps the text; a refused

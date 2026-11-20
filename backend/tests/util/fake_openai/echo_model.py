@@ -8,7 +8,7 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from util.fake_openai.server import CallTool
+from util.fake_openai.server import CallTool, HeldText
 
 
 def text_of(message: dict[str, Any]) -> str:
@@ -40,6 +40,23 @@ class HoldingEchoModel(EchoModel):
             self.asked.set()
             self.release.wait(30)
         return super().reply(messages)
+
+
+class StreamHoldingEchoModel(EchoModel):
+    """An echo whose answer to ``hold`` is streamed whole and held open before its end.
+
+    ``sent`` is set once the answer's text is sent, and the stream ends when ``release`` is set.
+    """
+
+    def __init__(self) -> None:
+        self.sent = threading.Event()
+        self.release = threading.Event()
+
+    def reply(self, messages: list[dict[str, Any]]) -> str | HeldText:
+        text = super().reply(messages)
+        if text == "hold":
+            return HeldText(text, self.sent, self.release)
+        return text
 
 
 class PoisonEchoModel(EchoModel):

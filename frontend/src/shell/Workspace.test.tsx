@@ -13,9 +13,9 @@ import { expect, test, vi } from "vitest";
 import { callsTo, json, refusal, stubFetch, type Call } from "../test/api";
 import { conversation, id, message, opened, page } from "../test/conversations";
 import { hashOf, InShell } from "../test/shell";
-import { event, streamHeaders, streamed } from "../test/stream";
+import { event, streamHeaders, streamed, writable } from "../test/stream";
 import { NOT_OFFERED, unoffered } from "./ModelPicker";
-import { PANEL_KEY, Workspace } from "./Workspace";
+import { PANEL_KEY, pickAfterRead, shownModel, Workspace } from "./Workspace";
 
 const RUN = "11111111-2222-4333-8444-555555555555";
 
@@ -615,6 +615,187 @@ test("a model moved from another tab is the one shown, and picking the old one i
     ),
   ).toEqual([{ model_id: "sonnet" }]);
   expect(screen.getByLabelText("Model")).toHaveValue("sonnet");
+});
+
+test("a model picked while a run is going is what the next turn runs on, after the run ends", async () => {
+  // The run in flight started on "sonnet". "opus" is picked before it ends,
+  // so the run's end dates the conversation later than the pick, and still
+  // has it on "sonnet": the model of the run's own answer.
+  location.hash = hashOf(`/c/${id(1)}`);
+  const asked = [
+    message(id(11), "user", "Hi"),
+    message(id(12), "assistant", "Hello"),
+  ];
+  const running = { ...conversation(1, "Robins"), model: "sonnet" };
+  const ended = { ...running, updated_at: "2026-09-03T10:00:05Z" };
+  const run = writable({ headers: streamHeaders(RUN, id(1)) });
+  let reads = 0;
+  const { fetch } = await shell((call) => {
+    if (call.method === "PUT") {
+      return json({
+        ...running,
+        model: "opus",
+        updated_at: "2026-09-03T10:00:01Z",
+      });
+    }
+    if (call.url.endsWith(`/runs/${RUN}/events`)) return run.response;
+    if (call.url === `/robinauts/api/conversations/${id(1)}/turns`) {
+      return streamed(
+        [event("RUN_FINISHED", { threadId: id(1), runId: RUN }, 2)],
+        {
+          headers: streamHeaders(RUN, id(1)),
+        },
+      );
+    }
+    if (call.url === `/robinauts/api/conversations/${id(1)}`) {
+      reads += 1;
+      return reads === 1
+        ? json(
+            opened(running, asked.slice(0, 1), {
+              run_id: RUN,
+              resume: { after: 0, follows: id(11) },
+            }),
+          )
+        : json(opened(ended, asked));
+    }
+    if (call.url.startsWith("/robinauts/api/conversations?")) {
+      return json(page([running]));
+    }
+    return undefined;
+  });
+
+  const picker = await screen.findByLabelText("Model");
+  await act(async () => {
+    fireEvent.change(picker, { target: { value: "opus" } });
+    await settled();
+  });
+  expect(screen.getByLabelText("Model")).toHaveValue("opus");
+
+  await act(async () => {
+    run.write(event("RUN_FINISHED", { threadId: id(1), runId: RUN }, 1));
+    run.close();
+    await settled();
+  });
+  await waitFor(() => {
+    expect(reads).toBe(2);
+  });
+  await act(settled);
+  expect(screen.getByLabelText("Model")).toHaveValue("opus");
+
+  const box = screen.getByRole("textbox", { name: "Message input" });
+  fireEvent.change(box, { target: { value: "And now?" } });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await settled();
+  });
+  expect(
+    callsTo(fetch, `/robinauts/api/conversations/${id(1)}/turns`, "POST").map(
+      (call) => (call.body as { model_id: string }).model_id,
+    ),
+  ).toEqual(["opus"]);
+});
+
+const picked = { id: id(1), model: "opus" };
+
+test.each([
+  // pick, the conversation on the screen, what the reads say, shown
+  [null, id(1), "sonnet", "sonnet"],
+  [picked, id(1), "sonnet", "opus"],
+  [picked, id(2), "sonnet", "sonnet"],
+  [picked, id(1), null, "opus"],
+  [null, null, null, null],
+])("a pick %o on %s over %s shows %s", (pick, on, known, shown) => {
+  expect(shownModel(pick, on, known)).toBe(shown);
+});
+
+test.each([
+  // pick, the read's conversation, its model, the pick after it
+  [null, 1, "opus", null],
+  [picked, 1, "opus", null],
+  [picked, 1, "sonnet", picked],
+  [picked, 2, "opus", picked],
+])(
+  "a pick %o read on conversation %i, %s, leaves %o",
+  (pick, n, model, after) => {
+    expect(pickAfterRead(pick, { ...conversation(n), model })).toEqual(after);
+  },
+);
+
+test("a pick lets go once a read has the conversation on it", async () => {
+  // Picked here, and a turn sent with it: the read after that turn has the
+  // conversation on it, and the pick is done. A later read on another model
+  // -- another tab's turn in between -- is then what the picker shows.
+  location.hash = hashOf(`/c/${id(1)}`);
+  const asked = [
+    message(id(11), "user", "Hi"),
+    message(id(12), "assistant", "Hello"),
+  ];
+  const before = { ...conversation(1, "Robins"), model: "sonnet" };
+  const reads = [
+    before,
+    { ...before, model: "opus", updated_at: "2026-09-03T10:00:05Z" },
+    { ...before, model: "sonnet", updated_at: "2026-09-03T10:00:09Z" },
+  ];
+  let read = 0;
+  const { fetch } = await shell((call) => {
+    if (call.method === "PUT") {
+      return json({
+        ...before,
+        model: "opus",
+        updated_at: "2026-09-03T10:00:01Z",
+      });
+    }
+    if (call.url === `/robinauts/api/conversations/${id(1)}/turns`) {
+      return streamed(
+        [event("RUN_FINISHED", { threadId: id(1), runId: RUN }, 2)],
+        {
+          headers: streamHeaders(RUN, id(1)),
+        },
+      );
+    }
+    if (call.url === `/robinauts/api/conversations/${id(1)}`) {
+      const now = reads[Math.min(read, reads.length - 1)] ?? before;
+      read += 1;
+      return json(opened(now, asked));
+    }
+    if (call.url.startsWith("/robinauts/api/conversations?")) {
+      return json(page([before]));
+    }
+    return undefined;
+  });
+  const send = async (text: string) => {
+    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+      target: { value: text },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+      await settled();
+    });
+  };
+
+  const picker = await screen.findByLabelText("Model");
+  await act(async () => {
+    fireEvent.change(picker, { target: { value: "opus" } });
+    await settled();
+  });
+  await send("On opus?");
+  await waitFor(() => {
+    expect(read).toBe(2);
+  });
+  expect(screen.getByLabelText("Model")).toHaveValue("opus");
+
+  await send("And again?");
+  await waitFor(() => {
+    expect(read).toBe(3);
+  });
+  await waitFor(() => {
+    expect(screen.getByLabelText("Model")).toHaveValue("sonnet");
+  });
+  expect(
+    callsTo(fetch, `/robinauts/api/conversations/${id(1)}/turns`, "POST").map(
+      (call) => (call.body as { model_id: string }).model_id,
+    ),
+  ).toEqual(["opus", "opus"]);
 });
 
 test("answers written in the same millisecond are ordered by their microseconds", async () => {
