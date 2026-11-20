@@ -9,8 +9,11 @@ on the ``task_key`` values it knows and runs every other turn on the text alone.
 
     {"task_key": "code_task/1", "repositories": {"<id>": {"branch": "<branch>"}}}
 
-Each id is one of ``[repositories]`` in the flows' settings, and each branch one of that
-repository's ``branches`` there: a payload asks for nothing the operator did not list.
+Each id is one of ``[repositories]`` in the flows' settings, and each branch one that
+repository's ``branches`` there names, or one of its patterns matches, as a form's ``branch``
+input offers them (``robinauts.orchestrator.core.search``): a payload asks for nothing the
+operator did not list. A pattern matches any text, so the branch must also be a name git takes
+as a branch's.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from robinauts.orchestrator.core.search import is_branch_name, matches
 from robinauts_worker_common.worktrees import Repository
 
 TASK_KEY = "task_key"
@@ -50,7 +54,11 @@ def code_task_starts(
             problems.append(f"no repository {id_!r} in this worker's flows settings")
             continue
         branch = entry.get("branch") if isinstance(entry, Mapping) else None
-        if not isinstance(branch, str) or branch not in repository.branches:
+        if not (
+            isinstance(branch, str)
+            and is_branch_name(branch)
+            and matches(branch, repository.branches)
+        ):
             listed = ", ".join(repository.branches) or "none"
             problems.append(f"{id_}: branch {branch!r} is not one it lists ({listed})")
             continue

@@ -17,6 +17,10 @@ REPOSITORIES = (
     Repository("app", "https://github.com/o/app.git", ("main", "develop")),
     Repository("docs", "https://github.com/o/docs.git", ("main",)),
 )
+PATTERNED = (
+    Repository("app", "https://github.com/o/app.git", ("main", "release/*")),
+    Repository("docs", "https://github.com/o/docs.git", ("*",)),
+)
 
 
 @pytest.mark.parametrize(
@@ -66,6 +70,35 @@ def test_a_code_task_that_asks_for_what_is_not_listed_is_refused(
     payload = {"task_key": "code_task/1", "repositories": repositories}
     with pytest.raises(TaskPayloadError, match=re.escape(said)):
         code_task_starts(payload, REPOSITORIES)
+
+
+@pytest.mark.parametrize(
+    ("id_", "branch"),
+    [("app", "main"), ("app", "release/1.0"), ("app", "release/1/hotfix"), ("docs", "anything")],
+)
+def test_a_branch_a_pattern_of_the_settings_matches_is_one_it_lists(id_: str, branch: str) -> None:
+    payload = {"task_key": "code_task/1", "repositories": {id_: {"branch": branch}}}
+    assert code_task_starts(payload, PATTERNED) == {id_: branch}
+
+
+@pytest.mark.parametrize(
+    ("id_", "branch"),
+    [
+        ("app", "develop"),
+        ("app", "release"),
+        # A pattern matches any text: what git would not take as a branch's name is refused.
+        ("docs", "--upload-pack=touch /tmp/x"),
+        ("docs", "a..b"),
+        ("docs", "refs/heads/x y"),
+        ("docs", ""),
+    ],
+)
+def test_a_branch_no_entry_matches_or_that_is_no_branch_s_name_is_refused(
+    id_: str, branch: str
+) -> None:
+    payload = {"task_key": "code_task/1", "repositories": {id_: {"branch": branch}}}
+    with pytest.raises(TaskPayloadError, match=f"{id_}: branch .* is not one it lists"):
+        code_task_starts(payload, PATTERNED)
 
 
 def test_every_problem_is_named_at_once() -> None:
