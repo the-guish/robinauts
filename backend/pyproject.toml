@@ -103,8 +103,8 @@ environments = [
 ]
 
 [tool.uv.sources]
-neorc = { git = "https://github.com/the-guish/neorc", rev = "deb05b278a36871e40d88ff11d7ef03f3ce4ce3b", subdirectory = "python/neorc" }
-neorc-core = { git = "https://github.com/the-guish/neorc", rev = "deb05b278a36871e40d88ff11d7ef03f3ce4ce3b", subdirectory = "python/neorc-core" }
+neorc = { git = "https://github.com/the-guish/neorc", rev = "4e1e4985a96866db654588969dbdbe0b3ea85c0d", subdirectory = "python/neorc" }
+neorc-core = { git = "https://github.com/the-guish/neorc", rev = "4e1e4985a96866db654588969dbdbe0b3ea85c0d", subdirectory = "python/neorc-core" }
 oneberth = { git = "https://github.com/open-shipyard/oneberth", rev = "822e025a692d8f5d2ec39c2738cd7d9235936ee8", subdirectory = "python/oneberth" }
 
 [project.scripts]
