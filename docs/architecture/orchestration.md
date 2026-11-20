@@ -110,31 +110,6 @@ Robinauts'.
 The start is sent to neorc's API with the person's own credential, so the run is theirs at
 neorc too (oneberth's `docs/specs/neorc-in-robinauts.md`, "Requests of the backend's own").
 
-#### Where a start is checked
-
-In neorc's manager, and nowhere else. The manager this backend composes is neorc's own, held
-to Robinauts' forms
-([orchestrator/adapters/neorc/held.py](../../backend/src/robinauts/orchestrator/adapters/neorc/held.py)):
-before it starts a run, the flow's form checks the inputs.
-
-- Every start is checked, whichever way it reached the manager: neorc's page, `POST
-  /neorc/flows/<name>/runs` from a script with a token, or `POST
-  /robinauts/api/flows/<name>/runs`, which only sends the start on. There is no route a start
-  must take to be checked, and none it can take to avoid it.
-- The check is the form's: every input there, none it does not have, each value with a list
-  of values one of them, the model one of the chosen agent's, and the lists that are searched
-  as they are now ([Lists that are searched](#lists-that-are-searched)).
-- A refusal is neorc's 422, with the form's every problem, as for an input of the wrong type.
-  A branch whose repository's server would not answer is refused too, with why: the start is
-  not let through unchecked.
-- A project is checked against the projects of the run's starter, whom neorc names by id. A
-  run a service starts has no person, and a project among its inputs is refused.
-- With a flows folder, the manager starts nothing until it has the forms. A flow the folder
-  does not hold has no form, and neorc checks it alone.
-- A flow called as a sub-flow is not checked here. Its inputs are what the calling flow
-  worked out, and neorc checks them against the declared types. neorc's manager has no hook
-  that covers both starts yet, and this is the one thing a hook there would add.
-
 A flow's form is `<flow name>.form.toml`, beside it in the flows folder. It is
 optional: without one, every input is a plain field.
 
@@ -225,6 +200,31 @@ lov = "project"
   worker has `GITHUB_TOKEN`: git reads a private repository only if its own configuration
   under the server's `HOME` gives it a credential. Without one, a search of its branches
   answers 502 and a start that names one is refused.
+
+#### Where a start is checked
+
+In neorc's manager, and nowhere else. The manager this backend composes is neorc's own, held
+to Robinauts' forms
+([orchestrator/adapters/neorc/held.py](../../backend/src/robinauts/orchestrator/adapters/neorc/held.py)):
+before it starts a run, the flow's form checks the inputs.
+
+- Every start is checked, whichever way it reached the manager: neorc's page, `POST
+  /neorc/flows/<name>/runs` from a script with a token, or `POST
+  /robinauts/api/flows/<name>/runs`, which only sends the start on. There is no route a start
+  must take to be checked, and none it can take to avoid it.
+- The check is the form's: every input there, none it does not have, each value with a list
+  of values one of them, the model one of the chosen agent's, and the lists that are searched
+  as they are now ([Lists that are searched](#lists-that-are-searched)).
+- A refusal is neorc's 422, with the form's every problem, as for an input of the wrong type.
+  A branch whose repository's server would not answer is refused too, with why: the start is
+  not let through unchecked.
+- A project is checked against the projects of the run's starter, whom neorc names by id. A
+  run a service starts has no person, and a project among its inputs is refused.
+- With a flows folder, the manager starts nothing until it has the forms. A flow the folder
+  does not hold has no form, and neorc checks it alone.
+- A flow called as a sub-flow is not checked here. Its inputs are what the calling flow
+  worked out, and neorc checks them against the declared types. neorc's manager has no hook
+  that covers both starts yet, and this is the one thing a hook there would add.
 
 ### Why the worker is a process of its own
 
