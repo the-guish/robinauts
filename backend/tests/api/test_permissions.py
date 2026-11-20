@@ -61,6 +61,7 @@ PERMISSION_OF: dict[tuple[str, str], str] = {
     ("GET", "/api/agents"): roles.AGENTS_READ,
     ("GET", "/api/models"): roles.AGENTS_READ,
     ("GET", "/api/flows"): roles.FLOWS_READ,
+    ("GET", "/api/lovs/{kind}/options"): roles.FLOWS_READ,
     ("POST", "/api/flows/{flow}/runs"): roles.FLOWS_START,
     ("GET", "/api/apps"): roles.APPS_USE,
     ("GET", "/api/apps/{server}/{tool}/view"): roles.APPS_USE,
@@ -159,6 +160,7 @@ def concrete(path: str) -> str:
         path = path.replace(f"{{{name}}}", str(uuid.uuid4()))
     return (
         path.replace("{flow}", "f")
+        .replace("{kind}", "project")
         .replace("{server}", "s")
         .replace("{tool}", "t")
         .replace("{position}", "1")
