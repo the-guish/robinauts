@@ -179,7 +179,10 @@ def test_a_grant_of_a_role_no_person_holds_is_refused_in_two_lines(tmp_path: Pat
     command = [str(stack.ROBINAUTS), "start", "--port", str(stack.free_port())]
     started = subprocess.run(command, env=environment, capture_output=True, timeout=30)
     assert started.returncode == 1
-    assert started.stderr.decode().strip().splitlines() == [
+    said = started.stderr.decode()
+    # A checkout whose interface is not built warns of it first; the refusal ends the output.
+    assert said.strip().splitlines()[-2:] == [
         "invalid oneberth configuration:",
         "grant 1: 'neorc/worker' is not a role for people",
-    ]
+    ], said
+    assert "Traceback" not in said, said
