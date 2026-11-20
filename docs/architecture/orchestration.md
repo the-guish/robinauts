@@ -184,6 +184,7 @@ lov = "project"
   repository in `after`.
 - The server reads a repository's branches with `git ls-remote`, and keeps the read for a
   minute. A later search is answered from it while a new read runs.
+- A repository named `owner/name` is read from GitHub, where the code worker clones it.
 - A start checks a branch against its repository as the server has it now. A branch pushed a
   moment ago starts a run.
 - A start checks a project against the person's projects.

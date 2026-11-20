@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -44,6 +45,21 @@ network. The keys of the configuration stay behind."""
 
 REASON_LIMIT = 300
 """The most of git's last line a refusal repeats."""
+
+SHORT_SERVER = "https://github.com"
+"""Where a repository named ``owner/name`` is, as the code worker has it."""
+
+_SHORT = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9._-]+")
+
+
+def remote_of(url: str) -> str:
+    """What git reads a repository's branches from: its URL, or for ``owner/name``, the
+    repository of that name on GitHub, as the code worker clones it. git would take
+    ``owner/name`` for a folder of this server."""
+    text = url.strip()
+    if _SHORT.fullmatch(text):
+        return f"{SHORT_SERVER}/{text.removesuffix('.git')}.git"
+    return text
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,7 +142,7 @@ class GitBranches(BranchNames):
             "--heads",
             "--refs",
             "--",
-            repository.url,
+            remote_of(repository.url),
             *patterns,
         )
         try:

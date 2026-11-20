@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from robinauts.orchestrator.adapters.git.branches import GitBranches, git_environment
+from robinauts.orchestrator.adapters.git.branches import GitBranches, git_environment, remote_of
 from robinauts.orchestrator.contract.domain import BranchesUnreadableError, Repository
 from util.aio import asyncio_test
 
@@ -170,3 +170,20 @@ def test_git_is_given_the_network_s_settings_and_none_of_the_keys() -> None:
         "HTTPS_PROXY": "http://proxy:3128",
         "GIT_TERMINAL_PROMPT": "0",
     }
+
+
+@pytest.mark.parametrize(
+    ("url", "remote"),
+    [
+        ("the-guish/fa1", "https://github.com/the-guish/fa1.git"),
+        ("the-guish/fa1.git", "https://github.com/the-guish/fa1.git"),
+        (" the-guish/fa1 ", "https://github.com/the-guish/fa1.git"),
+        ("https://github.com/the-guish/fa1", "https://github.com/the-guish/fa1"),
+        ("file:///srv/app.git", "file:///srv/app.git"),
+        ("/srv/app.git", "/srv/app.git"),
+        ("git@git.example:docs.git", "git@git.example:docs.git"),
+        ("-x/app", "-x/app"),
+    ],
+)
+def test_a_repository_named_owner_slash_name_is_read_from_github(url: str, remote: str) -> None:
+    assert remote_of(url) == remote
