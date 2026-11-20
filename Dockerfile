@@ -36,8 +36,8 @@ RUN scripts/ui-packages-from-source.sh \
 
 FROM python:3.12-slim
 
-# git, which uv builds neorc and oneberth from (neorc-from-source), and the certificates it
-# checks GitHub's against.
+# git, which uv builds neorc and oneberth from (neorc-from-source) and the backend reads a
+# repository's branches with, and the certificates it checks GitHub's against.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
