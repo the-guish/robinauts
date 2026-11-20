@@ -31,6 +31,7 @@ from robinauts.cli.desktop import NEORC_WORKER
 from robinauts.cli.worker_process import end_with_parent
 from robinauts.controller.contract.domain import ConfigError
 from robinauts.orchestrator.adapters.flows_folder import read_forms, read_settings
+from robinauts.orchestrator.adapters.git.branches import GitBranches
 from robinauts.orchestrator.adapters.neorc import composed as neorc
 from robinauts.orchestrator.application.flows import FlowForms
 from robinauts.orchestrator.contract.domain import (
@@ -116,7 +117,9 @@ def orchestrator_of(
             LAUNCHER_PID: str(os.getpid()),
         },
         supervised=supervised,
-        make_flows=lambda engine: FlowForms(engine, orchestration, declared, config),
+        make_flows=lambda engine: FlowForms(
+            engine, orchestration, declared, config, branches=GitBranches()
+        ),
         **storage,
     )
 

@@ -36,7 +36,7 @@ FOLDER = Path("/etc/robinauts/flows")
 CODE = Path("/opt/robinauts/orchestration")
 
 REPOSITORIES = (
-    Repository("app", "https://git.example/app", ("main", "next")),
+    Repository("app", "https://git.example/app", ("main", "next", "release/*")),
     Repository("docs", "git@git.example:docs.git", ("main",)),
 )
 CONFIG = Config(
@@ -58,7 +58,7 @@ DECLARED = {
 def test_the_repositories_of_flows_toml_are_read_in_order() -> None:
     settings = {
         "repositories": {
-            "app": {"url": "https://git.example/app", "branches": ["main", "next"]},
+            "app": {"url": "https://git.example/app", "branches": ["main", "next", "release/*"]},
             "docs": {"url": "git@git.example:docs.git", "branches": ["main"]},
         }
     }
@@ -101,6 +101,20 @@ def test_a_form_file_is_read_with_its_order_and_defaults() -> None:
     assert parse_form("code", {}) == (FormSpec(title="code", inputs={}), [])
 
 
+def test_a_branch_names_the_repository_it_is_of() -> None:
+    table = {
+        "inputs": {
+            "repo": {"lov": "repository"},
+            "branch": {"label": "Branch", "lov": "branch", "of": "repo"},
+            "project": {"lov": "project"},
+        }
+    }
+    form, problems = parse_form("code", table)
+    assert problems == []
+    assert form is not None
+    assert form.inputs["branch"] == InputSpec(label="Branch", lov=LovKind.BRANCH, of="repo")
+
+
 @pytest.mark.parametrize(
     ("table", "problem"),
     [
@@ -111,6 +125,20 @@ def test_a_form_file_is_read_with_its_order_and_defaults() -> None:
         ({"inputs": {"task": {"label": 3}}}, r"\[inputs.task\] label: a non-empty string"),
         ({"inputs": {"task": {"lov": "colour"}}}, r"lov: 'colour' is not one of repo_branch"),
         ({"inputs": {"task": {"hint": "x"}}}, r"\[inputs.task\] hint: unknown key"),
+        ({"inputs": {"b": {"lov": "branch", "of": ""}}}, r"\[inputs.b\] of: the name of another"),
+        ({"inputs": {"b": {"lov": "branch"}}}, r"\[inputs.b\] of: a branch names an input"),
+        (
+            {"inputs": {"b": {"lov": "branch", "of": "r"}, "r": {"lov": "model"}}},
+            r"\[inputs.b\] of: a branch names an input of the form whose lov is 'repository'",
+        ),
+        (
+            {"inputs": {"b": {"lov": "branch", "of": "nowhere"}}},
+            r"\[inputs.b\] of: a branch names an input",
+        ),
+        (
+            {"inputs": {"r": {"lov": "repository"}, "p": {"lov": "project", "of": "r"}}},
+            r"\[inputs.p\] of: only a branch names the input it is of",
+        ),
     ],
 )
 def test_a_wrong_form_file_is_refused_with_its_problem(table: dict[str, Any], problem: str) -> None:
@@ -154,6 +182,9 @@ def test_a_form_is_checked_against_the_inputs_its_flow_declares(
                 Option("docs@main", "docs · main"),
             ),
         ),
+        (LovKind.REPOSITORY, (Option("app", "app"), Option("docs", "docs"))),
+        (LovKind.BRANCH, ()),
+        (LovKind.PROJECT, ()),
         (LovKind.MODEL, (Option("opus", "Opus"), Option("local", "local"))),
         (
             LovKind.AGENT,
@@ -184,6 +215,28 @@ FORMS = build_forms(
     repositories=REPOSITORIES,
     config=CONFIG,
 )
+
+
+def test_a_list_that_is_searched_is_built_with_no_options_and_named_live() -> None:
+    [form] = build_forms(
+        {"ship": {"repo": "string", "branch": "string", "project": "string"}},
+        {
+            "ship": FormSpec(
+                "Ship",
+                {
+                    "repo": InputSpec("Repository", LovKind.REPOSITORY),
+                    "branch": InputSpec("Branch", LovKind.BRANCH, of="repo"),
+                    "project": InputSpec("Project", LovKind.PROJECT),
+                },
+            )
+        },
+        repositories=REPOSITORIES,
+        config=CONFIG,
+    )
+    repo, branch, project = form.inputs
+    assert (repo.live, repo.options) == (False, (Option("app", "app"), Option("docs", "docs")))
+    assert (branch.live, branch.options, branch.of) == (True, None, "repo")
+    assert (project.live, project.options) == (True, None)
 
 
 def test_every_flow_is_a_form_with_its_form_s_inputs_first() -> None:

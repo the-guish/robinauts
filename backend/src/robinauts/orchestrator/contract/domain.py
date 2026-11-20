@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -58,6 +58,18 @@ class LovKind(StrEnum):
     """A model of the agents' configuration, by its id."""
     AGENT = "agent"
     """An agent of the agents' configuration, by its id; its label names its worker."""
+    REPOSITORY = "repository"
+    """A repository the flows' settings name, by its id there."""
+    BRANCH = "branch"
+    """A branch of the repository another input of the form names (its ``of``), as the
+    repository has it now: one of those its entry in the flows' settings matches."""
+    PROJECT = "project"
+    """A project of the person who starts the run, by its id."""
+
+
+LIVE_KINDS = frozenset({LovKind.BRANCH, LovKind.PROJECT})
+"""The lists of values a form does not list: too long, or changing while the server runs. The
+person searches them as they type (``Flows.options``), and a start checks against them anew."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +87,8 @@ class InputSpec:
 
     label: str
     lov: LovKind | None = None
+    of: str | None = None
+    """A branch's: the input of the form that names its repository."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +119,26 @@ class FormInput:
     type: str
     lov: LovKind | None = None
     options: tuple[Option, ...] | None = None
+    of: str | None = None
+    """A branch's: the input whose repository its branches are of."""
+
+    @property
+    def live(self) -> bool:
+        """Whether its values are searched as the person types, rather than listed."""
+        return self.lov in LIVE_KINDS
+
+
+@dataclass(frozen=True, slots=True)
+class OptionPage:
+    """The values of a list that match a search, at most its limit; ``more`` when others
+    match too."""
+
+    items: tuple[Option, ...]
+    more: bool
+
+
+PersonsOptions = Callable[[], Awaitable[Sequence[Option]]]
+"""The values of a list that is the person's own, read when it is asked: their projects."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +166,15 @@ class InvalidInputsError(FlowRefused):
     problem."""
 
 
+class NoSuchListError(FlowRefused):
+    """A list of values that is not searched: a kind that is not one, or a repository the flows'
+    settings do not name."""
+
+
+class BranchesUnreadableError(FlowRefused):
+    """A repository whose branches could not be read: its server would not answer, or refused."""
+
+
 class Flows(ABC):
     """The flows a person may start, as forms, and the start of one."""
 
@@ -140,17 +183,33 @@ class Flows(ABC):
         """Every flow of the flows folder, by name."""
 
     @abstractmethod
+    async def options(
+        self,
+        kind: str,
+        *,
+        after: str | None,
+        query: str,
+        limit: int,
+        projects: PersonsOptions,
+    ) -> OptionPage:
+        """The values of the list ``kind`` that match ``query``, at most ``limit``: a branch of
+        the repository ``after`` names, or one of the person's ``projects``.
+        ``NoSuchListError``, ``BranchesUnreadableError``."""
+
+    @abstractmethod
     async def start(
         self,
         flow: str,
         inputs: Mapping[str, Any],
         *,
         credential: str | None,
+        projects: PersonsOptions,
     ) -> str:
         """Start a run of ``flow`` with ``inputs``, which are passed on as they are once they
         fit its form, and return the run's id. The start is sent to neorc with ``credential``,
-        the person's own, so that neorc records the run as theirs. ``NoSuchFlowError``,
-        ``InvalidInputsError``."""
+        the person's own, so that neorc records the run as theirs. A branch is checked against
+        its repository as it is now, and a project against the person's ``projects``.
+        ``NoSuchFlowError``, ``InvalidInputsError``, ``BranchesUnreadableError``."""
 
 
 class OrchestrationStartError(RuntimeError):

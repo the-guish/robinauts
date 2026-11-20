@@ -297,6 +297,11 @@
             "title": "Label",
             "type": "string"
           },
+          "live": {
+            "default": false,
+            "title": "Live",
+            "type": "boolean"
+          },
           "lov": {
             "anyOf": [
               {
@@ -311,6 +316,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Of"
           },
           "options": {
             "anyOf": [
@@ -679,6 +695,27 @@
           "ended_badly"
         ],
         "title": "OpenedConversationResponse",
+        "type": "object"
+      },
+      "OptionPageResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FlowOptionSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "more": {
+            "title": "More",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "more"
+        ],
+        "title": "OptionPageResponse",
         "type": "object"
       },
       "ProjectListResponse": {
@@ -1511,6 +1548,86 @@
           }
         },
         "summary": "Start Flow Run"
+      }
+    },
+    "/robinauts/api/lovs/{kind}/options": {
+      "get": {
+        "description": "The values of a list that is searched, ``branch`` or ``project``, that match ``q``:\na branch of the repository ``after`` names, or one of the person's projects.",
+        "operationId": "search_options_robinauts_api_lovs__kind__options_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptionPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "Search Options"
       }
     },
     "/robinauts/api/models": {

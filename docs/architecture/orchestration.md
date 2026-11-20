@@ -104,6 +104,7 @@ flow files are plain neorc flows.
 | route | answer |
 |---|---|
 | `GET /robinauts/api/flows` | every flow, with its inputs: a label, the type the flow declares, and the values a list of values offers |
+| `GET /robinauts/api/lovs/<lov>/options?q=&after=&limit=` | the values of a list that is searched that match `q`: `{"items": [...], "more": bool}`; 404 for a list that is not searched, or a repository the settings do not name; 502 for a repository whose server would not answer |
 | `POST /robinauts/api/flows/<name>/runs` | `{"inputs": {...}}`; 201 with the run's id, 404 for a flow the folder does not hold, 422 for inputs that do not fit |
 
 The start is sent to neorc's API with the person's own credential, so the run is theirs at
@@ -136,20 +137,59 @@ There are three lists of values:
 
 | `lov` | the values | the value sent |
 |---|---|---|
-| `repo_branch` | each branch of each repository of `flows.toml` | `<id>@<branch>`, the repository by its id there |
+| `repo_branch` | each branch each repository of `flows.toml` names | `<id>@<branch>`, the repository by its id there |
 | `model` | the models of the agents' configuration | the model's id |
 | `agent` | its agents, each labelled with the worker it runs on | the agent's id |
+| `repository` | the repositories of `flows.toml` | the repository's id |
+| `branch` | the branches of the repository its `of` input names, as its server has them now | the branch's name |
+| `project` | the projects of the person who starts the run | the project's id |
 
 The repositories are the flows' configuration, in `flows.toml`:
 
 ```toml
 [repositories.robinauts]
 url = "https://github.com/the-guish/robinauts"
-branches = ["main"]
+branches = ["main", "release/*"]
 ```
+
+An entry of `branches` is a branch's name or a shell pattern, where `*` matches across `/`
+too. `repo_branch` offers the names alone. `branch` offers the repository's branches that an
+entry matches: the named ones first, then the rest by name. `["*"]` offers every branch.
 
 A model the chosen agent's engine cannot reach is not refused yet: that needs
 the engines' provider kinds, which the orchestrator does not see.
+
+#### Lists that are searched
+
+A repository may have thousands of branches, and a person's projects change while the server
+runs. `branch` and `project` are lists of values that a form does not list. The person
+searches them as they type.
+
+```toml
+[inputs.repo]
+lov = "repository"
+
+[inputs.branch]
+lov = "branch"
+of = "repo"
+
+[inputs.project]
+lov = "project"
+```
+
+- A `branch` names its repository's input in `of`. That input's `lov` is `repository`.
+- `GET /robinauts/api/flows` gives such an input `"live": true`, no options, and its `of`.
+- `GET /robinauts/api/lovs/<lov>/options` answers the values that match `q`: an exact match
+  first, then those that start with it, then those that hold it. A branch search names its
+  repository in `after`.
+- The server reads a repository's branches with `git ls-remote`, and keeps the read for a
+  minute. A later search is answered from it while a new read runs.
+- A repository named `owner/name` is read from GitHub, where the code worker clones it.
+- A start checks a branch against its repository as the server has it now. A branch pushed a
+  moment ago starts a run.
+- A start checks a project against the person's projects.
+- The adapter is [orchestrator/adapters/git/branches.py](../../backend/src/robinauts/orchestrator/adapters/git/branches.py).
+  git gets the network's settings of the server's environment, and none of its keys.
 
 ### Why the worker is a process of its own
 
@@ -193,10 +233,14 @@ neorc's own built interface is not served, and the session has no `flows_url`.
 A run is started from neorc's form, at `/neorc/`. For a flow with a form file the form is
 Robinauts': the interface turns the flow's form, as `GET /robinauts/api/flows` gives it with
 its lists filled, into A2UI v0.9 in neorc's subset (`frontend/src/flows/forms.ts`). Each list
-of values is a choice of its values, and each other input a field of its type. neorc draws its
-own form for a flow with no form file, and for one with an empty list or a datetime input. A
-form sends the flow's inputs to neorc, which checks their types. Robinauts' own checks of a
-form, such as the agent and model pair, run only on `POST /robinauts/api/flows/<name>/runs`.
+of values is a choice of its values, and each other input a field of its type. A list that is
+searched is a choice that names its list (`optionsFrom`), and neorc asks the interface for its
+values as the person types (`searchOptions`). neorc draws its own form for a flow with no form
+file, and for one with an empty list or a datetime input.
+
+A run of a flow with a form file starts through Robinauts, with `POST
+/robinauts/api/flows/<name>/runs` (`startRun`). Robinauts' own checks of a form then run on it:
+the agent and model pair, and the lists that are searched, as they are now.
 
 ### Where neorc may be imported
 
