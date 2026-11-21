@@ -183,9 +183,12 @@ class FlowInputSummary(BaseModel):
     type: str
     """The type the flow declares: ``string``, ``number``, ``boolean`` or ``datetime``."""
     lov: str | None = None
-    """The list of values it takes its value from: ``repo_branch``, ``model`` or ``agent``."""
+    """The list of values it takes its value from: ``repo_branch``, ``model``, ``agent`` or
+    ``flow``."""
     options: list[FlowOptionSummary] | None = None
-    """The values it may take, when it has a list of values."""
+    """The values it may take, when it has a list of values the server fills. None for
+    ``flow``: the interface searches neorc's flows, at ``/neorc/flows``, as the person
+    types."""
 
 
 class FlowSummary(BaseModel):

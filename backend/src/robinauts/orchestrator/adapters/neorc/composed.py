@@ -255,16 +255,26 @@ class NeorcFlowEngine(FlowEngine):
         self._public_url = public_url
         self._transport = transport
 
-    async def start_run(
-        self, flow: str, inputs: Mapping[str, Any], *, credential: str | None
-    ) -> str:
-        client = HttpManagerClient(
+    def _client(self, credential: str | None) -> HttpManagerClient:
+        return HttpManagerClient(
             self._public_url,
             token=credential,
             allow_insecure=True,
             transport=self._transport,
         )
-        async with client:
+
+    async def has_flow(self, name: str, *, credential: str | None) -> bool:
+        async with self._client(credential) as client:
+            try:
+                await client.get_flow(name)
+            except (FlowNotFoundError, InvalidValueError):
+                return False
+        return True
+
+    async def start_run(
+        self, flow: str, inputs: Mapping[str, Any], *, credential: str | None
+    ) -> str:
+        async with self._client(credential) as client:
             try:
                 run = await client.start_run(flow, dict(inputs))
             except FlowNotFoundError as error:

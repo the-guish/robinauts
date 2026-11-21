@@ -430,6 +430,66 @@ def test_a_flow_with_a_form_is_listed_with_its_values_and_started_with_them(
     assert run["inputs"] == inputs
 
 
+RELAY_FLOW = """
+name: relay
+version: 0.1.0
+inputs:
+  target: string
+output: tasks.pick
+steps:
+  pick:
+    queue: default
+    handler: robinauts_tasks:pick_number
+"""
+RELAY_FORM = """
+title = "Relay"
+[inputs.target]
+label = "Flow"
+lov = "flow"
+"""
+
+
+def test_an_input_from_the_list_of_flows_is_held_to_the_flows_neorc_holds(
+    tmp_path: Path,
+) -> None:
+    """The list of flows is neorc's: the server lists no value for it, the interface searches
+    them at neorc, and a start names a flow neorc holds or is refused, whatever sends it."""
+    config = tmp_path / "robinauts.toml"
+    config.write_text(CONFIG)
+    flows = probe_folder(tmp_path)
+    (flows / "relay.yaml").write_text(RELAY_FLOW)
+    (flows / "relay.form.toml").write_text(RELAY_FORM)
+    start = "/robinauts/api/flows/relay/runs"
+    with started(config, environment_for(config, flows)) as (url, _):
+        with stack.client(url) as api:
+            listed = api.get("/robinauts/api/flows").json()["items"]
+            # What the interface asks as the person types: neorc's own listing, searched.
+            found = api.get("/neorc/flows", params={"search": "PROBE", "limit": 5})
+            refused = {
+                name: api.post(start, json={"inputs": {"target": target}})
+                for name, target in [
+                    ("no such flow", "nowhere"),
+                    ("no name of a flow", "relay; drop"),
+                    ("no text", ["relay"]),
+                    ("nothing", ""),
+                ]
+            }
+            begun = api.post(start, json={"inputs": {"target": "intake_probe"}})
+            assert begun.status_code == 201, begun.text
+            run = api.get(f"/neorc/runs/{begun.json()['id']}").json()
+    [relay] = [flow for flow in listed if flow["name"] == "relay"]
+    assert relay["inputs"] == [
+        {"name": "target", "label": "Flow", "type": "string", "lov": "flow", "options": None}
+    ]
+    assert found.status_code == 200, found.text
+    assert [flow["name"] for flow in found.json()["flows"]] == ["intake_probe"]
+    for name, answer in refused.items():
+        assert answer.status_code == 422, (name, answer.text)
+        assert "input 'target'" in answer.json()["detail"], name
+        assert "is not one of its flow values" in answer.json()["detail"], name
+    assert run["inputs"] == {"target": "intake_probe"}
+
+
 def test_the_shipped_code_and_review_runs_its_form_s_inputs_to_the_implementing_agent(
     tmp_path: Path,
 ) -> None:

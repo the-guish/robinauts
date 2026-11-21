@@ -3,11 +3,11 @@
 
 """Flows as forms: a form file read, checked against the inputs its flow declares; the lists of
 values its inputs take theirs from; and inputs checked against the form before a run starts.
-Pure: the declared inputs and the agents' configuration are handed in."""
+Pure: the declared inputs, the agents' configuration and the engine's flows are handed in."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any
 
 from robinauts.orchestrator.contract.domain import (
@@ -87,8 +87,12 @@ def check_forms(forms: Mapping[str, FormSpec], declared: DeclaredInputs) -> list
 
 def options_of(
     kind: LovKind, *, repositories: tuple[Repository, ...], config: Config
-) -> tuple[Option, ...]:
-    """The values a list of values offers, in the order their configuration gives them."""
+) -> tuple[Option, ...] | None:
+    """The values a list of values offers, in the order their configuration gives them.
+    ``None`` for the engine's flows, which no configuration holds: the interface searches them
+    at the engine, and ``check_inputs`` is handed the ones a run's inputs name."""
+    if kind is LovKind.FLOW:
+        return None
     if kind is LovKind.REPO_BRANCH:
         return tuple(
             Option(value=f"{r.id}@{branch}", label=f"{r.id} · {branch}")
@@ -138,19 +142,40 @@ def build_forms(
     return tuple(built)
 
 
-def check_inputs(form: FlowForm, inputs: Mapping[str, Any]) -> list[str]:
+def flows_named(form: FlowForm, inputs: Mapping[str, Any]) -> tuple[str, ...]:
+    """The flows ``inputs`` name where ``form`` has a list of the engine's flows, in the form's
+    order: the names to ask the engine for, before ``check_inputs`` is handed the ones it
+    holds."""
+    named = []
+    for field in form.inputs:
+        value = inputs.get(field.name)
+        if field.lov is LovKind.FLOW and isinstance(value, str) and value not in named:
+            named.append(value)
+    return tuple(named)
+
+
+def check_inputs(
+    form: FlowForm, inputs: Mapping[str, Any], *, flows: Collection[str] = ()
+) -> list[str]:
     """What keeps ``inputs`` from starting ``form``'s flow, as far as the form can tell: every
     input there, none it does not have, and each value with a list of values one of them. The
-    declared types are the engine's to check."""
+    declared types are the engine's to check. ``flows`` are the flows the engine holds for the
+    person who asks, of those ``flows_named`` names."""
     names = {field.name for field in form.inputs}
     problems = [f"missing input {name!r}" for name in sorted(names - inputs.keys())]
     problems += [f"{form.name} has no input {name!r}" for name in sorted(inputs.keys() - names)]
     for field in form.inputs:
-        if field.options is None or field.name not in inputs:
+        if field.name not in inputs:
             continue
         value = inputs[field.name]
+        if field.lov is LovKind.FLOW:
+            values: list[str] | None = list(flows)
+        elif field.options is not None:
+            values = [option.value for option in field.options]
+        else:
+            values = None
         # A list, not a set: a value a client sent may be one no set can hold.
-        if value not in [option.value for option in field.options]:
+        if values is not None and value not in values:
             problems.append(f"input {field.name!r}: {value!r} is not one of its {field.lov} values")
     agent = _chosen(form, inputs, LovKind.AGENT)
     model = _chosen(form, inputs, LovKind.MODEL)

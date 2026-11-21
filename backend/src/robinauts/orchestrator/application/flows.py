@@ -3,6 +3,7 @@
 
 """The flows a person may start, as forms, and the start of one: the inputs are checked against
 the flow's form and then handed to the engine as they came, with the person's own credential.
+An input that takes one of the engine's flows is checked there, with that credential too.
 The engine records the run as that person's, and a flow's handler acts for them
 (``docs/architecture/orchestration.md``, "Whose a run is").
 """
@@ -19,7 +20,12 @@ from robinauts.orchestrator.contract.domain import (
     NoSuchFlowError,
     OrchestrationConfig,
 )
-from robinauts.orchestrator.core.forms import DeclaredInputs, build_forms, check_inputs
+from robinauts.orchestrator.core.forms import (
+    DeclaredInputs,
+    build_forms,
+    check_inputs,
+    flows_named,
+)
 from robinauts.orchestrator.ports.engine import FlowEngine
 from robinauts.shared_domain.domain import Config
 
@@ -58,6 +64,13 @@ class FlowForms(Flows):
         form = self._by_name.get(flow)
         if form is None:
             raise NoSuchFlowError(f"no flow {flow!r}")
-        if problems := check_inputs(form, inputs):
+        # A list of the engine's flows has no values here: the engine says which of the flows
+        # the inputs name it holds, for the person who asks.
+        held = [
+            name
+            for name in flows_named(form, inputs)
+            if await self._engine.has_flow(name, credential=credential)
+        ]
+        if problems := check_inputs(form, inputs, flows=held):
             raise InvalidInputsError(f"{flow}: " + "; ".join(problems))
         return await self._engine.start_run(flow, inputs, credential=credential)
