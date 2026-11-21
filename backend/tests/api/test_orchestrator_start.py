@@ -199,8 +199,10 @@ def test_a_start_whose_flows_are_refused_is_refused_before_it_says_ready(
     (flows / "broken.yaml").write_text("name: broken\nversion: 1.0.0\nsteps: 3\n")
     config = tmp_path / "robinauts.toml"
     config.write_text(CONFIG)
-    port = stack.free_port()
-    start = [str(stack.ROBINAUTS), "start", "--local", "--port", str(port)]
+    # Both listeners serve before the flows are uploaded: a worker port of its own, since the
+    # front's plus one may be another test's server's.
+    ports = ["--port", str(stack.free_port()), "--worker-port", str(stack.free_port())]
+    start = [str(stack.ROBINAUTS), "start", "--local", *ports]
     environment = environment_for(config, flows)
     refused = subprocess.run(
         start,
@@ -283,7 +285,8 @@ def test_a_start_whose_queues_do_not_fit_is_refused_before_it_says_ready(
     (flows / "queues.toml").write_text(queues)
     config = tmp_path / "robinauts.toml"
     config.write_text(CONFIG)
-    start = [str(stack.ROBINAUTS), "start", "--local", "--port", str(stack.free_port())]
+    ports = ["--port", str(stack.free_port()), "--worker-port", str(stack.free_port())]
+    start = [str(stack.ROBINAUTS), "start", "--local", *ports]
     refused = subprocess.run(
         start,
         env=environment_for(config, flows),
