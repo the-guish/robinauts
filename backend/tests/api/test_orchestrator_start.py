@@ -31,6 +31,7 @@ import pytest
 from util import stack
 from util.controller_db import NO_DATABASE
 from util.desktop import appeared, gone
+from util.repositories import add_branches, bare_repository
 
 pytestmark = pytest.mark.io
 
@@ -198,8 +199,10 @@ def test_a_start_whose_flows_are_refused_is_refused_before_it_says_ready(
     (flows / "broken.yaml").write_text("name: broken\nversion: 1.0.0\nsteps: 3\n")
     config = tmp_path / "robinauts.toml"
     config.write_text(CONFIG)
-    port = stack.free_port()
-    start = [str(stack.ROBINAUTS), "start", "--local", "--port", str(port)]
+    # Both listeners serve before the flows are uploaded: a worker port of its own, since the
+    # front's plus one may be another test's server's.
+    ports = ["--port", str(stack.free_port()), "--worker-port", str(stack.free_port())]
+    start = [str(stack.ROBINAUTS), "start", "--local", *ports]
     environment = environment_for(config, flows)
     refused = subprocess.run(
         start,
@@ -282,7 +285,8 @@ def test_a_start_whose_queues_do_not_fit_is_refused_before_it_says_ready(
     (flows / "queues.toml").write_text(queues)
     config = tmp_path / "robinauts.toml"
     config.write_text(CONFIG)
-    start = [str(stack.ROBINAUTS), "start", "--local", "--port", str(stack.free_port())]
+    ports = ["--port", str(stack.free_port()), "--worker-port", str(stack.free_port())]
+    start = [str(stack.ROBINAUTS), "start", "--local", *ports]
     refused = subprocess.run(
         start,
         env=environment_for(config, flows),
@@ -396,6 +400,10 @@ def test_a_flow_with_a_form_is_listed_with_its_values_and_started_with_them(
             missing = api.post(
                 "/robinauts/api/flows/intake_probe/runs", json={"inputs": {"task": "x"}}
             )
+            # neorc's own route, which its page and a script reach: the form holds it too.
+            at_neorc = api.post(
+                "/neorc/flows/intake_probe/runs", json={"inputs": {**inputs, "model": "gpt"}}
+            )
             unknown = api.post("/robinauts/api/flows/nothing/runs", json={"inputs": {}})
             begun = api.post("/robinauts/api/flows/intake_probe/runs", json={"inputs": inputs})
             assert begun.status_code == 201, begun.text
@@ -422,11 +430,158 @@ def test_a_flow_with_a_form_is_listed_with_its_values_and_started_with_them(
         "type": "string",
         "lov": None,
         "options": None,
+        "live": False,
+        "of": None,
     }
     assert wrong.status_code == 422
     assert "'gpt' is not one of its model values" in wrong.json()["detail"]
+    assert at_neorc.status_code == 422, at_neorc.text
+    assert "'gpt' is not one of its model values" in at_neorc.json()["detail"]
     assert missing.status_code == 422
     assert unknown.status_code == 404
+    assert run["inputs"] == inputs
+
+
+LIVE_FLOW = """
+name: ship_probe
+version: 0.1.0
+inputs:
+  repo: string
+  branch: string
+  project: string
+output: tasks.pick
+steps:
+  pick:
+    queue: default
+    handler: robinauts_tasks:pick_number
+"""
+LIVE_FORM = """
+title = "Ship"
+[inputs.repo]
+lov = "repository"
+[inputs.branch]
+lov = "branch"
+of = "repo"
+[inputs.project]
+lov = "project"
+"""
+
+
+def test_a_branch_and_a_project_are_searched_as_they_are_now_and_checked_at_the_start(
+    tmp_path: Path,
+) -> None:
+    """A branch is one of a repository's own, among a thousand, that its settings offer; a
+    project is one of the person's. Both lists change while the server runs, and are searched
+    and checked as they are, with no restart. The start is held to the form on Robinauts'
+    route and on neorc's own, which neorc's page and a script reach: no route starts a run the
+    form would refuse."""
+    config = tmp_path / "robinauts.toml"
+    config.write_text(CONFIG)
+    app = bare_repository(
+        tmp_path / "app.git", "main", "other", *(f"feature/{n:04}" for n in range(1000))
+    )
+    docs = bare_repository(tmp_path / "docs.git", "main", "draft")
+    flows = tmp_path / "flows"
+    flows.mkdir()
+    (flows / "ship_probe.yaml").write_text(LIVE_FLOW)
+    (flows / "ship_probe.form.toml").write_text(LIVE_FORM)
+    (flows / "flows.toml").write_text(
+        f'[repositories.app]\nurl = "file://{app}"\nbranches = ["main", "feature/*"]\n'
+        f'[repositories.docs]\nurl = "file://{docs}"\nbranches = ["main"]\n'
+        f'[repositories.gone]\nurl = "file://{tmp_path / "gone.git"}"\nbranches = ["main"]\n'
+    )
+    with started(config, environment_for(config, flows)) as (url, _):
+        with stack.client(url) as api:
+
+            def options(kind: str, **query: Any) -> httpx.Response:
+                return api.get(f"/robinauts/api/lovs/{kind}/options", params=query)
+
+            def start(route: str = "/robinauts/api/flows", **inputs: str) -> httpx.Response:
+                return api.post(f"{route}/ship_probe/runs", json={"inputs": inputs})
+
+            [form] = api.get("/robinauts/api/flows").json()["items"]
+            narrowed = options("branch", after="app", q="feature/09", limit=5).json()
+            first = options("branch", after="app").json()["items"][0]
+            unoffered = options("branch", after="app", q="other").json()
+            no_repository = options("branch", after="nowhere")
+            no_list = options("model")
+            project = api.post("/robinauts/api/projects", json={"name": "Ship it"}).json()
+            projects = options("project", q="ship").json()
+            commit = subprocess.run(
+                ["git", "rev-parse", "main"], cwd=app, capture_output=True, text=True, check=True
+            ).stdout.strip()
+            add_branches(app, commit, "feature/pushed-now")
+            refused = {
+                "a branch its settings do not offer": start(
+                    repo="app", branch="other", project=project["id"]
+                ),
+                "a branch the repository does not have": start(
+                    repo="app", branch="feature/never", project=project["id"]
+                ),
+                "a branch of the other repository": start(
+                    repo="docs", branch="feature/0001", project=project["id"]
+                ),
+                "a name that is no branch's": start(
+                    repo="app", branch="feature/../main", project=project["id"]
+                ),
+                "a project that is not the person's": start(
+                    repo="app", branch="main", project=str(uuid.uuid4())
+                ),
+            }
+            refused_at_neorc = {
+                "a branch its settings do not offer": start(
+                    "/neorc/flows", repo="app", branch="other", project=project["id"]
+                ),
+                "a branch of the other repository": start(
+                    "/neorc/flows", repo="docs", branch="feature/0001", project=project["id"]
+                ),
+                "a repository the settings do not name": start(
+                    "/neorc/flows", repo="nowhere", branch="main", project=project["id"]
+                ),
+                "a project that is not the person's": start(
+                    "/neorc/flows", repo="app", branch="main", project=str(uuid.uuid4())
+                ),
+            }
+            # A repository whose server does not answer: the branch could not be checked, which
+            # starts no run and refuses no input.
+            unchecked = [
+                start(route, repo="gone", branch="main", project=project["id"])
+                for route in ("/robinauts/api/flows", "/neorc/flows")
+            ]
+            inputs = {"repo": "app", "branch": "feature/pushed-now", "project": project["id"]}
+            begun = start(**inputs)
+            assert begun.status_code == 201, begun.text
+            run = api.get(f"/neorc/runs/{begun.json()['id']}").json()
+            # neorc's own route starts what the form takes, as its page does.
+            at_neorc = start("/neorc/flows", **{**inputs, "branch": "main"})
+            assert at_neorc.status_code == 201, at_neorc.text
+    fields = {field["name"]: field for field in form["inputs"]}
+    assert fields["repo"]["options"] == [
+        {"value": "app", "label": "app", "models": None},
+        {"value": "docs", "label": "docs", "models": None},
+        {"value": "gone", "label": "gone", "models": None},
+    ]
+    assert (fields["branch"]["live"], fields["branch"]["of"], fields["branch"]["options"]) == (
+        True,
+        "repo",
+        None,
+    )
+    assert (fields["project"]["live"], fields["project"]["options"]) == (True, None)
+    assert [o["value"] for o in narrowed["items"]] == [f"feature/09{n:02}" for n in range(5)]
+    assert narrowed["more"] is True
+    assert first["value"] == "main"
+    assert unoffered == {"items": [], "more": False}
+    assert no_repository.status_code == 404
+    assert no_list.status_code == 404
+    assert projects["items"] == [{"value": project["id"], "label": "Ship it", "models": None}]
+    for case, answer in (*refused.items(), *refused_at_neorc.items()):
+        assert answer.status_code == 422, (case, answer.text)
+    for answer in unchecked:
+        assert answer.status_code == 503, answer.text
+        assert "the branches of gone could not be read" in answer.json()["detail"]
+    for answers in (refused, refused_at_neorc):
+        assert "not one of your projects" in answers["a project that is not the person's"].text
+    assert at_neorc.json()["inputs"] == {**inputs, "branch": "main"}
     assert run["inputs"] == inputs
 
 

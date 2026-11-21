@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -58,6 +58,18 @@ class LovKind(StrEnum):
     """A model of the agents' configuration, by its id."""
     AGENT = "agent"
     """An agent of the agents' configuration, by its id; its label names its worker."""
+    REPOSITORY = "repository"
+    """A repository the flows' settings name, by its id there."""
+    BRANCH = "branch"
+    """A branch of the repository another input of the form names (its ``of``), as the
+    repository has it now: one of those its entry in the flows' settings matches."""
+    PROJECT = "project"
+    """A project of the person who starts the run, by its id."""
+
+
+LIVE_KINDS = frozenset({LovKind.BRANCH, LovKind.PROJECT})
+"""The lists of values a form does not list: too long, or changing while the server runs. The
+person searches them as they type (``Flows.options``), and a start checks against them anew."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +87,8 @@ class InputSpec:
 
     label: str
     lov: LovKind | None = None
+    of: str | None = None
+    """A branch's: the input of the form that names its repository."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +119,30 @@ class FormInput:
     type: str
     lov: LovKind | None = None
     options: tuple[Option, ...] | None = None
+    of: str | None = None
+    """A branch's: the input whose repository its branches are of."""
+
+    @property
+    def live(self) -> bool:
+        """Whether its values are searched as the person types, rather than listed."""
+        return self.lov in LIVE_KINDS
+
+
+@dataclass(frozen=True, slots=True)
+class OptionPage:
+    """The values of a list that match a search, at most its limit; ``more`` when others
+    match too."""
+
+    items: tuple[Option, ...]
+    more: bool
+
+
+PersonsOptions = Callable[[], Awaitable[Sequence[Option]]]
+"""The values of a list that is the person's own, read when it is asked: their projects."""
+
+ProjectsOf = Callable[[uuid.UUID], Awaitable[Sequence[Option]]]
+"""The projects of the person of that id, as they are stored: none for a person this server
+holds nothing of. A start names its starter by id alone."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,12 +170,58 @@ class InvalidInputsError(FlowRefused):
     problem."""
 
 
+class NoSuchListError(FlowRefused):
+    """A list of values that is not searched: a kind that is not one, or a repository the flows'
+    settings do not name."""
+
+
+class BranchesUnreadableError(FlowRefused):
+    """A repository whose branches could not be read: its server would not answer, or refused."""
+
+
+class EngineUnavailableError(FlowRefused):
+    """A start the engine could not serve now: it could not hold the start to its flow's form,
+    a repository's server would not answer or the forms are not read yet, or it did not answer
+    itself. Nothing started, and the same start may be taken later."""
+
+
 class Flows(ABC):
-    """The flows a person may start, as forms, and the start of one."""
+    """The flows a person may start, as forms; what holds a start to its flow's form; and the
+    start of one through Robinauts."""
 
     @abstractmethod
     async def forms(self) -> tuple[FlowForm, ...]:
         """Every flow of the flows folder, by name."""
+
+    @abstractmethod
+    async def options(
+        self,
+        kind: str,
+        *,
+        after: str | None,
+        query: str,
+        limit: int,
+        projects: PersonsOptions,
+    ) -> OptionPage:
+        """The values of the list ``kind`` that match ``query``, at most ``limit``: a branch of
+        the repository ``after`` names, or one of the person's ``projects``.
+        ``NoSuchListError``, ``BranchesUnreadableError``."""
+
+    @abstractmethod
+    async def check(
+        self,
+        flow: str,
+        inputs: Mapping[str, Any],
+        *,
+        projects: PersonsOptions | None,
+    ) -> None:
+        """Hold a start of ``flow`` with ``inputs`` to the flow's form: every input there, none
+        it does not have, each value with a list of values one of them. A branch is checked
+        against its repository as it is now, and a project against ``projects``, the starter's
+        own: ``None`` when no person starts the run, and a project is then refused. A flow the
+        flows folder does not hold has no form, and nothing is checked. neorc's manager asks
+        this before every start, wherever the start came from. ``InvalidInputsError``,
+        ``BranchesUnreadableError``."""
 
     @abstractmethod
     async def start(
@@ -147,10 +231,11 @@ class Flows(ABC):
         *,
         credential: str | None,
     ) -> str:
-        """Start a run of ``flow`` with ``inputs``, which are passed on as they are once they
-        fit its form, and return the run's id. The start is sent to neorc with ``credential``,
-        the person's own, so that neorc records the run as theirs. ``NoSuchFlowError``,
-        ``InvalidInputsError``."""
+        """Start a run of ``flow`` with ``inputs``, and return the run's id. The start is sent
+        to neorc with ``credential``, the person's own, so that neorc records the run as
+        theirs; neorc's manager holds it to the flow's form there (``check``), as it holds a
+        start that reaches it any other way. ``NoSuchFlowError``, ``InvalidInputsError``,
+        ``EngineUnavailableError``."""
 
 
 class OrchestrationStartError(RuntimeError):
@@ -205,5 +290,8 @@ class Orchestrator(ABC):
         hold, or one a service started. A sub-flow's run has its tree's starter."""
 
     @abstractmethod
-    def flows(self, transport: object) -> Flows | None:
-        """The flows folder's flows, started through ``transport``: none without a folder."""
+    def flows(self, transport: object, projects_of: ProjectsOf) -> Flows | None:
+        """The flows folder's flows, started through ``transport``: none without a folder. From
+        this call on, neorc's manager holds every start of a run to its flow's form, with the
+        starter's projects from ``projects_of``. With a folder, a start before this call is
+        refused."""

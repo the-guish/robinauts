@@ -14,16 +14,28 @@
  * messages neorc draws, within the subset neorc accepts: a column of a
  * heading and one control per input.
  *
+ * A list too long or too changing to list, a repository's branches or the
+ * person's projects, is a choice whose options neorc asks for as the person
+ * types (`optionsFrom`): `searchOptions` answers from
+ * `GET /robinauts/api/lovs/<lov>/options`. neorc starts the run at its own
+ * route, as it starts any run: the backend holds every start to the flow's
+ * form inside neorc's manager, so this page hands neorc no way to start one.
+ *
  * neorc draws its own form for a flow this answers `null` for: a flow with no
  * form file, one the backend does not list, and one this cannot say in the
  * subset -- an input with a list that is empty, or a date and time.
  */
-import type { FormMessages, FormRequest } from "@neorc/ui";
+import type {
+  FormMessages,
+  FormRequest,
+  OptionPage,
+  OptionRequest,
+} from "@neorc/ui";
 
-import { request } from "../api/client";
+import { ApiError, request } from "../api/client";
 import type { components } from "../api/schema";
 
-export type { FormRequest } from "@neorc/ui";
+export type { FormRequest, OptionRequest } from "@neorc/ui";
 
 export type Flow = components["schemas"]["FlowSummary"];
 export type FlowInput = components["schemas"]["FlowInputSummary"];
@@ -45,6 +57,21 @@ function required(name: string, message: string): Component {
 function control(input: FlowInput): Component | null {
   const id = `input-${input.name}`;
   const value = { path: `/${input.name}` };
+  if (input.live === true && input.lov !== null && input.lov !== undefined) {
+    const after =
+      input.of === null || input.of === undefined
+        ? {}
+        : { after: { path: `/${input.of}` } };
+    return {
+      id,
+      component: "ChoicePicker",
+      label: input.label,
+      variant: "mutuallyExclusive",
+      optionsFrom: { source: input.lov, ...after },
+      value,
+      checks: [required(input.name, `Choose a value for ${input.label}.`)],
+    };
+  }
   if (input.options !== null && input.options !== undefined) {
     // The subset draws a choice from one option up; an empty list is none.
     if (input.options.length === 0) return null;
@@ -145,4 +172,30 @@ export async function formFor(
 /** Back to a page that has read nothing. Nothing in the application calls this. */
 export function forgetFlows(): void {
   flows = null;
+}
+
+/** A refusal as neorc shows one: the backend's own words. */
+function said(failure: unknown): unknown {
+  return failure instanceof ApiError ? new Error(failure.detail) : failure;
+}
+
+/**
+ * The options neorc asks for, for a choice of a form that names its list
+ * (`optionsFrom.source`, the input's `lov`): the values that match what the
+ * person typed, a branch of the repository chosen or one of their projects.
+ */
+export async function searchOptions(asked: OptionRequest): Promise<OptionPage> {
+  try {
+    return await request("get", "/robinauts/api/lovs/{kind}/options", {
+      path: { kind: asked.source },
+      query: {
+        q: asked.query,
+        limit: asked.limit,
+        ...(asked.after === null ? {} : { after: asked.after }),
+      },
+      signal: asked.signal,
+    });
+  } catch (failure) {
+    throw said(failure);
+  }
 }

@@ -96,15 +96,16 @@ kind = "external"
 ### Flows as forms
 
 The server lists every flow of the flows folder with its inputs, and the values each may
-take, and starts a run once the inputs fit
+take, and a run starts once the inputs fit
 ([orchestrator/application/flows.py](../../backend/src/robinauts/orchestrator/application/flows.py)).
-The inputs go to neorc as they came: neorc knows nothing of the forms, and its
-flow files are plain neorc flows.
+The inputs go to neorc as they came: its flow files are plain neorc flows, and the forms are
+Robinauts'.
 
 | route | answer |
 |---|---|
 | `GET /robinauts/api/flows` | every flow, with its inputs: a label, the type the flow declares, and the values a list of values offers |
-| `POST /robinauts/api/flows/<name>/runs` | `{"inputs": {...}}`; 201 with the run's id, 404 for a flow the folder does not hold, 422 for inputs that do not fit |
+| `GET /robinauts/api/lovs/<lov>/options?q=&after=&limit=` | the values of a list that is searched that match `q`: `{"items": [...], "more": bool}`; 404 for a list that is not searched, or a repository the settings do not name; 502 for a repository whose server would not answer |
+| `POST /robinauts/api/flows/<name>/runs` | `{"inputs": {...}}`; 201 with the run's id, 404 for a flow the folder does not hold, 422 for inputs that do not fit, 503 for a start that could not be checked |
 
 The start is sent to neorc's API with the person's own credential, so the run is theirs at
 neorc too (oneberth's `docs/specs/neorc-in-robinauts.md`, "Requests of the backend's own").
@@ -136,20 +137,99 @@ There are three lists of values:
 
 | `lov` | the values | the value sent |
 |---|---|---|
-| `repo_branch` | each branch of each repository of `flows.toml` | `<id>@<branch>`, the repository by its id there |
+| `repo_branch` | each branch each repository of `flows.toml` names | `<id>@<branch>`, the repository by its id there |
 | `model` | the models of the agents' configuration | the model's id |
 | `agent` | its agents, each labelled with the worker it runs on | the agent's id |
+| `repository` | the repositories of `flows.toml` | the repository's id |
+| `branch` | the branches of the repository its `of` input names, as its server has them now | the branch's name |
+| `project` | the projects of the person who starts the run | the project's id |
 
 The repositories are the flows' configuration, in `flows.toml`:
 
 ```toml
 [repositories.robinauts]
 url = "https://github.com/the-guish/robinauts"
-branches = ["main"]
+branches = ["main", "release/*"]
 ```
+
+An entry of `branches` is a branch's name or a shell pattern, where `*` matches across `/`
+too. `repo_branch` offers the names alone. `branch` offers the repository's branches that an
+entry matches: the named ones first, then the rest by name. `["*"]` offers every branch.
 
 A model the chosen agent's engine cannot reach is not refused yet: that needs
 the engines' provider kinds, which the orchestrator does not see.
+
+#### Lists that are searched
+
+A repository may have thousands of branches, and a person's projects change while the server
+runs. `branch` and `project` are lists of values that a form does not list. The person
+searches them as they type.
+
+```toml
+[inputs.repo]
+lov = "repository"
+
+[inputs.branch]
+lov = "branch"
+of = "repo"
+
+[inputs.project]
+lov = "project"
+```
+
+- A `branch` names its repository's input in `of`. That input's `lov` is `repository`.
+- `GET /robinauts/api/flows` gives such an input `"live": true`, no options, and its `of`.
+- `GET /robinauts/api/lovs/<lov>/options` answers the values that match `q`: an exact match
+  first, then those that start with it, then those that hold it. A branch search names its
+  repository in `after`.
+- The server reads a repository's branches with `git ls-remote`, and keeps the read for a
+  minute. A later search is answered from it while a new read runs.
+- A repository named `owner/name` is read from GitHub, where the code worker clones it.
+- A start checks a branch against its repository as its server has it now. A read vouches
+  for a branch only for the minute it serves. After that the server is asked for that one
+  branch: a branch pushed a moment ago starts a run, and one deleted an hour ago does not.
+- A start checks a project against the starter's projects.
+- The code worker holds a `code_task/1` to the same rule: a branch an entry names or a
+  pattern matches, and a name git takes as a branch's
+  (`orchestrator/core/search.py`, which the worker imports).
+- The adapter is [orchestrator/adapters/git/branches.py](../../backend/src/robinauts/orchestrator/adapters/git/branches.py).
+  It runs `git`, which must be on the server's `PATH`; Robinauts' image has it. git gets the
+  network's settings of the server's environment, and none of its keys. A read that runs out
+  of time, or whose request is cancelled, ends its git.
+- **A private repository is not read yet.** The server hands git no token, where the code
+  worker has `GITHUB_TOKEN`: git reads a private repository only if its own configuration
+  under the server's `HOME` gives it a credential. Without one, a search of its branches
+  answers 502 and a start that names one is refused.
+
+#### Where a start is checked
+
+In neorc's manager, and nowhere else. The manager this backend composes is neorc's own, held
+to Robinauts' forms
+([orchestrator/adapters/neorc/held.py](../../backend/src/robinauts/orchestrator/adapters/neorc/held.py)):
+before it starts a run, the flow's form checks the inputs.
+
+- Every start is checked, whichever way it reached the manager: neorc's page, `POST
+  /neorc/flows/<name>/runs` from a script with a token, or `POST
+  /robinauts/api/flows/<name>/runs`, which only sends the start on. There is no route a start
+  must take to be checked, and none it can take to avoid it.
+- The check is the form's: every input there, none it does not have, each value with a list
+  of values one of them, the model one of the chosen agent's, and the lists that are searched
+  as they are now ([Lists that are searched](#lists-that-are-searched)).
+- A refusal is neorc's 422, with the form's every problem, as for an input of the wrong type.
+- A branch whose repository's server would not answer starts no run either: the start is not
+  let through unchecked. The inputs were not refused, so the answer is 503, with why, on
+  neorc's route and on Robinauts', and the same start may be tried again.
+- neorc's manager starts a run in two places: `start_run`, which every route, client and page
+  reaches and the form holds, and `start_sub_run`. A test reads neorc's manager and fails when
+  a neorc update adds a third
+  ([test_neorc_held_manager.py](../../backend/tests/adapters_free/test_neorc_held_manager.py)).
+- A project is checked against the projects of the run's starter, whom neorc names by id. A
+  run a service starts has no person, and a project among its inputs is refused.
+- With a flows folder, the manager starts nothing until it has the forms. A flow the folder
+  does not hold has no form, and neorc checks it alone.
+- A flow called as a sub-flow is not checked here. Its inputs are what the calling flow
+  worked out, and neorc checks them against the declared types. neorc's manager has no hook
+  that covers both starts yet, and this is the one thing a hook there would add.
 
 ### Why the worker is a process of its own
 
@@ -171,7 +251,8 @@ It costs one process and a long-poll over the loopback interface.
 
 A run is the person's who started it, and so are the conversations its handlers open for it.
 That holds in both modes, for a run started on neorc's form and for one started through
-`POST /robinauts/api/flows/<name>/runs`.
+`POST /robinauts/api/flows/<name>/runs`. Both are held to the flow's form
+([Where a start is checked](#where-a-start-is-checked)).
 
 - neorc records the starter on the run, as `started_by`, from the credential that started it.
   Robinauts starts a run with the person's own credential. A sub-flow's run has its tree's
@@ -193,10 +274,15 @@ neorc's own built interface is not served, and the session has no `flows_url`.
 A run is started from neorc's form, at `/neorc/`. For a flow with a form file the form is
 Robinauts': the interface turns the flow's form, as `GET /robinauts/api/flows` gives it with
 its lists filled, into A2UI v0.9 in neorc's subset (`frontend/src/flows/forms.ts`). Each list
-of values is a choice of its values, and each other input a field of its type. neorc draws its
-own form for a flow with no form file, and for one with an empty list or a datetime input. A
-form sends the flow's inputs to neorc, which checks their types. Robinauts' own checks of a
-form, such as the agent and model pair, run only on `POST /robinauts/api/flows/<name>/runs`.
+of values is a choice of its values, and each other input a field of its type. A list that is
+searched is a choice that names its list (`optionsFrom`), and neorc asks the interface for its
+values as the person types (`searchOptions`). neorc draws its own form for a flow with no form
+file, and for one with an empty list or a datetime input.
+
+neorc's page starts the run at neorc's own route, as it starts any run. The interface hands
+neorc its forms and their options, and no way to start a run: the form holds the start inside
+neorc's manager ([Where a start is checked](#where-a-start-is-checked)), so a form the page
+could not draw, or a page that is not Robinauts', starts nothing the form would refuse.
 
 ### Where neorc may be imported
 
@@ -213,9 +299,11 @@ Taking neorc out is taking out that package and `cli/orchestration.py`.
 `cli/orchestration.py` is apart from `cli/composition.py` because a worker in
 a process of its own imports the composition, and the extra workers' images
 leave neorc out. The extra workers also read `[repositories]` of `flows.toml`
-with the orchestrator's own parser, `orchestrator/core/config.py`. A contract
+with the orchestrator's own parser, `orchestrator/core/config.py`, and match a
+branch against a repository's entries with `orchestrator/core/search.py`. A contract
 keeps all of it so: nothing `cli/worker_process.py`, `cli/composition.py`,
-`orchestrator/contract/` or `orchestrator/core/config.py` imports may reach
+`orchestrator/contract/`, `orchestrator/core/config.py` or
+`orchestrator/core/search.py` imports may reach
 neorc, even through another module.
 
 ### Installing neorc

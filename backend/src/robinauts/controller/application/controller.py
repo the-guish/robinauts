@@ -180,6 +180,9 @@ class RobinautsController(Controller):
         await self._default_project(user)
         return tuple(await self._store.projects_of(user.id))
 
+    async def projects_of(self, owner: uuid.UUID) -> tuple[Project, ...]:
+        return tuple(await self._store.projects_of(owner))
+
     async def create_project(self, user: User, name: str) -> Project:
         return await self._store.ensure_project(
             Project(uuid.uuid4(), user.id, project_name(name), self._now())

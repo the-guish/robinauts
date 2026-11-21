@@ -35,8 +35,10 @@ topic documents listed under [Documents](#documents).
 - The platform sends nothing to the Robinauts project or to any third party:
   no telemetry, no CDN, no hosted service it depends on.
 - The only data that leaves is what a conversation sends to the model
-  providers the operator has configured (goal 5), and what a model asks a
-  configured tool server.
+  providers the operator has configured (goal 5), what a model asks a
+  configured tool server, and what reading a repository's branches sends its
+  git server: the repository's address, as the operator listed it for the
+  flows, and the name of a branch a run is started on.
 
 ### 4. Compose over build
 
@@ -137,8 +139,9 @@ topic documents listed under [Documents](#documents).
 
 - No telemetry, no CDN, no hosted service, no framework's hosted tracing.
   The only outbound traffic is to the identity providers at sign-in, to the
-  model providers the operator configured, and to the tool servers the
-  operator configured.
+  model providers the operator configured, to the tool servers the operator
+  configured, and to the git servers of the repositories the operator listed
+  for the flows.
 
 ## The system in one page
 

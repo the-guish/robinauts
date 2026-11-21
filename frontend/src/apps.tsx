@@ -18,7 +18,7 @@
 import { neorcApp } from "@neorc/ui";
 import type { ShellApp } from "@oneberth/ui";
 
-import type { FormRequest } from "./flows/forms";
+import type { FormRequest, OptionRequest } from "./flows/forms";
 import { MessageSquareIcon } from "./icons";
 
 /** Robinauts, as an application of the shell. */
@@ -38,6 +38,10 @@ export function neorcWithForms(): ShellApp {
     forms: async (flow: FormRequest) => {
       const { formFor } = await import("./flows/forms");
       return formFor(flow);
+    },
+    options: async (asked: OptionRequest) => {
+      const { searchOptions } = await import("./flows/forms");
+      return searchOptions(asked);
     },
   });
 }
