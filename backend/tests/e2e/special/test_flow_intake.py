@@ -183,10 +183,14 @@ def test_a_form_s_list_of_flows_is_searched_at_neorc_as_the_person_types(
     box.click()
     expect(found).to_have_text(["code_task 0.1.0", "relay 0.1.0"])
 
-    # 3. As the person types, in any case: the box asks neorc, and lists what it found.
+    # 3. As the person types, in any case: the box asks neorc, and lists what it found. A
+    #    click picks the flow, and the list goes.
     with page.expect_request(lambda asked: "/neorc/flows?search=CODE" in asked.url):
         box.press_sequentially("CODE")
     expect(found).to_have_text(["code_task 0.1.0"])
+    found.first.click()
+    expect(box).to_have_value("code_task")
+    expect(found).to_have_count(0)
 
     # 4. A text that names no flow is no choice: the form says so, and nothing is sent.
     box.fill("nowhere")
