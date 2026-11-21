@@ -56,6 +56,7 @@ from neorc.manager import new_manager_webapp
 from neorc_core import (
     FlowNotFoundError,
     InvalidValueError,
+    ManagerUnavailableError,
     NeorcError,
     QueueKind,
     RunNotFoundError,
@@ -70,6 +71,7 @@ from robinauts.orchestrator.contract.domain import (
     HANDLER_TOKEN_PATH,
     MOUNT,
     SETTINGS_FILE,
+    EngineUnavailableError,
     Flows,
     InvalidInputsError,
     NoSuchFlowError,
@@ -273,6 +275,10 @@ class NeorcFlowEngine(FlowEngine):
                 raise NoSuchFlowError(str(error)) from error
             except InvalidValueError as error:
                 raise InvalidInputsError(str(error)) from error
+            except ManagerUnavailableError as error:
+                # The start could not be checked, or the manager did not answer: not a refusal
+                # of the inputs.
+                raise EngineUnavailableError(str(error)) from error
         return str(run.id)
 
 

@@ -488,6 +488,7 @@ def test_a_branch_and_a_project_are_searched_as_they_are_now_and_checked_at_the_
     (flows / "flows.toml").write_text(
         f'[repositories.app]\nurl = "file://{app}"\nbranches = ["main", "feature/*"]\n'
         f'[repositories.docs]\nurl = "file://{docs}"\nbranches = ["main"]\n'
+        f'[repositories.gone]\nurl = "file://{tmp_path / "gone.git"}"\nbranches = ["main"]\n'
     )
     with started(config, environment_for(config, flows)) as (url, _):
         with stack.client(url) as api:
@@ -541,6 +542,12 @@ def test_a_branch_and_a_project_are_searched_as_they_are_now_and_checked_at_the_
                     "/neorc/flows", repo="app", branch="main", project=str(uuid.uuid4())
                 ),
             }
+            # A repository whose server does not answer: the branch could not be checked, which
+            # starts no run and refuses no input.
+            unchecked = [
+                start(route, repo="gone", branch="main", project=project["id"])
+                for route in ("/robinauts/api/flows", "/neorc/flows")
+            ]
             inputs = {"repo": "app", "branch": "feature/pushed-now", "project": project["id"]}
             begun = start(**inputs)
             assert begun.status_code == 201, begun.text
@@ -552,6 +559,7 @@ def test_a_branch_and_a_project_are_searched_as_they_are_now_and_checked_at_the_
     assert fields["repo"]["options"] == [
         {"value": "app", "label": "app", "models": None},
         {"value": "docs", "label": "docs", "models": None},
+        {"value": "gone", "label": "gone", "models": None},
     ]
     assert (fields["branch"]["live"], fields["branch"]["of"], fields["branch"]["options"]) == (
         True,
@@ -568,6 +576,9 @@ def test_a_branch_and_a_project_are_searched_as_they_are_now_and_checked_at_the_
     assert projects["items"] == [{"value": project["id"], "label": "Ship it", "models": None}]
     for case, answer in (*refused.items(), *refused_at_neorc.items()):
         assert answer.status_code == 422, (case, answer.text)
+    for answer in unchecked:
+        assert answer.status_code == 503, answer.text
+        assert "the branches of gone could not be read" in answer.json()["detail"]
     for answers in (refused, refused_at_neorc):
         assert "not one of your projects" in answers["a project that is not the person's"].text
     assert at_neorc.json()["inputs"] == {**inputs, "branch": "main"}

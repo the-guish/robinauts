@@ -52,6 +52,7 @@ from robinauts.orchestrator.contract.domain import (
     HANDLER_QUEUE_PERMISSION,
     HANDLER_TOKEN_PATH,
     BranchesUnreadableError,
+    EngineUnavailableError,
     FlowForm,
     Flows,
     InvalidInputsError,
@@ -134,6 +135,7 @@ STATUS_OF: dict[type[Exception], int] = {
     InvalidInputsError: 422,
     NoSuchListError: 404,
     BranchesUnreadableError: 502,
+    EngineUnavailableError: 503,
 }
 """The status of each error a route raises; a subclass takes its nearest base's."""
 
@@ -145,6 +147,7 @@ ERROR_NAMES: dict[type[Exception], str] = {
     InvalidInputsError: "InvalidInputs",
     NoSuchListError: "NotFound",
     BranchesUnreadableError: "BadGateway",
+    EngineUnavailableError: "ServiceUnavailable",
 }
 """The ``error`` of the answer, where it is not the class's own name."""
 

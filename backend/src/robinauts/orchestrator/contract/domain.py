@@ -179,6 +179,12 @@ class BranchesUnreadableError(FlowRefused):
     """A repository whose branches could not be read: its server would not answer, or refused."""
 
 
+class EngineUnavailableError(FlowRefused):
+    """A start the engine could not serve now: it could not hold the start to its flow's form,
+    a repository's server would not answer or the forms are not read yet, or it did not answer
+    itself. Nothing started, and the same start may be taken later."""
+
+
 class Flows(ABC):
     """The flows a person may start, as forms; what holds a start to its flow's form; and the
     start of one through Robinauts."""
@@ -228,7 +234,8 @@ class Flows(ABC):
         """Start a run of ``flow`` with ``inputs``, and return the run's id. The start is sent
         to neorc with ``credential``, the person's own, so that neorc records the run as
         theirs; neorc's manager holds it to the flow's form there (``check``), as it holds a
-        start that reaches it any other way. ``NoSuchFlowError``, ``InvalidInputsError``."""
+        start that reaches it any other way. ``NoSuchFlowError``, ``InvalidInputsError``,
+        ``EngineUnavailableError``."""
 
 
 class OrchestrationStartError(RuntimeError):

@@ -80,8 +80,10 @@ class HeldManager(Manager):
         started_by: RunStarter | None = None,
     ) -> Run:
         """As neorc's, once the flow's form takes the inputs. ``InvalidValueError`` with the
-        form's every problem, or with why a repository's branches could not be read: neorc's
-        route answers both as it answers an input of the wrong type."""
+        form's every problem: neorc's route answers it as it answers an input of the wrong
+        type. ``ManagerUnavailableError`` with why a repository's branches could not be read:
+        the inputs were not refused, the start could not be checked, and neorc's route answers
+        503, which a caller tries again."""
         if self._held:
             await self._hold(flow, inputs, person_of(started_by))
         return await super().start_run(flow, inputs, started_by=started_by)
@@ -95,5 +97,5 @@ class HeldManager(Manager):
         except InvalidInputsError as refused:
             raise InvalidValueError(str(refused)) from None
         except BranchesUnreadableError as refused:
-            # The start is refused, not let through: the branch could not be checked.
-            raise InvalidValueError(f"{flow}: {refused}") from None
+            # Not let through, and not a refusal of the inputs: the branch could not be checked.
+            raise ManagerUnavailableError(f"{flow}: {refused}") from None

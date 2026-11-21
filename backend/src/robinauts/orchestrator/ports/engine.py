@@ -19,4 +19,5 @@ class FlowEngine(ABC):
     ) -> str:
         """Start a run of the latest version of ``flow`` and return its id, asked with
         ``credential`` as a bearer: the person's own. ``NoSuchFlowError`` for a flow the engine
-        does not hold, ``InvalidInputsError`` for inputs it refuses."""
+        does not hold, ``InvalidInputsError`` for inputs it refuses, ``EngineUnavailableError``
+        when it could not serve the start: nothing started."""

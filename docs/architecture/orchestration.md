@@ -105,7 +105,7 @@ Robinauts'.
 |---|---|
 | `GET /robinauts/api/flows` | every flow, with its inputs: a label, the type the flow declares, and the values a list of values offers |
 | `GET /robinauts/api/lovs/<lov>/options?q=&after=&limit=` | the values of a list that is searched that match `q`: `{"items": [...], "more": bool}`; 404 for a list that is not searched, or a repository the settings do not name; 502 for a repository whose server would not answer |
-| `POST /robinauts/api/flows/<name>/runs` | `{"inputs": {...}}`; 201 with the run's id, 404 for a flow the folder does not hold, 422 for inputs that do not fit |
+| `POST /robinauts/api/flows/<name>/runs` | `{"inputs": {...}}`; 201 with the run's id, 404 for a flow the folder does not hold, 422 for inputs that do not fit, 503 for a start that could not be checked |
 
 The start is sent to neorc's API with the person's own credential, so the run is theirs at
 neorc too (oneberth's `docs/specs/neorc-in-robinauts.md`, "Requests of the backend's own").
@@ -216,8 +216,13 @@ before it starts a run, the flow's form checks the inputs.
   of values one of them, the model one of the chosen agent's, and the lists that are searched
   as they are now ([Lists that are searched](#lists-that-are-searched)).
 - A refusal is neorc's 422, with the form's every problem, as for an input of the wrong type.
-  A branch whose repository's server would not answer is refused too, with why: the start is
-  not let through unchecked.
+- A branch whose repository's server would not answer starts no run either: the start is not
+  let through unchecked. The inputs were not refused, so the answer is 503, with why, on
+  neorc's route and on Robinauts', and the same start may be tried again.
+- neorc's manager starts a run in two places: `start_run`, which every route, client and page
+  reaches and the form holds, and `start_sub_run`. A test reads neorc's manager and fails when
+  a neorc update adds a third
+  ([test_neorc_held_manager.py](../../backend/tests/adapters_free/test_neorc_held_manager.py)).
 - A project is checked against the projects of the run's starter, whom neorc names by id. A
   run a service starts has no person, and a project among its inputs is refused.
 - With a flows folder, the manager starts nothing until it has the forms. A flow the folder
