@@ -64,7 +64,7 @@ async def test_an_app_is_listed_viewed_and_called_over_a_server_that_keeps_sessi
                 json={"agent": "echo", "arguments": {"start": 41}},
             )
 
-    assert [a["id"] for a in listed.json()["apps"]] == ["counter/counter"]
+    assert [a["id"] for a in listed.json()["apps"]] == ["counter/ui://tests/counter.html"]
     assert shown.text == "<p>count</p>"
     assert shown.headers["content-security-policy"] == VIEW_CONTENT_SECURITY_POLICY
     assert called.json()["structuredContent"] == {"result": 42}

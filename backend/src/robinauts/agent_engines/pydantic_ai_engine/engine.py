@@ -58,7 +58,11 @@ from robinauts.agent_engines.pydantic_ai_engine.clients import (
 from robinauts.agent_engines.pydantic_ai_engine.context import within
 from robinauts.agent_engines.pydantic_ai_engine.session_store import SessionStore
 from robinauts.agent_engines.pydantic_ai_engine.thinking import ANTHROPIC, signed_thinking_only
-from robinauts.agent_engines.pydantic_ai_engine.tools import function_toolsets, toolsets_for
+from robinauts.agent_engines.pydantic_ai_engine.tools import (
+    STRUCTURED_CONTENT,
+    function_toolsets,
+    toolsets_for,
+)
 
 FASTEST_MODEL_CALL = 1.0
 """Seconds: a turn may make one model call per second of its timeout. Real rounds are slower;
@@ -228,4 +232,16 @@ def events_of(event: AgentStreamEvent) -> Iterator[Event]:
             yield ToolResult(part.tool_call_id, part.tool_name or "", part.model_response(), True)
         else:
             output = part.model_response_str(wrap_if_error=False)
-            yield ToolResult(part.tool_call_id, part.tool_name, output, part.outcome != "success")
+            yield ToolResult(
+                part.tool_call_id,
+                part.tool_name,
+                output,
+                part.outcome != "success",
+                structured_content_of(part.metadata),
+            )
+
+
+def structured_content_of(metadata: object) -> Mapping[str, Any] | None:
+    """An MCP result's structured content, which ``TextToModel`` keeps on the return's metadata."""
+    structured = metadata.get(STRUCTURED_CONTENT) if isinstance(metadata, Mapping) else None
+    return structured if isinstance(structured, Mapping) else None

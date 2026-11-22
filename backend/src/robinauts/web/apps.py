@@ -2,12 +2,13 @@
 # Copyright The Robinauts Authors
 
 """The MCP apps of an agent's tool servers, for the interface's side panel
-(``docs/adr/0007-mcp-apps-in-the-side-panel.md``).
+(``docs/architecture/mcp-apps.md``).
 
-An app is a tool whose ``_meta.ui.resourceUri`` names a ``ui://`` resource: one HTML document,
-the view, which the panel frames. An agent's apps are those of the tool servers it names, less
-the tools its server's ``exclude`` keeps from it. Web reads the view and relays the view's tool
-calls; the view never reaches a server itself.
+A tool's ``_meta.ui.resourceUri`` names a ``ui://`` resource: one HTML document, the view,
+which the panel frames. An app is one view of one server, with the tools that name it. An
+agent's apps are those of the tool servers it names, less the tools its server's ``exclude``
+keeps from it. Web reads the view and relays the view's tool calls; the view never reaches a
+server itself.
 
 A server is reached with its configured credential, read from its ``secret_env`` the way the
 worker reads it (``worker/engine_settings.py``), and within its ``timeout_seconds``. A server
@@ -60,7 +61,7 @@ UI_SCHEME = "ui://"
 UI_MIME_TYPE = "text/html;profile=mcp-app"
 APP_VISIBILITY = "app"
 MAX_TOOL_PAGES = 20
-"""The most pages of ``tools/list`` read from one server."""
+"""The most pages of ``tools/list``, and of ``resources/list``, read from one server."""
 
 NO_SUCH_APP = "the agent has no app of that name"
 
@@ -87,15 +88,26 @@ class UnansweredCallError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
-class App:
-    server: str
-    tool: str
+class AppTool:
+    """A tool that names a view: a call of it by the agent is shown in that view."""
+
+    name: str
     title: str
-    description: str
+
+
+@dataclass(frozen=True, slots=True)
+class App:
+    """One view of one server, and the tools that name it, in the server's order."""
+
+    server: str
+    view: str
+    """The view's ``ui://`` address."""
+    title: str
+    tools: tuple[AppTool, ...]
 
     @property
     def id(self) -> str:
-        return f"{self.server}/{self.tool}"
+        return f"{self.server}/{self.view}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,25 +145,47 @@ def callable_by_apps(tool: Mapping[str, Any]) -> bool:
     return isinstance(visibility, list) and APP_VISIBILITY in visibility
 
 
-def app_of(server: str, tool: Mapping[str, Any]) -> App | None:
-    """The app the tool is: one with a view, that a view may call, under a name a path can
-    carry; ``None`` for any other tool."""
+def app_tool_of(tool: Mapping[str, Any]) -> AppTool | None:
+    """The tool as one that names a view, under a name a path can carry; ``None`` for any
+    other tool. Its title is the tool's, or its name."""
     name = tool.get("name")
     if not isinstance(name, str) or not name or "/" in name or not name.isprintable():
         return None
-    if view_of(tool) is None or not callable_by_apps(tool):
+    if view_of(tool) is None:
         return None
     title = tool.get("title")
     if not isinstance(title, str) or not title:
         annotations = tool.get("annotations")
         title = annotations.get("title") if isinstance(annotations, Mapping) else None
-    description = tool.get("description")
-    return App(
-        server=server,
-        tool=name,
-        title=title if isinstance(title, str) and title else name,
-        description=description if isinstance(description, str) else "",
-    )
+    return AppTool(name=name, title=title if isinstance(title, str) and title else name)
+
+
+def view_titles(resources: object) -> dict[str, str]:
+    """The title of each resource a ``resources/list`` answer lists, by its address: its
+    ``title``, or its ``name``."""
+    titles: dict[str, str] = {}
+    for resource in resources if isinstance(resources, list) else []:
+        if not isinstance(resource, Mapping):
+            continue
+        uri, title = resource.get("uri"), resource.get("title") or resource.get("name")
+        if isinstance(uri, str) and isinstance(title, str) and title:
+            titles[uri] = title
+    return titles
+
+
+def apps_of(server: str, tools: list[Mapping[str, Any]], titles: Mapping[str, str]) -> list[App]:
+    """The server's apps: one per view its tools name, in the order the views first appear.
+    An app's title is the view's in ``titles``, or the title of the first tool that names it."""
+    named: dict[str, list[AppTool]] = {}
+    for tool in tools:
+        found = app_tool_of(tool)
+        uri = view_of(tool)
+        if found is not None and uri is not None:
+            named.setdefault(uri, []).append(found)
+    return [
+        App(server=server, view=uri, title=titles.get(uri) or found[0].title, tools=tuple(found))
+        for uri, found in named.items()
+    ]
 
 
 def is_view(mime_type: object) -> bool:
@@ -272,14 +306,33 @@ class Apps:
             reason = f"no answer within {server.timeout_seconds:g} seconds"
         log.warning("tool server %s failed %s: %s", server.id, doing, reason)
 
+    @staticmethod
+    async def _view_titles(opened: McpSession) -> dict[str, str]:
+        """The titles of the views the server lists. A server may list none of its views, and
+        one without resources refuses the request: both are no titles."""
+        titles: dict[str, str] = {}
+        cursor: str | None = None
+        try:
+            for _ in range(MAX_TOOL_PAGES):
+                params = {"cursor": cursor} if cursor else None
+                page = await opened.request("resources/list", params)
+                titles |= view_titles(page.get("resources"))
+                cursor = page.get("nextCursor")
+                if not isinstance(cursor, str) or not cursor:
+                    break
+        except McpError:
+            return titles
+        return titles
+
     async def _apps_of(self, server: ToolServerConfig) -> list[App]:
         try:
             async with self._session(server) as opened:
                 tools = await self._tools(opened, server)
+                titles = await self._view_titles(opened) if any(map(view_of, tools)) else {}
         except FAILURES as error:
             self._failed(server, "listing its apps, left out", error)
             return []
-        return [app for app in (app_of(server.id, t) for t in tools) if app is not None]
+        return apps_of(server.id, tools, titles)
 
     async def of(self, agent_id: str) -> list[App]:
         """The agent's apps, server by server in the order it names them. A server that cannot

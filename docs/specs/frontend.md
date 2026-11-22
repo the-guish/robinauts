@@ -81,21 +81,17 @@
     what it shows.
   - Open tabs are remembered per conversation, per browser. Tabs opened on
     the empty chat move to the conversation its first message creates.
-  - An MCP app's tab frames the app's view
-    ([ADR 0007](../adr/0007-mcp-apps-in-the-side-panel.md)), with
-    `sandbox="allow-scripts"` and never `allow-same-origin`. The panel is
-    the view's host: it answers `ui/initialize` with the theme, calls the
-    app's own tool once the view says it is ready and hands it the result,
-    relays the view's `tools/call` to the backend, answers `ping`, and
-    refuses anything else. It reads only messages from that frame, and
-    tells the view when the theme changes. Each turn that ends has the
-    app's own tool called again and the new result handed to the view, and
-    so does each tool of the app's server that answers in the chat
-    (`onToolResult`, `<server>__<tool>`), so what the agent changes shows
-    while the turn goes on. Only the newest of these reads reaches the
-    view, and a call that fails leaves the view as it is. The view is
-    hidden until the first call has answered; a view that does not start,
-    or a first call that fails, is said so in its place, with "Try again".
+  - An MCP app's tab is one view of one tool server, with a sub-tab for
+    each call of the agent that the view shows
+    ([architecture/mcp-apps.md](../architecture/mcp-apps.md)). A sub-tab
+    frames the view with `sandbox="allow-scripts"` alone. The panel is the
+    view's host: it tells the view the arguments and the result of the
+    agent's call, relays the view's `tools/call` to the backend, answers
+    `ping`, and refuses anything else. The agent's call opens the tab and
+    selects the sub-tab, and a collapsed panel stays collapsed. The view is
+    hidden until it has been told the result. A view that does not start,
+    or a result that cannot be read, is said so in its place, with
+    "Try again".
   - The keyboard: Left and Right move between tabs, Delete closes one;
     the menu takes the arrow keys and closes on Escape.
 - The theme follows the operating system by default. The shell's toggle,
@@ -188,7 +184,7 @@ neorc's rules (`neorc/contributing/js-dependencies.md`):
   `connect-src` `'self'`; `style-src 'self' 'unsafe-inline'`;
   `img-src 'self' data:`; `frame-src 'self'`, so that the side panel can
   frame an MCP app's view, which this server serves under a policy of its
-  own ([ADR 0007](../adr/0007-mcp-apps-in-the-side-panel.md));
+  own ([architecture/mcp-apps.md](../architecture/mcp-apps.md));
   `frame-ancestors 'none'`; plus `base-uri 'none'`
   and `form-action 'none'`, which `default-src` does not cover — the page's
   script and stylesheet are named relatively, so an injected `<base>` would

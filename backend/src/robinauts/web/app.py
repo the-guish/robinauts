@@ -239,13 +239,22 @@ def flow_summary(form: FlowForm) -> FlowSummary:
     )
 
 
-class AppSummary(BaseModel):
-    id: str
-    """``<server>/<tool>``."""
-    server: str
-    tool: str
+class AppToolSummary(BaseModel):
+    name: str
     title: str
-    description: str
+
+
+class AppSummary(BaseModel):
+    """One view of one server (``docs/architecture/mcp-apps.md``)."""
+
+    id: str
+    """``<server>/<view>``."""
+    server: str
+    view: str
+    """The view's ``ui://`` address."""
+    title: str
+    tools: list[AppToolSummary]
+    """The tools that name the view: a call of one by the agent is shown in it."""
 
 
 class AppListResponse(BaseModel):
@@ -270,6 +279,16 @@ def tool_call_response(result: ToolResult) -> AppToolCallResponse:
         content=result.content,
         structuredContent=result.structured_content,
         isError=result.is_error,
+    )
+
+
+def stored_result_response(part: ToolResultPart) -> AppToolCallResponse:
+    """A tool result of the transcript as an MCP ``CallToolResult``: its text as one text
+    block, and its structured content."""
+    return AppToolCallResponse(
+        content=[{"type": "text", "text": part.text}],
+        structuredContent=None if part.structured is None else dict(part.structured),
+        isError=part.is_error,
     )
 
 
@@ -667,9 +686,9 @@ def new_robinauts_webapp(
                 AppSummary(
                     id=a.id,
                     server=a.server,
-                    tool=a.tool,
+                    view=a.view,
                     title=a.title,
-                    description=a.description,
+                    tools=[AppToolSummary(name=t.name, title=t.title) for t in a.tools],
                 )
                 for a in found
             ]
@@ -744,6 +763,20 @@ def new_robinauts_webapp(
     ) -> OpenedConversationResponse:
         opened = await controller.open_session(user, conversation_id)
         return opened_view(opened, await default_model(opened.session.agent))
+
+    @router.get(
+        "/api/conversations/{conversation_id}/messages/{message_id}/tool-result",
+        dependencies=[permit(roles.CONVERSATIONS_READ)],
+    )
+    async def read_tool_result(
+        conversation_id: uuid.UUID, message_id: uuid.UUID, call_id: str, user: User = asking
+    ) -> AppToolCallResponse:
+        """One tool call's result, whole, for the view of that call: the conversation's own
+        read carries its text alone."""
+        part = await controller.tool_result(
+            user, conversation_id, message_id=message_id, call_id=call_id
+        )
+        return stored_result_response(part)
 
     @router.patch(
         "/api/conversations/{conversation_id}",

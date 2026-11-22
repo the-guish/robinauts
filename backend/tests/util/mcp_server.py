@@ -87,7 +87,10 @@ def mcp_server(
         server.add_tool(tool)
     for view in views:
         server.add_tool(view.tool, title=view.title, meta=view.meta)
-        server.resource(view.uri, mime_type=VIEW_MIME_TYPE)(serve_view(view))
+        named = server.resource(
+            view.uri, name=view.tool.__name__, title=view.title, mime_type=VIEW_MIME_TYPE
+        )
+        named(serve_view(view))
     app: ASGIApp = server.streamable_http_app()
     if token is not None:
         app = BearerOnly(app, token)

@@ -13,6 +13,7 @@ replaced, since PostgreSQL holds neither and a provider or a tool may send eithe
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import uuid
@@ -73,6 +74,11 @@ MESSAGE_KEYS = frozenset(
 
 MESSAGE_OPTIONAL_KEYS = frozenset({"failed", "task_payload"})
 """Written only when set, so that the messages stored before them read the same."""
+STRUCTURED_KEYS = frozenset({"structured"})
+"""A tool result's structured content, on its part and on its event: written only when the
+result has one, so that the results stored before it read the same."""
+MAX_STRUCTURED_BYTES = 1024 * 1024
+"""The most of a tool result's structured content the transcript keeps, as JSON."""
 PART_KEYS: Mapping[str, frozenset[str]] = {
     "text": frozenset({"kind", "text"}),
     "reasoning": frozenset({"kind", "text"}),
@@ -125,6 +131,35 @@ def clean_json(value: Any, what: str) -> Any:
     if isinstance(value, Mapping):
         return {clean_text(str(key)): clean_json(item, what) for key, item in value.items()}
     raise InvalidValueError(f"{what} holds a value that is not JSON: {type(value).__name__}")
+
+
+def kept_structured(structured: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """A tool result's structured content as the transcript keeps it. ``None`` for a result
+    without one, for one whose JSON is longer than ``MAX_STRUCTURED_BYTES``, and for one that
+    is not JSON: the result then has its text alone."""
+    if structured is None:
+        return None
+    try:
+        cleaned: dict[str, Any] = clean_json(dict(structured), "a tool result's structured content")
+    except InvalidValueError:
+        return None
+    if len(json.dumps(cleaned).encode()) > MAX_STRUCTURED_BYTES:
+        return None
+    return cleaned
+
+
+def _structured_document(structured: Mapping[str, Any] | None) -> dict[str, Any]:
+    if structured is None:
+        return {}
+    return {"structured": clean_json(dict(structured), "a tool result's structured content")}
+
+
+def _read_structured(value: object, what: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise InvalidValueError(f"{what} is not an object: {value!r}")
+    return dict(value)
 
 
 # --- spelling ------------------------------------------------------------------
@@ -221,7 +256,7 @@ def part_to_document(part: MessagePart) -> dict[str, Any]:
                 "call_id": clean_text(part.call_id),
                 "text": clean_text(part.text),
                 "is_error": bool(part.is_error),
-            }
+            } | _structured_document(part.structured)
     raise InvalidValueError(f"a part of a kind this build does not know: {type(part).__name__}")
 
 
@@ -229,7 +264,8 @@ def part_from_document(document: object) -> MessagePart:
     if not isinstance(document, Mapping):
         raise InvalidValueError(f"a part is not a document: {type(document).__name__}")
     kind = _read_kind(document, PART_KEYS, "a part")
-    read = _read_keys(document, PART_KEYS[kind], f"a {kind} part")
+    optional = STRUCTURED_KEYS if kind == "tool_result" else frozenset()
+    read = _read_keys(document, PART_KEYS[kind], f"a {kind} part", optional)
     match kind:
         case "text":
             return TextPart(_read_text(read["text"], "a text part's text"))
@@ -248,6 +284,7 @@ def part_from_document(document: object) -> MessagePart:
         _read_text(read["call_id"], "a tool result's call id"),
         _read_text(read["text"], "a tool result's text"),
         _read_bool(read["is_error"], "a tool result's is_error"),
+        _read_structured(read.get("structured"), "a tool result's structured content"),
     )
 
 
@@ -374,7 +411,7 @@ def event_to_document(turn_id: uuid.UUID, position: int, event: TurnEvent) -> di
                 "call_id": clean_text(event.call_id),
                 "text": clean_text(event.text),
                 "is_error": bool(event.is_error),
-            }
+            } | _structured_document(event.structured)
             kind = "result_landed"
         case MessageCompleted():
             body, kind = {"message_id": str(event.message_id)}, "message_completed"
@@ -395,7 +432,8 @@ def event_from_document(document: object) -> NumberedEvent:
         raise InvalidValueError(f"an event is not a document: {type(document).__name__}")
     _read_version(document, "an event")
     kind = _read_kind(document, EVENT_KEYS, "an event")
-    read = _read_keys(document, EVENT_HEAD | EVENT_KEYS[kind], f"a {kind} event")
+    optional = STRUCTURED_KEYS if kind == "result_landed" else frozenset()
+    read = _read_keys(document, EVENT_HEAD | EVENT_KEYS[kind], f"a {kind} event", optional)
     _read_id(read["turn_id"], "an event's turn_id")
     position = read["position"]
     if not isinstance(position, int) or isinstance(position, bool) or position < 1:
@@ -444,6 +482,7 @@ def event_from_document(document: object) -> NumberedEvent:
                 _read_text(read["call_id"], "an event's call_id"),
                 _read_text(read["text"], "a result_landed event's text"),
                 _read_bool(read["is_error"], "a result_landed event's is_error"),
+                _read_structured(read.get("structured"), "a result_landed event's structured"),
             )
         case "message_completed":
             event = MessageCompleted(_read_id(read["message_id"], "an event's message_id"))

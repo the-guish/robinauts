@@ -2,16 +2,23 @@
 # Copyright The Robinauts Authors
 
 """The agent's tools: toolsets of its MCP servers with the server's credential, and one toolset of
-its function tools."""
+its function tools.
+
+An MCP result has text for the model and may have structured content for a view
+(``docs/architecture/mcp-apps.md``). Pydantic AI hands the model the structured content in the
+text's place when a result has both. ``TextToModel`` puts the text back and keeps the structured
+content on the tool return's metadata, where the engine reads it."""
 
 from __future__ import annotations
 
 import base64
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic_ai import RunContext, Tool
+from mcp.types import TextContent
+from pydantic_ai import RunContext, Tool, ToolReturn
 from pydantic_ai.exceptions import ApprovalRequired, CallDeferred, ModelRetry, ToolFailed
 from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.toolsets import AbstractToolset, FunctionToolset, ToolsetTool, WrapperToolset
@@ -43,10 +50,60 @@ def toolset_for(server: ToolServerConfig, settings: EngineSettings) -> AbstractT
         read_timeout=server.timeout_seconds,
         tool_error_behavior="failed",
     )
+    heard_from(toolset.client)
+    toolset = TextToModel(toolset)
     if server.exclude:
         excluded = set(server.exclude)
         toolset = toolset.filtered(lambda _context, tool: tool.name not in excluded)
     return FailuresToModel(toolset)
+
+
+STRUCTURED_CONTENT = "structured_content"
+"""The key of a tool return's metadata that holds an MCP result's structured content."""
+
+_HEARD: ContextVar[list[Any] | None] = ContextVar("robinauts_mcp_results", default=None)
+"""The MCP results of the tool call this task is making, as the client received them."""
+
+
+def heard_from(client: Any) -> None:
+    """Have the toolset's MCP client hand each result it receives to the tool call that asked,
+    as the server gave it: the toolset itself returns a result already mapped for the model."""
+    call: Callable[..., Awaitable[Any]] = client.call_tool
+
+    async def call_tool(*args: Any, **kwargs: Any) -> Any:
+        result = await call(*args, **kwargs)
+        heard = _HEARD.get()
+        if heard is not None:
+            heard.append(result)
+        return result
+
+    client.call_tool = call_tool
+
+
+@dataclass
+class TextToModel(WrapperToolset[Any]):
+    """An MCP result with structured content: its text is what the model reads, and the
+    structured content is kept on the return's metadata, apart. A result of text parts alone is
+    their text, one string, or a list of several; any other result is as Pydantic AI maps it."""
+
+    async def call_tool(
+        self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any], tool: ToolsetTool[Any]
+    ) -> Any:
+        heard: list[Any] = []
+        token = _HEARD.set(heard)
+        try:
+            mapped = await super().call_tool(name, tool_args, ctx, tool)
+        finally:
+            _HEARD.reset(token)
+        result = heard[-1] if heard else None
+        structured = getattr(result, "structured_content", None)
+        if not isinstance(structured, dict):
+            return mapped
+        parts = list(getattr(result, "content", None) or [])
+        texts = [part.text for part in parts if isinstance(part, TextContent)]
+        if texts and len(texts) == len(parts):
+            mapped = texts[0] if len(texts) == 1 else texts
+        return ToolReturn(return_value=mapped, metadata={STRUCTURED_CONTENT: structured})
 
 
 @dataclass

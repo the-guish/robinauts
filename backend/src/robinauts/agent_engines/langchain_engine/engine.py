@@ -269,5 +269,17 @@ def events_of(mode: str, payload: Any) -> Iterator[Event]:
                     yield ToolCall(str(call["id"]), call["name"], call["args"])
             elif isinstance(message, ToolMessage):
                 yield ToolResult(
-                    message.tool_call_id, str(message.name), message.text, message.status == "error"
+                    message.tool_call_id,
+                    str(message.name),
+                    message.text,
+                    message.status == "error",
+                    structured_content_of(message),
                 )
+
+
+def structured_content_of(message: ToolMessage) -> Mapping[str, Any] | None:
+    """The structured content of an MCP result, which the adapter keeps on the message's
+    artifact, beside the content the model reads."""
+    artifact = message.artifact
+    structured = artifact.get("structured_content") if isinstance(artifact, Mapping) else None
+    return structured if isinstance(structured, Mapping) else None

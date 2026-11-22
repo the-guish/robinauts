@@ -46,9 +46,11 @@ from robinauts.shared_domain.domain import (
     Config,
     Message,
     Project,
+    ResultLanded,
     Role,
     Session,
     TextPart,
+    ToolResultPart,
     Turn,
     TurnEnded,
     TurnStarted,
@@ -149,6 +151,30 @@ class RobinautsController(Controller):
         if latest is not None and latest.state in ENDED_BADLY:
             ended_badly = latest
         return OpenedSession(session, tuple(reversed(thread)), active, ended_badly)
+
+    async def tool_result(
+        self, user: User, session_id: uuid.UUID, *, message_id: uuid.UUID, call_id: str
+    ) -> ToolResultPart:
+        await self._store.get_session(user.id, session_id)
+        for message in await load_messages(self._store, user.id, session_id):
+            if message.id != message_id:
+                continue
+            for part in message.parts:
+                if isinstance(part, ToolResultPart) and part.call_id == call_id:
+                    return part
+        # An answer still being produced is not stored yet: its results are the turn's events.
+        running = await self._store.active_turn(user.id, session_id)
+        if running is not None:
+            events = await self._store.events_after(user.id, session_id, running.id, 0)
+            for _, document in events:
+                landed = event_from_document(document).event
+                if not isinstance(landed, ResultLanded):
+                    continue
+                if landed.message_id == message_id and landed.call_id == call_id:
+                    return ToolResultPart(
+                        landed.call_id, landed.text, landed.is_error, landed.structured
+                    )
+        raise MessageNotFoundError(f"no result of call {call_id!r} on message {message_id}")
 
     async def rename_session(self, user: User, session_id: uuid.UUID, title: str) -> Session:
         session = await self._store.get_session(user.id, session_id)

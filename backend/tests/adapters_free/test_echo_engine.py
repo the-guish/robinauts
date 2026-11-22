@@ -37,7 +37,9 @@ async def test_a_turn_calls_the_tool_and_answers_the_fixed_string_plus_its_resul
     call, result, *said, done = await turn("hello", after="any checkpoint at all")
     assert isinstance(call, ToolCall)
     assert (call.name, call.raw_input) == (TOOL, {"text": "hello"})
-    assert result == ToolResult(call_id=call.call_id, name=TOOL, raw_output="hello")
+    assert result == ToolResult(
+        call_id=call.call_id, name=TOOL, raw_output="hello", structured_content={"text": "hello"}
+    )
     assert said == [TextDelta(text=ANSWER), TextDelta(text="hello")]
     assert isinstance(done, Done)
     assert done.text == ANSWER + "hello"
