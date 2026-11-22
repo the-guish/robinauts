@@ -166,3 +166,33 @@ export function addableTabs(
 ): readonly TabOffer[] {
   return offers.filter((offer) => !tabs.open.includes(offer.key));
 }
+
+const CLOSED_KEY = "side.closed.";
+
+/**
+ * The calls whose sub-tabs this browser closed in a conversation
+ * (`./apps.ts`, `callRef`).
+ *
+ * A sub-tab is closed by the call it showed, so a later call of the agent's
+ * for the same thing opens it again. Read as defensively as the open tabs.
+ */
+export function rememberedClosed(conversation: string): readonly string[] {
+  const text = remembered(CLOSED_KEY + conversation);
+  if (text === null) return [];
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(value.filter((ref): ref is string => typeof ref === "string")),
+  ];
+}
+
+/** Remember one more closed call of a conversation. */
+export function rememberClosed(conversation: string, ref: string): void {
+  const closed = new Set([...rememberedClosed(conversation), ref]);
+  remember(CLOSED_KEY + conversation, JSON.stringify([...closed]));
+}

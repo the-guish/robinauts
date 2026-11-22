@@ -10,6 +10,11 @@
  * hand is empty until the agent calls a tool of the view, and a conversation
  * opened again shows the sub-tabs it had.
  *
+ * **A sub-tab closes on its own.** This browser remembers the call it
+ * showed as closed, per conversation (`./tabs.ts`), so it stays closed when
+ * the conversation is opened again, and a later call of the agent's for the
+ * same thing opens it again. The others keep their names.
+ *
  * **The one on top** is the one the person picked, until the agent asks for
  * another (`asked`); with neither, the one of the newest call.
  *
@@ -19,12 +24,15 @@
  * view, not all of them.
  *
  * **Keyboard.** The strip is a tab list: Left and Right move to the
- * neighbouring sub-tab and bring it to the top, Home and End go to the ends.
+ * neighbouring sub-tab and bring it to the top, Home and End go to the ends,
+ * Delete closes the one on top. Its close button is the next Tab stop.
  */
-import { type KeyboardEvent, useId, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 
+import { XIcon } from "../icons";
 import { AppFrame } from "./AppFrame";
-import type { App, SubTab } from "./apps";
+import { type App, callRef, type SubTab } from "./apps";
+import { rememberClosed, rememberedClosed } from "./tabs";
 
 /** The sub-tab the agent last asked for, and a count that grows each time. */
 export interface Asked {
@@ -46,6 +54,12 @@ export function AppTab({
   subTabs: readonly SubTab[];
   asked: Asked | null;
 }>) {
+  // The calls whose sub-tabs the person closed, as this browser remembers.
+  const [closed, setClosed] = useState<ReadonlySet<string>>(
+    () => new Set(conversation === null ? [] : rememberedClosed(conversation)),
+  );
+  const open = subTabs.filter((sub) => !closed.has(callRef(sub.call)));
+
   // The agent's last asking, kept once its turn is over and `asked` is gone.
   const [asking, setAsking] = useState(asked);
   if (asked !== null && asked.at !== asking?.at) setAsking(asked);
@@ -57,11 +71,11 @@ export function AppTab({
   );
   const wanted =
     picked !== null && picked.after === askedAt ? picked.key : asking?.sub;
-  const newest = subTabs.reduce<SubTab | null>(
+  const newest = open.reduce<SubTab | null>(
     (latest, sub) => (latest === null || sub.last > latest.last ? sub : latest),
     null,
   );
-  const selected = subTabs.find((sub) => sub.key === wanted) ?? newest;
+  const selected = open.find((sub) => sub.key === wanted) ?? newest;
 
   // The sub-tabs that have been on top, which are the ones with a frame.
   const [framed, setFramed] = useState<ReadonlySet<string>>(new Set());
@@ -78,19 +92,51 @@ export function AppTab({
   const tabId = (key: string) => `${base}-sub-${encodeURIComponent(key)}`;
   const panelId = (key: string) => `${base}-view-${encodeURIComponent(key)}`;
 
+  // Where the keyboard goes once a sub-tab has closed: the one now on top.
+  const focusNext = useRef<string | null>(null);
+  useEffect(() => {
+    const next = focusNext.current;
+    if (next === null) return;
+    focusNext.current = null;
+    tabs.current.get(next)?.focus();
+  });
+
   const pick = (key: string) => {
     setPicked({ key, after: askedAt });
     tabs.current.get(key)?.focus();
   };
 
+  /** Close a sub-tab. The one on top goes to its right-hand neighbour, or
+   * the left-hand one when it was the last, as the tabs above do. */
+  const close = (sub: SubTab) => {
+    if (conversation === null) return;
+    const at = open.indexOf(sub);
+    const next = open[at + 1] ?? open[at - 1];
+    const ref = callRef(sub.call);
+    rememberClosed(conversation, ref);
+    setClosed(new Set([...closed, ref]));
+    setFramed(new Set([...framed].filter((key) => key !== sub.key)));
+    if (sub.key === selected?.key && next !== undefined) {
+      setPicked({ key: next.key, after: askedAt });
+      focusNext.current = next.key;
+    }
+  };
+
   const onKey = (event: KeyboardEvent<HTMLButtonElement>, at: number) => {
+    const current = open[at];
+    if (current === undefined) return;
+    if (event.key === "Delete") {
+      event.preventDefault();
+      close(current);
+      return;
+    }
     const to = new Map([
-      ["ArrowRight", (at + 1) % subTabs.length],
-      ["ArrowLeft", (at - 1 + subTabs.length) % subTabs.length],
+      ["ArrowRight", (at + 1) % open.length],
+      ["ArrowLeft", (at - 1 + open.length) % open.length],
       ["Home", 0],
-      ["End", subTabs.length - 1],
+      ["End", open.length - 1],
     ]).get(event.key);
-    const target = to === undefined ? undefined : subTabs[to];
+    const target = to === undefined ? undefined : open[to];
     if (target === undefined) return;
     event.preventDefault();
     pick(target.key);
@@ -99,7 +145,7 @@ export function AppTab({
   if (conversation === null || selected === null) {
     return (
       <p className="side-empty">
-        Nothing to show yet. {app.title} shows here when the agent uses it.
+        Nothing to show. {app.title} shows here when the agent uses it.
       </p>
     );
   }
@@ -111,37 +157,56 @@ export function AppTab({
         aria-label={`${app.title}, shown`}
         className="side-sub-strip"
       >
-        {subTabs.map((sub, at) => {
+        {open.map((sub, at) => {
           const isSelected = sub.key === selected.key;
           return (
-            <button
+            // The close button sits beside its tab, not inside it: a button
+            // in a button is no button at all to a reader.
+            <div
               key={sub.key}
-              type="button"
-              role="tab"
-              id={tabId(sub.key)}
-              ref={(node) => {
-                if (node === null) tabs.current.delete(sub.key);
-                else tabs.current.set(sub.key, node);
-              }}
-              aria-selected={isSelected}
-              aria-controls={panelId(sub.key)}
-              tabIndex={isSelected ? 0 : -1}
-              title={sub.title}
+              role="presentation"
               data-selected={isSelected}
-              onClick={() => {
-                pick(sub.key);
-              }}
-              onKeyDown={(event) => {
-                onKey(event, at);
-              }}
               className="side-sub"
             >
-              {sub.title}
-            </button>
+              <button
+                type="button"
+                role="tab"
+                id={tabId(sub.key)}
+                ref={(node) => {
+                  if (node === null) tabs.current.delete(sub.key);
+                  else tabs.current.set(sub.key, node);
+                }}
+                aria-selected={isSelected}
+                aria-controls={panelId(sub.key)}
+                tabIndex={isSelected ? 0 : -1}
+                title={sub.title}
+                onClick={() => {
+                  pick(sub.key);
+                }}
+                onKeyDown={(event) => {
+                  onKey(event, at);
+                }}
+                className="side-sub-name"
+              >
+                {sub.title}
+              </button>
+              <button
+                type="button"
+                aria-label={`Close ${sub.title}`}
+                title={`Close ${sub.title}`}
+                tabIndex={isSelected ? 0 : -1}
+                onClick={() => {
+                  close(sub);
+                }}
+                className="side-sub-close"
+              >
+                <XIcon className="side-icon-small" />
+              </button>
+            </div>
           );
         })}
       </div>
-      {subTabs
+      {open
         .filter((sub) => framed.has(sub.key) || sub.key === selected.key)
         .map((sub) => (
           <div

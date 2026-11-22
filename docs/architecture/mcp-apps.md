@@ -90,6 +90,8 @@ sequenceDiagram
 - **A call with the same tool and arguments uses the sub-tab of the earlier call.** The view
   there is sent the new result.
 - **The agent's call opens the tab and selects the sub-tab.** A collapsed panel stays collapsed.
+- **A sub-tab has its own close button.** The browser remembers the call it showed as closed, per
+  conversation. A later call for it opens it again. The other sub-tabs keep their names.
 - **"Add a tab" lists the agent's views.** A tab added by hand is empty until the conversation
   has a call for it.
 - **Sub-tabs come from the transcript**: the tool calls of the thread on the screen. A reopened

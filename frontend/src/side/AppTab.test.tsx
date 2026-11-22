@@ -378,3 +378,43 @@ test("a tab is empty until the agent calls, then holds a sub-tab per call, the a
     method: "ui/resource-teardown",
   });
 });
+
+test("a sub-tab closes on its own, stays closed, and a later call of the agent's opens it again", () => {
+  localStorage.clear();
+  answering();
+  const first = shown("c1", "a", { live: false });
+  const second = shown("c2", "b", { live: false });
+  const names = () =>
+    screen.queryAllByRole("tab").map((tab) => tab.textContent);
+  const { unmount } = render(tabOf([first, second]));
+
+  // The one on top is closed: its frame goes, and its neighbour takes the top.
+  fireEvent.click(screen.getByRole("button", { name: "Close Diagram 2" }));
+  expect(names()).toEqual(["Diagram 1"]);
+  expect(document.querySelector('iframe[title="Diagram 2"]')).toBeNull();
+  expect(screen.getByRole("tab", { name: "Diagram 1" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  expect(frameOf("Diagram 1")).toBeInTheDocument();
+
+  // Delete closes the one on top too. With none left, the tab says so.
+  fireEvent.keyDown(screen.getByRole("tab", { name: "Diagram 1" }), {
+    key: "Delete",
+  });
+  expect(names()).toEqual([]);
+  expect(
+    screen.getByText(/Diagrams shows here when the agent uses it/),
+  ).toBeInTheDocument();
+
+  // The conversation opened again: this browser remembers both as closed.
+  unmount();
+  const again = render(tabOf([first, second]));
+  expect(names()).toEqual([]);
+
+  // The agent shows the second diagram again: its sub-tab is back, under
+  // the name it had.
+  again.rerender(tabOf([first, second, shown("c3", "b")]));
+  expect(names()).toEqual(["Diagram 2"]);
+  localStorage.clear();
+});

@@ -107,6 +107,14 @@ export interface ShownCall {
   readonly state: ThreadToolCall["state"];
 }
 
+/** How a call is named: by its answer and its own id. */
+export function callRef(call: {
+  readonly messageId: string;
+  readonly callId: string;
+}): string {
+  return `${call.messageId}/${call.callId}`;
+}
+
 /** One sub-tab: a tool of the app with its arguments, and its newest call. */
 export interface SubTab {
   /** Unique in its tab: the tool and its arguments. */
@@ -208,7 +216,7 @@ export function lastAsked(
     return {
       tab: appTabKey(app.server, app.view),
       sub: subTabKey(call.name, call.arguments),
-      callId: `${call.messageId}/${call.callId}`,
+      callId: callRef(call),
     };
   }
   return null;

@@ -202,7 +202,7 @@ def test_side_panel_and_an_app(server: Server, page: Page) -> None:
 
     # 5. Close the tab: it is offered again. Open it again: the conversation's sub-tab is back,
     #    and its view shows the server's list.
-    page.get_by_role("button", name="Close To-do list").click()
+    page.get_by_role("button", name="Close To-do list", exact=True).click()
     expect(frame_element).to_have_count(0)
     assert menu(page) == ["To-do list"]
     page.get_by_role("menuitem", name="To-do list").click()
@@ -320,13 +320,26 @@ def test_the_agent_s_diagrams_are_sub_tabs(server: Server, page: Page) -> None:
     expect(page.get_by_role("tab", name="Diagram 1")).to_have_attribute("aria-selected", "true")
     assert sub_tabs(page) == ["Diagram 1", "Diagram 2"]
 
-    # 6. The conversation left for a new chat and opened again: its sub-tabs are rebuilt from
-    #    its tool calls, the one of the newest call on top, and each view shows its diagram.
+    # 6. The second sub-tab is closed: the first stays, under its name.
+    page.get_by_role("button", name="Close Diagram 2").click()
+    assert sub_tabs(page) == ["Diagram 1"]
+    expect(page.locator('iframe[title="Diagram 2"]')).to_have_count(0)
+
+    # 7. The conversation left for a new chat and opened again: its sub-tabs are rebuilt from
+    #    its tool calls, the closed one stays closed, and the view shows its diagram.
     page.get_by_role("button", name="New chat").click()
     expect(page.get_by_role("tablist", name="Diagrams, shown")).to_have_count(0)
     page.get_by_role("link", name="draw a b").click()
     expect(page.get_by_role("tab", name="Diagram 1")).to_have_attribute("aria-selected", "true")
-    assert sub_tabs(page) == ["Diagram 1", "Diagram 2"]
+    assert sub_tabs(page) == ["Diagram 1"]
     expect(drawn(page, "Diagram 1")).to_have_text("Diagram: 3 nodes, 1 arrows.")
-    page.get_by_role("tab", name="Diagram 2").click()
-    expect(drawn(page, "Diagram 2")).to_have_text("Diagram: 3 nodes, 2 arrows.")
+
+    # 8. The last sub-tab is closed with the keyboard: the tab is empty. The agent shows that
+    #    diagram again, and its sub-tab is back.
+    page.get_by_role("tab", name="Diagram 1").press("Delete")
+    expect(page.get_by_text("Diagrams shows here when the agent uses it.")).to_be_visible()
+    send(page, "show the first")
+    expect(agent_answers.nth(4)).to_contain_text("Done: show the first")
+    expect(page.get_by_role("tab", name="Diagram 1")).to_have_attribute("aria-selected", "true")
+    assert sub_tabs(page) == ["Diagram 1"]
+    expect(drawn(page, "Diagram 1")).to_have_text("Diagram: 3 nodes, 1 arrows.")

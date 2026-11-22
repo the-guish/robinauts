@@ -88,11 +88,14 @@
     view's host: it tells the view the arguments and the result of the
     agent's call, relays the view's `tools/call` to the backend, answers
     `ping`, and refuses anything else. The agent's call opens the tab and
-    selects the sub-tab, and a collapsed panel stays collapsed. The view is
+    selects the sub-tab, and a collapsed panel stays collapsed. A sub-tab
+    has a close button of its own, and stays closed, per conversation and
+    per browser, until the agent calls for it again. The view is
     hidden until it has been told the result. A view that does not start,
     or a result that cannot be read, is said so in its place, with
     "Try again".
-  - The keyboard: Left and Right move between tabs, Delete closes one;
+  - The keyboard: Left and Right move between tabs, and between an app's
+    sub-tabs, Delete closes one;
     the menu takes the arrow keys and closes on Escape.
 - The theme follows the operating system by default. The shell's toggle,
   on the rail, is remembered per browser.
