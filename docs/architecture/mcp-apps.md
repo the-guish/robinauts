@@ -82,8 +82,9 @@ sequenceDiagram
 
 ## Tabs and sub-tabs
 
-- **A tab is one view of one server.** Its title is the view's title in the server's resource
-  list. A server that does not list the view gives the title of the first tool that names it.
+- **A tab is one view of one server.** Its title is the view's `title` in the server's resource
+  list, or its `name`. A server that does not list the view gives the title of the first tool
+  that names it.
 - **A sub-tab is one call of the agent**: a tool with that view, and its arguments. Its name is
   the tool's title and a number, `Diagram 1`.
 - **A call with the same tool and arguments uses the sub-tab of the earlier call.** The view
@@ -109,20 +110,27 @@ sequenceDiagram
 | 23 | `ui/resource-teardown` | sent before the frame is removed; the panel does not wait for the answer |
 
 - The side panel is reported as `inline`. A view fills the box of its `containerDimensions`.
+- A frame that is not on the screen has no size. Its `containerDimensions` come later, in
+  `host-context-changed`.
 - The text block holds the text the model read.
 - The panel sends a view nothing before `ui/notifications/initialized`.
+- A cancelled call leaves its view in place.
 
 ## What a view may ask
 
 - **`tools/call`** is relayed to the view's own server
   (`POST /robinauts/api/apps/<server>/tools/<tool>`). The tool must be one the agent is given,
-  with `app` in `_meta.ui.visibility`.
+  with `app` in `_meta.ui.visibility`. A view may call a tool as soon as it runs. A call the
+  backend refuses is answered with a JSON-RPC error.
 - **`ping`** is answered.
 - **Every other request is answered "method not found"**: `ui/open-link`, `ui/message`,
   `ui/update-model-context`, `ui/request-display-mode`, `resources/read`.
 - **A view keeps its data fresh by polling**, the standard's pattern: it calls an `app` tool
   again every few seconds. A view polls only while it is drawn. The example views ask the browser
-  for a frame before each read, and a hidden frame is given none.
+  for an animation frame before each read. The panel hides a frame with `display: none`, and
+  the browser gives such a frame none.
+- **A result told later may be older than what the view read itself.** The view keeps the newer
+  of the two.
 
 ## How the result reaches the view
 
@@ -158,7 +166,7 @@ The view runs next to a page that holds a signed-in person's session.
 - **The panel reads a message only from its frame's window.** An opaque origin has no name, so
   the panel posts to `"*"`. It sends what the view's own server already has: the theme, the size,
   the arguments of the agent's call and the server's answers. A tool call the backend refuses is
-  answered with fixed words.
+  answered with fixed words, whatever the backend said.
 - **The server's credential stays on the backend.** The browser never reaches a tool server.
 - **A server that cannot be reached is left out of the list**, and logged by its id and the kind
   of failure.
