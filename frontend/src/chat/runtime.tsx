@@ -53,7 +53,7 @@ import {
   UNKNOWN_MODEL,
 } from "../api/client";
 import { cancelRun, type Opened } from "../conversation/conversation";
-import type { ChatProps, Drafts, ThreadToolCall } from "./index";
+import type { ChatProps, Drafts, ThreadToolCalls } from "./index";
 import {
   attach,
   startNewConversation,
@@ -72,6 +72,7 @@ import {
   sameRead,
   STOP_DID_NOT_ARRIVE,
   storedParent,
+  sameToolCalls,
   toolCallsOf,
   turnStart,
   under,
@@ -268,6 +269,9 @@ function keepDraft(
   else drafts.set(conversationId, text);
 }
 
+/** The thread before anything is on the screen: no conversation, no calls. */
+const NO_CALLS: ThreadToolCalls = { conversationId: null, calls: [] };
+
 export function useChat(props: ChatProps): Chatting {
   const [state, dispatch] = useReducer(reduce, EMPTY);
 
@@ -289,18 +293,26 @@ export function useChat(props: ChatProps): Chatting {
   });
 
   // The thread's tool calls, told each time they change (`./index.ts`,
-  // `onToolCalls`). Compared as text: a new array of the same calls, which
-  // every piece of an answer's text makes, is no change to tell.
-  const toolCalls = toolCallsOf(state);
-  const toldCalls = JSON.stringify([state.conversationId, toolCalls]);
+  // `onToolCalls`). Kept as they were last told: a new list of the same
+  // calls, which every piece of an answer's text makes, is no change to
+  // tell, and is found to be none without writing the calls out
+  // (`sameToolCalls`).
+  const { messages, streamed } = state;
+  const toolCalls = useMemo(
+    () => toolCallsOf({ messages, streamed }),
+    [messages, streamed],
+  );
+  const [thread, setThread] = useState<ThreadToolCalls>(NO_CALLS);
+  if (
+    thread.conversationId !== state.conversationId ||
+    !sameToolCalls(thread.calls, toolCalls)
+  ) {
+    setThread({ conversationId: state.conversationId, calls: toolCalls });
+  }
   const onToolCalls = props.onToolCalls;
   useEffect(() => {
-    const [conversationId, calls] = JSON.parse(toldCalls) as [
-      string | null,
-      ThreadToolCall[],
-    ];
-    onToolCalls?.({ conversationId, calls });
-  }, [toldCalls, onToolCalls]);
+    onToolCalls?.(thread);
+  }, [thread, onToolCalls]);
 
   // Which conversation is on the screen. Reading one is one call
   // (`docs/specs/conversations.md`), and leaving one abandons it.

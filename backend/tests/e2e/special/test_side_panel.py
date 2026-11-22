@@ -303,10 +303,13 @@ def test_the_agent_s_diagrams_are_sub_tabs(server: Server, page: Page) -> None:
     send(page, "add c")
     expect(agent_answers.nth(2)).to_contain_text("Done: add c")
     reads.clear()
-    page.wait_for_timeout(4500)
+    # Two rounds of the view on top, however long the runner takes over them: a hidden view
+    # that read would have asked in that time too.
+    for _ in range(2):
+        with page.expect_request(lambda r: r.url.endswith("/tools/show_diagram"), timeout=30_000):
+            pass
     asked = {r.post_data_json["arguments"]["diagram_id"] for r in reads}
     assert len(asked) == 1, asked
-    assert len(reads) >= 2, reads
     # On top again, the first view reads its diagram and shows what the agent added.
     page.get_by_role("tab", name="Diagram 1").click()
     expect(drawn(page, "Diagram 1")).to_have_text("Diagram: 3 nodes, 1 arrows.")

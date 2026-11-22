@@ -21,6 +21,8 @@ from robinauts.controller.contract.broker.documents import (
     kept_structured,
     message_from_document,
     message_to_document,
+    result_in_event,
+    result_in_message,
 )
 from robinauts.controller.contract.domain import InvalidValueError, NumberedEvent
 from robinauts.shared_domain.domain import (
@@ -127,15 +129,84 @@ def test_a_result_s_structured_content_is_written_only_when_it_has_one() -> None
         ({"nodes": [1, 2.5, "a", None, True]}, {"nodes": [1, 2.5, "a", None, True]}),
         ({"na\x00me": "bo\x00x"}, {"name": "box"}),
         ({"x": "a" * MAX_STRUCTURED_BYTES}, None),
+        # Measured as UTF-8: three bytes a character here, and six were it escaped to ASCII.
+        ({"x": "図" * (MAX_STRUCTURED_BYTES // 4)}, {"x": "図" * (MAX_STRUCTURED_BYTES // 4)}),
+        ({"x": "図" * (MAX_STRUCTURED_BYTES // 3)}, None),
         ({"x": float("nan")}, None),
         ({"x": {1, 2}}, None),
     ],
-    ids=["none", "empty", "json", "cleaned", "too-long", "not-a-json-number", "not-json"],
+    ids=[
+        "none",
+        "empty",
+        "json",
+        "cleaned",
+        "too-long",
+        "not-ascii-and-short-enough",
+        "not-ascii-and-too-long",
+        "not-a-json-number",
+        "not-json",
+    ],
 )
 def test_the_structured_content_the_transcript_keeps(
     structured: dict[str, object] | None, kept: dict[str, object] | None
 ) -> None:
     assert kept_structured(structured) == kept
+
+
+LANDED = ToolResultPart("toolu_01", "18°C", False, {"celsius": 18})
+
+
+@pytest.mark.parametrize(
+    ("message_id", "call_id", "found"),
+    [
+        (ANSWER, "toolu_01", ToolResultPart("toolu_01", "18°C, clear", is_error=False)),
+        (ANSWER, "toolu_02", None),
+        (QUESTION, "toolu_01", None),
+    ],
+    ids=["its-message-and-call", "another-call", "another-message"],
+)
+def test_a_call_s_result_is_found_in_its_message(
+    message_id: uuid.UUID, call_id: str, found: ToolResultPart | None
+) -> None:
+    assert result_in_message(message_to_document(answer()), message_id, call_id) == found
+
+
+@pytest.mark.parametrize(
+    ("event", "message_id", "call_id", "found"),
+    [
+        (
+            ResultLanded(ANSWER, "toolu_01", "18°C", False, {"celsius": 18}),
+            ANSWER,
+            "toolu_01",
+            LANDED,
+        ),
+        (
+            ResultLanded(ANSWER, "toolu_01", "18°C", False, {"celsius": 18}),
+            ANSWER,
+            "toolu_02",
+            None,
+        ),
+        (
+            ResultLanded(ANSWER, "toolu_01", "18°C", False, {"celsius": 18}),
+            QUESTION,
+            "toolu_01",
+            None,
+        ),
+        (CallCompleted(ANSWER, "toolu_01"), ANSWER, "toolu_01", None),
+    ],
+    ids=["its-message-and-call", "another-call", "another-message", "another-kind"],
+)
+def test_a_call_s_result_is_found_in_the_event_it_landed_in(
+    event: object, message_id: uuid.UUID, call_id: str, found: ToolResultPart | None
+) -> None:
+    document = event_to_document(TURN, 7, event)  # type: ignore[arg-type]
+    assert result_in_event(document, message_id, call_id) == found
+
+
+def test_a_search_for_a_result_decodes_no_other_document() -> None:
+    # Neither is a document a reader accepts: a search passes over what it is not looking for.
+    assert result_in_message({"id": str(QUESTION)}, ANSWER, "toolu_01") is None
+    assert result_in_event({"kind": "text_piece"}, ANSWER, "toolu_01") is None
 
 
 def test_a_question_has_every_field_with_nulls_where_nothing_applies() -> None:

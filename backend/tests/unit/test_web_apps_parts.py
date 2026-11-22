@@ -20,6 +20,7 @@ from robinauts.web.apps import (
     app_tool_of,
     apps_of,
     callable_by_apps,
+    shared_names,
     view_text,
     view_titles,
 )
@@ -115,6 +116,28 @@ def test_an_app_is_one_view_with_the_tools_that_name_it(
 ) -> None:
     assert apps_of("s", tools, titles) == apps
     assert [app.id for app in apps] == [f"s/{app.view}" for app in apps]
+
+
+@pytest.mark.parametrize(
+    ("servers", "shared"),
+    [
+        ([[{"name": "show"}, {"name": "add"}], [{"name": "show"}, {"name": "list"}]], {"show"}),
+        # With a view or without one, on either side: the call could be either server's.
+        (
+            [[{"name": "show", **ui(resourceUri=URI)}], [{"name": "show"}], [{"name": "show"}]],
+            {"show"},
+        ),
+        ([[{"name": "show"}, {"name": "add"}], [{"name": "list"}]], set()),
+        # Twice on one server is that server's own affair, and a name that is no name is none.
+        ([[{"name": "show"}, {"name": "show"}], [{"name": 7}, {}], [{"name": 7}]], set()),
+        ([], set()),
+    ],
+    ids=["one-shared", "three-servers", "none-shared", "one-server-twice", "no-servers"],
+)
+def test_a_tool_name_is_shared_when_more_than_one_server_gives_it(
+    servers: list[list[dict[str, Any]]], shared: set[str]
+) -> None:
+    assert shared_names(servers) == shared
 
 
 @pytest.mark.parametrize(

@@ -140,9 +140,10 @@ within its `timeout_seconds`, over streamable HTTP with a client of its own
   `{"apps": [{"id": "<server>/<view>", "server", "view", "title", "tools": [{"name", "title"}]}]}`,
   server by server in the agent's order. `view` is the view's `ui://` address. `title` is the
   view's title in the server's resource list, or the title of the first tool that names it.
-  `tools` are the tools that name the view, whatever their `_meta.ui.visibility`. A server that
-  cannot be reached is left out and logged by its id and the kind of failure. An unknown agent
-  is 404 `UnknownAgentError`.
+  `tools` are the tools that name the view, whatever their `_meta.ui.visibility`. A tool whose
+  name another of the agent's servers gives too is left out, and the log says how many. A
+  server that cannot be reached is left out and logged by its id and the kind of failure. An
+  unknown agent is 404 `UnknownAgentError`.
 - `open_app_view`: `GET /robinauts/api/apps/<server>/<tool>/view?agent=<agent>`, the HTML of the
   view that tool names, which the panel frames. Its answer alone carries
   `Content-Security-Policy: default-src 'none';

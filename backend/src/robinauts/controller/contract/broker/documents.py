@@ -145,7 +145,9 @@ def kept_structured(structured: Mapping[str, Any] | None) -> dict[str, Any] | No
         cleaned: dict[str, Any] = clean_json(dict(structured), _STRUCTURED)
     except InvalidValueError:
         return None
-    if len(json.dumps(cleaned).encode()) > MAX_STRUCTURED_BYTES:
+    # As UTF-8, the way a store holds it: escaped to ASCII, text in most scripts would count
+    # two or three times over.
+    if len(json.dumps(cleaned, ensure_ascii=False).encode()) > MAX_STRUCTURED_BYTES:
         return None
     return cleaned
 
@@ -506,3 +508,29 @@ def stored_message(message: Message) -> StoredMessage:
         message.created_at,
         message_to_document(message),
     )
+
+
+def result_in_message(
+    document: Mapping[str, Any], message_id: uuid.UUID, call_id: str
+) -> ToolResultPart | None:
+    """The call's result, when ``document`` is that message and holds it. No other message
+    is decoded."""
+    if document.get("id") != str(message_id):
+        return None
+    for part in message_from_document(document).parts:
+        if isinstance(part, ToolResultPart) and part.call_id == call_id:
+            return part
+    return None
+
+
+def result_in_event(
+    document: Mapping[str, Any], message_id: uuid.UUID, call_id: str
+) -> ToolResultPart | None:
+    """The call's result, when ``document`` is the event it landed in. No other event is
+    decoded."""
+    if document.get("kind") != "result_landed" or document.get("call_id") != call_id:
+        return None
+    landed = event_from_document(document).event
+    if not isinstance(landed, ResultLanded) or landed.message_id != message_id:
+        return None
+    return ToolResultPart(landed.call_id, landed.text, landed.is_error, landed.structured)

@@ -1215,3 +1215,32 @@ export function toolCallsOf(
     }),
   );
 }
+
+/**
+ * Whether two lists say the same calls, in the same order.
+ *
+ * Compared field by field. A call's arguments are one object for as long as
+ * the call is held, so they are compared as objects first and written out
+ * only when they are not the same one: after a conversation is read again.
+ * A piece of an answer's text, which makes a new list of the same calls,
+ * costs a look at each call and no more.
+ */
+export function sameToolCalls(
+  one: readonly ThreadToolCall[],
+  other: readonly ThreadToolCall[],
+): boolean {
+  if (one.length !== other.length) return false;
+  return one.every((call, at) => {
+    const beside = other[at];
+    return (
+      beside !== undefined &&
+      call.messageId === beside.messageId &&
+      call.callId === beside.callId &&
+      call.name === beside.name &&
+      call.state === beside.state &&
+      call.live === beside.live &&
+      (call.arguments === beside.arguments ||
+        JSON.stringify(call.arguments) === JSON.stringify(beside.arguments))
+    );
+  });
+}

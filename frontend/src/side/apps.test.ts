@@ -68,8 +68,12 @@ test.each<[unknown, string]>([
   [{}, "{}"],
   ["text", '"text"'],
   [undefined, "null"],
+  // Half a character, as a model may write one: escaped, in a value and in a key.
+  [{ "\ud800": ["a\udc00"] }, '{"\\ud800":["a\\udc00"]}'],
 ])("%j is the same text whatever order its keys came in", (value, text) => {
   expect(canonical(value)).toBe(text);
+  // An address or an element's id can carry it: nothing in it is half a character.
+  expect(() => encodeURIComponent(canonical(value))).not.toThrow();
 });
 
 test("a sub-tab is one tool with its arguments, numbered per tool, in the order first called", () => {
@@ -111,6 +115,26 @@ test("a sub-tab is one tool with its arguments, numbered per tool, in the order 
     },
   ]);
   expect(subTabsOf(APP, [])).toEqual([]);
+});
+
+test("two tools with one title are numbered together, so no two sub-tabs share a name", () => {
+  const app: App = {
+    ...APP,
+    tools: [
+      { name: "show_diagram", title: "Diagram" },
+      { name: "show_chart", title: "Diagram" },
+    ],
+  };
+  const calls = [
+    call("c1", "show_diagram", { diagram_id: "a" }),
+    call("c2", "show_chart", { chart_id: "b" }),
+    call("c3", "show_diagram", { diagram_id: "c" }),
+  ];
+  expect(subTabsOf(app, calls).map((sub) => sub.title)).toEqual([
+    "Diagram 1",
+    "Diagram 2",
+    "Diagram 3",
+  ]);
 });
 
 test("the agent is asking for the view of its newest call being made now", () => {

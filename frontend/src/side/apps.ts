@@ -164,7 +164,8 @@ export function subTabKey(
  * A call is the app's when the app has a tool of its name. A call whose
  * arguments are not whole yet is left out until they are. A call with the
  * same tool and arguments as an earlier one is that one's sub-tab, which
- * then shows the later call. Sub-tabs are numbered per tool.
+ * then shows the later call. Sub-tabs are numbered per title, so two tools
+ * with one title never give two sub-tabs one name.
  */
 export function subTabsOf(
   app: App,
@@ -186,8 +187,8 @@ export function subTabsOf(
       found.set(key, { ...held, call: shown, last });
       continue;
     }
-    const number = (numbered.get(tool.name) ?? 0) + 1;
-    numbered.set(tool.name, number);
+    const number = (numbered.get(tool.title) ?? 0) + 1;
+    numbered.set(tool.title, number);
     found.set(key, {
       key,
       title: `${tool.title} ${String(number)}`,

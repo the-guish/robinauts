@@ -92,8 +92,9 @@
     has a close button of its own, and stays closed, per conversation and
     per browser, until the agent calls for it again. The view is
     hidden until it has been told the result. A view that does not start,
-    or a result that cannot be read, is said so in its place, with
-    "Try again".
+    or a first result that cannot be read, is said so in its place, with
+    "Try again". A later result that cannot be read leaves the view as
+    it is.
   - The keyboard: Left and Right move between tabs, and between an app's
     sub-tabs, Delete closes one;
     the menu takes the arrow keys and closes on Escape.

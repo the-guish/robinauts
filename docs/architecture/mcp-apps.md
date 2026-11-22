@@ -86,7 +86,10 @@ sequenceDiagram
   list, or its `name`. A server that does not list the view gives the title of the first tool
   that names it.
 - **A sub-tab is one call of the agent**: a tool with that view, and its arguments. Its name is
-  the tool's title and a number, `Diagram 1`.
+  the tool's title and a number, `Diagram 1`. Sub-tabs are numbered per title: two tools with
+  one title give `Diagram 1` and `Diagram 2`.
+- **A call names its tool and not its server.** A tool name that two of the agent's servers
+  give could be a call to either. The panel lists such a tool with no view, on both servers.
 - **A call with the same tool and arguments uses the sub-tab of the earlier call.** The view
   there is sent the new result.
 - **The agent's call opens the tab and selects the sub-tab.** A collapsed panel stays collapsed.
@@ -146,6 +149,9 @@ structured content.
 3. **The panel asks for one call's result**:
    `GET /robinauts/api/conversations/<id>/messages/<message>/tool-result?call_id=<call>`
    ([web.md](web.md)). The chat's stream carries the text alone.
+4. **A result that cannot be read does not replace a view that is showing.** The panel says
+   so only in the place of a view with nothing to show yet. A view that is showing keeps what
+   it was told before.
 
 Every tool call is the agent's or a view's. The panel makes none of its own.
 

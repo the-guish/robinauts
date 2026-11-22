@@ -21,7 +21,8 @@ import asyncio
 import base64
 import binascii
 import logging
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections import Counter
+from collections.abc import AsyncIterator, Callable, Iterable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -188,6 +189,19 @@ def apps_of(server: str, tools: list[Mapping[str, Any]], titles: Mapping[str, st
     ]
 
 
+def shared_names(servers: Iterable[Iterable[Mapping[str, Any]]]) -> frozenset[str]:
+    """The tool names that more than one of the servers gives. A call says its tool's name and
+    not its server, so a call of such a tool could be any of those servers': none of them is
+    listed with a view, and no view is told a call that another server answered."""
+    given = Counter(
+        name
+        for tools in servers
+        for name in {tool.get("name") for tool in tools}
+        if isinstance(name, str)
+    )
+    return frozenset(name for name, count in given.items() if count > 1)
+
+
 def is_view(mime_type: object) -> bool:
     return isinstance(mime_type, str) and mime_type.replace(" ", "").lower() == UI_MIME_TYPE
 
@@ -324,21 +338,42 @@ class Apps:
             return titles
         return titles
 
-    async def _apps_of(self, server: ToolServerConfig) -> list[App]:
+    async def _listed(
+        self, server: ToolServerConfig
+    ) -> tuple[list[Mapping[str, Any]], dict[str, str]]:
+        """The tools the server gives the agent and the titles of its views: none of either
+        from a server that cannot be reached."""
         try:
             async with self._session(server) as opened:
                 tools = await self._tools(opened, server)
                 titles = await self._view_titles(opened) if any(map(view_of, tools)) else {}
         except FAILURES as error:
             self._failed(server, "listing its apps, left out", error)
-            return []
-        return apps_of(server.id, tools, titles)
+            return [], {}
+        return tools, titles
 
     async def of(self, agent_id: str) -> list[App]:
         """The agent's apps, server by server in the order it names them. A server that cannot
-        be reached is left out."""
-        found = await asyncio.gather(*(self._apps_of(s) for s in self.servers_of(agent_id)))
-        return [app for apps in found for app in apps]
+        be reached is left out, and so is a tool whose name another of the servers gives too
+        (``shared_names``)."""
+        servers = self.servers_of(agent_id)
+        listed = await asyncio.gather(*(self._listed(server) for server in servers))
+        shared = shared_names(tools for tools, _ in listed)
+        if shared:
+            # By how many, never by name: a tool's name is what a server said.
+            log.warning(
+                "agent %s: %d tool names are given by more than one of its tool servers,"
+                " and are shown in no view",
+                agent_id,
+                len(shared),
+            )
+        return [
+            app
+            for server, (tools, titles) in zip(servers, listed, strict=True)
+            for app in apps_of(
+                server.id, [tool for tool in tools if tool.get("name") not in shared], titles
+            )
+        ]
 
     async def view(self, agent_id: str, server_id: str, tool: str) -> str:
         """The HTML of the tool's view; ``NoSuchAppError`` for a tool without one, and for a

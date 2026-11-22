@@ -25,8 +25,9 @@
  * too, and its result is told to the view already here.
  *
  * **Loading.** The view is hidden until it has been told a result. A view
- * that never starts, or a result that cannot be read, is said so in its
- * place, with a way to try again.
+ * that never starts, or a first result that cannot be read, is said so in
+ * its place, with a way to try again. A later call's result that cannot be
+ * read leaves the view as it is, showing what it was told before.
  */
 import {
   useEffect,
@@ -241,7 +242,13 @@ export function AppFrame({
       },
       (failure: unknown) => {
         if (dropped.signal.aborted) return;
-        setState({ status: "failed", detail: detailOf(failure) });
+        // A view that is showing a result is left as it is: only a view with
+        // nothing to show yet has this said in its place.
+        setState((was) =>
+          was.status === "ready"
+            ? was
+            : { status: "failed", detail: detailOf(failure) },
+        );
       },
     );
     return () => {

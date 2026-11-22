@@ -314,6 +314,28 @@ test("a result that cannot be read says so in the view's place, and can be tried
   expect(frameOf("Diagram 1")).not.toBe(frame);
 });
 
+test("a later result that cannot be read leaves the view that is showing", async () => {
+  const fetch = answering();
+  const { frame, posted, rerender } = await started();
+  expect(screen.queryByRole("status")).toBeNull();
+
+  // The agent shows the same diagram again, and this call's result is not read.
+  answering(() => refusal(404, "MessageNotFoundError", "No such result."));
+  rerender(tabOf([shown("c1", "a"), shown("c9", "a", { messageId: "m4" })]));
+  await waitFor(() => {
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledOnce();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+  // The same frame, still shown, with what it was told before and no more.
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(frameOf("Diagram 1")).toBe(frame);
+  expect(frame.closest(".side-app")).toHaveAttribute("data-state", "ready");
+  expect(sent(posted)).toHaveLength(3);
+  expect(fetch).toHaveBeenCalledOnce();
+});
+
 test("a view that loads and never asks to start is said not to have", () => {
   vi.useFakeTimers();
   try {

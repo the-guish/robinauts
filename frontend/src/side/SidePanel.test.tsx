@@ -2,7 +2,7 @@
 // Copyright The Robinauts Authors
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { createRef } from "react";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import {
   DEFAULT_WIDTH,
@@ -190,6 +190,32 @@ test("open tabs are remembered per conversation", () => {
   // And across a reload.
   side(B);
   expect(tabNames()).toEqual(["To-do list"]);
+});
+
+test("a tab the agent opens leaves the ones opened by hand, where nothing more can be remembered too", () => {
+  localStorage.setItem(`robinauts.${SIDE_KEY}`, "open");
+  // Full: what is open from here on is in the page alone.
+  vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    throw new DOMException("no room", "QuotaExceededError");
+  });
+  const props = {
+    conversation: A,
+    offers: OFFERS,
+    renderers: RENDERERS,
+    drawer: false,
+    onCloseDrawer: () => undefined,
+    closeRef: createRef<HTMLButtonElement>(),
+  };
+  const { rerender } = render(<SidePanel {...props} />);
+  pick("To-do list");
+  expect(rememberedTabs(A).open).toEqual([]);
+
+  rerender(<SidePanel {...props} asked={{ key: NOTES, at: 1 }} />);
+  expect(tabNames()).toEqual(["To-do list", "Notes"]);
+  expect(screen.getByRole("tab", { name: "Notes" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
 });
 
 test("closing every tab forgets the conversation's entry", () => {

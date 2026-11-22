@@ -70,15 +70,17 @@ export function SideTabs({
   const [tabs, setTabs] = useState<OpenTabs>(() =>
     rememberedTabs(conversation),
   );
-  // The agent's asking, taken once: the person may close the tab after.
+  // The agent's asking, taken once: the person may close the tab after. It
+  // is added to what is open in the page, which is all there is where the
+  // browser remembers nothing.
   const taken = useRef(0);
   useEffect(() => {
     if (asked === null || asked.at === taken.current) return;
     taken.current = asked.at;
-    const next = withOpened(rememberedTabs(conversation), asked.key);
+    const next = withOpened(tabs, asked.key);
     rememberTabs(conversation, next);
     setTabs(next);
-  }, [asked, conversation]);
+  }, [asked, conversation, tabs]);
   const { open, selected } = shownTabs(tabs, offers);
   const addable = addableTabs(tabs, offers);
   const base = useId();
