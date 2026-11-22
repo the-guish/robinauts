@@ -28,7 +28,7 @@ import { PanelRightIcon } from "../icons";
 import { NEW_CHAT, useRouter } from "../router";
 import { shownTitle } from "../conversation/conversation";
 import { AppTab } from "../side/AppTab";
-import { appOf, appOffers, lastAsked, subTabsOf, useApps } from "../side/apps";
+import { appOf, appOffers, subTabsOf, useApps, useAsked } from "../side/apps";
 import { SIDE_ID, SidePanel } from "../side/SidePanel";
 import { carryOpenTabs, NEW_CHAT_TABS, type TabRenderers } from "../side/tabs";
 import type { Conversation } from "../conversation/conversation";
@@ -397,18 +397,9 @@ export function Workspace({
   // shown.
   const [thread, setThread] = useState<ThreadToolCalls>(NO_THREAD);
   const calls = thread.conversationId === current ? thread.calls : NO_CALLS;
-  // The view the agent is asking for now, counted so that the panel takes
-  // each asking once: it opens that tab and that sub-tab, and the person may
-  // then close either.
-  const asking = lastAsked(apps, calls);
-  const [counted, setCounted] = useState({ call: "", at: 0 });
-  if (asking !== null && asking.callId !== counted.call) {
-    setCounted({ call: asking.callId, at: counted.at + 1 });
-  }
-  const asked =
-    asking !== null && asking.callId === counted.call
-      ? { ...asking, at: counted.at }
-      : null;
+  // The view the agent is asking for now: the panel opens its tab and its
+  // sub-tab (`../side/apps.ts`, `useAsked`).
+  const asked = useAsked(apps, calls);
   const renderers: TabRenderers = {
     app: (offer) => {
       const app = appOf(apps, offer);

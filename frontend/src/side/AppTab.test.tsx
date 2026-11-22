@@ -83,10 +83,13 @@ function tab(calls: ThreadToolCall[] = [shown("c1", "a")]) {
   return { ...drawn, frame, view, posted };
 }
 
-/** A message from `source`, as the browser would hand it to the page. */
-function from(source: Window, data: unknown) {
+/**
+ * A message from `source`, as the browser would hand it to the page: a
+ * sandboxed frame's origin is opaque, and spelt `"null"`.
+ */
+function from(source: Window, data: unknown, origin = "null") {
   act(() => {
-    window.dispatchEvent(new MessageEvent("message", { data, source }));
+    window.dispatchEvent(new MessageEvent("message", { data, source, origin }));
   });
 }
 
@@ -282,6 +285,12 @@ test("a message from anywhere but the frame, or one that is no message, is not r
   const fetch = answering();
   const { view, posted } = tab();
   from(window, { jsonrpc: "2.0", id: 1, method: "ui/initialize" });
+  // From the frame's window, and from an origin with a name: not the view.
+  from(
+    view,
+    { jsonrpc: "2.0", id: 1, method: "ui/initialize" },
+    "https://elsewhere.example",
+  );
   from(view, "ui/initialize");
   from(view, { id: 1, method: "ui/initialize" });
   from(view, { jsonrpc: "2.0", method: "ui/notifications/initialized" });

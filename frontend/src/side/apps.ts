@@ -137,11 +137,17 @@ export function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (typeof value === "object" && value !== null) {
     const fields = Object.entries(value)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .sort(([a], [b]) => inOrder(a, b))
       .map(([key, held]) => `${JSON.stringify(key)}:${canonical(held)}`);
     return `{${fields.join(",")}}`;
   }
   return JSON.stringify(value) ?? "null";
+}
+
+/** Two keys in the order of their code units, which no locale changes. */
+function inOrder(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
 }
 
 /** The key of the sub-tab a call is shown in. */
@@ -220,4 +226,30 @@ export function lastAsked(
     };
   }
   return null;
+}
+
+/** The tab and the sub-tab the agent asked for, and a count of its askings. */
+export interface AskedView {
+  readonly tab: string;
+  readonly sub: string;
+  readonly at: number;
+}
+
+/**
+ * The view the agent is asking for now (`lastAsked`), counted so that the
+ * panel takes each asking once: it opens that tab and that sub-tab, and the
+ * person may then close either.
+ */
+export function useAsked(
+  apps: readonly App[],
+  calls: readonly ThreadToolCall[],
+): AskedView | null {
+  const asking = lastAsked(apps, calls);
+  const [counted, setCounted] = useState({ call: "", at: 0 });
+  if (asking === null) return null;
+  if (asking.callId !== counted.call) {
+    setCounted({ call: asking.callId, at: counted.at + 1 });
+    return null;
+  }
+  return { tab: asking.tab, sub: asking.sub, at: counted.at };
 }

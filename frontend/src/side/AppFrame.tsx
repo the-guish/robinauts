@@ -10,9 +10,10 @@
  * never `allow-same-origin`, so it runs in an opaque origin and can neither
  * read the session, call the API, nor script this page.
  *
- * **The bridge.** Only a message whose `source` is this frame's window is
- * read, and only one `./bridge.ts` makes sense of; anything else is
- * dropped. An opaque origin has no name to post to, so answers go to `"*"`,
+ * **The bridge.** Only a message whose `source` is this frame's window, from
+ * an opaque origin, is read, and only one `./bridge.ts` makes sense of;
+ * anything else is dropped. An opaque origin has no name to post to, so
+ * answers go to `"*"`,
  * and they carry only what the view's own server already has. The view's
  * tool calls go to the backend, which relays them to the server with its
  * credential (`POST /robinauts/api/apps/<server>/tools/<tool>`).
@@ -57,6 +58,13 @@ import {
 
 /** How long a view that has loaded has to ask `ui/initialize`. */
 export const START_TIMEOUT_MS = 10_000;
+
+/**
+ * The origin a message from a sandboxed frame is from: the frame has no
+ * `allow-same-origin`, so its origin is opaque, which a message spells
+ * `"null"`.
+ */
+export const OPAQUE_ORIGIN = "null";
 
 const DARK = "(prefers-color-scheme: dark)";
 
@@ -153,6 +161,7 @@ export function AppFrame({
     const onMessage = (event: MessageEvent) => {
       if (
         target === null ||
+        event.origin !== OPAQUE_ORIGIN ||
         event.source === null ||
         event.source !== target.contentWindow
       ) {

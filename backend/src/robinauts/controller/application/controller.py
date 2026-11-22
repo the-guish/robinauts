@@ -156,25 +156,42 @@ class RobinautsController(Controller):
         self, user: User, session_id: uuid.UUID, *, message_id: uuid.UUID, call_id: str
     ) -> ToolResultPart:
         await self._store.get_session(user.id, session_id)
+        result = await self._stored_result(user, session_id, message_id, call_id)
+        if result is None:
+            result = await self._landed_result(user, session_id, message_id, call_id)
+        if result is None:
+            raise MessageNotFoundError(f"no result of call {call_id!r} on message {message_id}")
+        return result
+
+    async def _stored_result(
+        self, user: User, session_id: uuid.UUID, message_id: uuid.UUID, call_id: str
+    ) -> ToolResultPart | None:
+        """The result as a part of a stored message."""
         for message in await load_messages(self._store, user.id, session_id):
             if message.id != message_id:
                 continue
             for part in message.parts:
                 if isinstance(part, ToolResultPart) and part.call_id == call_id:
                     return part
-        # An answer still being produced is not stored yet: its results are the turn's events.
+        return None
+
+    async def _landed_result(
+        self, user: User, session_id: uuid.UUID, message_id: uuid.UUID, call_id: str
+    ) -> ToolResultPart | None:
+        """The result as an event of the turn being run: an answer still being produced is
+        not stored yet."""
         running = await self._store.active_turn(user.id, session_id)
-        if running is not None:
-            events = await self._store.events_after(user.id, session_id, running.id, 0)
-            for _, document in events:
-                landed = event_from_document(document).event
-                if not isinstance(landed, ResultLanded):
-                    continue
-                if landed.message_id == message_id and landed.call_id == call_id:
-                    return ToolResultPart(
-                        landed.call_id, landed.text, landed.is_error, landed.structured
-                    )
-        raise MessageNotFoundError(f"no result of call {call_id!r} on message {message_id}")
+        if running is None:
+            return None
+        for _, document in await self._store.events_after(user.id, session_id, running.id, 0):
+            landed = event_from_document(document).event
+            if not isinstance(landed, ResultLanded):
+                continue
+            if landed.message_id == message_id and landed.call_id == call_id:
+                return ToolResultPart(
+                    landed.call_id, landed.text, landed.is_error, landed.structured
+                )
+        return None
 
     async def rename_session(self, user: User, session_id: uuid.UUID, title: str) -> Session:
         session = await self._store.get_session(user.id, session_id)

@@ -79,6 +79,8 @@ STRUCTURED_KEYS = frozenset({"structured"})
 result has one, so that the results stored before it read the same."""
 MAX_STRUCTURED_BYTES = 1024 * 1024
 """The most of a tool result's structured content the transcript keeps, as JSON."""
+_STRUCTURED = "a tool result's structured content"
+"""What a refusal of one calls it."""
 PART_KEYS: Mapping[str, frozenset[str]] = {
     "text": frozenset({"kind", "text"}),
     "reasoning": frozenset({"kind", "text"}),
@@ -140,7 +142,7 @@ def kept_structured(structured: Mapping[str, Any] | None) -> dict[str, Any] | No
     if structured is None:
         return None
     try:
-        cleaned: dict[str, Any] = clean_json(dict(structured), "a tool result's structured content")
+        cleaned: dict[str, Any] = clean_json(dict(structured), _STRUCTURED)
     except InvalidValueError:
         return None
     if len(json.dumps(cleaned).encode()) > MAX_STRUCTURED_BYTES:
@@ -151,7 +153,7 @@ def kept_structured(structured: Mapping[str, Any] | None) -> dict[str, Any] | No
 def _structured_document(structured: Mapping[str, Any] | None) -> dict[str, Any]:
     if structured is None:
         return {}
-    return {"structured": clean_json(dict(structured), "a tool result's structured content")}
+    return {"structured": clean_json(dict(structured), _STRUCTURED)}
 
 
 def _read_structured(value: object, what: str) -> dict[str, Any] | None:
@@ -284,7 +286,7 @@ def part_from_document(document: object) -> MessagePart:
         _read_text(read["call_id"], "a tool result's call id"),
         _read_text(read["text"], "a tool result's text"),
         _read_bool(read["is_error"], "a tool result's is_error"),
-        _read_structured(read.get("structured"), "a tool result's structured content"),
+        _read_structured(read.get("structured"), _STRUCTURED),
     )
 
 

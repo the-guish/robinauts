@@ -74,29 +74,38 @@ svg { display: block; width: 100%; height: auto; margin: 0 auto; }
     pending.set(id, { resolve, reject, timer });
     send({ jsonrpc: "2.0", id, method, params });
   });
-  window.addEventListener("message", (event) => {
-    const message = event.data;
-    if (event.source !== window.parent || !message || message.jsonrpc !== "2.0") return;
-    if (typeof message.method === "string") {
-      if (message.id === undefined || message.id === null) {
-        if (message.method === "ui/notifications/tool-input") input(message.params);
-        if (message.method === "ui/notifications/tool-result") show(message.params) || failed();
-        if (message.method === "ui/notifications/tool-cancelled") failed();
-        if (message.method === "ui/notifications/host-context-changed") theme(message.params);
-      } else if (message.method === "ping" || message.method === "ui/resource-teardown") {
-        if (message.method === "ui/resource-teardown") clearInterval(poll);
-        send({ jsonrpc: "2.0", id: message.id, result: {} });
-      } else {
-        send({ jsonrpc: "2.0", id: message.id,
-          error: { code: -32601, message: "Method not found: " + message.method } });
-      }
-      return;
+  /* What the host tells this view, by method. Anything else it tells is left alone. */
+  const told = new Map([
+    ["ui/notifications/tool-input", (params) => input(params)],
+    ["ui/notifications/tool-result", (params) => { if (!show(params)) failed(); }],
+    ["ui/notifications/tool-cancelled", () => failed()],
+    ["ui/notifications/host-context-changed", (params) => theme(params)],
+  ]);
+  /* What the host asks of this view: a ping, and to stop before it is taken away. */
+  function asked(message) {
+    if (message.method === "ui/resource-teardown") clearInterval(poll);
+    if (message.method === "ping" || message.method === "ui/resource-teardown") {
+      send({ jsonrpc: "2.0", id: message.id, result: {} });
+    } else {
+      send({ jsonrpc: "2.0", id: message.id,
+        error: { code: -32601, message: "Method not found: " + message.method } });
     }
+  }
+  /* The host's answer to a request of this view's. */
+  function answered(message) {
     const call = pending.get(message.id);
     if (!call) return;
     pending.delete(message.id);
     clearTimeout(call.timer);
-    message.error ? call.reject(new Error(message.error.message)) : call.resolve(message.result);
+    if (message.error) call.reject(new Error(message.error.message));
+    else call.resolve(message.result);
+  }
+  window.addEventListener("message", (event) => {
+    const message = event.data;
+    if (event.source !== window.parent || !message || message.jsonrpc !== "2.0") return;
+    if (typeof message.method !== "string") answered(message);
+    else if (message.id === undefined || message.id === null) told.get(message.method)?.(message.params);
+    else asked(message);
   });
 
   function theme(context) {
@@ -247,7 +256,10 @@ svg { display: block; width: 100%; height: auto; margin: 0 auto; }
       if (t < total || gone > 0) running.id = requestAnimationFrame(given);
       else running = null;
     };
-    const given = (now) => { if (start === null) start = now; frame(now); };
+    const given = (now) => {
+      if (start === null) start = now;
+      frame(now);
+    };
     running = { id: 0, finish: () => { cancelAnimationFrame(running.id); start = 0; frame(total + 400); } };
     frame(0);
   }

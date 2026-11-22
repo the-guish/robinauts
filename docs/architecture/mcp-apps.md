@@ -165,10 +165,11 @@ The view runs next to a page that holds a signed-in person's session.
 - **The interface's own policy gains `frame-src 'self'` and nothing else.** A `srcdoc` or a
   `blob:` URL would make that policy allow inline script or `blob:` for the page that holds the
   session.
-- **The panel reads a message only from its frame's window.** An opaque origin has no name, so
-  the panel posts to `"*"`. It sends what the view's own server already has: the theme, the size,
-  the arguments of the agent's call and the server's answers. A tool call the backend refuses is
-  answered with fixed words, whatever the backend said.
+- **The panel reads a message only from its frame's window.** A sandboxed frame's message
+  carries the origin `"null"`. The panel drops a message with any other origin. An opaque origin
+  has no name, so the panel posts to `"*"`. It sends what the view's own server already has: the
+  theme, the size, the arguments of the agent's call and the server's answers. A tool call the
+  backend refuses is answered with fixed words, whatever the backend said.
 - **The server's credential stays on the backend.** The browser never reaches a tool server.
 - **A server that cannot be reached is left out of the list**, and logged by its id and the kind
   of failure.

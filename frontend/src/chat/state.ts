@@ -1188,6 +1188,14 @@ export function sameRead(before: Read | null, after: Read): boolean {
  * answer is not, nothing will answer it. A call is live when this page saw
  * it arrive (`ChatState.streamed`).
  */
+function callState(
+  call: ChatToolCall,
+  answer: ChatMessage,
+): ThreadToolCall["state"] {
+  if (call.result !== undefined) return "answered";
+  return answer.state === "running" ? "running" : "unanswered";
+}
+
 export function toolCallsOf(
   state: Pick<ChatState, "messages" | "streamed">,
 ): ThreadToolCall[] {
@@ -1200,12 +1208,7 @@ export function toolCallsOf(
           callId: part.id,
           name: part.name,
           arguments: part.args ?? null,
-          state:
-            part.result !== undefined
-              ? "answered"
-              : message.state === "running"
-                ? "running"
-                : "unanswered",
+          state: callState(part, message),
           live: state.streamed.includes(streamedKey(message.id, part.id)),
         },
       ];
