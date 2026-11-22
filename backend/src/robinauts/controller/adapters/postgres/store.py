@@ -36,6 +36,7 @@ from robinauts.controller.contract.domain import TurnActiveError, User
 from robinauts.controller.ports.store import (
     Cursor,
     Document,
+    SearchTerm,
     Store,
     StoredEvent,
     StoredMessage,
@@ -300,8 +301,7 @@ class PostgresStore(Store):
 
     async def projects_of(self, owner: uuid.UUID) -> list[Project]:
         rows = await self._pool.fetch(
-            f"SELECT {_PROJECT_COLUMNS} FROM projects WHERE owner_id = $1"
-            " ORDER BY created_at, id",
+            f"SELECT {_PROJECT_COLUMNS} FROM projects WHERE owner_id = $1 ORDER BY created_at, id",
             owner,
         )
         return [_project(row) for row in rows]
@@ -356,18 +356,37 @@ class PostgresStore(Store):
                 await _bump(connection, session.owner_id)
 
     async def sessions_of(
-        self, owner: uuid.UUID, limit: int, before: Cursor | None
+        self,
+        owner: uuid.UUID,
+        limit: int,
+        before: Cursor | None,
+        terms: Sequence[SearchTerm] = (),
     ) -> list[Session]:
         updated_at, session_id = before if before is not None else (None, None)
+        matching = ""
+        found: list[object] = []
+        for term in terms:
+            word = f"${5 + len(found)}"
+            found.append(term.word)
+            matching += (
+                f" AND (strpos(lower(title), {word}) > 0 OR strpos(lower(agent), {word}) > 0"
+                " OR strpos(lower(COALESCE((SELECT name FROM projects"
+                f"   WHERE projects.id = sessions.project_id), '')), {word}) > 0"
+            )
+            if term.agents:
+                matching += f" OR agent = ANY(${5 + len(found)}::text[])"
+                found.append(list(term.agents))
+            matching += ")"
         rows = await self._pool.fetch(
             f"SELECT {_SESSION_COLUMNS} FROM sessions"
             " WHERE owner_id = $1 AND deleted_at IS NULL AND archived_at IS NULL"
             "   AND ($2::timestamptz IS NULL OR (updated_at, id) < ($2, $3::uuid))"
-            " ORDER BY updated_at DESC, id DESC LIMIT $4",
+            f"{matching} ORDER BY updated_at DESC, id DESC LIMIT $4",
             owner,
             updated_at,
             session_id,
             limit,
+            *found,
         )
         return [_session(row) for row in rows]
 

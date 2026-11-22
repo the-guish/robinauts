@@ -68,8 +68,8 @@ class Api:
         self.run_id = ""
         """The run of the last turn."""
 
-    async def get(self, path: str) -> Any:
-        response = await self.http.get(path)
+    async def get(self, path: str, params: dict[str, str] | None = None) -> Any:
+        response = await self.http.get(path, params=params)
         assert response.status_code == 200, response.text
         return response.json()
 
@@ -169,6 +169,20 @@ async def test_everyday_use(agent: str) -> None:
         )
         assert await api.thread(a) == echoed("alpha one")
         assert await api.history() == ["alpha one"]
+
+        # 2b. Searched by ``q``: by title, case aside, and by the agent's title; a query of
+        #     only blanks is no query, and one past 200 characters is refused.
+        async def found(q: str) -> list[str]:
+            listed = await api.get("/robinauts/api/conversations", params={"q": q})
+            return [c["title"] for c in listed["items"]]
+
+        assert await found("ALPHA") == ["alpha one"]
+        assert await found(config.agents[agent].title.upper()) == ["alpha one"]
+        assert await found("alpha nothing") == []
+        assert await found("   ") == ["alpha one"]
+        assert (
+            await http.get("/robinauts/api/conversations", params={"q": "x" * 201})
+        ).status_code == 422
         last_call("local_gpt", "alpha one", None)
         engine.create.assert_awaited_once_with(uuid.UUID(a))
 

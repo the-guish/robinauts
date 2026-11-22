@@ -40,7 +40,7 @@ from robinauts.controller.contract.ports import Controller
 from robinauts.controller.core.projects import project_name
 from robinauts.controller.core.task_payloads import check_task_payload
 from robinauts.controller.core.titles import title_from_text
-from robinauts.controller.ports.store import Cursor, Store
+from robinauts.controller.ports.store import Cursor, SearchTerm, Store
 from robinauts.shared_domain.domain import (
     DEFAULT_PROJECT,
     Config,
@@ -123,49 +123,19 @@ class RobinautsController(Controller):
         self, user: User, *, limit: int, cursor: str | None = None, query: str | None = None
     ) -> SessionPage:
         before = None if cursor is None else _decode_cursor(cursor)
-        words = (query or "").lower().split()
-        if not words:
-            sessions = await self._store.sessions_of(user.id, limit, before)
-            following = _encode_cursor(sessions[-1]) if len(sessions) == limit else None
-        else:
-            sessions, following = await self._search_sessions(user, limit, before, words)
+        terms = [
+            SearchTerm(
+                word,
+                tuple(a.id for a in self._config.agents.values() if word in a.title.lower()),
+            )
+            for word in (query or "").lower().split()
+        ]
+        # One more than a page, to know whether there is a next one.
+        sessions = await self._store.sessions_of(user.id, limit + 1, before, terms)
+        following = _encode_cursor(sessions[limit - 1]) if len(sessions) > limit else None
+        sessions = sessions[:limit]
         running = await self._store.running_sessions(user.id, [s.id for s in sessions])
         return SessionPage(tuple(sessions), cursor=following, running=running)
-
-    async def _search_sessions(
-        self, user: User, limit: int, before: Cursor | None, words: list[str]
-    ) -> tuple[list[Session], str | None]:
-        """The next ``limit`` sessions whose title, project or agent holds every word.
-
-        Reads the user's sessions newest first from ``before``, at most ``SEARCH_SCAN`` of them
-        per call; the cursor is where the reading stopped, so a page may hold fewer than
-        ``limit`` and still have a cursor.
-        """
-        projects = {p.id: p.name for p in await self._store.projects_of(user.id)}
-        agents = {a.id: a.title for a in self._config.agents.values()}
-        found: list[Session] = []
-        scanned = 0
-        while True:
-            batch = await self._store.sessions_of(user.id, SEARCH_BATCH, before)
-            for session in batch:
-                scanned += 1
-                haystack = "\n".join(
-                    (
-                        session.title,
-                        projects.get(session.project_id, ""),
-                        session.agent,
-                        agents.get(session.agent, ""),
-                    )
-                ).lower()
-                if all(word in haystack for word in words):
-                    found.append(session)
-                    if len(found) == limit:
-                        return found, _encode_cursor(session)
-                if scanned >= SEARCH_SCAN:
-                    return found, _encode_cursor(session)
-            if len(batch) < SEARCH_BATCH:
-                return found, None
-            before = _decode_cursor(_encode_cursor(batch[-1]))
 
     async def wait_for_changes(self, user: User, *, after: int | None, timeout: float) -> int:
         return await self._store.wait_for_changes(user.id, after, timeout)
@@ -543,13 +513,6 @@ class RobinautsController(Controller):
 async def load_messages(store: Store, owner: uuid.UUID, session: uuid.UUID) -> list[Message]:
     """Every message of the session, decoded, oldest first."""
     return [message_from_document(d) for d in await store.messages_of(owner, session)]
-
-
-SEARCH_BATCH = 100
-"""How many sessions a search reads from the store at a time."""
-
-SEARCH_SCAN = 1000
-"""How many sessions one search call reads at most before it hands back a cursor."""
 
 
 def _encode_cursor(session: Session) -> str:

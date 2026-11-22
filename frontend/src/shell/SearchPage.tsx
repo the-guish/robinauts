@@ -88,8 +88,11 @@ export function SearchPage({
     };
   }, [asked, cursor, key]);
 
-  const current = asked !== "" && answer?.key === key ? answer : null;
-  const loading = asked !== "" && current === null;
+  // The answer to what is on the screen; until it comes, the one before it
+  // stays, so the rows do not flicker away on every keystroke.
+  const fresh = asked !== "" && answer?.key === key;
+  const current = asked !== "" ? answer : null;
+  const loading = asked !== "" && !fresh;
   const projectName = (id: string) =>
     projects?.find((project) => project.id === id)?.name ?? "";
 
@@ -138,27 +141,22 @@ export function SearchPage({
           Searching…
         </p>
       )}
-      {current?.error != null && (
+      {!loading && current?.error != null && (
         <p role="alert" className="search-empty">
           The search failed: {current.error}
         </p>
       )}
-      {current !== null &&
-        current.error === null &&
-        current.items.length === 0 && (
-          <p role="status" className="search-empty">
-            {current.next === null
-              ? "No conversations found."
-              : "Nothing on this page; try the next."}
-          </p>
-        )}
-      {current !== null &&
-        current.error === null &&
+      {!loading && current?.error === null && current.items.length === 0 && (
+        <p role="status" className="search-empty">
+          No conversations found.
+        </p>
+      )}
+      {current?.error === null &&
         (cursors.length > 1 || current.next !== null) && (
           <nav aria-label="Pages" className="search-pages">
             <button
               type="button"
-              disabled={cursors.length === 1}
+              disabled={loading || cursors.length === 1}
               onClick={() => {
                 setCursors(cursors.slice(0, -1));
               }}
@@ -168,7 +166,7 @@ export function SearchPage({
             <span>Page {cursors.length}</span>
             <button
               type="button"
-              disabled={current.next === null}
+              disabled={loading || current.next === null}
               onClick={() => {
                 setCursors([...cursors, current.next]);
               }}

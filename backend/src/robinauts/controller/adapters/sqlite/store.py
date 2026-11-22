@@ -39,6 +39,7 @@ from robinauts.controller.contract.domain import TurnActiveError, User
 from robinauts.controller.ports.store import (
     Cursor,
     Document,
+    SearchTerm,
     Store,
     StoredEvent,
     StoredMessage,
@@ -521,19 +522,37 @@ class SQLiteStore(Store):
         await self._write(work)
 
     async def sessions_of(
-        self, owner: uuid.UUID, limit: int, before: Cursor | None
+        self,
+        owner: uuid.UUID,
+        limit: int,
+        before: Cursor | None,
+        terms: Sequence[SearchTerm] = (),
     ) -> list[Session]:
         updated_at, session_id = before if before is not None else (None, None)
+        matching = ""
+        found: list[object] = []
+        for term in terms:
+            matching += (
+                " AND (instr(lower(title), ?) > 0 OR instr(lower(agent), ?) > 0"
+                " OR instr(lower(COALESCE((SELECT name FROM projects"
+                "   WHERE projects.id = sessions.project_id), '')), ?) > 0"
+            )
+            found += [term.word] * 3
+            if term.agents:
+                matching += f" OR agent IN ({', '.join('?' * len(term.agents))})"
+                found += term.agents
+            matching += ")"
         rows = await self._read(
             lambda tx: tx.all(
                 f"SELECT {_SESSION_COLUMNS} FROM sessions"
                 " WHERE owner_id = ? AND deleted_at IS NULL AND archived_at IS NULL"
                 "   AND (? IS NULL OR (updated_at, id) < (?, ?))"
-                " ORDER BY updated_at DESC, id DESC LIMIT ?",
+                f"{matching} ORDER BY updated_at DESC, id DESC LIMIT ?",
                 _id(owner),
                 _at_or_none(updated_at),
                 _at_or_none(updated_at),
                 _id_or_none(session_id),
+                *found,
                 limit,
             )
         )

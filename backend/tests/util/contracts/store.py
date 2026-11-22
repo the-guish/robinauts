@@ -21,7 +21,7 @@ import pytest
 
 from robinauts.controller.contract.broker.domain import RUN_TURN, Task, TaskState
 from robinauts.controller.contract.domain import TurnActiveError, User
-from robinauts.controller.ports.store import Store, StoredEvent, StoredMessage
+from robinauts.controller.ports.store import SearchTerm, Store, StoredEvent, StoredMessage
 from robinauts.shared_domain.domain import (
     DEFAULT_PROJECT,
     DEFAULT_WORKER,
@@ -223,6 +223,30 @@ class StoreContract:
         rest = await store.sessions_of(me.id, 2, (page[-1].updated_at, page[-1].id))
         assert rest == [first]
         assert await store.sessions_of(me.id, 2, (first.updated_at, first.id)) == []
+
+    @store_test
+    async def test_sessions_are_searched_by_title_project_and_agent(self, store: Store) -> None:
+        me = await add_user(store, user())
+        work = await store.ensure_project(Project(uuid.uuid4(), me.id, "Quarterly Work", NOW))
+        plain = dataclasses.replace(session(me.id, NOW), title="Apple pie")
+        tart = dataclasses.replace(
+            session(me.id, NOW + MINUTE), title="apple TART", project_id=work.id
+        )
+        other = dataclasses.replace(session(me.id, NOW + 2 * MINUTE), title="Banana", agent="b")
+        for each in (plain, tart, other):
+            await store.add_session(each)
+
+        async def found(*terms: SearchTerm, limit: int = 10, before: Any = None) -> list[Session]:
+            return await store.sessions_of(me.id, limit, before, terms)
+
+        assert await found(SearchTerm("apple")) == [tart, plain]
+        assert await found(SearchTerm("apple"), SearchTerm("quarterly")) == [tart]
+        assert await found(SearchTerm("apple"), limit=1) == [tart]
+        assert await found(SearchTerm("apple"), before=(tart.updated_at, tart.id)) == [plain]
+        assert await found(SearchTerm("nothing")) == []
+        # The agent's id, and the ids of agents whose title held the word.
+        assert await found(SearchTerm("zzz", ("b",))) == [other]
+        assert await found(SearchTerm("100%_")) == []
 
     # --- projects -----------------------------------------------------------
 

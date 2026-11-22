@@ -70,3 +70,35 @@ test("a refusal is said, and is not asked again", async () => {
     expect(callsTo(fetch, "/robinauts/api/conversations")).toHaveLength(1);
   });
 });
+
+test("the rows stay while the next answer is on its way", async () => {
+  let release: (response: Response) => void = () => undefined;
+  stubFetch((call) =>
+    call.url.includes("q=more")
+      ? (new Promise<Response>((resolve) => {
+          release = resolve;
+        }) as unknown as Response)
+      : json(page([conversation(1, "First")])),
+  );
+  const box = drawn();
+  fireEvent.change(box, { target: { value: "first" } });
+  expect(await screen.findByRole("link", { name: "First" })).toBeVisible();
+  fireEvent.change(box, { target: { value: "more" } });
+  expect(await screen.findByText("Searching…")).toBeVisible();
+  expect(screen.getByRole("link", { name: "First" })).toBeVisible();
+  release(json(page([conversation(2, "Second")])));
+  expect(await screen.findByRole("link", { name: "Second" })).toBeVisible();
+  expect(screen.queryByRole("link", { name: "First" })).toBeNull();
+});
+
+test("a blank box asks nothing and lists nothing", async () => {
+  const fetch = stubFetch(() => json(page([conversation(1, "First")])));
+  const box = drawn();
+  fireEvent.change(box, { target: { value: "first" } });
+  await screen.findByRole("link", { name: "First" });
+  fireEvent.change(box, { target: { value: "   " } });
+  await waitFor(() => {
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+  expect(callsTo(fetch, "/robinauts/api/conversations")).toHaveLength(1);
+});

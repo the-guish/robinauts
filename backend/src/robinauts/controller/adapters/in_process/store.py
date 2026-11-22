@@ -17,6 +17,7 @@ from robinauts.controller.contract.domain import TurnActiveError, User
 from robinauts.controller.ports.store import (
     Cursor,
     Document,
+    SearchTerm,
     Store,
     StoredEvent,
     StoredMessage,
@@ -164,8 +165,17 @@ class InProcessStore(Store):
         await self._notify()
 
     async def sessions_of(
-        self, owner: uuid.UUID, limit: int, before: Cursor | None
+        self,
+        owner: uuid.UUID,
+        limit: int,
+        before: Cursor | None,
+        terms: Sequence[SearchTerm] = (),
     ) -> list[Session]:
+        def matches(s: Session) -> bool:
+            project = self._projects.get(s.project_id)
+            held = f"{s.title}\n{project.name if project else ''}\n{s.agent}".lower()
+            return all(t.word in held or s.agent in t.agents for t in terms)
+
         owned = [
             s
             for s in self._sessions.values()
@@ -173,6 +183,7 @@ class InProcessStore(Store):
             and s.id not in self._hidden
             and s.archived_at is None
             and (before is None or (s.updated_at, s.id) < before)
+            and matches(s)
         ]
         owned.sort(key=lambda s: (s.updated_at, s.id), reverse=True)
         return owned[:limit]

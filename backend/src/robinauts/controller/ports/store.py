@@ -17,6 +17,7 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 
 from robinauts.controller.contract.broker.domain import (
@@ -28,6 +29,16 @@ from robinauts.controller.contract.broker.domain import (
 )
 from robinauts.controller.contract.domain import User
 from robinauts.shared_domain.domain import Project, Session, Turn, TurnState
+
+
+@dataclass(frozen=True, slots=True)
+class SearchTerm:
+    """A word a session must hold, in lower case: in its title, in the name of its project,
+    or in its agent's id -- or its agent is one of ``agents``, the ids of the agents whose
+    title holds the word, which the store cannot see."""
+
+    word: str
+    agents: tuple[str, ...] = ()
 
 
 class Store(ABC):
@@ -82,10 +93,15 @@ class Store(ABC):
 
     @abstractmethod
     async def sessions_of(
-        self, owner: uuid.UUID, limit: int, before: Cursor | None
+        self,
+        owner: uuid.UUID,
+        limit: int,
+        before: Cursor | None,
+        terms: Sequence[SearchTerm] = (),
     ) -> list[Session]:
         """A page of the owner's visible sessions that are not archived, most recently updated
-        first, ties broken by id, past ``before``."""
+        first, ties broken by id, past ``before``. With ``terms``, only those that match every
+        one."""
 
     @abstractmethod
     async def hide_session(self, owner: uuid.UUID, session: uuid.UUID, at: datetime) -> None:

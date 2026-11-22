@@ -54,6 +54,13 @@ async def test_sessions_are_searched_by_title_project_and_agent_a_page_at_a_time
     assert first.cursor is not None
     second = await controller.list_sessions(user, limit=1, query="apple", cursor=first.cursor)
     assert [s.id for s in second.sessions] == [ids["apple pie"]]
+    # The last match ends the search: no cursor to an empty page.
+    assert second.cursor is None
+    exact = await controller.list_sessions(user, limit=2, query="apple")
+    assert len(exact.sessions) == 2
+    assert exact.cursor is None
+    blanks = await controller.list_sessions(user, limit=10, query="  \t ")
+    assert len(blanks.sessions) == 3
     by_project = await controller.list_sessions(user, limit=10, query="work apple")
     assert [s.id for s in by_project.sessions] == [ids["apple tart"]]
     assert by_project.cursor is None

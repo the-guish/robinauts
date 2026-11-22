@@ -53,3 +53,7 @@
   line-height: calc(1.75 / 1.25);
   font-weight: 600;
 }
+
+.search-results[aria-busy="true"] {
+  opacity: 0.6;
+}
