@@ -132,13 +132,25 @@ lov = "agent"
 The form's inputs come first, in its order, then those it leaves out. An input
 it names must be one its flow declares, and an input with a list of values
 must be a `string`: a form that does not fit its flow is refused at the start.
-There are three lists of values:
+There are four lists of values:
 
 | `lov` | the values | the value sent |
 |---|---|---|
 | `repo_branch` | each branch of each repository of `flows.toml` | `<id>@<branch>`, the repository by its id there |
 | `model` | the models of the agents' configuration | the model's id |
 | `agent` | its agents, each labelled with the worker it runs on | the agent's id |
+| `flow` | the flows neorc holds, searched as the person types | the flow's name |
+
+The server fills the first three, from its configuration. The list of `flow` is
+neorc's, and the server lists no value for it:
+
+- The interface searches neorc's flows as the person types, at
+  `GET /neorc/flows?search=<text>`, with the person's own credential. The
+  list holds the flows that person may read at neorc, those of the flows
+  folder and any other.
+- A start through `POST /robinauts/api/flows/<name>/runs` asks neorc for the
+  flow named, with the person's credential too. A name neorc holds no flow
+  for is refused with 422.
 
 The repositories are the flows' configuration, in `flows.toml`:
 
@@ -193,10 +205,12 @@ neorc's own built interface is not served, and the session has no `flows_url`.
 A run is started from neorc's form, at `/neorc/`. For a flow with a form file the form is
 Robinauts': the interface turns the flow's form, as `GET /robinauts/api/flows` gives it with
 its lists filled, into A2UI v0.9 in neorc's subset (`frontend/src/flows/forms.ts`). Each list
-of values is a choice of its values, and each other input a field of its type. neorc draws its
-own form for a flow with no form file, and for one with an empty list or a datetime input. A
-form sends the flow's inputs to neorc, which checks their types. Robinauts' own checks of a
-form, such as the agent and model pair, run only on `POST /robinauts/api/flows/<name>/runs`.
+of values is a choice of its values, and each other input a field of its type. The list of
+neorc's flows is neorc's `FlowPicker`: a box that searches them at neorc, and takes only a
+flow neorc found. neorc draws its own form for a flow with no form file, and for one with an
+empty list or a datetime input. A form sends the flow's inputs to neorc, which checks their types.
+Robinauts' own checks of a form, such as the agent and model pair, run only on
+`POST /robinauts/api/flows/<name>/runs`.
 
 ### Where neorc may be imported
 

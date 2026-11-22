@@ -8,11 +8,12 @@
  * A flow of the flows folder may have a form file beside it,
  * `<flow>.form.toml`, with a title, a label per input and, for an input that
  * takes its value from a list, which list: the repositories' branches, the
- * agents or the models (`docs/architecture/orchestration.md`, "Flows as
- * forms"). The backend reads the file and fills the lists
+ * agents, the models or neorc's flows (`docs/architecture/orchestration.md`,
+ * "Flows as forms"). The backend reads the file and fills the lists it holds
  * (`GET /robinauts/api/flows`); this turns one flow's form into the A2UI v0.9
  * messages neorc draws, within the subset neorc accepts: a column of a
- * heading and one control per input.
+ * heading and one control per input. The list of neorc's flows is neorc's to
+ * fill: its `FlowPicker` searches them at neorc as the person types.
  *
  * neorc draws its own form for a flow this answers `null` for: a flow with no
  * form file, one the backend does not list, and one this cannot say in the
@@ -45,6 +46,16 @@ function required(name: string, message: string): Component {
 function control(input: FlowInput): Component | null {
   const id = `input-${input.name}`;
   const value = { path: `/${input.name}` };
+  if (input.lov === "flow") {
+    // No option here: neorc's own control asks neorc for the flows.
+    return {
+      id,
+      component: "FlowPicker",
+      label: input.label,
+      value,
+      checks: [required(input.name, `Choose a flow for ${input.label}.`)],
+    };
+  }
   if (input.options !== null && input.options !== undefined) {
     // The subset draws a choice from one option up; an empty list is none.
     if (input.options.length === 0) return null;

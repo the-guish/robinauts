@@ -10,6 +10,10 @@ the place of its own, with the folder's branches, the configuration's agents and
 Filled in, it starts a run, and neorc goes to that run. The flow's handler opens a
 conversation for the person who started the run, which Robinauts then lists.
 
+A second flow of the folder takes the name of a flow, from the list of neorc's flows. The form
+holds no value for it: its box searches the flows at neorc as the person types, and starts a
+run with the flow picked.
+
 neorc is the real one, composed into the backend, on the test's PostgreSQL in its schema
 ``neorc``, which the test drops when it ends.
 """
@@ -70,15 +74,34 @@ SETTINGS = """
 url = "https://git.example/app"
 branches = ["main", "next"]
 """
+RELAY = """
+name: relay
+version: 0.1.0
+inputs:
+  target: string
+output: tasks.pick
+steps:
+  pick:
+    queue: default
+    handler: robinauts_tasks:pick_number
+"""
+RELAY_FORM = """
+title = "Relay"
+[inputs.target]
+label = "Flow"
+lov = "flow"
+"""
 
 
 @pytest.fixture
 def server(local_gpt: FakeLocalGPTServer, tmp_path: Path) -> Iterator[str]:
-    """The stack's server, with a flows folder."""
+    """The stack's server, with a flows folder of two flows."""
     flows = tmp_path / "flows"
     flows.mkdir()
     (flows / "code_task.yaml").write_text(FLOW)
     (flows / "code_task.form.toml").write_text(FORM)
+    (flows / "relay.yaml").write_text(RELAY)
+    (flows / "relay.form.toml").write_text(RELAY_FORM)
     (flows / "flows.toml").write_text(SETTINGS)
     config = tmp_path / "robinauts.toml"
     config.write_text(stack.config_for(local_gpt.base_url))
@@ -139,3 +162,47 @@ def test_a_run_started_from_robinauts_form_in_neorc_opens_a_conversation_of_its_
     # 6. neorc kept where it was: its run.
     choose_app(page, "neorc")
     expect(page).to_have_url(run_url)
+
+
+def test_a_form_s_list_of_flows_is_searched_at_neorc_as_the_person_types(
+    server: stack.Server, page: Page
+) -> None:
+    sign_in(page, server)
+
+    # 1. The flow's page in neorc, with Robinauts' form: one box for the flow to name.
+    choose_app(page, "neorc")
+    page.get_by_role("navigation", name="Main").get_by_role("link", name="Flows").click()
+    page.get_by_role("main").get_by_role("link", name="relay").first.click()
+    expect(page).to_have_url(re.compile(r"#/neorc/flows/relay"))
+    form = page.get_by_role("form", name="Start relay")
+    expect(form.get_by_role("heading", name="Relay")).to_be_visible()
+    box = form.get_by_role("combobox", name="Flow")
+    found = form.get_by_role("listbox", name="Flows for Flow").get_by_role("option")
+
+    # 2. With the focus, before a letter: the flows neorc holds, which are the folder's.
+    box.click()
+    expect(found).to_have_text(["code_task 0.1.0", "relay 0.1.0"])
+
+    # 3. As the person types, in any case: the box asks neorc, and lists what it found. A
+    #    click picks the flow, and the list goes.
+    with page.expect_request(lambda asked: "/neorc/flows?search=CODE" in asked.url):
+        box.press_sequentially("CODE")
+    expect(found).to_have_text(["code_task 0.1.0"])
+    found.first.click()
+    expect(box).to_have_value("code_task")
+    expect(found).to_have_count(0)
+
+    # 4. A text that names no flow is no choice: the form says so, and nothing is sent.
+    box.fill("nowhere")
+    expect(form.get_by_text("No flow matches.")).to_be_visible()
+    form.get_by_role("button", name="Start run").click()
+    expect(form.get_by_role("alert")).to_contain_text("Choose a flow for Flow.")
+
+    # 5. Enter picks the flow found, and the run starts with its name.
+    box.fill("code")
+    expect(found).to_have_text(["code_task 0.1.0"])
+    box.press("Enter")
+    expect(box).to_have_value("code_task")
+    form.get_by_role("button", name="Start run").click()
+    expect(page).to_have_url(re.compile(r"#/neorc/runs/[0-9a-f-]{36}$"))
+    expect(page.locator("pre", has_text='"target"')).to_contain_text('"target": "code_task"')

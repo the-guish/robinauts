@@ -58,6 +58,9 @@ class LovKind(StrEnum):
     """A model of the agents' configuration, by its id."""
     AGENT = "agent"
     """An agent of the agents' configuration, by its id; its label names its worker."""
+    FLOW = "flow"
+    """A flow the engine holds, by its name. A form holds none of these values: the interface
+    searches them at the engine as the person types, with the person's own credential."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +101,8 @@ class Option:
 @dataclass(frozen=True, slots=True)
 class FormInput:
     """One input of a flow's form: its declared type, and the values it may take when it has
-    a list of values."""
+    a list of values the server fills. ``options`` is ``None`` for a plain field, and for a
+    list the interface searches at the engine: ``LovKind.FLOW``."""
 
     name: str
     label: str

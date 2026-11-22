@@ -27,6 +27,7 @@ from robinauts.orchestrator.core.forms import (
     build_forms,
     check_forms,
     check_inputs,
+    flows_named,
     options_of,
     parse_form,
 )
@@ -162,10 +163,12 @@ def test_a_form_is_checked_against_the_inputs_its_flow_declares(
                 Option("chat", "chat · default", models=("local", "opus")),
             ),
         ),
+        # The engine's flows are in no configuration: the interface searches them there.
+        (LovKind.FLOW, None),
     ],
 )
 def test_each_list_of_values_comes_from_its_configuration(
-    kind: LovKind, options: tuple[Option, ...]
+    kind: LovKind, options: tuple[Option, ...] | None
 ) -> None:
     assert options_of(kind, repositories=REPOSITORIES, config=CONFIG) == options
 
@@ -255,3 +258,83 @@ def test_a_model_is_checked_against_the_agent_chosen_beside_it(
     agent: str, model: str, problems: list[str]
 ) -> None:
     assert check_inputs(PAIRED, {"agent": agent, "model": model}) == problems
+
+
+RELAY = build_forms(
+    {"relay": {"target": "string", "fallback": "string", "note": "string"}},
+    {
+        "relay": FormSpec(
+            "Relay",
+            {
+                "target": InputSpec("Flow", LovKind.FLOW),
+                "fallback": InputSpec("Fallback", LovKind.FLOW),
+            },
+        )
+    },
+    repositories=REPOSITORIES,
+    config=CONFIG,
+)[0]
+
+
+def test_a_form_file_names_the_list_of_the_engine_s_flows() -> None:
+    form, problems = parse_form("relay", {"inputs": {"target": {"lov": "flow"}}})
+    assert problems == []
+    assert form == FormSpec("relay", {"target": InputSpec("target", LovKind.FLOW)})
+
+
+def test_the_list_of_the_engine_s_flows_holds_no_value_in_a_form() -> None:
+    target, fallback, note = RELAY.inputs
+    assert target == FormInput(name="target", label="Flow", type="string", lov=LovKind.FLOW)
+    assert (fallback.lov, fallback.options) == (LovKind.FLOW, None)
+    assert (note.lov, note.options) == (None, None)
+
+
+@pytest.mark.parametrize(
+    ("inputs", "named"),
+    [
+        ({"target": "review", "fallback": "hello", "note": "review"}, ("review", "hello")),
+        ({"target": "review", "fallback": "review", "note": ""}, ("review",)),
+        # What cannot name a flow is asked of no engine: the check refuses it by itself.
+        ({"target": ["review"], "fallback": 3, "note": ""}, ()),
+        ({"note": "review"}, ()),
+    ],
+)
+def test_the_flows_a_run_s_inputs_name_are_the_ones_to_ask_the_engine_for(
+    inputs: dict[str, Any], named: tuple[str, ...]
+) -> None:
+    assert flows_named(RELAY, inputs) == named
+    # A form with no such list names none, whatever its inputs hold.
+    assert flows_named(FORMS[0], {**VALID, "task": "review"}) == ()
+
+
+@pytest.mark.parametrize(
+    ("inputs", "held", "problems"),
+    [
+        ({"target": "review", "fallback": "hello"}, ("review", "hello"), []),
+        (
+            {"target": "review", "fallback": "hello"},
+            ("review",),
+            ["input 'fallback': 'hello' is not one of its flow values"],
+        ),
+        (
+            {"target": "review", "fallback": "hello"},
+            (),
+            [
+                "input 'target': 'review' is not one of its flow values",
+                "input 'fallback': 'hello' is not one of its flow values",
+            ],
+        ),
+        (
+            {"target": ["review"], "fallback": ""},
+            ("review",),
+            [
+                "input 'target': ['review'] is not one of its flow values",
+                "input 'fallback': '' is not one of its flow values",
+            ],
+        ),
+    ],
+)
+def test_an_input_names_a_flow_the_engine_holds(
+    inputs: dict[str, Any], held: tuple[str, ...], problems: list[str]
+) -> None:
+    assert check_inputs(RELAY, {**inputs, "note": "anything"}, flows=held) == problems

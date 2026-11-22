@@ -33,6 +33,14 @@ const AGENTS: FlowInput = {
   options: [{ value: "helper", label: "Helper", models: ["sonnet"] }],
 };
 const TASK: FlowInput = { name: "task", label: "Task", type: "string" };
+/** neorc's flows: the backend lists no value, and neorc searches them. */
+const TARGET: FlowInput = {
+  name: "target",
+  label: "Flow",
+  type: "string",
+  lov: "flow",
+  options: null,
+};
 
 function flow(inputs: FlowInput[], has_form = true): Flow {
   return { name: "code_task", title: "Code a task", has_form, inputs };
@@ -74,8 +82,30 @@ test("a form is a column of its title and one control per input, in order", () =
 test("every kind of input makes a form neorc's subset draws", () => {
   const count: FlowInput = { name: "count", label: "Count", type: "number" };
   const draft: FlowInput = { name: "draft", label: "Draft", type: "boolean" };
-  const form = a2uiForm(flow([BRANCHES, AGENTS, TASK, count, draft]));
+  const form = a2uiForm(flow([BRANCHES, AGENTS, TASK, TARGET, count, draft]));
   expect(formOf({ form })).not.toBeNull();
+});
+
+test("the list of neorc's flows is neorc's own control, with no value of ours", () => {
+  const form = a2uiForm(flow([TARGET]));
+  expect(components(form).get("input-target")).toEqual({
+    id: "input-target",
+    component: "FlowPicker",
+    label: "Flow",
+    value: { path: "/target" },
+    checks: [
+      {
+        condition: { call: "required", args: { value: { path: "/target" } } },
+        message: "Choose a flow for Flow.",
+      },
+    ],
+  });
+  // neorc reads it as its choice of a flow, which starts with none chosen.
+  const read = formOf({ form });
+  expect(read?.start).toEqual({ target: "" });
+  expect(read?.root).toMatchObject({
+    children: [{ kind: "text" }, { kind: "flow", input: "target" }],
+  });
 });
 
 test("a list of values is a choice of its values, filled, and required", () => {

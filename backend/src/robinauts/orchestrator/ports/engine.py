@@ -11,7 +11,13 @@ from typing import Any
 
 
 class FlowEngine(ABC):
-    """Where a run of a flow starts."""
+    """Where a run of a flow starts, and where the flows are."""
+
+    @abstractmethod
+    async def has_flow(self, name: str, *, credential: str | None) -> bool:
+        """Whether the engine holds a flow by that name, asked with ``credential`` as a
+        bearer: the person's own, so the answer is about the flows that person may read. A
+        text that cannot name a flow names none."""
 
     @abstractmethod
     async def start_run(
