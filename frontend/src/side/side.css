@@ -180,6 +180,52 @@
   padding: 0;
 }
 
+/*
+ * An app's sub-tabs: a strip of the calls the view shows, and the frame of
+ * the one on top below it (`./AppTab.tsx`).
+ */
+.side-subs {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+}
+
+.side-sub-strip {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.25rem;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  padding: 0.25rem 0.5rem;
+}
+
+.side-sub {
+  max-width: 12rem;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: var(--radius);
+  padding: 0.125rem 0.5rem;
+  font-size: 0.8125rem;
+  line-height: calc(1.25 / 0.8125);
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-sub[data-selected="true"] {
+  background-color: var(--tint);
+  color: var(--ink);
+}
+
+.side-sub-view {
+  min-height: 0;
+  flex: 1;
+}
+
+.side-sub-view[hidden] {
+  display: none;
+}
+
 .side-app {
   display: flex;
   height: 100%;

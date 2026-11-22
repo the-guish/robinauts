@@ -34,7 +34,7 @@ import { PanelRightIcon, XIcon } from "../icons";
 import { useWide } from "../shell/breakpoint";
 import { useLockedScroll, useTrappedFocus } from "../shell/drawer";
 import { remember, remembered } from "../shell/storage";
-import { SideTabs } from "./SideTabs";
+import { type AskedTab, SideTabs } from "./SideTabs";
 import type { TabOffer, TabRenderers } from "./tabs";
 import "./side.css";
 
@@ -65,6 +65,11 @@ export interface SidePanelProps {
   onCloseDrawer: () => void;
   /** What is focused when the drawer opens. */
   closeRef: RefObject<HTMLButtonElement | null>;
+  /**
+   * The tab the agent last asked for, which is opened and put on top. The
+   * panel itself stays as it is: collapsed, it stays collapsed.
+   */
+  asked?: AskedTab | null;
 }
 
 function clamp(width: number, max: number): number {
@@ -112,6 +117,7 @@ export function SidePanel({
   drawer,
   onCloseDrawer,
   closeRef,
+  asked = null,
 }: Readonly<SidePanelProps>) {
   const asDrawer = !useWide();
   const open = asDrawer && drawer;
@@ -184,6 +190,7 @@ export function SidePanel({
         offers={offers}
         renderers={renderers}
         hidden={rail}
+        asked={asked}
       />
     </aside>
   );

@@ -14,7 +14,7 @@
  * tab -- a built-in every conversation can open, say -- is a new member of
  * `TabKind`; `TabRenderers` is a record over it, so the shell does not
  * compile until it says how that kind is drawn. An MCP app's tab is kind
- * `"app"`, keyed `app:<server>/<tool>` (`appTabKey`), one offer per app the
+ * `"app"`, keyed `app:<server>/<view>` (`appTabKey`), one offer per app the
  * agent has (`./apps.ts`).
  *
  * Nothing here draws anything and nothing here asks the network: the
@@ -52,8 +52,8 @@ export type TabRenderer = (offer: TabOffer) => ReactNode;
 export type TabRenderers = Readonly<Record<TabKind, TabRenderer>>;
 
 /** The key an MCP app's tab is remembered by. */
-export function appTabKey(server: string, tool: string): string {
-  return `app:${server}/${tool}`;
+export function appTabKey(server: string, view: string): string {
+  return `app:${server}/${view}`;
 }
 
 /** What is open in one conversation, and which of it is on top. */

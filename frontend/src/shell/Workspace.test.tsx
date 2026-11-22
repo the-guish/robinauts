@@ -11,7 +11,15 @@ import {
 import { expect, test, vi } from "vitest";
 
 import { callsTo, json, refusal, stubFetch, type Call } from "../test/api";
-import { conversation, id, message, opened, page } from "../test/conversations";
+import {
+  calling,
+  conversation,
+  id,
+  message,
+  opened,
+  page,
+  results,
+} from "../test/conversations";
 import { hashOf, InShell } from "../test/shell";
 import { event, streamHeaders, streamed } from "../test/stream";
 import { NOT_OFFERED, unoffered } from "./ModelPicker";
@@ -917,11 +925,11 @@ const sidePanel = () =>
 
 /** The helper agent's one app, as `GET /robinauts/api/apps` lists it. */
 const TO_DO_APP = {
-  id: "todo/show_todos",
+  id: "todo/ui://to-do-list/app.html",
   server: "todo",
-  tool: "show_todos",
+  view: "ui://to-do-list/app.html",
   title: "To-do list",
-  description: "The list.",
+  tools: [{ name: "show_todos", title: "To-do list" }],
 };
 
 /** The helper agent has the to-do list app; the rest as `otherwise`. */
@@ -931,11 +939,19 @@ function withApp(call: Call): Response | undefined {
     : undefined;
 }
 
-test("the agent's apps are offered, and open as a sandboxed frame", async () => {
+test("the agent's apps are offered, and a tab shows its conversation's calls in a sandboxed frame", async () => {
   location.hash = hashOf(`/c/${id(1)}`);
   await shell((call) => {
     if (call.url === `/robinauts/api/conversations/${id(1)}`) {
-      return json(opened(conversation(1, "Robins"), []));
+      return json(
+        opened(conversation(1, "Robins"), [
+          message("m1", "user", "What is left to do?"),
+          calling("m2", "", [
+            { call_id: "c1", name: "show_todos", arguments: {} },
+          ]),
+          results("m3", [{ call_id: "c1", text: "1 to-do" }]),
+        ]),
+      );
     }
     return withApp(call) ?? withConversation(call);
   });
@@ -949,8 +965,14 @@ test("the agent's apps are offered, and open as a sandboxed frame", async () => 
     ).toEqual(["To-do list"]);
   });
   fireEvent.click(screen.getByRole("menuitem", { name: "To-do list" }));
+  // The call read with the conversation is the tab's one sub-tab.
   const app = within(screen.getByRole("tabpanel", { name: "To-do list" }));
-  const frame = app.getByTitle("To-do list");
+  expect(app.getByRole("tab", { name: "To-do list 1" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  const frame = app.getByRole("tabpanel", { name: "To-do list 1" }).firstChild
+    ?.lastChild;
   expect(frame).toHaveAttribute(
     "src",
     "/robinauts/api/apps/todo/show_todos/view?agent=helper",

@@ -9,37 +9,78 @@ import {
 } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 
+import type { ThreadToolCall } from "../chat";
 import { json, refusal, stubFetch, type Call } from "../test/api";
-import { AppTab, START_TIMEOUT_MS } from "./AppTab";
-import { type App, type ToolResults, toolResults } from "./apps";
-import { PROTOCOL_VERSION } from "./bridge";
+import { START_TIMEOUT_MS } from "./AppFrame";
+import { AppTab, type Asked } from "./AppTab";
+import { type App, subTabKey, subTabsOf } from "./apps";
+import { PROTOCOL_VERSION, TEARDOWN_ID } from "./bridge";
 
 const APP: App = {
-  id: "todo/show_todos",
-  server: "todo",
-  tool: "show_todos",
-  title: "To-do list",
-  description: "",
+  id: "draw/ui://diagrams/view.html",
+  server: "draw",
+  view: "ui://diagrams/view.html",
+  title: "Diagrams",
+  tools: [{ name: "show_diagram", title: "Diagram" }],
 };
 
-const LIST = {
-  content: [{ type: "text", text: "1 to-do(s), 0 done" }],
-  structuredContent: { items: [{ id: "1", text: "milk", done: false }] },
+const CONVERSATION = "0b7e0000-0000-4000-8000-000000000001";
+
+const DRAWN = {
+  content: [{ type: "text", text: "Two boxes." }],
+  structuredContent: { nodes: [{ id: "a" }, { id: "b" }], revision: 1 },
   isError: false,
 };
 
-function answering(answer: (call: Call) => Response = () => json(LIST)) {
+function shown(
+  callId: string,
+  diagram: string,
+  more: Partial<ThreadToolCall> = {},
+): ThreadToolCall {
+  return {
+    messageId: "m2",
+    callId,
+    name: "show_diagram",
+    arguments: { diagram_id: diagram },
+    state: "answered",
+    live: true,
+    ...more,
+  };
+}
+
+function answering(answer: (call: Call) => Response = () => json(DRAWN)) {
   return stubFetch(answer);
 }
 
-/** The tab, its frame, and what the frame's window is posted. */
-function tab(results?: ToolResults) {
-  render(<AppTab agent="planner" app={APP} turnsEnded={0} results={results} />);
-  const frame = screen.getByTitle<HTMLIFrameElement>("To-do list");
+/** A sub-tab's frame: the sub-tab itself has the same title. */
+function frameOf(title: string) {
+  const frame = document.querySelector<HTMLIFrameElement>(
+    `iframe[title="${title}"]`,
+  );
+  if (frame === null) throw new Error(`no frame titled ${title}`);
+  return frame;
+}
+
+function tabOf(calls: ThreadToolCall[], asked: Asked | null = null) {
+  return (
+    <AppTab
+      agent="planner"
+      app={APP}
+      conversation={CONVERSATION}
+      subTabs={subTabsOf(APP, calls)}
+      asked={asked}
+    />
+  );
+}
+
+/** The tab with one sub-tab, its frame, and what the frame's window is posted. */
+function tab(calls: ThreadToolCall[] = [shown("c1", "a")]) {
+  const drawn = render(tabOf(calls));
+  const frame = frameOf("Diagram 1");
   const view = frame.contentWindow;
   if (view === null) throw new Error("the frame has no window");
   const posted = vi.spyOn(view, "postMessage");
-  return { frame, view, posted };
+  return { ...drawn, frame, view, posted };
 }
 
 /** A message from `source`, as the browser would hand it to the page. */
@@ -56,40 +97,44 @@ const sent = (posted: ReturnType<typeof tab>["posted"]) =>
     return message as Record<string, unknown>;
   });
 
-async function started(results?: ToolResults) {
-  const drawn = tab(results);
-  from(drawn.view, {
+function handshake(view: Window) {
+  from(view, {
     jsonrpc: "2.0",
     id: 1,
     method: "ui/initialize",
     params: { protocolVersion: PROTOCOL_VERSION },
   });
-  from(drawn.view, {
+  from(view, {
     jsonrpc: "2.0",
     method: "ui/notifications/initialized",
     params: {},
   });
+}
+
+async function started(calls?: ThreadToolCall[]) {
+  const drawn = tab(calls);
+  handshake(drawn.view);
   await waitFor(() => {
     expect(sent(drawn.posted)).toHaveLength(3);
   });
   return drawn;
 }
 
-test("the view is framed sandboxed, with scripts alone, and hidden until it answers", () => {
+test("the view is framed sandboxed, with scripts alone, and hidden until it is told a result", () => {
   answering();
   const { frame } = tab();
   expect(frame).toHaveAttribute(
     "src",
-    "/robinauts/api/apps/todo/show_todos/view?agent=planner",
+    "/robinauts/api/apps/draw/show_diagram/view?agent=planner",
   );
   expect(frame).toHaveAttribute("sandbox", "allow-scripts");
-  expect(screen.getByRole("status")).toHaveTextContent("Loading To-do list…");
+  expect(screen.getByRole("status")).toHaveTextContent("Loading Diagram 1…");
 });
 
-test("the handshake: the theme, then the app's own tool, its input and its result", async () => {
+test("the handshake: the theme, then the agent's arguments and the result of its call", async () => {
   document.documentElement.dataset.theme = "dark";
   const fetch = answering();
-  const { posted } = await started();
+  const { posted, rerender } = await started();
   const [initialized, input, result] = sent(posted);
   expect(initialized).toEqual({
     jsonrpc: "2.0",
@@ -98,27 +143,30 @@ test("the handshake: the theme, then the app's own tool, its input and its resul
       protocolVersion: PROTOCOL_VERSION,
       hostInfo: { name: "robinauts" },
       hostCapabilities: { serverTools: {} },
-      hostContext: { theme: "dark", displayMode: "inline" },
+      hostContext: {
+        theme: "dark",
+        displayMode: "inline",
+        availableDisplayModes: ["inline"],
+      },
     },
   });
   expect(input).toEqual({
     jsonrpc: "2.0",
     method: "ui/notifications/tool-input",
-    params: { arguments: {} },
+    params: { arguments: { diagram_id: "a" } },
   });
   expect(result).toEqual({
     jsonrpc: "2.0",
     method: "ui/notifications/tool-result",
-    params: LIST,
+    params: DRAWN,
   });
+  // The result is the agent's own, read from the conversation: no tool is called.
   expect(fetch).toHaveBeenCalledOnce();
   const [url, init] = fetch.mock.calls[0] ?? [];
-  expect(url).toBe("/robinauts/api/apps/todo/tools/show_todos");
-  expect(init?.method).toBe("POST");
-  expect(JSON.parse(String(init?.body))).toEqual({
-    agent: "planner",
-    arguments: {},
-  });
+  expect(url).toBe(
+    `/robinauts/api/conversations/${CONVERSATION}/messages/m2/tool-result?call_id=c1`,
+  );
+  expect(init?.method ?? "GET").toBe("GET");
   // Loaded: the view is shown, and nothing stands in its place.
   expect(screen.queryByRole("status")).toBeNull();
 
@@ -131,13 +179,56 @@ test("the handshake: the theme, then the app's own tool, its input and its resul
       params: { theme: "light" },
     });
   });
+
+  // The agent shows the same diagram again: the same sub-tab, the same view,
+  // told the new call's result and not its arguments again.
+  rerender(tabOf([shown("c1", "a"), shown("c9", "a", { messageId: "m4" })]));
+  await waitFor(() => {
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  expect(fetch.mock.calls[1]?.[0]).toBe(
+    `/robinauts/api/conversations/${CONVERSATION}/messages/m4/tool-result?call_id=c9`,
+  );
+  await waitFor(() => {
+    expect(sent(posted).at(-1)).toEqual(result);
+  });
+  expect(screen.getAllByRole("tab")).toHaveLength(1);
+  expect(
+    sent(posted).filter(
+      (message) => message.method === "ui/notifications/tool-input",
+    ),
+  ).toHaveLength(1);
+});
+
+test("a call is told once its tool has answered, and as cancelled when its turn ended first", async () => {
+  const fetch = answering();
+  const running = shown("c1", "a", { state: "running" });
+  const { view, posted, rerender } = tab([running]);
+  handshake(view);
+  await waitFor(() => {
+    expect(sent(posted)).toHaveLength(2);
+  });
+  // Still running: the arguments are told, and the view waits.
+  expect(fetch).not.toHaveBeenCalled();
+  expect(screen.getByRole("status")).toHaveTextContent("Loading Diagram 1…");
+
+  rerender(tabOf([{ ...running, state: "unanswered" }]));
+  await waitFor(() => {
+    expect(sent(posted).at(-1)).toEqual({
+      jsonrpc: "2.0",
+      method: "ui/notifications/tool-cancelled",
+      params: { reason: "The turn ended before the tool answered." },
+    });
+  });
+  expect(fetch).not.toHaveBeenCalled();
+  expect(screen.queryByRole("status")).toBeNull();
 });
 
 test("the view's tool calls go through the backend, and nothing else is offered", async () => {
   const fetch = answering((call) =>
-    call.url.endsWith("/remove_todo")
+    call.url.endsWith("/pin_node")
       ? refusal(502, "BadGateway", "The tool server did not answer.")
-      : json(LIST),
+      : json(DRAWN),
   );
   const { view, posted } = await started();
 
@@ -145,21 +236,21 @@ test("the view's tool calls go through the backend, and nothing else is offered"
     jsonrpc: "2.0",
     id: 2,
     method: "tools/call",
-    params: { name: "add_todo", arguments: { text: "milk" } },
+    params: { name: "show_diagram", arguments: { diagram_id: "a" } },
   });
   await waitFor(() => {
     expect(sent(posted).at(-1)).toEqual({
       jsonrpc: "2.0",
       id: 2,
-      result: LIST,
+      result: DRAWN,
     });
   });
   expect(fetch.mock.calls.at(-1)?.[0]).toBe(
-    "/robinauts/api/apps/todo/tools/add_todo",
+    "/robinauts/api/apps/draw/tools/show_diagram",
   );
   expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body))).toEqual({
     agent: "planner",
-    arguments: { text: "milk" },
+    arguments: { diagram_id: "a" },
   });
 
   // A call the backend refuses: an error, in fixed words.
@@ -167,7 +258,7 @@ test("the view's tool calls go through the backend, and nothing else is offered"
     jsonrpc: "2.0",
     id: 3,
     method: "tools/call",
-    params: { name: "remove_todo", arguments: { id: "1" } },
+    params: { name: "pin_node", arguments: { id: "a" } },
   });
   await waitFor(() => {
     expect(sent(posted).at(-1)).toEqual({
@@ -198,23 +289,20 @@ test("a message from anywhere but the frame, or one that is no message, is not r
   expect(fetch).not.toHaveBeenCalled();
 });
 
-test("a first call that fails says so in the view's place, and can be tried again", async () => {
-  answering(() =>
-    refusal(502, "BadGateway", "The tool server did not answer."),
-  );
+test("a result that cannot be read says so in the view's place, and can be tried again", async () => {
+  answering(() => refusal(404, "MessageNotFoundError", "No such result."));
   const { frame, view } = tab();
-  from(view, { jsonrpc: "2.0", id: 1, method: "ui/initialize" });
-  from(view, { jsonrpc: "2.0", method: "ui/notifications/initialized" });
+  handshake(view);
   const alert = await screen.findByRole("alert");
-  expect(alert).toHaveTextContent("To-do list could not be opened.");
-  expect(alert).toHaveTextContent("The tool server did not answer.");
+  expect(alert).toHaveTextContent("Diagram 1 could not be opened.");
+  expect(alert).toHaveTextContent("No such result.");
 
   answering();
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   expect(screen.queryByRole("alert")).toBeNull();
-  expect(screen.getByRole("status")).toHaveTextContent("Loading To-do list…");
+  expect(screen.getByRole("status")).toHaveTextContent("Loading Diagram 1…");
   // A new frame, and a new handshake with it.
-  expect(screen.getByTitle("To-do list")).not.toBe(frame);
+  expect(frameOf("Diagram 1")).not.toBe(frame);
 });
 
 test("a view that loads and never asks to start is said not to have", () => {
@@ -234,21 +322,59 @@ test("a view that loads and never asks to start is said not to have", () => {
   }
 });
 
-test("a tool of the app's server answering in the chat hands the view the app's answer again", async () => {
-  const fetch = answering();
-  const results = toolResults();
-  const { posted } = await started(results);
-  act(() => {
-    results.publish("other__show_todos");
-    results.publish("todo__add_todo");
+test("a tab is empty until the agent calls, then holds a sub-tab per call, the asked one on top", async () => {
+  answering();
+  const { rerender } = render(tabOf([]));
+  expect(
+    screen.getByText(/Diagrams shows here when the agent uses it/),
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("tab")).toBeNull();
+
+  // Two diagrams: the newest call is on top, and only its view is loaded.
+  const first = shown("c1", "a", { live: false });
+  const second = shown("c2", "b", { live: false });
+  rerender(tabOf([first, second]));
+  const names = () => screen.getAllByRole("tab").map((tab) => tab.textContent);
+  const onTop = () =>
+    screen
+      .getAllByRole("tab")
+      .find((tab) => tab.getAttribute("aria-selected") === "true")?.textContent;
+  expect(names()).toEqual(["Diagram 1", "Diagram 2"]);
+  expect(onTop()).toBe("Diagram 2");
+  expect(document.querySelectorAll("iframe")).toHaveLength(1);
+  const secondView = frameOf("Diagram 2");
+
+  // The person picks the first: its view is made, and the second's is kept.
+  fireEvent.click(screen.getByRole("tab", { name: "Diagram 1" }));
+  expect(onTop()).toBe("Diagram 1");
+  const firstView = frameOf("Diagram 1");
+  expect(frameOf("Diagram 2")).toBe(secondView);
+  expect(secondView.closest("[hidden]")).not.toBeNull();
+
+  // The agent asks for the second again: it takes the top back.
+  const asked = { sub: subTabKey("show_diagram", { diagram_id: "b" }), at: 1 };
+  rerender(tabOf([first, second, shown("c3", "b")], asked));
+  expect(onTop()).toBe("Diagram 2");
+  expect(names()).toEqual(["Diagram 1", "Diagram 2"]);
+  // The asking is taken once: what the person picks after it stays.
+  fireEvent.keyDown(screen.getByRole("tab", { name: "Diagram 2" }), {
+    key: "ArrowLeft",
   });
+  expect(onTop()).toBe("Diagram 1");
+  rerender(tabOf([first, second, shown("c3", "b")], asked));
+  expect(onTop()).toBe("Diagram 1");
+
+  // A view that has started is told as its frame goes.
+  const view = firstView.contentWindow;
+  if (view === null) throw new Error("the frame has no window");
+  const posted = vi.spyOn(view, "postMessage");
+  handshake(view);
   await waitFor(() => {
-    expect(sent(posted)).toHaveLength(4);
+    expect(posted).toHaveBeenCalledTimes(3);
   });
-  expect(sent(posted)[3]).toEqual({
-    jsonrpc: "2.0",
-    method: "ui/notifications/tool-result",
-    params: LIST,
+  rerender(<p>closed</p>);
+  expect(posted.mock.calls.at(-1)?.[0]).toMatchObject({
+    id: TEARDOWN_ID,
+    method: "ui/resource-teardown",
   });
-  expect(fetch).toHaveBeenCalledTimes(2);
 });

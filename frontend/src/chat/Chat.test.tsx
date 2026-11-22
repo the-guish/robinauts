@@ -29,6 +29,7 @@ import {
   type ConversationId,
   type Drafts,
   type ModelId,
+  type ThreadToolCalls,
 } from "./index";
 
 const RUN = "11111111-2222-4333-8444-555555555555";
@@ -485,7 +486,7 @@ test("the seam is a component and eleven names, and nothing of a library", () =>
     onTurnEnded?: () => void;
     changes?: number;
     onModelRefused?: (modelId: ModelId) => void;
-    onToolResult?: (name: string) => void;
+    onToolCalls?: (thread: ThreadToolCalls) => void;
     welcome?: ReactNode;
     drafts?: Drafts;
   }>();

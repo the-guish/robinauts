@@ -53,7 +53,7 @@ import {
   UNKNOWN_MODEL,
 } from "../api/client";
 import { cancelRun, type Opened } from "../conversation/conversation";
-import type { ChatProps, Drafts } from "./index";
+import type { ChatProps, Drafts, ThreadToolCall } from "./index";
 import {
   attach,
   startNewConversation,
@@ -72,6 +72,7 @@ import {
   sameRead,
   STOP_DID_NOT_ARRIVE,
   storedParent,
+  toolCallsOf,
   turnStart,
   under,
   UNSENT,
@@ -286,6 +287,20 @@ export function useChat(props: ChatProps): Chatting {
   useLayoutEffect(() => {
     turns.now(props, state);
   });
+
+  // The thread's tool calls, told each time they change (`./index.ts`,
+  // `onToolCalls`). Compared as text: a new array of the same calls, which
+  // every piece of an answer's text makes, is no change to tell.
+  const toolCalls = toolCallsOf(state);
+  const toldCalls = JSON.stringify([state.conversationId, toolCalls]);
+  const onToolCalls = props.onToolCalls;
+  useEffect(() => {
+    const [conversationId, calls] = JSON.parse(toldCalls) as [
+      string | null,
+      ThreadToolCall[],
+    ];
+    onToolCalls?.({ conversationId, calls });
+  }, [toldCalls, onToolCalls]);
 
   // Which conversation is on the screen. Reading one is one call
   // (`docs/specs/conversations.md`), and leaving one abandons it.
@@ -860,18 +875,10 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     afterLoss: boolean,
   ): Promise<void> {
     let lost: string | null = null;
-    // A result names its call alone; the call named the tool.
-    const tools = new Map<string, string>();
     try {
       for await (const { event } of attached.events) {
         if (control.signal.aborted) return;
         dispatch({ kind: "event", event });
-        if (event.type === "TOOL_CALL_START") {
-          tools.set(event.toolCallId, event.toolCallName);
-        } else if (event.type === "TOOL_CALL_RESULT") {
-          const name = tools.get(event.toolCallId);
-          if (name !== undefined) props.onToolResult?.(name);
-        }
       }
     } catch {
       if (control.signal.aborted) return;

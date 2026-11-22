@@ -16,8 +16,11 @@
  *   or a click anywhere else, closes it too.
  *
  * **The panels stay mounted.** Every open tab's panel is in the page, and
- * those not on top are `hidden`: what a tab holds -- an app's frame and
- * what its view shows -- is not thrown away when another is looked at.
+ * those not on top are `hidden`: what a tab holds -- an app's frames and
+ * what its views show -- is not thrown away when another is looked at.
+ *
+ * **The agent opens a tab too.** A call of a tool with a view opens that
+ * view's tab and puts it on top (`asked`), wherever the keyboard is.
  */
 import {
   type KeyboardEvent,
@@ -44,20 +47,38 @@ import {
 /** Where the focus goes once the next render is on the screen. */
 type FocusNext = { tab: string } | "add" | null;
 
+/** The tab the agent last asked for, and a count that grows each time. */
+export interface AskedTab {
+  readonly key: string;
+  readonly at: number;
+}
+
 export function SideTabs({
   conversation,
   offers,
   renderers,
   hidden,
+  asked = null,
 }: Readonly<{
   conversation: string;
   offers: readonly TabOffer[];
   renderers: TabRenderers;
   hidden: boolean;
+  /** Opened and put on top when the agent asks; the keyboard stays put. */
+  asked?: AskedTab | null;
 }>) {
   const [tabs, setTabs] = useState<OpenTabs>(() =>
     rememberedTabs(conversation),
   );
+  // The agent's asking, taken once: the person may close the tab after.
+  const taken = useRef(0);
+  useEffect(() => {
+    if (asked === null || asked.at === taken.current) return;
+    taken.current = asked.at;
+    const next = withOpened(rememberedTabs(conversation), asked.key);
+    rememberTabs(conversation, next);
+    setTabs(next);
+  }, [asked, conversation]);
   const { open, selected } = shownTabs(tabs, offers);
   const addable = addableTabs(tabs, offers);
   const base = useId();

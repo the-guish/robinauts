@@ -21,14 +21,14 @@
 import { ShellPanel } from "@oneberth/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { Chat, type Drafts } from "../chat";
+import { Chat, type Drafts, type ThreadToolCalls } from "../chat";
 import { useChanges } from "../changes/changes";
 import { conversationIn, useHistory } from "../history/history";
 import { PanelRightIcon } from "../icons";
 import { NEW_CHAT, useRouter } from "../router";
 import { shownTitle } from "../conversation/conversation";
 import { AppTab } from "../side/AppTab";
-import { appOf, appOffers, toolResults, useApps } from "../side/apps";
+import { appOf, appOffers, lastAsked, subTabsOf, useApps } from "../side/apps";
 import { SIDE_ID, SidePanel } from "../side/SidePanel";
 import { carryOpenTabs, NEW_CHAT_TABS, type TabRenderers } from "../side/tabs";
 import type { Conversation } from "../conversation/conversation";
@@ -57,6 +57,10 @@ import { remember, remembered } from "./storage";
 import "./shell.css";
 
 export const PANEL_KEY = "panel";
+
+/** No tool calls: the empty chat's, and a conversation's before it is read. */
+const NO_CALLS: ThreadToolCalls["calls"] = [];
+const NO_THREAD: ThreadToolCalls = { conversationId: null, calls: NO_CALLS };
 
 /**
  * What to call the agent a conversation is with (`docs/specs/agents.md`).
@@ -387,13 +391,24 @@ export function Workspace({
   // conversation's agent, or on the empty chat the one picked for it.
   const sideAgent = current === null ? agentId : conversationAgent;
   const apps = useApps(sideAgent);
-  const [results] = useState(toolResults);
-  // A turn can change what an open app shows, so its tab reads it again.
-  const [turnsEnded, setTurnsEnded] = useState(0);
-  const turnEnded = () => {
-    history.refresh();
-    setTurnsEnded((count) => count + 1);
-  };
+  // The tool calls of the thread the chat holds, which the apps' tabs show
+  // as sub-tabs (`docs/architecture/mcp-apps.md`). The chat may still hold
+  // the conversation just left: only the calls of the one on the screen are
+  // shown.
+  const [thread, setThread] = useState<ThreadToolCalls>(NO_THREAD);
+  const calls = thread.conversationId === current ? thread.calls : NO_CALLS;
+  // The view the agent is asking for now, counted so that the panel takes
+  // each asking once: it opens that tab and that sub-tab, and the person may
+  // then close either.
+  const asking = lastAsked(apps, calls);
+  const [counted, setCounted] = useState({ call: "", at: 0 });
+  if (asking !== null && asking.callId !== counted.call) {
+    setCounted({ call: asking.callId, at: counted.at + 1 });
+  }
+  const asked =
+    asking !== null && asking.callId === counted.call
+      ? { ...asking, at: counted.at }
+      : null;
   const renderers: TabRenderers = {
     app: (offer) => {
       const app = appOf(apps, offer);
@@ -404,8 +419,9 @@ export function Workspace({
           key={sideAgent}
           agent={sideAgent}
           app={app}
-          turnsEnded={turnsEnded}
-          results={results}
+          conversation={current}
+          subTabs={subTabsOf(app, calls)}
+          asked={asked?.tab === offer.key ? asked : null}
         />
       );
     },
@@ -520,9 +536,9 @@ export function Workspace({
               onModelRefused={forgetModel}
               onConversationStarted={startedConversation}
               onConversationOpened={conversationOpened}
-              onTurnEnded={turnEnded}
+              onTurnEnded={history.refresh}
               changes={changes}
-              onToolResult={results.publish}
+              onToolCalls={setThread}
               welcome={welcome}
               drafts={drafts}
             />
@@ -536,6 +552,7 @@ export function Workspace({
         drawer={sideDrawer}
         onCloseDrawer={closeSide}
         closeRef={sideCloser}
+        asked={asked === null ? null : { key: asked.tab, at: asked.at }}
       />
     </div>
   );
