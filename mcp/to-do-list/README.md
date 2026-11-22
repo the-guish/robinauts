@@ -87,18 +87,38 @@ It keeps nothing in the browser.
 
 It speaks to the host alone, in JSON-RPC 2.0 over `postMessage`, with no SDK:
 
-1. It asks `ui/initialize`, takes the theme from the answer's `hostContext`,
-   and sends `ui/notifications/initialized`.
+1. It asks `ui/initialize` with `protocolVersion` `2026-01-26`, takes the theme
+   from the answer's `hostContext`, and sends `ui/notifications/initialized`.
 2. It draws the list from the `structuredContent` of
-   `ui/notifications/tool-result`.
+   `ui/notifications/tool-result`: the result of the agent's call of
+   `show_todos`. A later result for the same view is drawn the same way.
 3. It asks the host `tools/call` for `add_todo`, `toggle_todo` and
    `remove_todo`, and draws the list again from each answer.
-4. It follows `ui/notifications/host-context-changed` to a light or dark theme.
+4. It reads the list again every 2 seconds. It asks the host `tools/call` for
+   `show_todos`, and draws the answer.
+5. It says "The to-do list could not be shown." on
+   `ui/notifications/tool-cancelled`.
+6. It follows `ui/notifications/host-context-changed` to a light or dark theme.
    Until the host names one, it follows the system's.
 
 It answers `ping` and `ui/resource-teardown`, and refuses any other request with
--32601. A sandbox without `allow-forms` never submits a form, so the button and
-the Enter key add a to-do themselves.
+-32601. The teardown ends the reads. A sandbox without `allow-forms` never
+submits a form, so the button and the Enter key add a to-do themselves.
+
+The host sends the result of the agent's call and nothing after it. The view
+keeps the list fresh with its own reads, so a change the agent makes shows
+within 2 seconds.
+
+- **The view reads only while it is drawn.** Each read waits for an animation
+  frame (`requestAnimationFrame`). The browser gives no frame to a view hidden
+  with `display: none`, or to a view in a background tab.
+- **One read is in flight at a time.** A call of the view's own holds the reads
+  back until it is answered.
+- **A read that fails says nothing.** The next tick tries again.
+- **A list equal to the one on the screen changes nothing.** The list is not
+  drawn again, and the focus stays where it is.
+- **A list that differs is drawn again.** The focus stays on the same control,
+  and the text typed in "New to-do" stays.
 
 ## Check it
 

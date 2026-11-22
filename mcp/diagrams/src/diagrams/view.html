@@ -7,9 +7,10 @@ The diagram's view, for hosts that show MCP Apps (io.modelcontextprotocol/ui).
 One document: its style and its script are inline, and it names no other file, no
 address and no font, so it runs under a policy of default-src 'none' in a sandbox
 that allows scripts alone. It talks to the host and to nothing else, by postMessage,
-in JSON-RPC 2.0. It lays nothing out: the server does, and the view draws what it is
-given, animated: the items the last change touched, one after another, over 2 to 6
-seconds; the whole diagram, the first time.
+in JSON-RPC 2.0. It shows one diagram: the one the agent's call names. It lays nothing
+out: the server does, and the view draws what it is given, animated: the items the last
+change touched, one after another, over 2 to 6 seconds; the whole diagram, the first
+time. While it is drawn, it reads the diagram again every 2 seconds.
 -->
 <html lang="en">
 <head>
@@ -56,13 +57,21 @@ svg { display: block; width: 100%; height: auto; margin: 0 auto; }
   const canvas = document.getElementById("canvas");
   const layers = { nodes: document.getElementById("nodes"), edges: document.getElementById("edges") };
 
-  /* The wire: JSON-RPC 2.0 over postMessage, with the parent window alone. */
+  const POLL_MS = 2000;
+  const TIMEOUT_MS = 30000;
+
+  /* The wire: JSON-RPC 2.0 over postMessage, with the parent window alone. A request the
+     host does not answer in 30 seconds has failed. */
   const pending = new Map();
   let nextId = 1;
   const send = (message) => window.parent.postMessage(message, "*");
   const request = (method, params) => new Promise((resolve, reject) => {
     const id = nextId++;
-    pending.set(id, { resolve, reject });
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error("the host did not answer " + method));
+    }, TIMEOUT_MS);
+    pending.set(id, { resolve, reject, timer });
     send({ jsonrpc: "2.0", id, method, params });
   });
   window.addEventListener("message", (event) => {
@@ -70,9 +79,12 @@ svg { display: block; width: 100%; height: auto; margin: 0 auto; }
     if (event.source !== window.parent || !message || message.jsonrpc !== "2.0") return;
     if (typeof message.method === "string") {
       if (message.id === undefined || message.id === null) {
-        if (message.method === "ui/notifications/tool-result") show(message.params);
+        if (message.method === "ui/notifications/tool-input") input(message.params);
+        if (message.method === "ui/notifications/tool-result") show(message.params) || failed();
+        if (message.method === "ui/notifications/tool-cancelled") failed();
         if (message.method === "ui/notifications/host-context-changed") theme(message.params);
       } else if (message.method === "ping" || message.method === "ui/resource-teardown") {
+        if (message.method === "ui/resource-teardown") clearInterval(poll);
         send({ jsonrpc: "2.0", id: message.id, result: {} });
       } else {
         send({ jsonrpc: "2.0", id: message.id,
@@ -83,6 +95,7 @@ svg { display: block; width: 100%; height: auto; margin: 0 auto; }
     const call = pending.get(message.id);
     if (!call) return;
     pending.delete(message.id);
+    clearTimeout(call.timer);
     message.error ? call.reject(new Error(message.error.message)) : call.resolve(message.result);
   });
 
@@ -98,6 +111,40 @@ svg { display: block; width: 100%; height: auto; margin: 0 auto; }
   let revision = null;
   let running = null;
 
+  /* Which diagram: the agent's call names it, and the host sends the call's arguments before
+     its result. */
+  let diagramId = null;
+  function input(params) {
+    const given = params && params.arguments && params.arguments.diagram_id;
+    if (typeof given === "string" && given) diagramId = given;
+  }
+
+  /* The agent's call ended without a diagram: cancelled, or refused by the server. A drawing
+     already on the screen stays, and so does its status line. */
+  function failed() {
+    if (revision === null) status.textContent = "The diagram could not be shown.";
+  }
+
+  /* Keeping fresh. The host sends the result of the agent's call and nothing after it, so
+     the view reads its diagram again every 2 seconds, with the tool the agent called. Each
+     read waits for an animation frame: the browser gives none to a frame that is hidden
+     (display: none) or in a background tab, so the view reads only while it is drawn. One
+     read at a time. A read that fails leaves the drawing as it is, and the next tick tries
+     again. */
+  let reading = false;
+  let framed = false;
+  function read() {
+    framed = false;
+    reading = true;
+    request("tools/call", { name: "show_diagram", arguments: { diagram_id: diagramId } })
+      .then(show).catch(() => {}).then(() => { reading = false; });
+  }
+  const poll = setInterval(() => {
+    if (diagramId === null || reading || framed) return;
+    framed = true;
+    requestAnimationFrame(read);
+  }, POLL_MS);
+
   function element(name, attributes, parent) {
     const created = document.createElementNS(SVG, name);
     for (const [key, value] of Object.entries(attributes)) created.setAttribute(key, value);
@@ -105,10 +152,14 @@ svg { display: block; width: 100%; height: auto; margin: 0 auto; }
     return created;
   }
 
+  /* A result of show_diagram, from the host's notification or from a read of the view's
+     own. False for a result that holds no diagram. A revision already drawn is left alone,
+     and so is an older one: the result of an agent's call may arrive after a newer read. */
   function show(result) {
     const data = result && result.structuredContent;
-    if (!data || result.isError || !Array.isArray(data.nodes)) return;
-    if (data.revision === revision) return;
+    if (!data || result.isError || !Array.isArray(data.nodes)) return false;
+    if (diagramId === null && typeof data.diagram_id === "string") diagramId = data.diagram_id;
+    if (revision !== null && data.revision <= revision) return true;
     const steps = revision === null ? data.order : data.changed;
     revision = data.revision;
     status.textContent = data.nodes.length
@@ -117,6 +168,7 @@ svg { display: block; width: 100%; height: auto; margin: 0 auto; }
     canvas.setAttribute("viewBox", "0 0 " + data.width + " " + data.height);
     canvas.style.maxWidth = data.width + "px";
     animate(data, steps);
+    return true;
   }
 
   /* One change, animated. Each item it touched gets a slot of its own, in the server's order:
@@ -161,9 +213,11 @@ svg { display: block; width: 100%; height: auto; margin: 0 auto; }
       return { held, edge, at: fresh ? timing(edge.key, [0, 0]) : [0, 0] };
     });
 
-    const start = performance.now();
+    /* The clock starts with the first frame the browser gives, so a change that arrives
+       while the view is hidden is animated once the view is shown. */
+    let start = null;
     const frame = (now) => {
-      const t = now - start;
+      const t = start === null ? 0 : now - start;
       const part = ([from, to]) => to <= from ? (t >= from ? 1 : 0) : Math.min(1, Math.max(0, (t - from) / (to - from)));
       const ease = (p) => p * p * (3 - 2 * p);
       for (const track of tracks) {
@@ -190,11 +244,12 @@ svg { display: block; width: 100%; height: auto; margin: 0 auto; }
       }
       const gone = Math.max(0, 1 - t / 400);
       for (const el of fading) gone > 0 ? el.setAttribute("opacity", gone) : el.remove();
-      if (t < total || gone > 0) running.id = requestAnimationFrame(frame);
+      if (t < total || gone > 0) running.id = requestAnimationFrame(given);
       else running = null;
     };
-    running = { id: 0, finish: () => { cancelAnimationFrame(running.id); frame(start + total + 400); } };
-    frame(start);
+    const given = (now) => { if (start === null) start = now; frame(now); };
+    running = { id: 0, finish: () => { cancelAnimationFrame(running.id); start = 0; frame(total + 400); } };
+    frame(0);
   }
 
   /* A node's rectangle and its lines of text, drawn around its centre. */
@@ -217,7 +272,7 @@ svg { display: block; width: 100%; height: auto; margin: 0 auto; }
     return [box.x + dx * s, box.y + dy * s];
   }
 
-  request("ui/initialize", { protocolVersion: "2025-06-18",
+  request("ui/initialize", { protocolVersion: "2026-01-26",
     appInfo: { name: "diagrams", version: "0.1.0" }, appCapabilities: {} }).then(
     (result) => {
       theme(result && result.hostContext);

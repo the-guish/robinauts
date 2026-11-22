@@ -42,12 +42,26 @@ def test_the_style_and_the_script_are_inline_and_alone(html):
         "ui/initialize",
         "ui/notifications/initialized",
         "ui/notifications/tool-result",
+        "ui/notifications/tool-cancelled",
         "ui/notifications/host-context-changed",
+        "ui/resource-teardown",
+        "ping",
         "tools/call",
     ],
 )
 def test_the_view_speaks_each_message_of_the_protocol(html, method):
     assert f'"{method}"' in html
+
+
+def test_the_view_asks_for_the_version_of_the_protocol_the_host_speaks(html):
+    assert 'var PROTOCOL_VERSION = "2026-01-26";' in html
+    assert "protocolVersion: PROTOCOL_VERSION" in html
+
+
+def test_the_view_reads_the_list_again_from_an_animation_frame(html):
+    assert '{ name: "show_todos", arguments: {} }' in html
+    assert "requestAnimationFrame(refresh)" in html
+    assert "var POLL_MS = 2000;" in html
 
 
 @pytest.mark.parametrize("tool", ["add_todo", "toggle_todo", "remove_todo"])
