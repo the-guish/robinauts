@@ -13,6 +13,7 @@
  *
  *     ""            the empty chat, ready for a first message
  *     /c/<id>       that conversation
+ *     /search       the search page
  *
  * **Any other route is the empty chat.** Reading a route never writes one:
  * an unknown route is answered with the empty chat, and the address bar is
@@ -25,6 +26,7 @@ import type { ConversationId } from "./chat";
 /** Where the application is. */
 export type Route =
   | { readonly kind: "new" }
+  | { readonly kind: "search" }
   | { readonly kind: "conversation"; readonly id: ConversationId };
 
 /** The empty chat: the route of a page that has been told nothing else. */
@@ -67,6 +69,7 @@ export function isConversationId(value: string): boolean {
 export function parseRoute(route: string): Route {
   const path = route.split("?")[0] ?? "";
   const parts = path.split("/");
+  if (path === "/search") return { kind: "search" };
   const id = parts[2];
   if (
     parts.length === 3 &&
@@ -89,6 +92,7 @@ export function parseRoute(route: string): Route {
  * that goes home is a smaller one than a hash somebody else composed.
  */
 export function formatRoute(route: Route): string {
+  if (route.kind === "search") return "/search";
   return route.kind === "conversation" && isConversationId(route.id)
     ? `/c/${route.id}`
     : "";

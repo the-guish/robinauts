@@ -20,6 +20,12 @@ test("and written back the same way, round trip included", () => {
   });
 });
 
+test("the search page has a route of its own", () => {
+  expect(parseRoute("/search")).toEqual({ kind: "search" });
+  expect(formatRoute({ kind: "search" })).toBe("/search");
+  expect(parseRoute("/search/x")).toEqual({ kind: "new" });
+});
+
 test("every other route is the empty chat", () => {
   for (const route of [
     "",

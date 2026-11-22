@@ -57,6 +57,8 @@ export interface PanelProps {
   collapsed: boolean;
   onCollapse: (collapsed: boolean) => void;
   onNewChat: () => void;
+  /** Open the search page. */
+  onSearch?: () => void;
 }
 
 export function Panel({
@@ -69,6 +71,7 @@ export function Panel({
   collapsed,
   onCollapse,
   onNewChat,
+  onSearch,
 }: Readonly<PanelProps>) {
   // In the shell's drawer, on a small screen, the panel is drawn whole.
   const wide = useWide();
@@ -113,6 +116,19 @@ export function Panel({
         {onNewProject !== undefined && (
           <div className="panel-history-head">
             <NewProject onNewProject={onNewProject} />
+          </div>
+        )}
+        {onSearch !== undefined && (
+          <div className="panel-history-head">
+            <button
+              type="button"
+              title="Search"
+              aria-label="Search"
+              onClick={onSearch}
+              className="panel-tool panel-new-project"
+            >
+              <span>Search</span>
+            </button>
           </div>
         )}
         <HistoryList
