@@ -55,6 +55,7 @@ function WithProjects({
       collapsed={false}
       onCollapse={() => undefined}
       onNewChat={() => undefined}
+      onSearch={() => undefined}
     />
   );
 }

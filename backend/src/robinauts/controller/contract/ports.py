@@ -48,9 +48,12 @@ class Controller(ABC):
 
     @abstractmethod
     async def list_sessions(
-        self, user: User, *, limit: int, cursor: str | None = None
+        self, user: User, *, limit: int, cursor: str | None = None, query: str | None = None
     ) -> SessionPage:
-        """``InvalidValueError`` for a limit out of range or a cursor that does not parse."""
+        """``InvalidValueError`` for a limit out of range or a cursor that does not parse.
+
+        With a ``query``, only the sessions whose title, project name or agent holds every word
+        of it, case aside. A page of a search may be short and still have a cursor."""
         raise NotImplementedError
 
     @abstractmethod

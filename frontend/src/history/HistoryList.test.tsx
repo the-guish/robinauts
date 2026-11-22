@@ -42,6 +42,7 @@ function Panelled({ current }: { current: string | null }) {
       collapsed={false}
       onCollapse={() => undefined}
       onNewChat={() => undefined}
+      onSearch={() => undefined}
     />
   );
 }

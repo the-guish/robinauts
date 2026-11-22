@@ -25,7 +25,7 @@ import { Chat, type Drafts } from "../chat";
 import { useChanges } from "../changes/changes";
 import { conversationIn, useHistory } from "../history/history";
 import { PanelRightIcon } from "../icons";
-import { NEW_CHAT, useRouter } from "../router";
+import { NEW_CHAT, useRouter, type Route } from "../router";
 import { shownTitle } from "../conversation/conversation";
 import { AppTab } from "../side/AppTab";
 import { appOf, appOffers, toolResults, useApps } from "../side/apps";
@@ -158,6 +158,13 @@ function freshest(listed: Opened | null, about: Opened | null): Opened | null {
   return later(listed, about);
 }
 
+function sameRoute(a: Route, b: Route): boolean {
+  return (
+    a.kind === b.kind &&
+    (a.kind !== "conversation" || a.id === (b as typeof a).id)
+  );
+}
+
 /** The rail, as this browser last left it. */
 function usePanelCollapsed(): [boolean, (collapsed: boolean) => void] {
   const [collapsed, setCollapsed] = useState(
@@ -286,7 +293,18 @@ export function Workspace({
     if (sideDrawer) sideCloser.current?.focus();
   }, [sideDrawer]);
 
-  const current = route.kind === "conversation" ? route.id : null;
+  // The search page is drawn over the chat, which stays mounted under it (and
+  // so keeps its draft and any turn streaming): the chat's own route is the
+  // last one that was not the search page.
+  const [chatRoute, setChatRoute] = useState<Route>(
+    route.kind === "search" ? NEW_CHAT : route,
+  );
+  const searching = route.kind === "search";
+  if (route.kind !== "search" && !sameRoute(route, chatRoute)) {
+    setChatRoute(route);
+  }
+  const view = route.kind === "search" ? chatRoute : route;
+  const current = view.kind === "conversation" ? view.id : null;
   const listed = conversationIn(history.items, current);
   // What the chat's own read said about the conversation on the screen,
   // which the panel's pages need not hold; the title is the panel's first,
@@ -436,6 +454,7 @@ export function Workspace({
           onSearch={() => {
             navigate({ kind: "search" });
           }}
+          searching={searching}
         />
       </ShellPanel>
       {sideDrawer && (
@@ -479,66 +498,64 @@ export function Workspace({
             `chat` count is what "New chat" remounts it by, so that nothing
             typed into one carries over into the next. */}
         <main className="shell-main">
-          {route.kind === "search" ? (
+          {searching && (
             <SearchPage
-              history={history}
               projects={projects.status === "ready" ? projects.items : null}
               agentName={(id) => agentTitle(agents, id) ?? id}
             />
-          ) : (
-            <>
-              <h1 className="shell-title">
-                {route.kind === "conversation"
-                  ? title === null
-                    ? "…"
-                    : shownTitle(title)
-                  : "New chat"}
-              </h1>
-              {/* Who the conversation is with, under its title. The agent
+          )}
+          <div hidden={searching} className="shell-chat">
+            <h1 className="shell-title">
+              {route.kind === "conversation"
+                ? title === null
+                  ? "…"
+                  : shownTitle(title)
+                : "New chat"}
+            </h1>
+            {/* Who the conversation is with, under its title. The agent
               picker is gone once a conversation exists (`./AgentPicker.tsx`),
               and with it the only thing on the screen that said so; this is
               the fact it left behind, told as a line rather than a control
               that could not be changed. The model is still a choice, so
               beside it is the model picker (`./ModelPicker.tsx`). */}
-              {withAgent !== null && (
-                <div className="shell-about">
-                  <p data-agent="" className="shell-agent">
-                    with {withAgent}
-                  </p>
-                  {current !== null && conversationModel !== null && (
-                    <ConversationModel
-                      key={current}
-                      models={conversationModels}
-                      conversationId={current}
-                      model={conversationModel}
-                      onMoved={modelMoved}
-                      onNotOffered={modelsStale}
-                    />
-                  )}
-                </div>
-              )}
-              <Chat
-                key={chat}
-                conversationId={current}
-                agentId={agentId}
-                projectId={projectId}
-                // The model goes with every turn: an open conversation's is the
-                // one its line's picker shows.
-                modelId={current === null ? modelId : conversationModel}
-                // A first message refused for its model: this browser forgets
-                // it, whether or not the list has come, and asks for the list
-                // again, so the next one goes to a model still offered.
-                onModelRefused={forgetModel}
-                onConversationStarted={startedConversation}
-                onConversationOpened={conversationOpened}
-                onTurnEnded={turnEnded}
-                changes={changes}
-                onToolResult={results.publish}
-                welcome={welcome}
-                drafts={drafts}
-              />
-            </>
-          )}
+            {withAgent !== null && (
+              <div className="shell-about">
+                <p data-agent="" className="shell-agent">
+                  with {withAgent}
+                </p>
+                {current !== null && conversationModel !== null && (
+                  <ConversationModel
+                    key={current}
+                    models={conversationModels}
+                    conversationId={current}
+                    model={conversationModel}
+                    onMoved={modelMoved}
+                    onNotOffered={modelsStale}
+                  />
+                )}
+              </div>
+            )}
+            <Chat
+              key={chat}
+              conversationId={current}
+              agentId={agentId}
+              projectId={projectId}
+              // The model goes with every turn: an open conversation's is the
+              // one its line's picker shows.
+              modelId={current === null ? modelId : conversationModel}
+              // A first message refused for its model: this browser forgets
+              // it, whether or not the list has come, and asks for the list
+              // again, so the next one goes to a model still offered.
+              onModelRefused={forgetModel}
+              onConversationStarted={startedConversation}
+              onConversationOpened={conversationOpened}
+              onTurnEnded={turnEnded}
+              changes={changes}
+              onToolResult={results.publish}
+              welcome={welcome}
+              drafts={drafts}
+            />
+          </div>
         </main>
       </div>
       <SidePanel

@@ -707,9 +707,12 @@ def new_robinauts_webapp(
 
     @router.get("/api/conversations", dependencies=[permit(roles.CONVERSATIONS_READ)])
     async def list_sessions(
-        user: User = asking, limit: int = DEFAULT_PAGE, cursor: str | None = None
+        user: User = asking,
+        limit: int = DEFAULT_PAGE,
+        cursor: str | None = None,
+        q: Annotated[str | None, Query(max_length=200)] = None,
     ) -> ConversationListResponse:
-        page = await controller.list_sessions(user, limit=limit, cursor=cursor)
+        page = await controller.list_sessions(user, limit=limit, cursor=cursor, query=q)
         defaults = {a.id: a.default_model for a in await controller.list_agents()}
         return ConversationListResponse(
             items=[

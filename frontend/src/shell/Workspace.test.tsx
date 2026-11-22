@@ -1159,3 +1159,44 @@ test("hidden, it holds no long poll, and shown again it polls", async () => {
   });
   expect(asks()).toBe(asked);
 });
+
+test("Search opens the search page over the chat, which keeps its draft", async () => {
+  await shell();
+  const box = screen.getByRole("textbox", { name: "Message input" });
+  fireEvent.change(box, { target: { value: "half written" } });
+
+  const search = screen.getByRole("button", { name: "Search" });
+  expect(search).not.toHaveAttribute("aria-current");
+  fireEvent.click(search);
+
+  expect(location.hash).toBe(hashOf("/search"));
+  await screen.findByRole("searchbox", { name: "Search conversations" });
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Search");
+  expect(
+    screen.getByRole("searchbox", { name: "Search conversations" }),
+  ).toBeVisible();
+  expect(screen.getByRole("button", { name: "Search" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  // The chat is hidden, not unmounted.
+  expect(screen.queryByRole("textbox", { name: "Message input" })).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await waitFor(() => {
+    expect(screen.queryByRole("searchbox")).toBeNull();
+  });
+});
+
+test("leaving the search page for the conversation that was open shows it again", async () => {
+  location.hash = hashOf(`/c/${id(1)}`);
+  await shell(withConversation);
+  fireEvent.click(screen.getByRole("button", { name: "Search" }));
+  expect(await screen.findByRole("searchbox")).toBeVisible();
+  // The conversation is still the chat's while the search page is up.
+  location.hash = hashOf(`/c/${id(1)}`);
+  await waitFor(() => {
+    expect(screen.queryByRole("searchbox")).toBeNull();
+  });
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Robins");
+});

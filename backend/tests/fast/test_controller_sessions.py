@@ -37,6 +37,32 @@ async def test_sessions_are_listed_a_page_at_a_time_none_twice() -> None:
 
 
 @asyncio_test
+async def test_sessions_are_searched_by_title_project_and_agent_a_page_at_a_time() -> None:
+    lifecycle = await start_echo_controller()
+    controller = lifecycle.composed.controller
+    user = await controller.ensure_user(Identity("local", "me"), id=uuid.uuid4())
+    work = await controller.create_project(user, "Work")
+    ids = {}
+    for text, project in (("apple pie", None), ("banana", work.id), ("apple tart", work.id)):
+        turn = await controller.start_session(
+            user, agent="echo", model="echo", text=text, project=project
+        )
+        await wait_for_turn_end(controller, user, turn)
+        ids[text] = turn.session_id
+    first = await controller.list_sessions(user, limit=1, query="APPLE")
+    assert [s.id for s in first.sessions] == [ids["apple tart"]]
+    assert first.cursor is not None
+    second = await controller.list_sessions(user, limit=1, query="apple", cursor=first.cursor)
+    assert [s.id for s in second.sessions] == [ids["apple pie"]]
+    by_project = await controller.list_sessions(user, limit=10, query="work apple")
+    assert [s.id for s in by_project.sessions] == [ids["apple tart"]]
+    assert by_project.cursor is None
+    assert (await controller.list_sessions(user, limit=10, query="echo")).sessions
+    assert not (await controller.list_sessions(user, limit=10, query="zzz")).sessions
+    await lifecycle.stop()
+
+
+@asyncio_test
 async def test_a_session_is_in_the_default_project_unless_another_is_chosen() -> None:
     lifecycle = await start_echo_controller()
     controller = lifecycle.composed.controller

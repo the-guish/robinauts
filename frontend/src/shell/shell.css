@@ -43,6 +43,19 @@
   flex-direction: column;
 }
 
+/* The chat's column, kept mounted under the search page. */
+.shell-chat {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.shell-chat[hidden] {
+  display: none;
+}
+
 /* The two drawers' buttons, at the two ends of a line. */
 .shell-openers {
   display: flex;

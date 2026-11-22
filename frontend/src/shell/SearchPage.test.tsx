@@ -1,70 +1,72 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright The Robinauts Authors
-import { fireEvent, render, screen } from "@testing-library/react";
-import { expect, test, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { expect, test } from "vitest";
 
-import type { History } from "../history/history";
-import { RESULTS_PER_PAGE, SearchPage } from "./SearchPage";
+import { callsTo, json, refusal, stubFetch } from "../test/api";
+import { conversation, DEFAULT_PROJECT_ID, page } from "../test/conversations";
+import { SearchPage } from "./SearchPage";
 
-const PROJECT = "11111111-1111-4111-8111-111111111111";
+const PROJECTS = [
+  { id: DEFAULT_PROJECT_ID, name: "Work", created_at: "2026-01-01T00:00:00Z" },
+];
 
-function history(titles: string[]): History {
-  return {
-    status: "ready",
-    items: titles.map((title, i) => ({
-      id: `3f1b8e2a-4c5d-4e6f-8a9b-${String(i).padStart(12, "0")}`,
-      title,
-      agent: "helper",
-      model: "m",
-      project_id: PROJECT,
-      created_at: "2026-01-01T00:00:00Z",
-      updated_at: "2026-01-01T00:00:00Z",
-      running: false,
-    })),
-    more: false,
-    loadingMore: false,
-    refreshing: false,
-    error: null,
-    refresh: vi.fn(),
-    loadMore: vi.fn(),
-    rename: vi.fn(),
-    archive: vi.fn(),
-    remove: vi.fn(),
-  };
+function drawn() {
+  render(<SearchPage projects={PROJECTS} agentName={(id) => `Agent ${id}`} />);
+  return screen.getByRole("searchbox", { name: "Search conversations" });
 }
 
-function page(titles: string[]) {
-  render(
-    <SearchPage
-      history={history(titles)}
-      projects={[
-        { id: PROJECT, name: "Work", created_at: "2026-01-01T00:00:00Z" },
-      ]}
-      agentName={(id) => `Agent ${id}`}
-    />,
-  );
-}
-
-test("nothing is listed until something is typed, then rows match and update", () => {
-  page(["Budget plan", "Holiday trip"]);
+test("nothing is asked or listed until something is typed", async () => {
+  const fetch = stubFetch(() => json(page([])));
+  drawn();
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Search");
   expect(screen.queryByRole("table")).toBeNull();
-  const box = screen.getByRole("searchbox", { name: "Search conversations" });
-  fireEvent.change(box, { target: { value: "budget" } });
-  expect(screen.getByRole("link", { name: "Budget plan" })).toBeTruthy();
-  expect(screen.queryByRole("link", { name: "Holiday trip" })).toBeNull();
-  expect(screen.getByText("Work")).toBeTruthy();
-  expect(screen.getByText("Agent helper")).toBeTruthy();
-  fireEvent.change(box, { target: { value: "zzz" } });
-  expect(screen.getByText("No conversations found.")).toBeTruthy();
+  expect(callsTo(fetch, "/robinauts/api/conversations")).toHaveLength(0);
 });
 
-test("results are paged", () => {
-  page(Array.from({ length: RESULTS_PER_PAGE + 3 }, (_, i) => `Chat ${i}`));
-  fireEvent.change(screen.getByRole("searchbox"), {
-    target: { value: "chat" },
-  });
-  expect(screen.getAllByRole("link")).toHaveLength(RESULTS_PER_PAGE);
+test("what is typed is asked of the backend, and the rows say project, name and agent", async () => {
+  const fetch = stubFetch((call) =>
+    call.url.includes("q=budget")
+      ? json(page([conversation(1, "Budget plan")]))
+      : json(page([])),
+  );
+  const box = drawn();
+  fireEvent.change(box, { target: { value: "budget" } });
+  expect(
+    await screen.findByRole("link", { name: "Budget plan" }),
+  ).toBeVisible();
+  expect(screen.getByText("Work")).toBeVisible();
+  expect(screen.getByText("Agent helper")).toBeVisible();
+  expect(callsTo(fetch, "/robinauts/api/conversations").length).toBe(1);
+
+  fireEvent.change(box, { target: { value: "zzz" } });
+  expect(await screen.findByText("No conversations found.")).toBeVisible();
+});
+
+test("results are paged by the backend's cursor", async () => {
+  stubFetch((call) =>
+    call.url.includes("cursor=next")
+      ? json(page([conversation(2, "Second")]))
+      : json(page([conversation(1, "First")], "next")),
+  );
+  const box = drawn();
+  fireEvent.change(box, { target: { value: "x" } });
+  expect(await screen.findByRole("link", { name: "First" })).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  expect(screen.getAllByRole("link")).toHaveLength(3);
-  expect(screen.getByText("Page 2 of 2")).toBeTruthy();
+  expect(await screen.findByRole("link", { name: "Second" })).toBeVisible();
+  expect(screen.getByText("Page 2")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+  expect(await screen.findByRole("link", { name: "First" })).toBeVisible();
+});
+
+test("a refusal is said, and is not asked again", async () => {
+  const fetch = stubFetch(() => refusal(500, "internal", "boom"));
+  const box = drawn();
+  fireEvent.change(box, { target: { value: "x" } });
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "The search failed",
+  );
+  await waitFor(() => {
+    expect(callsTo(fetch, "/robinauts/api/conversations")).toHaveLength(1);
+  });
 });

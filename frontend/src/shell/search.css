@@ -46,3 +46,10 @@
   justify-content: center;
   gap: 1rem;
 }
+
+.search-title {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: calc(1.75 / 1.25);
+  font-weight: 600;
+}
