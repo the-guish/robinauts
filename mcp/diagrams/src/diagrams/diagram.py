@@ -1,22 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
-"""The diagram: rectangles joined by arrows, laid out again after every change.
+"""The diagrams: rectangles joined by arrows, each laid out again after every change.
 
-It is kept in memory, one diagram for everyone who reaches the server, and is gone when
-the server stops. Every change bumps the revision and records which items it touched, in
-the order a view should animate them: node by node in layout order, each arrow once both of
-its ends are there.
+They are kept in memory, by id, and are gone when the server stops. An id is 16 random hex
+digits, and whoever holds it reaches the diagram. Every change bumps the diagram's revision
+and records which items it touched, in the order a view should animate them: node by node in
+layout order, each arrow once both of its ends are there.
 """
 
 from __future__ import annotations
 
 import re
+import secrets
 import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from diagrams.layout import Layout, layout
 
+MAX_DIAGRAMS = 200
+"""The most diagrams the server holds."""
 MAX_NODES = 100
 MAX_EDGES = 200
 MAX_LABEL = 60
@@ -56,6 +59,7 @@ def _label(text: str) -> str:
 class Diagram:
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self.id = secrets.token_hex(8)
         self.direction = "TB"
         self.nodes: dict[str, str] = {}  # id -> label, in the order they were added
         self.edges: dict[str, Edge] = {}
@@ -118,6 +122,7 @@ class Diagram:
         with self._lock:
             boxes = self.layout.boxes
             return {
+                "diagram_id": self.id,
                 "revision": self.revision,
                 "direction": self.direction,
                 "width": self.layout.width,
@@ -143,11 +148,13 @@ class Diagram:
             }
 
     def describe(self) -> str:
-        """The diagram in words, for the model: every node where it is, every arrow."""
+        """The diagram in words, for the model: its id, every node where it is, every arrow."""
         with self._lock:
+            named = f"(diagram_id {self.id})"
             if not self.nodes:
-                return "The diagram is empty."
-            lines = [f"Diagram {self.direction}, {self.layout.width}x{self.layout.height}px:"]
+                return f"The diagram is empty {named}."
+            size = f"{self.layout.width}x{self.layout.height}px"
+            lines = [f"Diagram {self.direction}, {size} {named}:"]
             for node, box in self.layout.boxes.items():
                 pin = ", pinned" if node in self.pins else ""
                 lines.append(f"- {node} {self.nodes[node]!r} at ({box.x:g}, {box.y:g}){pin}")
@@ -215,3 +222,24 @@ class Diagram:
                 if node in (e.source, e.target) and {e.source, e.target} <= seen
             ]
         return order
+
+
+class Diagrams:
+    """The diagrams the server holds, by id, in the order they were created."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._held: dict[str, Diagram] = {}
+
+    def keep(self, diagram: Diagram) -> None:
+        """Hold a new diagram. A full store first drops the diagram created first."""
+        with self._lock:
+            while len(self._held) >= MAX_DIAGRAMS:
+                del self._held[next(iter(self._held))]
+            self._held[diagram.id] = diagram
+
+    def get(self, diagram_id: str) -> Diagram:
+        with self._lock:
+            if diagram_id not in self._held:
+                raise DiagramError(f"there is no diagram {diagram_id!r}")
+            return self._held[diagram_id]

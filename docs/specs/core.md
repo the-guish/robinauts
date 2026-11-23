@@ -228,6 +228,7 @@ hard, the decision is taken with them in mind.
 | [open-source.md](open-source.md) | licence, contributions, dependency policy, checks |
 | [../architecture/data-model.md](../architecture/data-model.md) | the stored records, the message tree, how a message is written |
 | [../architecture/the-path-of-one-message.md](../architecture/the-path-of-one-message.md) | one turn from the UI to the model and back: background execution, re-attaching |
+| [../architecture/mcp-apps.md](../architecture/mcp-apps.md) | MCP Apps: the views of tool servers in the side panel |
 | [../layout.md](../layout.md) | the package tree; the layer rules are in [../architecture/rules.md](../architecture/rules.md) |
 | [../oss-checklist.md](../oss-checklist.md) | the open source to-do list |
 | [../adr/](../adr/README.md) | decisions that needed a discussion, and why they went the way they did |

@@ -37,6 +37,7 @@
  */
 import type { Message } from "../conversation/conversation";
 import type { AguiEvent } from "./agui/events";
+import type { ThreadToolCall } from "./index";
 
 /**
  * What a message of ours that the server has never seen is called.
@@ -162,6 +163,22 @@ export interface ChatState {
    * put back as it was rather than reconstructed.
    */
   before: ChatMessage[] | null;
+  /**
+   * The tool calls this page saw arrive in a turn, each as its answer's id
+   * and its own (`streamedKey`).
+   *
+   * Kept across the read that ends the turn, which makes every message the
+   * store's: the side panel takes a call made while the page watched as one
+   * the agent is asking to be shown now, and a call read on opening a
+   * conversation as one it is not (`toolCallsOf`). Another conversation
+   * starts with none.
+   */
+  streamed: readonly string[];
+}
+
+/** How a call a turn streamed is remembered: by its answer and its own id. */
+function streamedKey(messageId: string, callId: string): string {
+  return `${messageId}/${callId}`;
 }
 
 export const EMPTY: ChatState = {
@@ -176,6 +193,7 @@ export const EMPTY: ChatState = {
   ended: null,
   notice: null,
   before: null,
+  streamed: [],
 };
 
 /**
@@ -676,7 +694,7 @@ function applied(state: ChatState, event: AguiEvent): ChatState {
       ) {
         return state;
       }
-      return withMessage(state, parent, (message) => ({
+      const held = withMessage(state, parent, (message) => ({
         ...message,
         parts: [
           ...message.parts,
@@ -688,6 +706,10 @@ function applied(state: ChatState, event: AguiEvent): ChatState {
           },
         ],
       }));
+      return {
+        ...held,
+        streamed: [...state.streamed, streamedKey(parent, event.toolCallId)],
+      };
     }
 
     case "TOOL_CALL_ARGS": {
@@ -1156,4 +1178,69 @@ export function sameRead(before: Read | null, after: Read): boolean {
     before.lastId === after.lastId &&
     before.runId === after.runId
   );
+}
+
+/**
+ * The tool calls of the thread, oldest first, as the side panel reads them
+ * (`./index.ts`, `ThreadToolCall`).
+ *
+ * A call with no result is still running while its answer is; once the
+ * answer is not, nothing will answer it. A call is live when this page saw
+ * it arrive (`ChatState.streamed`).
+ */
+function callState(
+  call: ChatToolCall,
+  answer: ChatMessage,
+): ThreadToolCall["state"] {
+  if (call.result !== undefined) return "answered";
+  return answer.state === "running" ? "running" : "unanswered";
+}
+
+export function toolCallsOf(
+  state: Pick<ChatState, "messages" | "streamed">,
+): ThreadToolCall[] {
+  return state.messages.flatMap((message) =>
+    message.parts.flatMap((part): ThreadToolCall[] => {
+      if (part.kind !== "tool-call") return [];
+      return [
+        {
+          messageId: message.id,
+          callId: part.id,
+          name: part.name,
+          arguments: part.args ?? null,
+          state: callState(part, message),
+          live: state.streamed.includes(streamedKey(message.id, part.id)),
+        },
+      ];
+    }),
+  );
+}
+
+/**
+ * Whether two lists say the same calls, in the same order.
+ *
+ * Compared field by field. A call's arguments are one object for as long as
+ * the call is held, so they are compared as objects first and written out
+ * only when they are not the same one: after a conversation is read again.
+ * A piece of an answer's text, which makes a new list of the same calls,
+ * costs a look at each call and no more.
+ */
+export function sameToolCalls(
+  one: readonly ThreadToolCall[],
+  other: readonly ThreadToolCall[],
+): boolean {
+  if (one.length !== other.length) return false;
+  return one.every((call, at) => {
+    const beside = other[at];
+    if (beside === undefined) return false;
+    return (
+      call.messageId === beside.messageId &&
+      call.callId === beside.callId &&
+      call.name === beside.name &&
+      call.state === beside.state &&
+      call.live === beside.live &&
+      (call.arguments === beside.arguments ||
+        JSON.stringify(call.arguments) === JSON.stringify(beside.arguments))
+    );
+  });
 }

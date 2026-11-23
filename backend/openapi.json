@@ -70,11 +70,8 @@
         "type": "object"
       },
       "AppSummary": {
+        "description": "One view of one server (``docs/architecture/mcp-apps.md``).",
         "properties": {
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -87,17 +84,24 @@
             "title": "Title",
             "type": "string"
           },
-          "tool": {
-            "title": "Tool",
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/AppToolSummary"
+            },
+            "title": "Tools",
+            "type": "array"
+          },
+          "view": {
+            "title": "View",
             "type": "string"
           }
         },
         "required": [
           "id",
           "server",
-          "tool",
+          "view",
           "title",
-          "description"
+          "tools"
         ],
         "title": "AppSummary",
         "type": "object"
@@ -152,6 +156,24 @@
           "isError"
         ],
         "title": "AppToolCallResponse",
+        "type": "object"
+      },
+      "AppToolSummary": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "title"
+        ],
+        "title": "AppToolSummary",
         "type": "object"
       },
       "ChangesResponse": {

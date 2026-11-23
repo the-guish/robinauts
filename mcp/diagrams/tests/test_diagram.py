@@ -2,9 +2,11 @@
 # Copyright The Robinauts Authors
 """The diagram: its changes, what each one touched, in order, and what it refuses."""
 
+import re
+
 import pytest
 
-from diagrams.diagram import Diagram, DiagramError, Edge, Node
+from diagrams.diagram import MAX_DIAGRAMS, Diagram, DiagramError, Diagrams, Edge, Node
 
 
 @pytest.fixture
@@ -20,6 +22,15 @@ def test_a_drawing_is_built_node_by_node_each_arrow_after_its_ends(diagram):
     assert snapshot["order"] == ["a", "b", "a->b", "c", "a->c"]
     assert snapshot["changed"] == snapshot["order"]
     assert [node["lines"] for node in snapshot["nodes"]] == [["API"], ["b"], ["c"]]
+
+
+def test_a_diagram_names_its_id_in_its_snapshot_and_in_its_words(diagram):
+    assert re.fullmatch(r"[0-9a-f]{16}", diagram.id)
+    assert diagram.snapshot()["diagram_id"] == diagram.id
+    assert re.match(rf"Diagram TB, \d+x\d+px \(diagram_id {diagram.id}\):\n", diagram.describe())
+    empty = Diagram()
+    assert empty.id != diagram.id
+    assert empty.describe() == f"The diagram is empty (diagram_id {empty.id})."
 
 
 def test_an_addition_touches_what_it_added_and_nothing_else(diagram):
@@ -66,3 +77,15 @@ def test_a_refused_change_says_why_and_changes_nothing(diagram, change, why):
     with pytest.raises(DiagramError, match=why):
         change(diagram)
     assert diagram.snapshot() == before
+
+
+def test_a_full_store_drops_the_diagram_created_first():
+    held = Diagrams()
+    drawn = [Diagram() for _ in range(MAX_DIAGRAMS + 1)]
+    for diagram in drawn[:-1]:
+        held.keep(diagram)
+    assert held.get(drawn[0].id) is drawn[0]
+    held.keep(drawn[-1])
+    with pytest.raises(DiagramError, match=f"there is no diagram '{drawn[0].id}'"):
+        held.get(drawn[0].id)
+    assert [held.get(diagram.id) for diagram in drawn[1:]] == drawn[1:]

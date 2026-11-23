@@ -11,6 +11,10 @@ What they have in common:
   none of them. It speaks MCP over streamable HTTP, like any tool server.
 - **It uses the MCP SDK the backend already has**, at the version
   `backend/uv.lock` pins. Its other dependencies come with the SDK.
+- **Its view keeps itself fresh.** A host sends a view the result of the
+  agent's call and nothing after it. The view reads its data again every 2
+  seconds while it is drawn
+  ([docs/architecture/mcp-apps.md](../docs/architecture/mcp-apps.md)).
 - **It is checked like the rest of the repository**: SPDX headers on every
   file, its lock under the licence gate (`scripts/check-licences.sh`), ruff and
   black under the backend's rules, and its own tests
@@ -21,4 +25,4 @@ The servers:
 | folder | what it serves | state |
 | --- | --- | --- |
 | [to-do-list/](to-do-list/README.md) | a to-do list: five tools and a view for the side panel (MCP Apps) | one JSON file |
-| [diagrams/](diagrams/README.md) | a diagram of rectangles and arrows: the server lays it out, the side panel draws it animated (MCP Apps) | in memory |
+| [diagrams/](diagrams/README.md) | diagrams of rectangles and arrows, each under an id: the server lays a diagram out, the side panel draws it animated (MCP Apps) | in memory |

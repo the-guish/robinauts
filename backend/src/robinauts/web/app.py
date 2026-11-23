@@ -239,13 +239,22 @@ def flow_summary(form: FlowForm) -> FlowSummary:
     )
 
 
-class AppSummary(BaseModel):
-    id: str
-    """``<server>/<tool>``."""
-    server: str
-    tool: str
+class AppToolSummary(BaseModel):
+    name: str
     title: str
-    description: str
+
+
+class AppSummary(BaseModel):
+    """One view of one server (``docs/architecture/mcp-apps.md``)."""
+
+    id: str
+    """``<server>/<view>``."""
+    server: str
+    view: str
+    """The view's ``ui://`` address."""
+    title: str
+    tools: list[AppToolSummary]
+    """The tools that name the view: a call of one by the agent is shown in it."""
 
 
 class AppListResponse(BaseModel):
@@ -677,9 +686,9 @@ def new_robinauts_webapp(
                 AppSummary(
                     id=a.id,
                     server=a.server,
-                    tool=a.tool,
+                    view=a.view,
                     title=a.title,
-                    description=a.description,
+                    tools=[AppToolSummary(name=t.name, title=t.title) for t in a.tools],
                 )
                 for a in found
             ]

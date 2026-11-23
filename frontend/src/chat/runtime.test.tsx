@@ -20,7 +20,7 @@ import {
 } from "../test/conversations";
 import { event, streamed, streamHeaders, writable } from "../test/stream";
 import { ToolGroup } from "./thread/ToolCall";
-import type { ChatProps } from "./index";
+import type { ChatProps, ThreadToolCalls } from "./index";
 import type { AguiEvent } from "./agui/events";
 import {
   AGENT_GONE,
@@ -1179,7 +1179,7 @@ test("a first message begins a conversation and says which one", async () => {
   expect(ended).toHaveBeenCalled();
 });
 
-test("each tool that answers in a turn is told by its full name", async () => {
+test("the thread's tool calls are told as they are made and answered", async () => {
   stub((call) => {
     if (call.url === "/robinauts/api/turns") {
       return streamed(
@@ -1198,25 +1198,42 @@ test("each tool that answers in a turn is told by its full name", async () => {
             },
             3,
           ),
-          event("TOOL_CALL_END", { toolCallId: "t1" }, 4),
-          event("TEXT_MESSAGE_END", { messageId: "m2" }, 5),
+          event(
+            "TOOL_CALL_ARGS",
+            { toolCallId: "t1", delta: '{"shape":"box"}' },
+            4,
+          ),
+          event("TOOL_CALL_END", { toolCallId: "t1" }, 5),
+          event("TEXT_MESSAGE_END", { messageId: "m2" }, 6),
           event(
             "TOOL_CALL_RESULT",
             { messageId: "m3", toolCallId: "t1", content: "drawn" },
-            6,
+            7,
           ),
-          event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 7),
+          event("RUN_FINISHED", { threadId: CONVERSATION, runId: RUN }, 8),
         ],
         { headers: streamHeaders(RUN, CONVERSATION) },
       );
     }
     if (call.url === `/robinauts/api/conversations/${CONVERSATION}`) {
-      return json(opened(conversation(1), TREE));
+      return json(
+        opened(conversation(1), [
+          message("m1", "user", "draw it"),
+          calling("m2", "", [
+            {
+              call_id: "t1",
+              name: "diagrams__draw_diagram",
+              arguments: { shape: "box" },
+            },
+          ]),
+          results("m3", [{ call_id: "t1", text: "drawn" }]),
+        ]),
+      );
     }
     return undefined;
   });
-  const answered = vi.fn();
-  const { result } = chatting({ onToolResult: answered });
+  const told = vi.fn<(thread: ThreadToolCalls) => void>();
+  const { result } = chatting({ onToolCalls: told });
   await settle();
   await act(async () => {
     await result.current.send("draw it");
@@ -1224,7 +1241,26 @@ test("each tool that answers in a turn is told by its full name", async () => {
   await waitFor(() => {
     expect(result.current.state.runId).toBeNull();
   });
-  expect(answered.mock.calls).toEqual([["diagrams__draw_diagram"]]);
+  const threads = told.mock.calls.map(([thread]) => thread);
+  // An empty thread first. The same calls again are not told again.
+  expect(threads[0]).toEqual({ conversationId: null, calls: [] });
+  const texts = threads.map((thread) => JSON.stringify(thread));
+  expect(new Set(texts).size).toBe(texts.length);
+  // The read that ends the turn makes the thread the store's, and the call
+  // is still one this page saw arrive.
+  expect(threads.at(-1)).toEqual({
+    conversationId: CONVERSATION,
+    calls: [
+      {
+        messageId: "m2",
+        callId: "t1",
+        name: "diagrams__draw_diagram",
+        arguments: { shape: "box" },
+        state: "answered",
+        live: true,
+      },
+    ],
+  });
 });
 
 test("a conversation with a run in flight is attached to at resume.after", async () => {
