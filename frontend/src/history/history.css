@@ -263,8 +263,8 @@
   gap: 0.25rem;
   border-radius: var(--radius);
   padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
-  line-height: calc(1 / 0.75);
+  font-size: 0.875rem;
+  line-height: calc(1.25 / 0.875);
   font-weight: 600;
   color: var(--muted);
 }
