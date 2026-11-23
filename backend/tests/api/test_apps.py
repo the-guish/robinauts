@@ -127,6 +127,13 @@ system_prompt = "{system_prompt}"
 models = ["local_gpt"]
 engine = "langchain"
 tools = ["board"]
+
+[agents.board_pydantic_ai]
+title = "The board, on Pydantic AI"
+system_prompt = "{system_prompt}"
+models = ["local_gpt"]
+engine = "pydantic-ai"
+tools = ["board"]
 """
 
 
@@ -244,7 +251,7 @@ def test_a_view_s_tool_call_is_relayed_as_the_server_answered(
     assert failed.json()["isError"] is True
 
 
-@pytest.mark.parametrize("agent", ["board_langchain"])
+@pytest.mark.parametrize("agent", ["board_langchain", "board_pydantic_ai"])
 def test_a_call_s_result_is_read_whole_and_the_conversation_carries_its_text_alone(
     api: httpx.Client, agent: str
 ) -> None:

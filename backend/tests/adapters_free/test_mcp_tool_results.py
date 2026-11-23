@@ -6,6 +6,9 @@ and the engine reports its structured content apart (``docs/architecture/mcp-app
 
 The engines' own MCP clients make the call; only the model is a stand-in, which keeps what it
 was sent (``chat_completions.Vendor``).
+
+The structured content is for a view, and the transcript keeps it. The Pydantic AI engine's
+session, which holds a tool result as the framework has it, keeps none of it.
 """
 
 from __future__ import annotations
@@ -17,8 +20,9 @@ from typing import Any
 
 import pytest
 from mcp.types import CallToolResult, TextContent
+from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
 from test_engines_over_chat_completions import SETTINGS
-from test_tool_server_exclude import Build, langchain
+from test_tool_server_exclude import Build, langchain, pydantic_ai
 
 from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
@@ -27,6 +31,9 @@ from robinauts.agent_engines.contract.domain import (
     ToolServerAuth,
     ToolServerConfig,
 )
+from robinauts.agent_engines.contract.ports import AgentEngine, EngineSettings
+from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
+from robinauts.agent_engines.pydantic_ai_engine.session_store import InProcessSessionStore
 from util.aio import asyncio_test
 from util.chat_completions import Vendor, calling, finished, said, streamed
 from util.contracts.engine import ARGUMENTS, CALL_ID, add
@@ -80,7 +87,7 @@ async def round_of(
         return [event async for event in stream], vendor
 
 
-@pytest.mark.parametrize("build", [langchain], ids=["langchain"])
+@pytest.mark.parametrize("build", [langchain, pydantic_ai], ids=["langchain", "pydantic-ai"])
 @pytest.mark.parametrize(
     ("tool", "arguments", "text", "structured"),
     [
@@ -108,3 +115,51 @@ async def test_the_model_is_sent_the_text_and_the_structured_content_is_reported
     sent = Vendor.body_of(second)["messages"][-1]
     assert (sent["role"], sent["tool_call_id"]) == ("tool", CALL_ID)
     assert text_of(sent["content"]) == text
+
+
+class EverySave(InProcessSessionStore):
+    """A session store that also keeps each history it was asked to save: a turn saves after
+    every tool round, and each save takes the place of the one before."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.saved: list[list[ModelMessage]] = []
+
+    async def save(
+        self, session_id: uuid.UUID, checkpoint_id: str, messages: list[ModelMessage]
+    ) -> None:
+        self.saved.append(list(messages))
+        await super().save(session_id, checkpoint_id, messages)
+
+
+def pydantic_ai_on(store: InProcessSessionStore) -> Build:
+    """The Pydantic AI engine over ``store``, its model plugged as ``pydantic_ai`` plugs it."""
+
+    def build(vendor: Vendor, settings: EngineSettings, mp: pytest.MonkeyPatch) -> AgentEngine:
+        pydantic_ai(vendor, settings, mp)
+        return PydanticAIEngine(settings, store)
+
+    return build
+
+
+@asyncio_test
+async def test_pydantic_ai_saves_the_text_in_its_session_and_none_of_the_structured_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = EverySave()
+
+    events, _ = await round_of(pydantic_ai_on(store), draw, {}, monkeypatch)
+
+    [result] = [event for event in events if isinstance(event, ToolResult)]
+    assert result.structured_content == LAYOUT
+    # Once with the tool round, before the model is asked again, and once with the answer.
+    assert len(store.saved) == 2
+    for history in store.saved:
+        [kept] = [
+            part
+            for message in history
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+            if isinstance(part, ToolReturnPart)
+        ]
+        assert (kept.content, kept.metadata) == (DRAWN, None)

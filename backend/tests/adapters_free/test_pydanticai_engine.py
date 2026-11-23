@@ -49,6 +49,8 @@ from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
 from robinauts.agent_engines.pydantic_ai_engine.session_store import InProcessSessionStore
 from robinauts.agent_engines.pydantic_ai_engine.tools import (
     FailuresToModel,
+    ResultsHeard,
+    TextToModel,
     toolset_for,
     toolsets_for,
 )
@@ -140,7 +142,7 @@ def tool_settings(secrets: ToolSecretLookup, *servers: ToolServerConfig) -> Engi
 def test_a_bearer_server_is_reached_with_its_secret_as_a_bearer_token() -> None:
     secrets = FixedSecret()
     server = ToolServerConfig(id="gh", url="https://mcp.example/gh", timeout_seconds=9.0)
-    client = toolset_for(server, tool_settings(secrets)).wrapped.client
+    client = toolset_for(server, tool_settings(secrets)).wrapped.wrapped.client
     assert client.transport.url == "https://mcp.example/gh"
     assert client.transport.headers == {"Authorization": "Bearer s3cret"}
     assert client._init_timeout == 9.0
@@ -153,7 +155,7 @@ def test_a_basic_server_is_reached_with_its_user_and_secret() -> None:
     server = ToolServerConfig(
         id="wiki", url="https://mcp.example/wiki", auth=ToolServerAuth.BASIC, user="ana"
     )
-    transport = toolset_for(server, tool_settings(secrets)).wrapped.client.transport
+    transport = toolset_for(server, tool_settings(secrets)).wrapped.wrapped.client.transport
     pair = base64.b64encode(b"ana:s3cret").decode("ascii")
     assert transport.headers == {"Authorization": f"Basic {pair}"}
     assert secrets.asked == ["wiki"]
@@ -167,14 +169,41 @@ def test_a_header_server_is_reached_with_its_secret_in_the_header_it_names() -> 
         auth=ToolServerAuth.HEADER,
         header="x-api-key",
     )
-    transport = toolset_for(server, tool_settings(secrets)).wrapped.client.transport
+    transport = toolset_for(server, tool_settings(secrets)).wrapped.wrapped.client.transport
     assert transport.headers == {"x-api-key": "s3cret"}
     assert secrets.asked == ["composio"]
 
 
 def test_a_public_server_carries_no_credential_and_asks_for_none() -> None:
     server = ToolServerConfig(id="docs", url="https://mcp.example/docs", auth=ToolServerAuth.NONE)
-    assert toolset_for(server, tool_settings(NoSecrets())).wrapped.client.transport.headers == {}
+    served = toolset_for(server, tool_settings(NoSecrets())).wrapped.wrapped
+    assert served.client.transport.headers == {}
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://mcp.example/docs", "https://mcp.example/docs/mcp", "https://mcp.example/docs/sse"],
+    ids=["plain", "streamable-http", "server-sent-events"],
+)
+def test_the_client_handed_to_pydantic_ai_is_built_as_it_builds_its_own(url: str) -> None:
+    server = ToolServerConfig(id="docs", url=url, auth=ToolServerAuth.NONE, timeout_seconds=9.0)
+    ours = toolset_for(server, tool_settings(NoSecrets())).wrapped.wrapped.client
+    theirs = MCPToolset(url, headers={}, init_timeout=9.0, read_timeout=9.0).client
+
+    # Ours is a client of the framework's own kind, with one method of its own and nothing
+    # put on it after it was made.
+    assert isinstance(ours, ResultsHeard)
+    assert isinstance(ours, type(theirs))
+    assert "call_tool" not in vars(ours)
+    assert type(ours.transport) is type(theirs.transport)
+    assert (ours.transport.url, ours.transport.headers) == (url, theirs.transport.headers)
+    assert getattr(ours.transport, "sse_read_timeout", None) == getattr(
+        theirs.transport, "sse_read_timeout", None
+    )
+    assert ours._init_timeout == theirs._init_timeout
+    assert ours._session_kwargs["read_timeout_seconds"] == (
+        theirs._session_kwargs["read_timeout_seconds"]
+    )
 
 
 def test_an_agent_without_tools_has_none() -> None:
@@ -187,9 +216,11 @@ def test_an_agent_has_a_toolset_per_server_it_names() -> None:
     settings = tool_settings(NoSecrets(), server, other)
     [toolset] = toolsets_for(AgentDefinition("be brief", tools=("docs",)), settings)
     assert isinstance(toolset, FailuresToModel)
-    assert isinstance(toolset.wrapped, MCPToolset)
-    assert toolset.wrapped.tool_error_behavior == "failed"
-    assert toolset.wrapped.client.transport.url == "https://mcp.example/docs"
+    assert isinstance(toolset.wrapped, TextToModel)
+    served = toolset.wrapped.wrapped
+    assert isinstance(served, MCPToolset)
+    assert served.tool_error_behavior == "failed"
+    assert served.client.transport.url == "https://mcp.example/docs"
 
 
 def test_the_engine_answers_the_four_kinds_and_turns_tracing_off(
