@@ -49,6 +49,7 @@ from robinauts.agent_engines.pydantic_ai_engine.engine import PydanticAIEngine
 from robinauts.agent_engines.pydantic_ai_engine.session_store import InProcessSessionStore
 from robinauts.agent_engines.pydantic_ai_engine.tools import (
     FailuresToModel,
+    ResultsHeard,
     TextToModel,
     toolset_for,
     toolsets_for,
@@ -177,6 +178,32 @@ def test_a_public_server_carries_no_credential_and_asks_for_none() -> None:
     server = ToolServerConfig(id="docs", url="https://mcp.example/docs", auth=ToolServerAuth.NONE)
     served = toolset_for(server, tool_settings(NoSecrets())).wrapped.wrapped
     assert served.client.transport.headers == {}
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://mcp.example/docs", "https://mcp.example/docs/mcp", "https://mcp.example/docs/sse"],
+    ids=["plain", "streamable-http", "server-sent-events"],
+)
+def test_the_client_handed_to_pydantic_ai_is_built_as_it_builds_its_own(url: str) -> None:
+    server = ToolServerConfig(id="docs", url=url, auth=ToolServerAuth.NONE, timeout_seconds=9.0)
+    ours = toolset_for(server, tool_settings(NoSecrets())).wrapped.wrapped.client
+    theirs = MCPToolset(url, headers={}, init_timeout=9.0, read_timeout=9.0).client
+
+    # Ours is a client of the framework's own kind, with one method of its own and nothing
+    # put on it after it was made.
+    assert isinstance(ours, ResultsHeard)
+    assert isinstance(ours, type(theirs))
+    assert "call_tool" not in vars(ours)
+    assert type(ours.transport) is type(theirs.transport)
+    assert (ours.transport.url, ours.transport.headers) == (url, theirs.transport.headers)
+    assert getattr(ours.transport, "sse_read_timeout", None) == getattr(
+        theirs.transport, "sse_read_timeout", None
+    )
+    assert ours._init_timeout == theirs._init_timeout
+    assert ours._session_kwargs["read_timeout_seconds"] == (
+        theirs._session_kwargs["read_timeout_seconds"]
+    )
 
 
 def test_an_agent_without_tools_has_none() -> None:
