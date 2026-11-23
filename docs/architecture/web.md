@@ -161,6 +161,13 @@ the engines' alone.
 
 - `list_sessions`: most recently updated first, a page at a time.
 - `open_session`: one moment of a session, its messages and its active turn if any.
+- `read_tool_result`:
+  `GET /robinauts/api/conversations/<id>/messages/<message>/tool-result?call_id=<call>`, one tool
+  call's result as an MCP `CallToolResult`: `{"content", "structuredContent", "isError"}`.
+  `content` is one text block with the result's text. `structuredContent` is what a view draws
+  ([mcp-apps.md](mcp-apps.md)), which `open_session` leaves out. It needs
+  `robinauts/conversations:read`. A call with no result on that message is 404
+  `MessageNotFoundError`.
 - `rename_session`
 - `archive_session`
 - `delete_session`

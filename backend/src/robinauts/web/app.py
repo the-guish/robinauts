@@ -273,6 +273,16 @@ def tool_call_response(result: ToolResult) -> AppToolCallResponse:
     )
 
 
+def stored_result_response(part: ToolResultPart) -> AppToolCallResponse:
+    """A tool result of the transcript as an MCP ``CallToolResult``: its text as one text
+    block, and its structured content."""
+    return AppToolCallResponse(
+        content=[{"type": "text", "text": part.text}],
+        structuredContent=None if part.structured is None else dict(part.structured),
+        isError=part.is_error,
+    )
+
+
 class ProjectSummary(BaseModel):
     id: uuid.UUID
     name: str
@@ -747,6 +757,20 @@ def new_robinauts_webapp(
     ) -> OpenedConversationResponse:
         opened = await controller.open_session(user, conversation_id)
         return opened_view(opened, await default_model(opened.session.agent))
+
+    @router.get(
+        "/api/conversations/{conversation_id}/messages/{message_id}/tool-result",
+        dependencies=[permit(roles.CONVERSATIONS_READ)],
+    )
+    async def read_tool_result(
+        conversation_id: uuid.UUID, message_id: uuid.UUID, call_id: str, user: User = asking
+    ) -> AppToolCallResponse:
+        """One tool call's result, whole, for the view of that call: the conversation's own
+        read carries its text alone."""
+        part = await controller.tool_result(
+            user, conversation_id, message_id=message_id, call_id=call_id
+        )
+        return stored_result_response(part)
 
     @router.patch(
         "/api/conversations/{conversation_id}",

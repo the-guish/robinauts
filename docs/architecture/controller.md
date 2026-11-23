@@ -78,6 +78,9 @@ the worker's folder, `workers/<worker name>/` in the data directory (`worker_fol
 
 - `list_sessions`: most recently updated first, a page at a time.
 - `open_session`: one moment of a session, its messages and its active turn if any.
+- `tool_result`: the result of one tool call of one answer, with its structured content. It
+  reads the events of the session's active turn first, then the stored answers. A turn stores
+  its answer as it ends, so a turn that ends between the two reads is found by the second.
 - `rename_session`
 - `archive_session`: take the session off the listing. Everything else stays, and its next turn
   brings it back.

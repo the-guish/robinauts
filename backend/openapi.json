@@ -1360,6 +1360,66 @@
         "summary": "Fork Session"
       }
     },
+    "/robinauts/api/conversations/{conversation_id}/messages/{message_id}/tool-result": {
+      "get": {
+        "description": "One tool call's result, whole, for the view of that call: the conversation's own\nread carries its text alone.",
+        "operationId": "read_tool_result_robinauts_api_conversations__conversation_id__messages__message_id__tool_result_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "call_id",
+            "required": true,
+            "schema": {
+              "title": "Call Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolCallResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "Read Tool Result"
+      }
+    },
     "/robinauts/api/conversations/{conversation_id}/model": {
       "put": {
         "operationId": "set_model_robinauts_api_conversations__conversation_id__model_put",

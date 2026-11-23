@@ -13,12 +13,16 @@ from datetime import UTC, datetime, timedelta, timezone
 import pytest
 
 from robinauts.controller.contract.broker.documents import (
+    MAX_STRUCTURED_BYTES,
     VERSION,
     clean_text,
     event_from_document,
     event_to_document,
+    kept_structured,
     message_from_document,
     message_to_document,
+    result_in_event,
+    result_in_message,
 )
 from robinauts.controller.contract.domain import InvalidValueError, NumberedEvent
 from robinauts.shared_domain.domain import (
@@ -105,6 +109,106 @@ def test_a_task_payload_is_written_only_when_set_and_round_trips() -> None:
     assert "task_payload" not in message_to_document(answer())
 
 
+def test_a_result_s_structured_content_is_written_only_when_it_has_one() -> None:
+    layout = {"nodes": [{"id": "a", "x": 0.5}], "revision": 2}
+    drawn = dataclasses.replace(
+        answer(), parts=(ToolResultPart("toolu_01", "Two boxes.", False, layout),)
+    )
+    document = message_to_document(drawn)
+    assert document["parts"][0]["structured"] == layout
+    assert json.loads(json.dumps(document)) == document
+    assert message_from_document(document) == drawn
+    assert all("structured" not in part for part in message_to_document(answer())["parts"])
+
+
+@pytest.mark.parametrize(
+    ("structured", "kept"),
+    [
+        (None, None),
+        ({}, {}),
+        ({"nodes": [1, 2.5, "a", None, True]}, {"nodes": [1, 2.5, "a", None, True]}),
+        ({"na\x00me": "bo\x00x"}, {"name": "box"}),
+        ({"x": "a" * MAX_STRUCTURED_BYTES}, None),
+        # Measured as UTF-8: three bytes a character here, and six were it escaped to ASCII.
+        ({"x": "図" * (MAX_STRUCTURED_BYTES // 4)}, {"x": "図" * (MAX_STRUCTURED_BYTES // 4)}),
+        ({"x": "図" * (MAX_STRUCTURED_BYTES // 3)}, None),
+        ({"x": float("nan")}, None),
+        ({"x": {1, 2}}, None),
+    ],
+    ids=[
+        "none",
+        "empty",
+        "json",
+        "cleaned",
+        "too-long",
+        "not-ascii-and-short-enough",
+        "not-ascii-and-too-long",
+        "not-a-json-number",
+        "not-json",
+    ],
+)
+def test_the_structured_content_the_transcript_keeps(
+    structured: dict[str, object] | None, kept: dict[str, object] | None
+) -> None:
+    assert kept_structured(structured) == kept
+
+
+LANDED = ToolResultPart("toolu_01", "18°C", False, {"celsius": 18})
+
+
+@pytest.mark.parametrize(
+    ("message_id", "call_id", "found"),
+    [
+        (ANSWER, "toolu_01", ToolResultPart("toolu_01", "18°C, clear", is_error=False)),
+        (ANSWER, "toolu_02", None),
+        (QUESTION, "toolu_01", None),
+    ],
+    ids=["its-message-and-call", "another-call", "another-message"],
+)
+def test_a_call_s_result_is_found_in_its_message(
+    message_id: uuid.UUID, call_id: str, found: ToolResultPart | None
+) -> None:
+    assert result_in_message(message_to_document(answer()), message_id, call_id) == found
+
+
+@pytest.mark.parametrize(
+    ("event", "message_id", "call_id", "found"),
+    [
+        (
+            ResultLanded(ANSWER, "toolu_01", "18°C", False, {"celsius": 18}),
+            ANSWER,
+            "toolu_01",
+            LANDED,
+        ),
+        (
+            ResultLanded(ANSWER, "toolu_01", "18°C", False, {"celsius": 18}),
+            ANSWER,
+            "toolu_02",
+            None,
+        ),
+        (
+            ResultLanded(ANSWER, "toolu_01", "18°C", False, {"celsius": 18}),
+            QUESTION,
+            "toolu_01",
+            None,
+        ),
+        (CallCompleted(ANSWER, "toolu_01"), ANSWER, "toolu_01", None),
+    ],
+    ids=["its-message-and-call", "another-call", "another-message", "another-kind"],
+)
+def test_a_call_s_result_is_found_in_the_event_it_landed_in(
+    event: object, message_id: uuid.UUID, call_id: str, found: ToolResultPart | None
+) -> None:
+    document = event_to_document(TURN, 7, event)  # type: ignore[arg-type]
+    assert result_in_event(document, message_id, call_id) == found
+
+
+def test_a_search_for_a_result_decodes_no_other_document() -> None:
+    # Neither is a document a reader accepts: a search passes over what it is not looking for.
+    assert result_in_message({"id": str(QUESTION)}, ANSWER, "toolu_01") is None
+    assert result_in_event({"kind": "text_piece"}, ANSWER, "toolu_01") is None
+
+
 def test_a_question_has_every_field_with_nulls_where_nothing_applies() -> None:
     question = Message(
         QUESTION, SESSION, parent_id=None, role=Role.USER, parts=(TextPart("hi"),), created_at=NOW
@@ -135,6 +239,7 @@ def test_a_time_in_another_zone_is_written_in_utc_and_one_without_a_zone_refused
         (ArgumentsPiece(ANSWER, "toolu_01", '{"city":'), "arguments_piece"),
         (CallCompleted(ANSWER, "toolu_01"), "call_completed"),
         (ResultLanded(ANSWER, "toolu_01", "18°C", True), "result_landed"),
+        (ResultLanded(ANSWER, "toolu_01", "18°C", False, {"celsius": 18}), "result_landed"),
         (MessageCompleted(ANSWER), "message_completed"),
         (TurnEnded(TurnState.FINISHED), "turn_ended"),
     ],

@@ -233,7 +233,7 @@ read. `tool` is a reserved role: no message has it yet.
 | `text` | `text` |
 | `reasoning` | `text` |
 | `tool_call` | `call_id`, `name`, `arguments` |
-| `tool_result` | `call_id`, `text`, `is_error` |
+| `tool_result` | `call_id`, `text`, `is_error`, and `structured` when the result has one |
 
 - **In the order they were streamed.** Text that arrives in a row is one `text` part,
   until a tool call or a stretch of thinking comes between. Each stretch of thinking
@@ -242,9 +242,11 @@ read. `tool` is a reserved role: no message has it yet.
 - **`arguments` is a JSON object.** The model fills the tool's input schema, which is
   an object, and the frameworks hand it over parsed. The model's exact text is not
   kept, and nothing needs it.
-- **A tool result is text**: the output as the model saw it, which is all the engine
-  contract passes. It is not parsed, even when it looks like JSON. `is_error` is what
-  the tool reported.
+- **A tool result's `text` is the output as the model saw it.** It is not parsed, even
+  when it looks like JSON. `is_error` is what the tool reported.
+- **`structured` is an MCP result's structured content**: a JSON object, which a view
+  draws ([mcp-apps.md](mcp-apps.md)). It is written only when the result has one.
+  Structured content above 1 MiB of JSON is left out, and the result keeps its text.
 - **`reasoning` is in the format, and not written yet.** The runner streams reasoning
   as events and keeps none of it in the answer (`docs/specs/wire.md`). Keeping it is a
   change to the runner, to web, which shows it collapsed, and to
@@ -268,7 +270,7 @@ Every event carries `v`, `kind`, `turn_id` and `position`, and then:
 | `call_started` | `message_id`, `call_id`, `name` |
 | `arguments_piece` | `message_id`, `call_id`, `text` |
 | `call_completed` | `message_id`, `call_id` |
-| `result_landed` | `message_id`, `call_id`, `text`, `is_error` |
+| `result_landed` | `message_id`, `call_id`, `text`, `is_error`, and `structured` when the result has one |
 | `message_completed` | `message_id` |
 | `turn_ended` | `state` |
 
@@ -287,7 +289,7 @@ written for one would make nonsense of the other.
 
 - **Additive changes keep the version:** a new kind of part or of event, a new
   role, and a new key written only when it is set and read as unset when absent
-  (`failed`). A build that does not know a kind, or such a key, refuses **the
+  (`failed`, `structured`). A build that does not know a kind, or such a key, refuses **the
   document holding it**, by name, and reads every other. A message is refused whole,
   since a message shown without part of itself is one misread.
 - **Anything else moves it:** a key every document must have, or a change to the

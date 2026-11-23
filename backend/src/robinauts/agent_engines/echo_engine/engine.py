@@ -79,7 +79,10 @@ class EchoEngine(AgentEngine):
             yield ToolResult(call_id=call_id, name=TOOL, raw_output=POISONED, failed=True)
             raise EngineError(f"Tool {TOOL!r} failed: {POISONED}")
         result = echo(prompt)
-        yield ToolResult(call_id=call_id, name=TOOL, raw_output=result)
+        # As an MCP tool with a view answers: text for the model, structured content apart.
+        yield ToolResult(
+            call_id=call_id, name=TOOL, raw_output=result, structured_content={"text": result}
+        )
         yield TextDelta(text=ANSWER)
         yield TextDelta(text=result)
         # A task payload, said back, so that a test sees what reached the engine.
