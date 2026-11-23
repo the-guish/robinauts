@@ -79,5 +79,7 @@ def partial_answer(events: Iterable[Document]) -> tuple[uuid.UUID | None, tuple[
             name, arguments = calls.pop(event.call_id)
             parts.append(ToolCallPart(event.call_id, name, json.loads(arguments or "{}")))
         elif isinstance(event, ResultLanded):
-            parts.append(ToolResultPart(event.call_id, event.text, event.is_error))
+            parts.append(
+                ToolResultPart(event.call_id, event.text, event.is_error, event.structured)
+            )
     return answer_id, tuple(parts)

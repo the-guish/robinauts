@@ -128,21 +128,25 @@ the service tokens are under `/auth/`. The local mode signs its one person in wi
 ## Apps
 
 The MCP apps of an agent's tool servers, for the side panel
-([ADR 0007](../adr/0007-mcp-apps-in-the-side-panel.md), `web/apps.py`). An app is a tool whose
-`_meta.ui.resourceUri` names a `ui://` resource of type `text/html;profile=mcp-app`: its view.
-Each route needs `robinauts/apps:use`, and names the agent. The agent's apps are
-those of the tool servers it names, less what a server's `exclude` keeps from it. Web reaches a
-server with its configured credential, read from `secret_env` as the worker reads it, within its
-`timeout_seconds`, over streamable HTTP with a client of its own (`web/mcp_client.py`): `mcp` is
-the engines' alone.
+([mcp-apps.md](mcp-apps.md), `web/apps.py`). A tool names its view in `_meta.ui.resourceUri`: a
+`ui://` resource of type `text/html;profile=mcp-app`. An app is one view of one server, with the
+tools that name it. Each route needs `robinauts/apps:use`, and names the agent. The agent's apps
+are those of the tool servers it names, less what a server's `exclude` keeps from it. Web
+reaches a server with its configured credential, read from `secret_env` as the worker reads it,
+within its `timeout_seconds`, over streamable HTTP with a client of its own
+(`web/mcp_client.py`): `mcp` is the engines' alone.
 
 - `list_apps`: `GET /robinauts/api/apps?agent=<agent>`, answered
-  `{"apps": [{"id": "<server>/<tool>", "server", "tool", "title", "description"}]}`, server by
-  server in the agent's order. An app is listed when a view may call its tool. A server that
-  cannot be reached is left out and logged by its id and the kind of failure. An unknown agent
-  is 404 `UnknownAgentError`.
-- `open_app_view`: `GET /robinauts/api/apps/<server>/<tool>/view?agent=<agent>`, the view's HTML, which the
-  panel frames. Its answer alone carries `Content-Security-Policy: default-src 'none';
+  `{"apps": [{"id": "<server>/<view>", "server", "view", "title", "tools": [{"name", "title"}]}]}`,
+  server by server in the agent's order. `view` is the view's `ui://` address. `title` is the
+  view's title in the server's resource list, or the title of the first tool that names it.
+  `tools` are the tools that name the view, whatever their `_meta.ui.visibility`. A tool whose
+  name another of the agent's servers gives too is left out. The log names those servers and
+  says how many names they share. A server that cannot be reached is left out and logged by its
+  id and the kind of failure. An unknown agent is 404 `UnknownAgentError`.
+- `open_app_view`: `GET /robinauts/api/apps/<server>/<tool>/view?agent=<agent>`, the HTML of the
+  view that tool names, which the panel frames. Its answer alone carries
+  `Content-Security-Policy: default-src 'none';
   script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:;
   connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self';
   sandbox allow-scripts`, `X-Frame-Options: SAMEORIGIN` and `Cache-Control: no-store`. The
@@ -161,6 +165,13 @@ the engines' alone.
 
 - `list_sessions`: most recently updated first, a page at a time.
 - `open_session`: one moment of a session, its messages and its active turn if any.
+- `read_tool_result`:
+  `GET /robinauts/api/conversations/<id>/messages/<message>/tool-result?call_id=<call>`, one tool
+  call's result as an MCP `CallToolResult`: `{"content", "structuredContent", "isError"}`.
+  `content` is one text block with the result's text. `structuredContent` is what a view draws
+  ([mcp-apps.md](mcp-apps.md)), which `open_session` leaves out. It needs
+  `robinauts/conversations:read`. A call with no result on that message is 404
+  `MessageNotFoundError`.
 - `rename_session`
 - `archive_session`
 - `delete_session`

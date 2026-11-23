@@ -180,6 +180,65 @@
   padding: 0;
 }
 
+/*
+ * An app's sub-tabs: a strip of the calls the view shows, and the frame of
+ * the one on top below it (`./AppTab.tsx`).
+ */
+.side-subs {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+}
+
+.side-sub-strip {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.25rem;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  padding: 0.25rem 0.5rem;
+}
+
+.side-sub {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  border-radius: var(--radius);
+  color: var(--muted);
+}
+
+.side-sub[data-selected="true"] {
+  background-color: var(--tint);
+  color: var(--ink);
+}
+
+.side-sub-name {
+  max-width: 12rem;
+  overflow: hidden;
+  padding: 0.125rem 0.125rem 0.125rem 0.5rem;
+  font-size: 0.8125rem;
+  line-height: calc(1.25 / 0.8125);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-sub-close {
+  display: grid;
+  place-items: center;
+  margin-right: 0.125rem;
+  border-radius: var(--radius);
+  padding: 0.125rem;
+}
+
+.side-sub-view {
+  min-height: 0;
+  flex: 1;
+}
+
+.side-sub-view[hidden] {
+  display: none;
+}
+
 .side-app {
   display: flex;
   height: 100%;
@@ -247,13 +306,15 @@
 @media (hover: hover) {
   .side-tool:hover:not(:disabled),
   .side-tab-close:hover,
+  .side-sub-close:hover,
   .side-menu-item:hover,
   .side-app-retry:hover {
     background-color: var(--hover);
     color: var(--ink);
   }
 
-  .side-tab:hover {
+  .side-tab:hover,
+  .side-sub:hover {
     color: var(--ink);
   }
 

@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""The pure parts of the side panel's MCP apps: which tool is an app, what a view may call,
-the view in a ``resources/read`` result, a ``CallToolResult``, and the answer to a request
-among the JSON-RPC messages and the server-sent events a tool server answers with."""
+"""The pure parts of the side panel's MCP apps: which tool names a view, a view's title, the
+apps of a server, what a view may call, the view in a ``resources/read`` result, a
+``CallToolResult``, and the answer to a request among the JSON-RPC messages and the server-sent
+events a tool server answers with."""
 
 from __future__ import annotations
 
@@ -12,7 +13,17 @@ from typing import Any
 
 import pytest
 
-from robinauts.web.apps import App, ToolResult, app_of, callable_by_apps, view_text
+from robinauts.web.apps import (
+    App,
+    AppTool,
+    ToolResult,
+    app_tool_of,
+    apps_of,
+    callable_by_apps,
+    shared_names,
+    view_text,
+    view_titles,
+)
 from robinauts.web.apps import tool_result as result_of
 from robinauts.web.mcp_client import EventReader, McpError, answer_in
 
@@ -25,22 +36,20 @@ def ui(**fields: Any) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize(
-    ("tool", "app"),
+    ("tool", "named"),
     [
-        (
-            {"name": "board", "title": "Board", "description": "The board.", **ui(resourceUri=URI)},
-            App("s", "board", "Board", "The board."),
-        ),
+        ({"name": "board", "title": "Board", **ui(resourceUri=URI)}, AppTool("board", "Board")),
         (
             {"name": "board", "annotations": {"title": "Noted"}, **ui(resourceUri=URI)},
-            App("s", "board", "Noted", ""),
+            AppTool("board", "Noted"),
         ),
-        ({"name": "board", "title": "", **ui(resourceUri=URI)}, App("s", "board", "board", "")),
+        ({"name": "board", "title": "", **ui(resourceUri=URI)}, AppTool("board", "board")),
+        # A tool the model alone may call still names its view: the agent's call is shown in it.
         (
-            {"name": "board", **ui(resourceUri=URI, visibility=["app"])},
-            App("s", "board", "board", ""),
+            {"name": "board", **ui(resourceUri=URI, visibility=["model"])},
+            AppTool("board", "board"),
         ),
-        ({"name": "board", **ui(resourceUri=URI, visibility=["model"])}, None),
+        ({"name": "board", **ui(resourceUri=URI, visibility=["app"])}, AppTool("board", "board")),
         ({"name": "board", **ui(resourceUri="https://example.com/app.html")}, None),
         ({"name": "board", **ui(resourceUri="ui://")}, None),
         ({"name": "board", **ui()}, None),
@@ -52,13 +61,83 @@ def ui(**fields: Any) -> dict[str, Any]:
         ({"name": "", **ui(resourceUri=URI)}, None),
         ({"name": 7, **ui(resourceUri=URI)}, None),
         ({**ui(resourceUri=URI)}, None),
-        ({"name": "b", "description": 3, **ui(resourceUri=URI)}, App("s", "b", "b", "")),
     ],
 )
-def test_an_app_is_a_tool_with_a_view_a_view_may_call(
-    tool: dict[str, Any], app: App | None
+def test_a_tool_names_a_view_by_its_resource_uri(
+    tool: dict[str, Any], named: AppTool | None
 ) -> None:
-    assert app_of("s", tool) == app
+    assert app_tool_of(tool) == named
+
+
+@pytest.mark.parametrize(
+    ("resources", "titles"),
+    [
+        ([{"uri": URI, "name": "board", "title": "Boards"}], {URI: "Boards"}),
+        ([{"uri": URI, "name": "board"}], {URI: "board"}),
+        ([{"uri": URI, "name": "board", "title": ""}], {URI: "board"}),
+        ([{"uri": URI}, {"uri": 3, "title": "x"}, "text", {"title": "No address"}], {}),
+        ("text", {}),
+        (None, {}),
+    ],
+)
+def test_a_view_s_title_is_its_resource_s_title_or_name(
+    resources: object, titles: dict[str, str]
+) -> None:
+    assert view_titles(resources) == titles
+
+
+OTHER = "ui://board/other.html"
+
+
+@pytest.mark.parametrize(
+    ("tools", "titles", "apps"),
+    [
+        # One app per view, with every tool that names it, in the server's order.
+        (
+            [
+                {"name": "draw", "title": "Draw", **ui(resourceUri=URI)},
+                {"name": "plain"},
+                {"name": "list", "title": "List", **ui(resourceUri=OTHER)},
+                {"name": "show", "title": "Show", **ui(resourceUri=URI)},
+            ],
+            {URI: "Boards"},
+            [
+                App("s", URI, "Boards", (AppTool("draw", "Draw"), AppTool("show", "Show"))),
+                # A view the server does not list is titled by its first tool.
+                App("s", OTHER, "List", (AppTool("list", "List"),)),
+            ],
+        ),
+        ([{"name": "plain"}, {"name": "a/b", **ui(resourceUri=URI)}], {URI: "Boards"}, []),
+        ([], {}, []),
+    ],
+)
+def test_an_app_is_one_view_with_the_tools_that_name_it(
+    tools: list[dict[str, Any]], titles: dict[str, str], apps: list[App]
+) -> None:
+    assert apps_of("s", tools, titles) == apps
+    assert [app.id for app in apps] == [f"s/{app.view}" for app in apps]
+
+
+@pytest.mark.parametrize(
+    ("servers", "shared"),
+    [
+        ([[{"name": "show"}, {"name": "add"}], [{"name": "show"}, {"name": "list"}]], {"show"}),
+        # With a view or without one, on either side: the call could be either server's.
+        (
+            [[{"name": "show", **ui(resourceUri=URI)}], [{"name": "show"}], [{"name": "show"}]],
+            {"show"},
+        ),
+        ([[{"name": "show"}, {"name": "add"}], [{"name": "list"}]], set()),
+        # Twice on one server is that server's own affair, and a name that is no name is none.
+        ([[{"name": "show"}, {"name": "show"}], [{"name": 7}, {}], [{"name": 7}]], set()),
+        ([], set()),
+    ],
+    ids=["one-shared", "three-servers", "none-shared", "one-server-twice", "no-servers"],
+)
+def test_a_tool_name_is_shared_when_more_than_one_server_gives_it(
+    servers: list[list[dict[str, Any]]], shared: set[str]
+) -> None:
+    assert shared_names(servers) == shared
 
 
 @pytest.mark.parametrize(

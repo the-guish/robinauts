@@ -68,7 +68,9 @@ until the frontend is revisited.
   has no field for it there, and this flag, a boolean of ours, is the one
   thing this wire ever puts in `metadata`; a plain result carries none.
   **Arguments and results are rendered as data** by the client, as text,
-  because both are attacker-influenced text.
+  because both are attacker-influenced text. A result's structured content
+  is not on the stream. The side panel reads it for the view of that call
+  ([mcp-apps.md](../architecture/mcp-apps.md)).
 
 ## The endpoints
 

@@ -70,6 +70,9 @@ PERMISSION_OF: dict[tuple[str, str], str] = {
     ("GET", "/api/conversations"): roles.CONVERSATIONS_READ,
     ("GET", "/api/changes"): roles.CONVERSATIONS_READ,
     ("GET", "/api/conversations/{conversation_id}"): roles.CONVERSATIONS_READ,
+    ("GET", "/api/conversations/{conversation_id}/messages/{message_id}/tool-result"): (
+        roles.CONVERSATIONS_READ
+    ),
     ("PATCH", "/api/conversations/{conversation_id}"): roles.CONVERSATIONS_WRITE,
     ("POST", "/api/conversations/{conversation_id}/archive"): roles.CONVERSATIONS_WRITE,
     ("DELETE", "/api/conversations/{conversation_id}"): roles.CONVERSATIONS_WRITE,

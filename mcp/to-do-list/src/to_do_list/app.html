@@ -8,7 +8,8 @@ One document: its style and its script are inline, and it names no other file, n
 address and no font, so it runs under a policy of default-src 'none' in a sandbox
 that allows scripts alone. It talks to the host and to nothing else, by postMessage,
 in JSON-RPC 2.0. It keeps nothing: the list is the server's, and every change goes
-through the host to the server and is drawn again from the server's answer.
+through the host to the server and is drawn again from the server's answer. While it
+is drawn, it reads the list again every 2 seconds.
 -->
 <html lang="en">
 <head>
@@ -132,12 +133,17 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
 (function () {
   "use strict";
 
-  var PROTOCOL_VERSION = "2025-06-18";
+  var PROTOCOL_VERSION = "2026-01-26";
   var TIMEOUT_MS = 30000;
+  var POLL_MS = 2000;
   var pending = new Map();
   var nextId = 1;
   var items = null;
   var busy = false;
+  var calls = 0;
+  var reading = false;
+  var framed = false;
+  var poll = null;
 
   var form = document.getElementById("add");
   var input = document.getElementById("new-text");
@@ -208,16 +214,26 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
 
   function onRequest(message) {
     if (message.method === "ui/resource-teardown" || message.method === "ping") {
+      if (message.method === "ui/resource-teardown") {
+        clearInterval(poll);
+      }
       answer(message.id, {});
     } else {
       refuse(message.id, message.method);
     }
   }
 
+  /* The host sends the result of each call the agent makes of show_todos: the first one, and
+     any later one, are drawn alike. A call that was cancelled has no result. */
   function onNotification(method, params) {
     if (method === "ui/notifications/tool-result") {
       if (!showResult(params) && items === null) {
         summary.textContent = "";
+      }
+    } else if (method === "ui/notifications/tool-cancelled") {
+      if (items === null) {
+        summary.textContent = "";
+        say("The to-do list could not be shown.");
       }
     } else if (method === "ui/notifications/host-context-changed") {
       applyContext(params);
@@ -236,21 +252,34 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
     status.className = ok ? "status ok" : "status";
   }
 
-  /* A tool's result, from the host's notification or from a call of the view's own. */
-  function showResult(result, key) {
-    if (!result || result.isError) {
-      say(errorText(result));
-      return false;
-    }
-    var structured = result.structuredContent;
+  /* The list a tool's result holds, or null for an error and for a result without one. */
+  function listOf(result) {
+    var structured = result && !result.isError && result.structuredContent;
     if (!structured || !Array.isArray(structured.items)) {
-      say("The server answered without a list.");
-      return false;
+      return null;
     }
-    items = structured.items.map(function (item) {
+    return structured.items.map(function (item) {
       return { id: String(item.id), text: String(item.text), done: Boolean(item.done) };
     });
+  }
+
+  /* The first list ends whatever was said while there was none. */
+  function draw(read, key) {
+    if (items === null) {
+      say("", true);
+    }
+    items = read;
     render(key);
+  }
+
+  /* A tool's result, from the host's notification or from a call of the view's own. */
+  function showResult(result, key) {
+    var read = listOf(result);
+    if (!read) {
+      say(result && !result.isError ? "The server answered without a list." : errorText(result));
+      return false;
+    }
+    draw(read, key);
     return true;
   }
 
@@ -279,6 +308,7 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
     }
     var key = focusedKey();
     busy = true;
+    calls++;
     say("", true);
     return request("tools/call", { name: name, arguments: args }).then(
       function (result) {
@@ -296,6 +326,46 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
         return false;
       }
     );
+  }
+
+  /* Keeping fresh. The host sends the result of the agent's call and nothing after it, so
+     the view reads the list again every 2 seconds, with show_todos. Each read waits for an
+     animation frame: the browser gives none to a frame that is hidden (display: none) or in
+     a background tab, so the view reads only while it is drawn. One read at a time, and none
+     while a call of the view's own is on its way. A read that such a call overtook is
+     dropped: the call's answer is the newer list. A read that fails says nothing, and the
+     next tick tries again. A list equal to the one on the screen is left alone, so nothing
+     moves under the person's hands. A list that differs is drawn as any other: the focus
+     stays where it was, and so does what is typed in "New to-do". */
+  function refresh() {
+    framed = false;
+    if (busy) {
+      return;
+    }
+    var asked = calls;
+    reading = true;
+    request("tools/call", { name: "show_todos", arguments: {} }).then(
+      function (result) {
+        reading = false;
+        var read = asked === calls ? listOf(result) : null;
+        if (read && JSON.stringify(read) !== JSON.stringify(items)) {
+          draw(read);
+        }
+      },
+      function () {
+        reading = false;
+      }
+    );
+  }
+
+  function startPolling() {
+    poll = setInterval(function () {
+      if (busy || reading || framed) {
+        return;
+      }
+      framed = true;
+      requestAnimationFrame(refresh);
+    }, POLL_MS);
   }
 
   /* Drawing: built from elements and text nodes, never from markup, so a to-do's text is
@@ -395,7 +465,7 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
   });
 
   /* The handshake: ui/initialize, then ui/notifications/initialized. The host then sends the
-     list as ui/notifications/tool-result. */
+     list as ui/notifications/tool-result, and the view starts to read it by itself. */
   request("ui/initialize", {
     protocolVersion: PROTOCOL_VERSION,
     appInfo: { name: "to-do-list", version: "0.1.0" },
@@ -404,6 +474,7 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
     function (result) {
       applyContext(result && result.hostContext);
       notify("ui/notifications/initialized", {});
+      startPolling();
     },
     function (error) {
       summary.textContent = "";

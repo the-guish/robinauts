@@ -53,7 +53,7 @@ import {
   UNKNOWN_MODEL,
 } from "../api/client";
 import { cancelRun, type Opened } from "../conversation/conversation";
-import type { ChatProps, Drafts } from "./index";
+import type { ChatProps, Drafts, ThreadToolCalls } from "./index";
 import {
   attach,
   startNewConversation,
@@ -72,6 +72,8 @@ import {
   sameRead,
   STOP_DID_NOT_ARRIVE,
   storedParent,
+  sameToolCalls,
+  toolCallsOf,
   turnStart,
   under,
   UNSENT,
@@ -267,6 +269,9 @@ function keepDraft(
   else drafts.set(conversationId, text);
 }
 
+/** The thread before anything is on the screen: no conversation, no calls. */
+const NO_CALLS: ThreadToolCalls = { conversationId: null, calls: [] };
+
 export function useChat(props: ChatProps): Chatting {
   const [state, dispatch] = useReducer(reduce, EMPTY);
 
@@ -286,6 +291,28 @@ export function useChat(props: ChatProps): Chatting {
   useLayoutEffect(() => {
     turns.now(props, state);
   });
+
+  // The thread's tool calls, told each time they change (`./index.ts`,
+  // `onToolCalls`). Kept as they were last told: a new list of the same
+  // calls, which every piece of an answer's text makes, is no change to
+  // tell, and is found to be none without writing the calls out
+  // (`sameToolCalls`).
+  const { messages, streamed } = state;
+  const toolCalls = useMemo(
+    () => toolCallsOf({ messages, streamed }),
+    [messages, streamed],
+  );
+  const [thread, setThread] = useState<ThreadToolCalls>(NO_CALLS);
+  if (
+    thread.conversationId !== state.conversationId ||
+    !sameToolCalls(thread.calls, toolCalls)
+  ) {
+    setThread({ conversationId: state.conversationId, calls: toolCalls });
+  }
+  const onToolCalls = props.onToolCalls;
+  useEffect(() => {
+    onToolCalls?.(thread);
+  }, [thread, onToolCalls]);
 
   // Which conversation is on the screen. Reading one is one call
   // (`docs/specs/conversations.md`), and leaving one abandons it.
@@ -860,18 +887,10 @@ function turnsOf(dispatch: (action: ChatAction) => void, first: ChatProps) {
     afterLoss: boolean,
   ): Promise<void> {
     let lost: string | null = null;
-    // A result names its call alone; the call named the tool.
-    const tools = new Map<string, string>();
     try {
       for await (const { event } of attached.events) {
         if (control.signal.aborted) return;
         dispatch({ kind: "event", event });
-        if (event.type === "TOOL_CALL_START") {
-          tools.set(event.toolCallId, event.toolCallName);
-        } else if (event.type === "TOOL_CALL_RESULT") {
-          const name = tools.get(event.toolCallId);
-          if (name !== undefined) props.onToolResult?.(name);
-        }
       }
     } catch {
       if (control.signal.aborted) return;

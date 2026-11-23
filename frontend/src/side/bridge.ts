@@ -4,25 +4,26 @@
 /**
  * The host's side of the MCP Apps protocol (`io.modelcontextprotocol/ui`):
  * what an app's view may say to the panel, and what the panel says back
- * (`docs/adr/0007-mcp-apps-in-the-side-panel.md`).
+ * (`docs/architecture/mcp-apps.md`).
  *
  * JSON-RPC 2.0 over `postMessage`. The view asks `ui/initialize` and is told
- * the theme; it says `ui/notifications/initialized`, and the host then calls
- * the app's own tool once and hands the view its input and its result. Each
- * turn that ends has the tool called again and the new result handed over. The
- * view may ask `tools/call`, which the backend relays to its server, and
- * `ping`. Anything else it asks is answered "method not found": a view
- * cannot open a page, write in the chat or reach the model.
+ * the theme and the size of its box; it says `ui/notifications/initialized`,
+ * and the host then tells it the arguments of the agent's call and, once the
+ * tool has answered, its result. The view may ask `tools/call`, which the
+ * backend relays to its server, and `ping`. Anything else it asks is
+ * answered "method not found": a view cannot open a page, write in the chat
+ * or reach the model.
  *
  * **Everything here is pure**: it reads a message and says what to do, and
  * builds what is sent. The frame, the listener and the network are
- * `./AppTab.tsx`'s. What is sent goes to an opaque origin, so it is posted
- * to `"*"`: nothing built here carries more than the view may see -- the
- * theme, and what its own server answered.
+ * `./AppFrame.tsx`'s. What is sent goes to an opaque origin, so it is posted
+ * to `"*"`: nothing built here carries more than the view's own server
+ * already has -- the theme, the size, the arguments of the agent's call and
+ * what the server answered.
  */
 
-/** The protocol version the host speaks, as the view's library expects it. */
-export const PROTOCOL_VERSION = "2025-06-18";
+/** The version of MCP Apps the host speaks. */
+export const PROTOCOL_VERSION = "2026-01-26";
 
 /** The theme a view is told: the one on the screen, never "system". */
 export type HostTheme = "light" | "dark";
@@ -51,7 +52,8 @@ export type Outbound =
       id: RequestId;
       error: { code: number; message: string };
     }
-  | { jsonrpc: "2.0"; method: string; params: unknown };
+  | { jsonrpc: "2.0"; method: string; params: unknown }
+  | { jsonrpc: "2.0"; id: RequestId; method: string; params: unknown };
 
 /** JSON-RPC's own error codes, the three the host answers with. */
 export const METHOD_NOT_FOUND = -32601;
@@ -60,7 +62,7 @@ export const INTERNAL_ERROR = -32603;
 
 /**
  * How far the handshake has got: nothing yet, `ui/initialize` answered, or
- * `ui/notifications/initialized` heard and the app's tool called.
+ * `ui/notifications/initialized` heard and the view told its call.
  */
 export type Phase = "waiting" | "initializing" | "running";
 
@@ -75,7 +77,7 @@ export type Step =
       readonly name: string;
       readonly arguments: Readonly<Record<string, unknown>>;
     }
-  /** The handshake is done: call the app's own tool and hand it over. */
+  /** The handshake is done: tell the view the call it is of. */
   | { readonly kind: "start" }
   | { readonly kind: "ignore" };
 
@@ -94,8 +96,9 @@ function isId(value: unknown): value is RequestId {
  * A message from the view, or `null` for anything that is not a request or
  * a notification of JSON-RPC 2.0.
  *
- * Responses are `null` too: the host asks the view nothing, so there is
- * nothing for one to answer. A view's message is a third party's data, read
+ * Responses are `null` too: the one thing the host asks the view,
+ * `ui/resource-teardown`, it asks as it removes the frame, and waits for no
+ * answer. A view's message is a third party's data, read
  * as such: no field is trusted to be what it claims until it is looked at.
  */
 export function parseInbound(data: unknown): Inbound | null {
@@ -125,19 +128,63 @@ export function notification(method: string, params: unknown): Outbound {
   return { jsonrpc: "2.0", method, params };
 }
 
-/** What `ui/initialize` is answered with. */
-export function initializeResult(theme: HostTheme) {
+/** The size of the box a view is drawn in, in CSS pixels. */
+export interface BoxSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * The size as the view is told it: both dimensions fixed, so the view fills
+ * its box. A box not on the screen has no size to tell.
+ */
+function containerDimensions(size: BoxSize | null) {
+  return size === null || size.width <= 0 || size.height <= 0
+    ? {}
+    : { containerDimensions: { width: size.width, height: size.height } };
+}
+
+/**
+ * What `ui/initialize` is answered with. The side panel is told as `inline`,
+ * the one mode offered, with the size of the view's box.
+ */
+export function initializeResult(theme: HostTheme, size: BoxSize | null) {
   return {
     protocolVersion: PROTOCOL_VERSION,
     hostInfo: { name: "robinauts" },
     hostCapabilities: { serverTools: {} },
-    hostContext: { theme, displayMode: "inline" },
+    hostContext: {
+      theme,
+      displayMode: "inline",
+      availableDisplayModes: ["inline"],
+      ...containerDimensions(size),
+    },
   };
 }
 
-/** The input of the app's own tool, which the host calls with none. */
-export function toolInput(): Outbound {
-  return notification("ui/notifications/tool-input", { arguments: {} });
+/** The arguments of the agent's call, which the view is of. */
+export function toolInput(args: Readonly<Record<string, unknown>>): Outbound {
+  return notification("ui/notifications/tool-input", { arguments: args });
+}
+
+/** The agent's call ended with no result: its turn was stopped or failed. */
+export function toolCancelled(): Outbound {
+  return notification("ui/notifications/tool-cancelled", {
+    reason: "The turn ended before the tool answered.",
+  });
+}
+
+/** What the id of the one request the host makes says it is. */
+export const TEARDOWN_ID = "robinauts-teardown";
+
+/** The frame is about to be removed. */
+export function resourceTeardown(): Outbound {
+  return {
+    jsonrpc: "2.0",
+    id: TEARDOWN_ID,
+    method: "ui/resource-teardown",
+    params: { reason: "The tab was closed." },
+  };
 }
 
 /** What the backend answered a tool call with, in MCP's shape. */
@@ -161,13 +208,21 @@ export function callToolResult(answer: ToolAnswer): Record<string, unknown> {
   };
 }
 
-/** The result of the app's own tool, handed to the view. */
+/** The result of the agent's call, handed to the view. */
 export function toolResult(answer: ToolAnswer): Outbound {
   return notification("ui/notifications/tool-result", callToolResult(answer));
 }
 
-export function hostContextChanged(theme: HostTheme): Outbound {
-  return notification("ui/notifications/host-context-changed", { theme });
+/** What changed of the host's context: the theme, or the size of the box. */
+export function hostContextChanged(
+  changed: { readonly theme: HostTheme } | { readonly size: BoxSize },
+): Outbound {
+  return notification(
+    "ui/notifications/host-context-changed",
+    "theme" in changed
+      ? { theme: changed.theme }
+      : containerDimensions(changed.size),
+  );
 }
 
 /**
@@ -184,6 +239,7 @@ export function dispatch(
   message: Inbound,
   phase: Phase,
   theme: HostTheme,
+  size: BoxSize | null = null,
 ): { readonly phase: Phase; readonly step: Step } {
   if (message.kind === "notification") {
     if (
@@ -202,9 +258,12 @@ export function dispatch(
   switch (method) {
     case "ui/initialize":
       return {
-        // A view that starts again is told again, and its tool called again.
+        // A view that starts again is told again, its call included.
         phase: "initializing",
-        step: { kind: "reply", message: response(id, initializeResult(theme)) },
+        step: {
+          kind: "reply",
+          message: response(id, initializeResult(theme, size)),
+        },
       };
     case "ping":
       return reply(response(id, {}));

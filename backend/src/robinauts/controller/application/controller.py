@@ -18,6 +18,8 @@ from robinauts.controller.application.intervals import run_at_intervals
 from robinauts.controller.contract.broker.documents import (
     event_from_document,
     message_from_document,
+    result_in_event,
+    result_in_message,
     stored_message,
 )
 from robinauts.controller.contract.broker.domain import RUN_TURN, Task, TaskState
@@ -49,6 +51,7 @@ from robinauts.shared_domain.domain import (
     Role,
     Session,
     TextPart,
+    ToolResultPart,
     Turn,
     TurnEnded,
     TurnStarted,
@@ -158,6 +161,44 @@ class RobinautsController(Controller):
         if latest is not None and latest.state in ENDED_BADLY:
             ended_badly = latest
         return OpenedSession(session, tuple(reversed(thread)), active, ended_badly)
+
+    async def tool_result(
+        self, user: User, session_id: uuid.UUID, *, message_id: uuid.UUID, call_id: str
+    ) -> ToolResultPart:
+        await self._store.get_session(user.id, session_id)
+        # The turn being run first, the stored answers second. A turn stores its answer as it
+        # ends, so one that ends between the two reads is found by the second. In the other
+        # order such a result is in neither.
+        result = await self._landed_result(user, session_id, message_id, call_id)
+        if result is None:
+            result = await self._stored_result(user, session_id, message_id, call_id)
+        if result is None:
+            raise MessageNotFoundError(f"no result of call {call_id!r} on message {message_id}")
+        return result
+
+    async def _landed_result(
+        self, user: User, session_id: uuid.UUID, message_id: uuid.UUID, call_id: str
+    ) -> ToolResultPart | None:
+        """The result as an event of the turn being run: an answer still being produced is
+        not stored yet."""
+        running = await self._store.active_turn(user.id, session_id)
+        if running is None:
+            return None
+        for _, document in await self._store.events_after(user.id, session_id, running.id, 0):
+            result = result_in_event(document, message_id, call_id)
+            if result is not None:
+                return result
+        return None
+
+    async def _stored_result(
+        self, user: User, session_id: uuid.UUID, message_id: uuid.UUID, call_id: str
+    ) -> ToolResultPart | None:
+        """The result as a part of a stored message."""
+        for document in await self._store.messages_of(user.id, session_id):
+            result = result_in_message(document, message_id, call_id)
+            if result is not None:
+                return result
+        return None
 
     async def rename_session(self, user: User, session_id: uuid.UUID, title: str) -> Session:
         session = await self._store.get_session(user.id, session_id)

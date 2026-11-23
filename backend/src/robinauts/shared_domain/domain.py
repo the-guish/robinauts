@@ -242,6 +242,9 @@ class ToolResultPart:
     call_id: str
     text: str
     is_error: bool = False
+    structured: Mapping[str, Any] | None = None
+    """An MCP result's structured content, which a view draws; ``None`` for a result without
+    one (``docs/architecture/mcp-apps.md``)."""
 
 
 MessagePart = TextPart | ReasoningPart | ToolCallPart | ToolResultPart
@@ -382,6 +385,8 @@ class ResultLanded:
     call_id: str
     text: str
     is_error: bool = False
+    structured: Mapping[str, Any] | None = None
+    """As ``ToolResultPart``'s."""
 
 
 @dataclass(frozen=True, slots=True)

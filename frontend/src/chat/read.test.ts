@@ -2,7 +2,8 @@
 // Copyright The Robinauts Authors
 import { expect, test } from "vitest";
 
-import { lastRead, sameRead, type Read } from "./state";
+import type { ThreadToolCall } from "./index";
+import { lastRead, sameRead, sameToolCalls, type Read } from "./state";
 
 const SHOWN: Read = { conversationId: "c", lastId: "m2", runId: null };
 
@@ -25,4 +26,32 @@ test.each<[{ id: string }[], string | null, string | null]>([
     lastId,
     runId,
   });
+});
+
+const ARGS = { shape: "box" };
+const CALL: ThreadToolCall = {
+  messageId: "m2",
+  callId: "t1",
+  name: "draw",
+  arguments: ARGS,
+  state: "running",
+  live: true,
+};
+
+test.each<[string, ThreadToolCall[], ThreadToolCall[], boolean]>([
+  ["none and none", [], [], true],
+  ["the same call, made again", [CALL], [{ ...CALL }], true],
+  // Read again from the store: other objects that say the same.
+  ["equal arguments", [CALL], [{ ...CALL, arguments: { ...ARGS } }], true],
+  ["other arguments", [CALL], [{ ...CALL, arguments: { shape: "o" } }], false],
+  ["arguments now whole", [{ ...CALL, arguments: null }], [CALL], false],
+  ["a call answered", [CALL], [{ ...CALL, state: "answered" }], false],
+  ["a call no longer live", [CALL], [{ ...CALL, live: false }], false],
+  ["another call", [CALL], [{ ...CALL, callId: "t2" }], false],
+  ["another answer", [CALL], [{ ...CALL, messageId: "m4" }], false],
+  ["another tool", [CALL], [{ ...CALL, name: "show" }], false],
+  ["one more call", [CALL], [CALL, { ...CALL, callId: "t2" }], false],
+])("%s: the same calls is %s", (_, one, other, same) => {
+  expect(sameToolCalls(one, other)).toBe(same);
+  expect(sameToolCalls(other, one)).toBe(same);
 });

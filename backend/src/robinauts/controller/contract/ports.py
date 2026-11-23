@@ -20,7 +20,7 @@ from robinauts.controller.contract.domain import (
     SessionPage,
     User,
 )
-from robinauts.shared_domain.domain import Project, Session, TurnStarted
+from robinauts.shared_domain.domain import Project, Session, ToolResultPart, TurnStarted
 
 
 class Controller(ABC):
@@ -66,6 +66,17 @@ class Controller(ABC):
     @abstractmethod
     async def open_session(self, user: User, session_id: uuid.UUID) -> OpenedSession:
         """``SessionNotFoundError`` for one the user does not have."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def tool_result(
+        self, user: User, session_id: uuid.UUID, *, message_id: uuid.UUID, call_id: str
+    ) -> ToolResultPart:
+        """The result of one tool call of one answer, whole: its text, and the structured
+        content a view draws (``docs/architecture/mcp-apps.md``). Read from the answer once it
+        is stored, and from the events of the session's active turn before.
+
+        ``SessionNotFoundError``; ``MessageNotFoundError`` for a call with no result there."""
         raise NotImplementedError
 
     @abstractmethod

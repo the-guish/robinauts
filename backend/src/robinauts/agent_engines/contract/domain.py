@@ -159,6 +159,9 @@ class ToolResult:
     raw_output: str
     """The output, as the model sees it."""
     failed: bool = False
+    structured_content: Mapping[str, Any] | None = None
+    """An MCP result's structured content, as the server gave it, apart from the text: what a
+    view draws (``docs/architecture/mcp-apps.md``). ``None`` for a result without one."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -32,6 +32,7 @@ from robinauts.agent_engines.contract.ports import AgentEngine
 from robinauts.controller.contract.broker.documents import (
     clean_text,
     event_to_document,
+    kept_structured,
     message_from_document,
     stored_message,
 )
@@ -214,10 +215,15 @@ async def run_turn(
                     await writer.append(CallCompleted(answer_id, event.call_id))
                     parts.append(ToolCallPart(event.call_id, event.name, event.raw_input))
                 elif isinstance(event, ToolResult):
+                    structured = kept_structured(event.structured_content)
                     await writer.append(
-                        ResultLanded(answer_id, event.call_id, event.raw_output, event.failed)
+                        ResultLanded(
+                            answer_id, event.call_id, event.raw_output, event.failed, structured
+                        )
                     )
-                    parts.append(ToolResultPart(event.call_id, event.raw_output, event.failed))
+                    parts.append(
+                        ToolResultPart(event.call_id, event.raw_output, event.failed, structured)
+                    )
                 elif isinstance(event, Done):
                     # An engine that streamed no text at all still hands the answer over.
                     if event.text and not any(isinstance(p, TextPart) for p in parts):
