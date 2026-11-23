@@ -123,7 +123,10 @@ export interface SubTab {
   readonly title: string;
   readonly tool: string;
   readonly arguments: Readonly<Record<string, unknown>>;
-  /** The newest call of that tool with those arguments. */
+  /**
+   * The newest call of that tool with those arguments, unless it ended with
+   * no result after one that had one: then the newest that had one.
+   */
   readonly call: ShownCall;
   /** Where that call stands among the thread's calls: the later, the higher. */
   readonly last: number;
@@ -164,8 +167,10 @@ export function subTabKey(
  * A call is the app's when the app has a tool of its name. A call whose
  * arguments are not whole yet is left out until they are. A call with the
  * same tool and arguments as an earlier one is that one's sub-tab, which
- * then shows the later call. Sub-tabs are numbered per title, so two tools
- * with one title never give two sub-tabs one name.
+ * then shows the later call. A later call that ended with no result is the
+ * exception: it has nothing to show, so the sub-tab keeps the earlier call
+ * and its result. Sub-tabs are numbered per title, so two tools with one
+ * title never give two sub-tabs one name.
  */
 export function subTabsOf(
   app: App,
@@ -184,7 +189,9 @@ export function subTabsOf(
     };
     const held = found.get(key);
     if (held !== undefined) {
-      found.set(key, { ...held, call: shown, last });
+      const nothingNew =
+        shown.state === "unanswered" && held.call.state === "answered";
+      if (!nothingNew) found.set(key, { ...held, call: shown, last });
       continue;
     }
     const number = (numbered.get(tool.title) ?? 0) + 1;

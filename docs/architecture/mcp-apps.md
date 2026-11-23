@@ -91,7 +91,8 @@ sequenceDiagram
 - **A call names its tool and not its server.** A tool name that two of the agent's servers
   give could be a call to either. The panel lists such a tool with no view, on both servers.
 - **A call with the same tool and arguments uses the sub-tab of the earlier call.** The view
-  there is sent the new result.
+  there is sent the new result. A later call that ended with no result leaves the earlier
+  result in the view.
 - **The agent's call opens the tab and selects the sub-tab.** A collapsed panel stays collapsed.
 - **A sub-tab has its own close button.** The browser remembers the call it showed as closed, per
   conversation. A later call for it opens it again. The other sub-tabs keep their names.

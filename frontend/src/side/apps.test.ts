@@ -117,6 +117,29 @@ test("a sub-tab is one tool with its arguments, numbered per tool, in the order 
   expect(subTabsOf(APP, [])).toEqual([]);
 });
 
+test("a later call with no result leaves its sub-tab the earlier call and its result", () => {
+  const args = { diagram_id: "a" };
+  const answered = call("c1", "show_diagram", args);
+  const failed = call("c2", "show_diagram", args, {
+    messageId: "m2",
+    state: "unanswered",
+  });
+  const running = call("c3", "show_diagram", args, {
+    messageId: "m3",
+    state: "running",
+  });
+  const shown = (calls: ThreadToolCall[]) =>
+    subTabsOf(APP, calls).map((sub) => [sub.call.callId, sub.last]);
+
+  // Its turn ended before the tool answered: there is nothing new to show.
+  expect(shown([answered, failed])).toEqual([["c1", 0]]);
+  // A call still being made may yet answer, so the sub-tab is its own.
+  expect(shown([answered, failed, running])).toEqual([["c3", 2]]);
+  // With no earlier result to keep, the call with none is all there is.
+  expect(shown([failed])).toEqual([["c2", 0]]);
+  expect(shown([failed, answered])).toEqual([["c1", 1]]);
+});
+
 test("two tools with one title are numbered together, so no two sub-tabs share a name", () => {
   const app: App = {
     ...APP,
