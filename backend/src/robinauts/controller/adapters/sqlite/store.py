@@ -527,6 +527,9 @@ class SQLiteStore(Store):
         limit: int,
         before: Cursor | None,
         terms: Sequence[SearchTerm] = (),
+        *,
+        project: uuid.UUID | None = None,
+        archived: bool = False,
     ) -> list[Session]:
         updated_at, session_id = before if before is not None else (None, None)
         matching = ""
@@ -545,10 +548,14 @@ class SQLiteStore(Store):
         rows = await self._read(
             lambda tx: tx.all(
                 f"SELECT {_SESSION_COLUMNS} FROM sessions"
-                " WHERE owner_id = ? AND deleted_at IS NULL AND archived_at IS NULL"
+                " WHERE owner_id = ? AND deleted_at IS NULL AND (? OR archived_at IS NULL)"
+                "   AND (? IS NULL OR project_id = ?)"
                 "   AND (? IS NULL OR (updated_at, id) < (?, ?))"
                 f"{matching} ORDER BY updated_at DESC, id DESC LIMIT ?",
                 _id(owner),
+                int(archived),
+                _id_or_none(project),
+                _id_or_none(project),
                 _at_or_none(updated_at),
                 _at_or_none(updated_at),
                 _id_or_none(session_id),

@@ -98,10 +98,13 @@ class Store(ABC):
         limit: int,
         before: Cursor | None,
         terms: Sequence[SearchTerm] = (),
+        *,
+        project: uuid.UUID | None = None,
+        archived: bool = False,
     ) -> list[Session]:
         """A page of the owner's visible sessions that are not archived, most recently updated
         first, ties broken by id, past ``before``. With ``terms``, only those that match every
-        one."""
+        one. With ``project``, only those in it. With ``archived``, the archived ones too."""
 
     @abstractmethod
     async def hide_session(self, owner: uuid.UUID, session: uuid.UUID, at: datetime) -> None:

@@ -154,6 +154,72 @@
         "title": "AppToolCallResponse",
         "type": "object"
       },
+      "BulkRequest": {
+        "description": "One action on many conversations: those of ``ids``, or every one ``matching`` lists\nbut those of ``except_ids``.",
+        "properties": {
+          "action": {
+            "enum": [
+              "archive",
+              "delete"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "except_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Except Ids",
+            "type": "array"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "maxItems": 1000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ids"
+          },
+          "matching": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationFilter"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "BulkRequest",
+        "type": "object"
+      },
+      "BulkResponse": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "BulkResponse",
+        "type": "object"
+      },
       "ChangesResponse": {
         "properties": {
           "version": {
@@ -165,6 +231,42 @@
           "version"
         ],
         "title": "ChangesResponse",
+        "type": "object"
+      },
+      "ConversationFilter": {
+        "description": "The filters of ``GET /api/conversations``: every conversation it lists, on any page.",
+        "properties": {
+          "archived": {
+            "default": false,
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "q": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q"
+          }
+        },
+        "title": "ConversationFilter",
         "type": "object"
       },
       "ConversationListResponse": {
@@ -451,6 +553,10 @@
             "title": "Agent",
             "type": "string"
           },
+          "archived": {
+            "title": "Archived",
+            "type": "boolean"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -492,7 +598,8 @@
           "project_id",
           "created_at",
           "updated_at",
-          "running"
+          "running",
+          "archived"
         ],
         "title": "ListedConversation",
         "type": "object"
@@ -1131,6 +1238,33 @@
               ],
               "title": "Q"
             }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Archived",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -1156,6 +1290,45 @@
           }
         },
         "summary": "List Sessions"
+      }
+    },
+    "/robinauts/api/conversations/bulk": {
+      "post": {
+        "description": "Archive or delete many conversations at once, skipping those not found.",
+        "operationId": "bulk_sessions_robinauts_api_conversations_bulk_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "Bulk Sessions"
       }
     },
     "/robinauts/api/conversations/{conversation_id}": {

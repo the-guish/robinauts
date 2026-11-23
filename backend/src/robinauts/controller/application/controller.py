@@ -10,7 +10,7 @@ import base64
 import dataclasses
 import logging
 import uuid
-from collections.abc import AsyncGenerator, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -48,6 +48,7 @@ from robinauts.shared_domain.domain import (
     Project,
     Role,
     Session,
+    SessionNotFoundError,
     TextPart,
     Turn,
     TurnEnded,
@@ -64,6 +65,9 @@ the turn's lease has passed."""
 MAX_QUEUED_TIME = timedelta(hours=48)
 """How long a task may wait queued, written as its lease until a worker claims it: long enough
 to outlast an outage of the workers."""
+
+_MATCHING_PAGE = 500
+"""How many sessions ``matching_sessions`` reads from the store at a time."""
 
 ENDED_BADLY = frozenset({TurnState.FAILED, TurnState.CANCELLED, TurnState.INTERRUPTED})
 """How a turn may end that opening its session says so."""
@@ -120,22 +124,53 @@ class RobinautsController(Controller):
         return tuple(ModelListing(m.id, m.title or m.id) for m in self._config.models.values())
 
     async def list_sessions(
-        self, user: User, *, limit: int, cursor: str | None = None, query: str | None = None
+        self,
+        user: User,
+        *,
+        limit: int,
+        cursor: str | None = None,
+        query: str | None = None,
+        project: uuid.UUID | None = None,
+        archived: bool = False,
     ) -> SessionPage:
         before = None if cursor is None else _decode_cursor(cursor)
-        terms = [
+        # One more than a page, to know whether there is a next one.
+        sessions = await self._store.sessions_of(
+            user.id, limit + 1, before, self._terms(query), project=project, archived=archived
+        )
+        following = _encode_cursor(sessions[limit - 1]) if len(sessions) > limit else None
+        sessions = sessions[:limit]
+        running = await self._store.running_sessions(user.id, [s.id for s in sessions])
+        return SessionPage(tuple(sessions), cursor=following, running=running)
+
+    async def matching_sessions(
+        self,
+        user: User,
+        *,
+        query: str | None = None,
+        project: uuid.UUID | None = None,
+        archived: bool = False,
+    ) -> tuple[uuid.UUID, ...]:
+        terms = self._terms(query)
+        found: list[uuid.UUID] = []
+        before: Cursor | None = None
+        while True:
+            sessions = await self._store.sessions_of(
+                user.id, _MATCHING_PAGE, before, terms, project=project, archived=archived
+            )
+            found += [s.id for s in sessions]
+            if len(sessions) < _MATCHING_PAGE:
+                return tuple(found)
+            before = (sessions[-1].updated_at, sessions[-1].id)
+
+    def _terms(self, query: str | None) -> list[SearchTerm]:
+        return [
             SearchTerm(
                 word,
                 tuple(a.id for a in self._config.agents.values() if word in a.title.lower()),
             )
             for word in (query or "").lower().split()
         ]
-        # One more than a page, to know whether there is a next one.
-        sessions = await self._store.sessions_of(user.id, limit + 1, before, terms)
-        following = _encode_cursor(sessions[limit - 1]) if len(sessions) > limit else None
-        sessions = sessions[:limit]
-        running = await self._store.running_sessions(user.id, [s.id for s in sessions])
-        return SessionPage(tuple(sessions), cursor=following, running=running)
 
     async def wait_for_changes(self, user: User, *, after: int | None, timeout: float) -> int:
         return await self._store.wait_for_changes(user.id, after, timeout)
@@ -169,6 +204,26 @@ class RobinautsController(Controller):
         session = await self._store.get_session(user.id, session_id)
         if session.archived_at is None:
             await self._store.update_session(dataclasses.replace(session, archived_at=self._now()))
+
+    async def archive_sessions(self, user: User, session_ids: Sequence[uuid.UUID]) -> int:
+        return await self._each(session_ids, lambda one: self.archive_session(user, one))
+
+    async def delete_sessions(self, user: User, session_ids: Sequence[uuid.UUID]) -> int:
+        return await self._each(session_ids, lambda one: self.delete_session(user, one))
+
+    @staticmethod
+    async def _each(
+        session_ids: Sequence[uuid.UUID],
+        act: Callable[[uuid.UUID], Awaitable[None]],
+    ) -> int:
+        done = 0
+        for one in dict.fromkeys(session_ids):
+            try:
+                await act(one)
+            except SessionNotFoundError:
+                continue
+            done += 1
+        return done
 
     async def delete_session(self, user: User, session_id: uuid.UUID) -> None:
         session = await self._store.get_session(user.id, session_id)
