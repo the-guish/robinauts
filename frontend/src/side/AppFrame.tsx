@@ -28,14 +28,13 @@
  * that never starts, or a first result that cannot be read, is said so in
  * its place, with a way to try again. A later call's result that cannot be
  * read leaves the view as it is, showing what it was told before.
+ *
+ * **The end.** The frame goes with its sub-tab, and the view is told nothing
+ * as it goes. The frame is removed in the step that closes it, and a message
+ * posted in that step never reaches a frame: the browser drops it with the
+ * frame's document. `ui/resource-teardown` is therefore not sent.
  */
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { detailOf, request } from "../api/client";
 import { type SubTab, viewUrl } from "./apps";
@@ -49,7 +48,6 @@ import {
   type Outbound,
   parseInbound,
   type Phase,
-  resourceTeardown,
   response,
   toolCallFailed,
   toolCancelled,
@@ -274,15 +272,6 @@ export function AppFrame({
     observer.observe(target);
     return () => {
       observer.disconnect();
-    };
-  }, []);
-
-  // Told as the frame goes, while it is still in the page: a layout
-  // effect's end runs before the frame is taken out.
-  useLayoutEffect(() => {
-    const target = frame.current;
-    return () => {
-      if (phase.current !== "waiting") post(target, resourceTeardown());
     };
   }, []);
 

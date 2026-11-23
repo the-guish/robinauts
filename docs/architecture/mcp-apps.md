@@ -76,8 +76,8 @@ sequenceDiagram
   MCP client.
 - **Web** reads the view from the server (steps 5 and 6) and relays the view's tool calls (steps
   17 and 18), with a small MCP client of its own on httpx (`web/mcp_client.py`).
-- **The panel** frames the view and speaks the protocol with it (steps 7 to 11, 14 to 16 and 19
-  to 25): `frontend/src/side/`.
+- **The panel** frames the view and speaks the protocol with it (steps 7 to 11, 14 to 16, 19 to
+  22 and 25): `frontend/src/side/`.
 - **The view** is third-party code in the person's browser. It talks to the panel alone.
 
 ## Tabs and sub-tabs
@@ -112,7 +112,6 @@ sequenceDiagram
 | 14 | `ui/notifications/tool-result` | the result of the agent's call: `content` with one text block, `structuredContent` and `isError` |
 | 15 | `ui/notifications/tool-cancelled` | sent when the turn ended and the call has no result |
 | 22 | `ui/notifications/host-context-changed` | the new `theme`, or the new `containerDimensions` |
-| 23 | `ui/resource-teardown` | sent before the frame is removed; the panel does not wait for the answer |
 
 - The side panel is reported as `inline`. A view fills the box of its `containerDimensions`.
 - A frame that is not on the screen has no size. Its `containerDimensions` come later, in
@@ -194,6 +193,8 @@ The view runs next to a page that holds a signed-in person's session.
   kept. Structured content above 1 MiB is not kept either, and the view is then sent the text
   alone.
 - **`hostContext.toolInfo` is not sent.**
+- **`ui/resource-teardown` is not sent** (steps 23 and 24). The panel removes a frame in the
+  step that closes its tab. A message posted in that step never reaches the frame.
 - **Each request to a server opens an MCP session and ends it.** A view that polls costs four
   requests to its server per read.
 - **The engines do not read `_meta.ui.visibility`.** A tool with `app` alone is still given to

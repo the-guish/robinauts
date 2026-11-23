@@ -15,8 +15,6 @@ import {
   parseInbound,
   type Phase,
   PROTOCOL_VERSION,
-  resourceTeardown,
-  TEARDOWN_ID,
   toolCallFailed,
   toolCancelled,
   toolInput,
@@ -247,13 +245,6 @@ test("what the host tells the view", () => {
     jsonrpc: "2.0",
     method: "ui/notifications/tool-cancelled",
     params: { reason: "The turn ended before the tool answered." },
-  });
-  // The one request the host makes, as the frame goes.
-  expect(resourceTeardown()).toEqual({
-    jsonrpc: "2.0",
-    id: TEARDOWN_ID,
-    method: "ui/resource-teardown",
-    params: { reason: "The tab was closed." },
   });
   expect(toolResult(answer)).toEqual({
     jsonrpc: "2.0",

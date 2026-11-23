@@ -14,7 +14,7 @@ import { json, refusal, stubFetch, type Call } from "../test/api";
 import { START_TIMEOUT_MS } from "./AppFrame";
 import { AppTab, type Asked } from "./AppTab";
 import { type App, subTabKey, subTabsOf } from "./apps";
-import { PROTOCOL_VERSION, TEARDOWN_ID } from "./bridge";
+import { PROTOCOL_VERSION } from "./bridge";
 
 const APP: App = {
   id: "draw/ui://diagrams/view.html",
@@ -395,7 +395,8 @@ test("a tab is empty until the agent calls, then holds a sub-tab per call, the a
   rerender(tabOf([first, second, shown("c3", "b")], asked));
   expect(onTop()).toBe("Diagram 1");
 
-  // A view that has started is told as its frame goes.
+  // A view that has started is told nothing as its frame goes: a message
+  // posted in the step that removes a frame never reaches it.
   const view = firstView.contentWindow;
   if (view === null) throw new Error("the frame has no window");
   const posted = vi.spyOn(view, "postMessage");
@@ -404,10 +405,7 @@ test("a tab is empty until the agent calls, then holds a sub-tab per call, the a
     expect(posted).toHaveBeenCalledTimes(3);
   });
   rerender(<p>closed</p>);
-  expect(posted.mock.calls.at(-1)?.[0]).toMatchObject({
-    id: TEARDOWN_ID,
-    method: "ui/resource-teardown",
-  });
+  expect(posted).toHaveBeenCalledTimes(3);
 });
 
 test("a sub-tab closes on its own, stays closed, and a later call of the agent's opens it again", () => {

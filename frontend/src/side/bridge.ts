@@ -60,8 +60,7 @@ export type Outbound =
       id: RequestId;
       error: { code: number; message: string };
     }
-  | { jsonrpc: "2.0"; method: string; params: unknown }
-  | { jsonrpc: "2.0"; id: RequestId; method: string; params: unknown };
+  | { jsonrpc: "2.0"; method: string; params: unknown };
 
 /** JSON-RPC's own error codes, the three the host answers with. */
 export const METHOD_NOT_FOUND = -32601;
@@ -104,9 +103,8 @@ function isId(value: unknown): value is RequestId {
  * A message from the view, or `null` for anything that is not a request or
  * a notification of JSON-RPC 2.0.
  *
- * Responses are `null` too: the one thing the host asks the view,
- * `ui/resource-teardown`, it asks as it removes the frame, and waits for no
- * answer. A view's message is a third party's data, read
+ * Responses are `null` too: the host asks the view nothing, so there is
+ * nothing for one to answer. A view's message is a third party's data, read
  * as such: no field is trusted to be what it claims until it is looked at.
  */
 export function parseInbound(data: unknown): Inbound | null {
@@ -180,19 +178,6 @@ export function toolCancelled(): Outbound {
   return notification("ui/notifications/tool-cancelled", {
     reason: "The turn ended before the tool answered.",
   });
-}
-
-/** What the id of the one request the host makes says it is. */
-export const TEARDOWN_ID = "robinauts-teardown";
-
-/** The frame is about to be removed. */
-export function resourceTeardown(): Outbound {
-  return {
-    jsonrpc: "2.0",
-    id: TEARDOWN_ID,
-    method: "ui/resource-teardown",
-    params: { reason: "The tab was closed." },
-  };
 }
 
 /** What the backend answered a tool call with, in MCP's shape. */
