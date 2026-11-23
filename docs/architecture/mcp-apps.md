@@ -73,7 +73,8 @@ sequenceDiagram
 
 - **The server** is a tool server the operator configured (`[tool_servers.<id>]`).
 - **The engine** makes the agent's tool calls (steps 3, 4, 12 and 13), with the framework's own
-  MCP client.
+  MCP client. It gives the model the tools with `model` in `_meta.ui.visibility`, and those
+  with no `visibility`.
 - **Web** reads the view from the server (steps 5 and 6) and relays the view's tool calls (steps
   17 and 18), with a small MCP client of its own on httpx (`web/mcp_client.py`).
 - **The panel** frames the view and speaks the protocol with it (steps 7 to 11, 14 to 16 and 19
@@ -201,7 +202,5 @@ The view runs next to a page that holds a signed-in person's session.
 - **The result of a tool without a view is as the framework gives it to the model.** Pydantic
   AI gives the structured content in the text's place when a result has both and all its content
   is text. LangChain gives the text. Neither reports that structured content: no view draws it.
-- **The engines do not read `_meta.ui.visibility`.** A tool with `app` alone is still given to
-  the model, unless the server's `exclude` names it, which hides it from views too.
 - **Robinauts does not advertise the extension** in its clients' capabilities. A server that
   registers its views only for hosts that do offers Robinauts none.

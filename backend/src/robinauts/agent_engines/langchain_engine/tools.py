@@ -4,8 +4,9 @@
 """The agent's tools: listed from its MCP servers with the server's credential, and its function
 tools made LangChain tools.
 
-An MCP tool may name a view in its ``_meta.ui`` (``docs/architecture/mcp-apps.md``). The adapter
-keeps a tool's ``_meta`` on the tool's metadata: ``has_view`` reads it there."""
+An MCP tool may name a view, and say who may call it, in its ``_meta.ui``
+(``docs/architecture/mcp-apps.md``). The adapter keeps a tool's ``_meta`` on the tool's metadata:
+``for_the_model`` and ``has_view`` read it there."""
 
 from __future__ import annotations
 
@@ -63,7 +64,7 @@ async def tools_for(agent: AgentDefinition, settings: EngineSettings) -> list[Ba
         tool
         for server_id, tools in zip(connections, listed, strict=True)
         for tool in tools
-        if tool.name not in servers[server_id].exclude
+        if tool.name not in servers[server_id].exclude and for_the_model(tool)
     ]
 
 
@@ -74,6 +75,13 @@ def ui_of(tool: object) -> Mapping[str, Any]:
     meta = metadata.get("_meta") if isinstance(metadata, Mapping) else None
     ui = meta.get("ui") if isinstance(meta, Mapping) else None
     return ui if isinstance(ui, Mapping) else {}
+
+
+def for_the_model(tool: object) -> bool:
+    """Whether the model may call the tool: its ``visibility`` names ``model``, or it has none.
+    A tool for ``app`` alone is one only a view calls."""
+    visibility = ui_of(tool).get("visibility")
+    return not isinstance(visibility, list) or "model" in visibility
 
 
 def has_view(tool: object) -> bool:
