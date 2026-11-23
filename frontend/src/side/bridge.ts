@@ -25,6 +25,14 @@
 /** The version of MCP Apps the host speaks. */
 export const PROTOCOL_VERSION = "2026-01-26";
 
+/**
+ * Who the host says it is. The standard asks for a name and a version, and
+ * its own library refuses an answer to `ui/initialize` without both. The
+ * interface has no version of its own to tell, so it tells the one the
+ * backend's MCP client tells a server (`web/mcp_client.py`).
+ */
+export const HOST_INFO = { name: "robinauts", version: "0" } as const;
+
 /** The theme a view is told: the one on the screen, never "system". */
 export type HostTheme = "light" | "dark";
 
@@ -151,7 +159,7 @@ function containerDimensions(size: BoxSize | null) {
 export function initializeResult(theme: HostTheme, size: BoxSize | null) {
   return {
     protocolVersion: PROTOCOL_VERSION,
-    hostInfo: { name: "robinauts" },
+    hostInfo: HOST_INFO,
     hostCapabilities: { serverTools: {} },
     hostContext: {
       theme,

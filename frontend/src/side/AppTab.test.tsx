@@ -144,7 +144,7 @@ test("the handshake: the theme, then the agent's arguments and the result of its
     id: 1,
     result: {
       protocolVersion: PROTOCOL_VERSION,
-      hostInfo: { name: "robinauts" },
+      hostInfo: { name: "robinauts", version: "0" },
       hostCapabilities: { serverTools: {} },
       hostContext: {
         theme: "dark",

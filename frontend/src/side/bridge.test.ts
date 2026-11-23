@@ -92,7 +92,7 @@ describe("dispatch", () => {
             id: 7,
             result: {
               protocolVersion: PROTOCOL_VERSION,
-              hostInfo: { name: "robinauts" },
+              hostInfo: { name: "robinauts", version: "0" },
               hostCapabilities: { serverTools: {} },
               hostContext: {
                 theme: "dark",

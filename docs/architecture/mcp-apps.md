@@ -107,7 +107,7 @@ sequenceDiagram
 
 | Step | Message | What the panel sends |
 |---|---|---|
-| 9 | answer to `ui/initialize` | `protocolVersion` `2026-01-26`; `hostCapabilities.serverTools`; `hostContext` with `theme`, `displayMode` `inline`, `availableDisplayModes` `["inline"]` and a fixed `containerDimensions` |
+| 9 | answer to `ui/initialize` | `protocolVersion` `2026-01-26`; `hostInfo` with `name` and `version`; `hostCapabilities.serverTools`; `hostContext` with `theme`, `displayMode` `inline`, `availableDisplayModes` `["inline"]` and a fixed `containerDimensions` |
 | 11 | `ui/notifications/tool-input` | the arguments of the agent's call, from the transcript |
 | 14 | `ui/notifications/tool-result` | the result of the agent's call: `content` with one text block, `structuredContent` and `isError` |
 | 15 | `ui/notifications/tool-cancelled` | sent when the turn ended and the call has no result |
