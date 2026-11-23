@@ -170,6 +170,9 @@ class InProcessStore(Store):
         limit: int,
         before: Cursor | None,
         terms: Sequence[SearchTerm] = (),
+        *,
+        project: uuid.UUID | None = None,
+        archived: bool = False,
     ) -> list[Session]:
         def matches(s: Session) -> bool:
             project = self._projects.get(s.project_id)
@@ -181,7 +184,8 @@ class InProcessStore(Store):
             for s in self._sessions.values()
             if s.owner_id == owner
             and s.id not in self._hidden
-            and s.archived_at is None
+            and (archived or s.archived_at is None)
+            and (project is None or s.project_id == project)
             and (before is None or (s.updated_at, s.id) < before)
             and matches(s)
         ]

@@ -76,13 +76,17 @@ the worker's folder, `workers/<worker name>/` in the data directory (`worker_fol
 
 ## Sessions
 
-- `list_sessions`: most recently updated first, a page at a time.
+- `list_sessions`: most recently updated first, a page at a time; searched by words, narrowed to
+  a project, and with or without the archived sessions.
+- `matching_sessions`: the ids of every session `list_sessions` lists with the same filters.
 - `open_session`: one moment of a session, its messages and its active turn if any.
 - `rename_session`
 - `archive_session`: take the session off the listing. Everything else stays, and its next turn
   brings it back.
 - `delete_session`: hide the session, after stopping a running turn. A soft delete: the records
   and the engine's state stay.
+- `archive_sessions`, `delete_sessions`: the same for many sessions at once, skipping those not
+  found.
 - `fork_session`: a new session from a message of another, independent from then on.
 
 ## Turns

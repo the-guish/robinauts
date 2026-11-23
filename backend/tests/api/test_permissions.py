@@ -72,6 +72,7 @@ PERMISSION_OF: dict[tuple[str, str], str] = {
     ("GET", "/api/conversations/{conversation_id}"): roles.CONVERSATIONS_READ,
     ("PATCH", "/api/conversations/{conversation_id}"): roles.CONVERSATIONS_WRITE,
     ("POST", "/api/conversations/{conversation_id}/archive"): roles.CONVERSATIONS_WRITE,
+    ("POST", "/api/conversations/bulk"): roles.CONVERSATIONS_WRITE,
     ("DELETE", "/api/conversations/{conversation_id}"): roles.CONVERSATIONS_WRITE,
     ("PUT", "/api/conversations/{conversation_id}/model"): roles.CONVERSATIONS_WRITE,
     ("POST", "/api/conversations/{conversation_id}/fork"): roles.CONVERSATIONS_WRITE,

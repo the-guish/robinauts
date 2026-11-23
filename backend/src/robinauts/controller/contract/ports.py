@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from typing import Any
 
 from robinauts.controller.contract.domain import (
@@ -48,12 +48,34 @@ class Controller(ABC):
 
     @abstractmethod
     async def list_sessions(
-        self, user: User, *, limit: int, cursor: str | None = None, query: str | None = None
+        self,
+        user: User,
+        *,
+        limit: int,
+        cursor: str | None = None,
+        query: str | None = None,
+        project: uuid.UUID | None = None,
+        archived: bool = False,
     ) -> SessionPage:
         """``InvalidValueError`` for a limit out of range or a cursor that does not parse.
 
         With a ``query``, only the sessions whose title, project name or agent holds every word
-        of it, case aside. A page of a search may be short and still have a cursor."""
+        of it, case aside. With a ``project``, only the sessions in it. With ``archived``, the
+        archived sessions are listed too. A page of a search may be short and still have a
+        cursor."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def matching_sessions(
+        self,
+        user: User,
+        *,
+        query: str | None = None,
+        project: uuid.UUID | None = None,
+        archived: bool = False,
+    ) -> tuple[uuid.UUID, ...]:
+        """The ids of every session ``list_sessions`` lists with the same filters, on all its
+        pages, in the same order."""
         raise NotImplementedError
 
     @abstractmethod
@@ -77,6 +99,18 @@ class Controller(ABC):
     async def archive_session(self, user: User, session_id: uuid.UUID) -> None:
         """``SessionNotFoundError``. The session leaves the listing and keeps everything else,
         a running turn included. Its next turn unarchives it."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def archive_sessions(self, user: User, session_ids: Sequence[uuid.UUID]) -> int:
+        """``archive_session`` for each of them, skipping those not found: how many it
+        archived or found archived."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def delete_sessions(self, user: User, session_ids: Sequence[uuid.UUID]) -> int:
+        """``delete_session`` for each of them, skipping those not found: how many it
+        deleted."""
         raise NotImplementedError
 
     @abstractmethod

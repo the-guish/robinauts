@@ -248,6 +248,40 @@ class StoreContract:
         assert await found(SearchTerm("zzz", ("b",))) == [other]
         assert await found(SearchTerm("100%_")) == []
 
+    @store_test
+    async def test_sessions_are_narrowed_to_a_project_and_list_the_archived_when_asked(
+        self, store: Store
+    ) -> None:
+        me = await add_user(store, user())
+        work = await store.ensure_project(Project(uuid.uuid4(), me.id, "Work", NOW))
+        plain = session(me.id, NOW)
+        worked = dataclasses.replace(session(me.id, NOW + MINUTE), project_id=work.id)
+        shelved = dataclasses.replace(
+            session(me.id, NOW + 2 * MINUTE), project_id=work.id, title="apple"
+        )
+        for each in (plain, worked, shelved):
+            await store.add_session(each)
+        shelved = dataclasses.replace(shelved, archived_at=NOW + 3 * MINUTE)
+        await store.update_session(shelved)
+
+        assert await store.sessions_of(me.id, 10, None) == [worked, plain]
+        assert await store.sessions_of(me.id, 10, None, archived=True) == [
+            shelved,
+            worked,
+            plain,
+        ]
+        assert await store.sessions_of(me.id, 10, None, project=work.id) == [worked]
+        in_work = await store.sessions_of(me.id, 1, None, project=work.id, archived=True)
+        assert in_work == [shelved]
+        rest = await store.sessions_of(
+            me.id, 10, (shelved.updated_at, shelved.id), project=work.id, archived=True
+        )
+        assert rest == [worked]
+        assert await store.sessions_of(
+            me.id, 10, None, [SearchTerm("apple")], project=work.id, archived=True
+        ) == [shelved]
+        assert await store.sessions_of(me.id, 10, None, project=uuid.uuid4()) == []
+
     # --- projects -----------------------------------------------------------
 
     @store_test

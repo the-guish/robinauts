@@ -361,10 +361,13 @@ class PostgresStore(Store):
         limit: int,
         before: Cursor | None,
         terms: Sequence[SearchTerm] = (),
+        *,
+        project: uuid.UUID | None = None,
+        archived: bool = False,
     ) -> list[Session]:
         updated_at, session_id = before if before is not None else (None, None)
         matching = ""
-        found: list[object] = []
+        found: list[object] = [archived, project]
         for term in terms:
             word = f"${5 + len(found)}"
             found.append(term.word)
@@ -379,7 +382,8 @@ class PostgresStore(Store):
             matching += ")"
         rows = await self._pool.fetch(
             f"SELECT {_SESSION_COLUMNS} FROM sessions"
-            " WHERE owner_id = $1 AND deleted_at IS NULL AND archived_at IS NULL"
+            " WHERE owner_id = $1 AND deleted_at IS NULL AND ($5::boolean OR archived_at IS NULL)"
+            "   AND ($6::uuid IS NULL OR project_id = $6)"
             "   AND ($2::timestamptz IS NULL OR (updated_at, id) < ($2, $3::uuid))"
             f"{matching} ORDER BY updated_at DESC, id DESC LIMIT $4",
             owner,

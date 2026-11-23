@@ -31,7 +31,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from oneberth.identity import Principal
 from oneberth.identity import User as OneberthUser
 from oneberth.web import Asking, Component, Health, Lifespan, Refusal, bearer_of, permit
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from robinauts.controller.contract.broker.ports import TurnBroker
 from robinauts.controller.contract.domain import (
@@ -301,6 +301,8 @@ class ConversationSummary(BaseModel):
 class ListedConversation(ConversationSummary):
     running: bool
     """The conversation has an active turn."""
+    archived: bool
+    """The conversation is archived: listed only when the archived ones are asked for."""
 
 
 class ConversationListResponse(BaseModel):
@@ -373,6 +375,41 @@ class OpenedConversationResponse(BaseModel):
 
 class RenameRequest(BaseModel):
     title: str
+
+
+MAX_BULK = 1000
+"""How many conversations a bulk request may name."""
+
+
+class ConversationFilter(BaseModel):
+    """The filters of ``GET /api/conversations``: every conversation it lists, on any page."""
+
+    q: str | None = Field(default=None, max_length=200)
+    project_id: uuid.UUID | None = None
+    archived: bool = False
+
+
+class BulkRequest(BaseModel):
+    """One action on many conversations: those of ``ids``, or every one ``matching`` lists
+    but those of ``except_ids``."""
+
+    action: Literal["archive", "delete"]
+    ids: list[uuid.UUID] | None = Field(default=None, max_length=MAX_BULK)
+    matching: ConversationFilter | None = None
+    except_ids: list[uuid.UUID] = Field(default_factory=list, max_length=MAX_BULK)
+
+    @model_validator(mode="after")
+    def one_selection(self) -> BulkRequest:
+        if (self.ids is None) == (self.matching is None):
+            raise ValueError("name either ids or matching")
+        if self.ids is not None and self.except_ids:
+            raise ValueError("except_ids goes with matching")
+        return self
+
+
+class BulkResponse(BaseModel):
+    count: int
+    """How many conversations the action reached."""
 
 
 class SetModelRequest(BaseModel):
@@ -711,19 +748,46 @@ def new_robinauts_webapp(
         limit: int = DEFAULT_PAGE,
         cursor: str | None = None,
         q: Annotated[str | None, Query(max_length=200)] = None,
+        project_id: uuid.UUID | None = None,
+        archived: bool = False,
     ) -> ConversationListResponse:
-        page = await controller.list_sessions(user, limit=limit, cursor=cursor, query=q)
+        page = await controller.list_sessions(
+            user, limit=limit, cursor=cursor, query=q, project=project_id, archived=archived
+        )
         defaults = {a.id: a.default_model for a in await controller.list_agents()}
         return ConversationListResponse(
             items=[
                 ListedConversation(
                     **summary(c, defaults[c.agent]).model_dump(),
                     running=c.id in page.running,
+                    archived=c.archived_at is not None,
                 )
                 for c in page.sessions
             ],
             next_cursor=page.cursor,
         )
+
+    @router.post("/api/conversations/bulk", dependencies=[permit(roles.CONVERSATIONS_WRITE)])
+    async def bulk_sessions(body: BulkRequest, user: User = asking) -> BulkResponse:
+        """Archive or delete many conversations at once, skipping those not found."""
+        if body.matching is None:
+            chosen: list[uuid.UUID] = body.ids or []
+        else:
+            left_out = set(body.except_ids)
+            chosen = [
+                one
+                for one in await controller.matching_sessions(
+                    user,
+                    query=body.matching.q,
+                    project=body.matching.project_id,
+                    archived=body.matching.archived,
+                )
+                if one not in left_out
+            ]
+        act = (
+            controller.archive_sessions if body.action == "archive" else controller.delete_sessions
+        )
+        return BulkResponse(count=await act(user, chosen))
 
     @router.get("/api/changes", dependencies=[permit(roles.CONVERSATIONS_READ)])
     async def changes(

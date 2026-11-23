@@ -70,6 +70,48 @@ async def test_sessions_are_searched_by_title_project_and_agent_a_page_at_a_time
 
 
 @asyncio_test
+async def test_sessions_are_filtered_and_archived_or_deleted_many_at_a_time() -> None:
+    lifecycle = await start_echo_controller()
+    controller = lifecycle.composed.controller
+    user = await controller.ensure_user(Identity("local", "me"), id=uuid.uuid4())
+    work = await controller.create_project(user, "Work")
+    ids = {}
+    for text, project in (("one", None), ("two", work.id), ("three", work.id)):
+        turn = await controller.start_session(
+            user, agent="echo", model="echo", text=text, project=project
+        )
+        await wait_for_turn_end(controller, user, turn)
+        ids[text] = turn.session_id
+
+    async def listed(**filters: object) -> list[uuid.UUID]:
+        page = await controller.list_sessions(user, limit=10, **filters)  # type: ignore[arg-type]
+        return [s.id for s in page.sessions]
+
+    assert await listed(project=work.id) == [ids["three"], ids["two"]]
+    assert await controller.matching_sessions(user, project=work.id) == (
+        ids["three"],
+        ids["two"],
+    )
+    assert await controller.matching_sessions(user, query="one") == (ids["one"],)
+
+    # Archived: off the listing, back with ``archived``; a missing id is skipped.
+    archived = await controller.archive_sessions(user, [ids["two"], ids["two"], uuid.uuid4()])
+    assert archived == 1
+    assert await listed() == [ids["three"], ids["one"]]
+    assert await listed(archived=True) == [ids["three"], ids["two"], ids["one"]]
+    assert await controller.matching_sessions(user, project=work.id, archived=True) == (
+        ids["three"],
+        ids["two"],
+    )
+
+    # Deleted: gone, archived or not.
+    assert await controller.delete_sessions(user, [ids["two"], ids["three"], uuid.uuid4()]) == 2
+    assert await listed(archived=True) == [ids["one"]]
+    assert await controller.delete_sessions(user, [ids["two"]]) == 0
+    await lifecycle.stop()
+
+
+@asyncio_test
 async def test_a_session_is_in_the_default_project_unless_another_is_chosen() -> None:
     lifecycle = await start_echo_controller()
     controller = lifecycle.composed.controller
