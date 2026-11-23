@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 from mcp.types import CallToolResult, TextContent
 from test_engines_over_chat_completions import SETTINGS
-from test_tool_server_exclude import Build, langchain
+from test_tool_server_exclude import Build, langchain, pydantic_ai
 
 from robinauts.agent_engines.contract.domain import (
     AgentDefinition,
@@ -80,7 +80,7 @@ async def round_of(
         return [event async for event in stream], vendor
 
 
-@pytest.mark.parametrize("build", [langchain], ids=["langchain"])
+@pytest.mark.parametrize("build", [langchain, pydantic_ai], ids=["langchain", "pydantic-ai"])
 @pytest.mark.parametrize(
     ("tool", "arguments", "text", "structured"),
     [
