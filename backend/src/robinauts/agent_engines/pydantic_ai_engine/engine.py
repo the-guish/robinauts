@@ -55,7 +55,7 @@ from robinauts.agent_engines.pydantic_ai_engine.clients import (
     force_tracing_off,
     release,
 )
-from robinauts.agent_engines.pydantic_ai_engine.context import within
+from robinauts.agent_engines.pydantic_ai_engine.context import within, without_structured
 from robinauts.agent_engines.pydantic_ai_engine.session_store import SessionStore
 from robinauts.agent_engines.pydantic_ai_engine.thinking import ANTHROPIC, signed_thinking_only
 from robinauts.agent_engines.pydantic_ai_engine.tools import (
@@ -120,7 +120,10 @@ class PydanticAIEngine(AgentEngine):
             asked = None
 
         async def save(messages: list[ModelMessage]) -> None:
-            await self._session_store.save(session_id, checkpoint, messages)
+            # A tool round is saved before the model is asked again, so before the history is
+            # processed: its results still carry the structured content the engine reported.
+            kept = without_structured(messages)
+            await self._session_store.save(session_id, checkpoint, kept)
 
         client, model_settings = chat_model(model, self._settings)
         try:

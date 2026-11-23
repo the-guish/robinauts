@@ -7,7 +7,8 @@ its function tools.
 An MCP result has text for the model and may have structured content for a view
 (``docs/architecture/mcp-apps.md``). Pydantic AI hands the model the structured content in the
 text's place when a result has both. ``TextToModel`` puts the text back and keeps the structured
-content on the tool return's metadata, where the engine reads it."""
+content on the tool return's metadata, where the engine reads it. The history drops it once it is
+reported (``context.py``): a session keeps a result's text alone."""
 
 from __future__ import annotations
 
