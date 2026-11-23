@@ -99,6 +99,11 @@ url = "{board_url}"
 secret_env = "BOARD_SECRET"
 exclude = ["hidden"]
 
+[tool_servers.board_again]
+url = "{board_url}"
+secret_env = "BOARD_SECRET"
+exclude = ["hidden", "refresh", "peek"]
+
 [tool_servers.plain]
 url = "{plain_url}"
 auth = "none"
@@ -120,6 +125,13 @@ system_prompt = "{system_prompt}"
 models = ["local_gpt"]
 engine = "langchain"
 tools = ["elsewhere"]
+
+[agents.board_twice]
+title = "The board, from two servers"
+system_prompt = "{system_prompt}"
+models = ["local_gpt"]
+engine = "langchain"
+tools = ["board", "board_again"]
 
 [agents.board_langchain]
 title = "The board, on LangChain"
@@ -155,6 +167,18 @@ def apps_agents() -> Iterator[shared_server.Contribution]:
         yield shared_server.Contribution(tools, {"BOARD_SECRET": SECRET})
 
 
+def app(tool: str, title: str, tool_title: str) -> dict[str, object]:
+    """One view of the board server as the listing has it, with the one tool that names it."""
+    view = f"ui://tests/{tool}.html"
+    return {
+        "id": f"board/{view}",
+        "server": "board",
+        "view": view,
+        "title": title,
+        "tools": [{"name": tool, "title": tool_title}],
+    }
+
+
 class ShowsTheBoard:
     """A model that calls ``board`` once, then answers."""
 
@@ -186,29 +210,25 @@ def test_an_agent_has_the_apps_of_the_servers_it_names_that_answer(
 ) -> None:
     listed = apps_api.get("/robinauts/api/apps", params={"agent": "with_apps"})
     alone = apps_api.get("/robinauts/api/apps", params={"agent": "elsewhere"})
+    twice = apps_api.get("/robinauts/api/apps", params={"agent": "board_twice"})
     without = apps_api.get("/robinauts/api/apps", params={"agent": "langchain"})
     unknown = apps_api.get("/robinauts/api/apps", params={"agent": "nobody"})
 
     assert listed.status_code == 200
     assert listed.json() == {
         "apps": [
-            {
-                "id": "board/board",
-                "server": "board",
-                "tool": "board",
-                "title": "The board",
-                "description": "The board, item by item.",
-            },
-            {
-                "id": "board/refresh",
-                "server": "board",
-                "tool": "refresh",
-                "title": "refresh",
-                "description": "",
-            },
+            app("board", "The board", "The board"),
+            app("refresh", "refresh", "refresh"),
+            # A tool the model alone may call still has its view: the agent's call shows in it.
+            app("peek", "peek", "peek"),
         ]
     }
-    assert [a["id"] for a in alone.json()["apps"]] == ["elsewhere/stolen"]
+    assert [a["id"] for a in alone.json()["apps"]] == ["elsewhere/ui://tests/stolen.html"]
+    # Two of an agent's servers give `board`: a call of it could be either's, so it has no
+    # view. The tools one server alone gives keep theirs.
+    assert twice.json() == {
+        "apps": [app("refresh", "refresh", "refresh"), app("peek", "peek", "peek")]
+    }
     assert without.json() == {"apps": []}
     assert unknown.status_code == 404
     assert unknown.json()["error"] == "UnknownAgentError"

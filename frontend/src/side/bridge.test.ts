@@ -16,6 +16,7 @@ import {
   type Phase,
   PROTOCOL_VERSION,
   toolCallFailed,
+  toolCancelled,
   toolInput,
   toolResult,
 } from "./bridge";
@@ -89,9 +90,13 @@ describe("dispatch", () => {
             id: 7,
             result: {
               protocolVersion: PROTOCOL_VERSION,
-              hostInfo: { name: "robinauts" },
+              hostInfo: { name: "robinauts", version: "0" },
               hostCapabilities: { serverTools: {} },
-              hostContext: { theme: "dark", displayMode: "inline" },
+              hostContext: {
+                theme: "dark",
+                displayMode: "inline",
+                availableDisplayModes: ["inline"],
+              },
             },
           },
         },
@@ -105,7 +110,11 @@ describe("dispatch", () => {
         phase: "initializing",
         step: {
           kind: "reply",
-          message: { jsonrpc: "2.0", id: 7, result: initializeResult("dark") },
+          message: {
+            jsonrpc: "2.0",
+            id: 7,
+            result: initializeResult("dark", null),
+          },
         },
       },
     ],
@@ -227,10 +236,15 @@ test("what the host tells the view", () => {
     structuredContent: { items: [] },
     isError: false,
   };
-  expect(toolInput()).toEqual({
+  expect(toolInput({ diagram_id: "d1" })).toEqual({
     jsonrpc: "2.0",
     method: "ui/notifications/tool-input",
-    params: { arguments: {} },
+    params: { arguments: { diagram_id: "d1" } },
+  });
+  expect(toolCancelled()).toEqual({
+    jsonrpc: "2.0",
+    method: "ui/notifications/tool-cancelled",
+    params: { reason: "The turn ended before the tool answered." },
   });
   expect(toolResult(answer)).toEqual({
     jsonrpc: "2.0",
@@ -241,10 +255,15 @@ test("what the host tells the view", () => {
   expect(
     callToolResult({ ...answer, structuredContent: null, isError: true }),
   ).toEqual({ content: answer.content, isError: true });
-  expect(hostContextChanged("light")).toEqual({
+  expect(hostContextChanged({ theme: "light" })).toEqual({
     jsonrpc: "2.0",
     method: "ui/notifications/host-context-changed",
     params: { theme: "light" },
+  });
+  expect(hostContextChanged({ size: { width: 320, height: 480 } })).toEqual({
+    jsonrpc: "2.0",
+    method: "ui/notifications/host-context-changed",
+    params: { containerDimensions: { width: 320, height: 480 } },
   });
   // Fixed words, whatever the backend said.
   expect(toolCallFailed("x")).toEqual({
@@ -262,4 +281,21 @@ test.each<[string | undefined, boolean, "light" | "dark"]>([
   ["system", true, "dark"],
 ])("the theme chosen %s, the system dark %s, is %s", (chosen, dark, theme) => {
   expect(hostTheme(chosen, dark)).toBe(theme);
+});
+
+test("the view is told the standard's version, and the size of a box on the screen", () => {
+  expect(PROTOCOL_VERSION).toBe("2026-01-26");
+  const told = (size: { width: number; height: number } | null) =>
+    initializeResult("light", size).hostContext;
+  expect(told({ width: 320, height: 480 })).toEqual({
+    theme: "light",
+    displayMode: "inline",
+    availableDisplayModes: ["inline"],
+    containerDimensions: { width: 320, height: 480 },
+  });
+  // A box that is not drawn has no size to tell.
+  expect(told({ width: 0, height: 480 })).not.toHaveProperty(
+    "containerDimensions",
+  );
+  expect(told(null)).not.toHaveProperty("containerDimensions");
 });

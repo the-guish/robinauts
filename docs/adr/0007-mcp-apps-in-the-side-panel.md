@@ -1,6 +1,12 @@
 # ADR 0007 — MCP apps in the side panel
 
-- Status: accepted.
+> **Superseded. Skip this ADR unless you need its history.**
+> [ADR 0008](0008-a-view-shows-one-call-of-the-agent.md) replaces it. How a
+> view is isolated and how its tool calls are relayed stand, and this record
+> holds the reasons. The panel no longer calls an app's tool itself.
+
+- Status: superseded by
+  [ADR 0008](0008-a-view-shows-one-call-of-the-agent.md)
 - Date: 2026-11-08
 
 ## Context

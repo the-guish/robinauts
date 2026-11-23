@@ -64,6 +64,39 @@ export type ModelId = string;
 export type Drafts = Map<ConversationId, string>;
 
 /**
+ * One tool call of the thread on the screen, as the side panel reads one
+ * (`docs/architecture/mcp-apps.md`): a call of a tool with a view is a
+ * sub-tab there.
+ */
+export interface ThreadToolCall {
+  /** The answer the call is part of, by the id the backend gave it. */
+  messageId: string;
+  /** The call's id, which its result is asked for by. */
+  callId: string;
+  /** The tool's name, as its server names it. */
+  name: string;
+  /** The arguments as data; `null` until the call is whole. */
+  arguments: Readonly<Record<string, unknown>> | null;
+  /**
+   * `"running"` until the tool answers, `"answered"` once it has, and
+   * `"unanswered"` for a call whose turn ended before it did.
+   */
+  state: "running" | "answered" | "unanswered";
+  /**
+   * This page saw the call arrive in a turn. One read from the store, on
+   * opening a conversation, is not live.
+   */
+  live: boolean;
+}
+
+/** The tool calls of the thread on the screen, oldest first. */
+export interface ThreadToolCalls {
+  /** The conversation they are of; `null` on the empty chat. */
+  conversationId: ConversationId | null;
+  calls: readonly ThreadToolCall[];
+}
+
+/**
  * What the chat is given, and the one thing it says back.
  *
  * `conversationId` is `null` on the empty chat -- the application opens on
@@ -131,11 +164,12 @@ export interface ChatProps {
    */
   onModelRefused?: (modelId: ModelId) => void;
   /**
-   * That a tool answered in the turn on the screen, by its full name,
-   * `<server>__<tool>`. An app of that server beside the chat asks it again
-   * (`src/side/AppTab.tsx`), so what the agent changed shows there at once.
+   * The tool calls of the thread on the screen, each time they change: a
+   * call starts, its arguments are whole, its tool answers, the thread is
+   * read again. The side panel shows the calls of tools with a view
+   * (`src/side/AppTab.tsx`).
    */
-  onToolResult?: (name: string) => void;
+  onToolCalls?: (thread: ThreadToolCalls) => void;
   /**
    * What to draw above the box on an empty chat: the agent and model
    * pickers.
