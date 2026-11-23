@@ -10,6 +10,10 @@ in JSON-RPC.
 
 Robinauts is a host. Its views show in the side panel beside the chat.
 
+[ADR 0008](../adr/0008-a-view-shows-one-call-of-the-agent.md) holds why a view shows one call
+of the agent. [ADR 0007](../adr/0007-mcp-apps-in-the-side-panel.md) holds why a view is isolated
+the way it is.
+
 ## The standard
 
 ```mermaid
