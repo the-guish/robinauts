@@ -1232,8 +1232,8 @@ export function sameToolCalls(
   if (one.length !== other.length) return false;
   return one.every((call, at) => {
     const beside = other[at];
+    if (beside === undefined) return false;
     return (
-      beside !== undefined &&
       call.messageId === beside.messageId &&
       call.callId === beside.callId &&
       call.name === beside.name &&

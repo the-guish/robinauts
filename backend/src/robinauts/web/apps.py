@@ -360,11 +360,16 @@ class Apps:
         listed = await asyncio.gather(*(self._listed(server) for server in servers))
         shared = shared_names(tools for tools, _ in listed)
         if shared:
-            # By how many, never by name: a tool's name is what a server said.
+            # By the servers' ids and how many, never by name: a tool's name is what a server
+            # said.
+            among = [
+                server.id
+                for server, (tools, _) in zip(servers, listed, strict=True)
+                if any(tool.get("name") in shared for tool in tools)
+            ]
             log.warning(
-                "agent %s: %d tool names are given by more than one of its tool servers,"
-                " and are shown in no view",
-                agent_id,
+                "tool servers %s give %d tool names in common, which are shown in no view",
+                ", ".join(among),
                 len(shared),
             )
         return [
