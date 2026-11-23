@@ -242,6 +242,7 @@ def events_of(event: AgentStreamEvent) -> Iterator[Event]:
 
 
 def structured_content_of(metadata: object) -> Mapping[str, Any] | None:
-    """An MCP result's structured content, which ``TextToModel`` keeps on the return's metadata."""
+    """The structured content of the answer of a tool with a view, which ``TextToModel`` keeps on
+    the return's metadata."""
     structured = metadata.get(STRUCTURED_CONTENT) if isinstance(metadata, Mapping) else None
     return structured if isinstance(structured, Mapping) else None

@@ -153,10 +153,11 @@ anything else.
 - A tool result: the call's id, the tool's name, the output as the model
   will see it, and whether the tool reported an error. A call that fails or
   times out has a result too: the failure, as an error. The turn goes on.
-  An MCP result may have structured content beside its text. The model reads
-  the text. The result reports the structured content apart, as the server
-  gave it, for a view to draw
-  ([mcp-apps.md](../architecture/mcp-apps.md)).
+  A tool with a view may answer structured content beside its text
+  ([mcp-apps.md](../architecture/mcp-apps.md)). The model reads the text.
+  The result reports the structured content apart, as the server gave it,
+  for the view to draw. The result of any other tool reports none, and the
+  model reads of it what the framework gives it.
 - Done: the final answer's text and the id of the new checkpoint. Always
   last, always once, and only after every tool call it reported has its
   result.

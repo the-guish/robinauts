@@ -4,20 +4,20 @@
 """The agent's tools: toolsets of its MCP servers with the server's credential, and one toolset of
 its function tools.
 
-An MCP result has text for the model and may have structured content for a view
-(``docs/architecture/mcp-apps.md``). Pydantic AI hands the model the structured content in the
-text's place when a result has both. ``TextToModel`` puts the text back and keeps the structured
-content on the tool return's metadata, where the engine reads it."""
+A tool with a view answers text for the model and may answer structured content for the view
+(``docs/architecture/mcp-apps.md``). Pydantic AI's toolset keeps that answer on the tool's return,
+as the server gave it, and hands the model the structured content in the text's place when the
+answer has both. ``TextToModel`` puts the text back and keeps the structured content on the
+return's metadata, where the engine reads it. The answer of any other tool is as Pydantic AI
+maps it."""
 
 from __future__ import annotations
 
 import base64
-from collections.abc import Awaitable, Callable, Iterable
-from contextvars import ContextVar
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from mcp.types import TextContent
 from pydantic_ai import RunContext, Tool, ToolReturn
 from pydantic_ai.exceptions import ApprovalRequired, CallDeferred, ModelRetry, ToolFailed
 from pydantic_ai.mcp import MCPToolset
@@ -43,15 +43,15 @@ def toolset_for(server: ToolServerConfig, settings: EngineSettings) -> AbstractT
     elif server.auth is ToolServerAuth.HEADER:
         headers[server.header] = settings.tool_secrets.secret_for(server.id)
     # Nothing connects here: the agent's run opens the session and closes it when the run ends.
-    toolset: AbstractToolset[Any] = MCPToolset(
-        server.url,
-        headers=headers,
-        init_timeout=server.timeout_seconds,
-        read_timeout=server.timeout_seconds,
-        tool_error_behavior="failed",
+    toolset: AbstractToolset[Any] = TextToModel(
+        MCPToolset(
+            server.url,
+            headers=headers,
+            init_timeout=server.timeout_seconds,
+            read_timeout=server.timeout_seconds,
+            tool_error_behavior="failed",
+        )
     )
-    heard_from(toolset.client)
-    toolset = TextToModel(toolset)
     if server.exclude:
         excluded = set(server.exclude)
         toolset = toolset.filtered(lambda _context, tool: tool.name not in excluded)
@@ -61,47 +61,41 @@ def toolset_for(server: ToolServerConfig, settings: EngineSettings) -> AbstractT
 STRUCTURED_CONTENT = "structured_content"
 """The key of a tool return's metadata that holds an MCP result's structured content."""
 
-_HEARD: ContextVar[list[Any] | None] = ContextVar("robinauts_mcp_results", default=None)
-"""The MCP results of the tool call this task is making, as the client received them."""
+KEPT_FOR_A_VIEW = "mcp_app"
+"""The key of a tool return's metadata under which Pydantic AI's toolset keeps what a view needs
+of a call to a tool with one (``pydantic_ai.mcp.MCPAppToolResult``). Its ``result`` is the
+server's answer in MCP's wire form."""
 
 
-def heard_from(client: Any) -> None:
-    """Have the toolset's MCP client hand each result it receives to the tool call that asked,
-    as the server gave it: the toolset itself returns a result already mapped for the model."""
-    call: Callable[..., Awaitable[Any]] = client.call_tool
-
-    async def call_tool(*args: Any, **kwargs: Any) -> Any:
-        result = await call(*args, **kwargs)
-        heard = _HEARD.get()
-        if heard is not None:
-            heard.append(result)
-        return result
-
-    client.call_tool = call_tool
+def answer_of(metadata: object) -> Mapping[str, Any] | None:
+    """The server's answer to a call of a tool with a view, in MCP's wire form, from the metadata
+    of the tool's return. ``None`` for the metadata of any other return."""
+    kept = metadata.get(KEPT_FOR_A_VIEW) if isinstance(metadata, Mapping) else None
+    answer = kept.get("result") if isinstance(kept, Mapping) else None
+    return answer if isinstance(answer, Mapping) else None
 
 
 @dataclass
 class TextToModel(WrapperToolset[Any]):
-    """An MCP result with structured content: its text is what the model reads, and the
-    structured content is kept on the return's metadata, apart. A result of text parts alone is
-    their text, one string, or a list of several; any other result is as Pydantic AI maps it."""
+    """The answer of a tool with a view: its text is what the model reads, and its structured
+    content is kept on the return's metadata, apart. An answer of text blocks alone is their
+    text, one string, or a list of several; any other is as Pydantic AI maps it. The rest of what
+    Pydantic AI keeps for a view goes no further: the session holds what the model read."""
 
     async def call_tool(
         self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any], tool: ToolsetTool[Any]
     ) -> Any:
-        heard: list[Any] = []
-        token = _HEARD.set(heard)
-        try:
-            mapped = await super().call_tool(name, tool_args, ctx, tool)
-        finally:
-            _HEARD.reset(token)
-        result = heard[-1] if heard else None
-        structured = getattr(result, "structured_content", None)
+        returned = await super().call_tool(name, tool_args, ctx, tool)
+        answer = answer_of(returned.metadata) if isinstance(returned, ToolReturn) else None
+        if answer is None:
+            return returned
+        mapped = returned.return_value
+        structured = answer.get("structuredContent")
         if not isinstance(structured, dict):
             return mapped
-        parts = list(getattr(result, "content", None) or [])
-        texts = [part.text for part in parts if isinstance(part, TextContent)]
-        if texts and len(texts) == len(parts):
+        blocks = answer.get("content") or []
+        texts = [block["text"] for block in blocks if block.get("type") == "text"]
+        if texts and len(texts) == len(blocks):
             mapped = texts[0] if len(texts) == 1 else texts
         return ToolReturn(return_value=mapped, metadata={STRUCTURED_CONTENT: structured})
 

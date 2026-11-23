@@ -2,13 +2,16 @@
 # Copyright The Robinauts Authors
 
 """The agent's tools: listed from its MCP servers with the server's credential, and its function
-tools made LangChain tools."""
+tools made LangChain tools.
+
+An MCP tool may name a view in its ``_meta.ui`` (``docs/architecture/mcp-apps.md``). The adapter
+keeps a tool's ``_meta`` on the tool's metadata: ``has_view`` reads it there."""
 
 from __future__ import annotations
 
 import asyncio
 import base64
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import timedelta
 from typing import Any
 
@@ -62,6 +65,20 @@ async def tools_for(agent: AgentDefinition, settings: EngineSettings) -> list[Ba
         for tool in tools
         if tool.name not in servers[server_id].exclude
     ]
+
+
+def ui_of(tool: object) -> Mapping[str, Any]:
+    """An MCP tool's ``_meta.ui``, empty when it has none, as for a tool that is no MCP
+    server's."""
+    metadata = getattr(tool, "metadata", None)
+    meta = metadata.get("_meta") if isinstance(metadata, Mapping) else None
+    ui = meta.get("ui") if isinstance(meta, Mapping) else None
+    return ui if isinstance(ui, Mapping) else {}
+
+
+def has_view(tool: object) -> bool:
+    """Whether the tool names a view, in ``resourceUri``."""
+    return isinstance(ui_of(tool).get("resourceUri"), str)
 
 
 def function_tools(functions: Iterable[FunctionTool]) -> list[BaseTool]:

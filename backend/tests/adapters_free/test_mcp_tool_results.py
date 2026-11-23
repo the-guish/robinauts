@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright The Robinauts Authors
 
-"""An MCP tool's result, on both engines, from a real MCP server: the model is sent its text,
-and the engine reports its structured content apart (``docs/architecture/mcp-apps.md``).
+"""An MCP tool's result, on both engines, from a real MCP server. The model is sent the text
+of a tool with a view, and the engine reports its structured content apart
+(``docs/architecture/mcp-apps.md``). A tool without a view reports none.
 
 The engines' own MCP clients make the call; only the model is a stand-in, which keeps what it
 was sent (``chat_completions.Vendor``).
@@ -30,7 +31,7 @@ from robinauts.agent_engines.contract.domain import (
 from util.aio import asyncio_test
 from util.chat_completions import Vendor, calling, finished, said, streamed
 from util.contracts.engine import ARGUMENTS, CALL_ID, add
-from util.mcp_server import mcp_server
+from util.mcp_server import View, mcp_server
 
 pytestmark = pytest.mark.io
 
@@ -57,10 +58,17 @@ def text_of(content: str | list[dict[str, Any]]) -> str:
 
 
 async def round_of(
-    build: Build, tool: Callable[..., Any], arguments: dict[str, Any], mp: pytest.MonkeyPatch
+    build: Build,
+    tool: Callable[..., Any],
+    arguments: dict[str, Any],
+    mp: pytest.MonkeyPatch,
+    *,
+    viewed: bool,
 ) -> tuple[list[Event], Vendor]:
-    """One turn in which the model calls ``tool`` of a real MCP server, then answers."""
-    with mcp_server(tool) as url:
+    """One turn in which the model calls ``tool`` of a real MCP server, then answers. With
+    ``viewed`` the tool names a view."""
+    offered = mcp_server(views=[View(tool, "<p>a view</p>")]) if viewed else mcp_server(tool)
+    with offered as url:
         server = ToolServerConfig("s", url, auth=ToolServerAuth.NONE)
         models = dataclasses.replace(SETTINGS.models, tool_servers={"s": server})
         vendor = Vendor(
@@ -80,6 +88,14 @@ async def round_of(
         return [event async for event in stream], vendor
 
 
+def sent_to_the_model(vendor: Vendor) -> str:
+    """The text of the tool's result in the model call that followed it."""
+    _, second = vendor.sent
+    sent = Vendor.body_of(second)["messages"][-1]
+    assert (sent["role"], sent["tool_call_id"]) == ("tool", CALL_ID)
+    return text_of(sent["content"])
+
+
 @pytest.mark.parametrize("build", [langchain, pydantic_ai], ids=["langchain", "pydantic-ai"])
 @pytest.mark.parametrize(
     ("tool", "arguments", "text", "structured"),
@@ -92,7 +108,7 @@ async def round_of(
     ids=["text-and-structured", "text-alone", "typed-return"],
 )
 @asyncio_test
-async def test_the_model_is_sent_the_text_and_the_structured_content_is_reported_apart(
+async def test_a_tool_with_a_view_sends_the_model_its_text_and_reports_the_structured_content_apart(
     build: Build,
     tool: Callable[..., Any],
     arguments: dict[str, Any],
@@ -100,11 +116,29 @@ async def test_the_model_is_sent_the_text_and_the_structured_content_is_reported
     structured: dict[str, Any] | None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    events, vendor = await round_of(build, tool, arguments, monkeypatch)
+    events, vendor = await round_of(build, tool, arguments, monkeypatch, viewed=True)
 
     [result] = [event for event in events if isinstance(event, ToolResult)]
     assert result == ToolResult(CALL_ID, tool.__name__, text, False, structured)
-    _, second = vendor.sent
-    sent = Vendor.body_of(second)["messages"][-1]
-    assert (sent["role"], sent["tool_call_id"]) == ("tool", CALL_ID)
-    assert text_of(sent["content"]) == text
+    assert sent_to_the_model(vendor) == text
+
+
+@pytest.mark.parametrize("build", [langchain, pydantic_ai], ids=["langchain", "pydantic-ai"])
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [(draw, {}), (add, ARGUMENTS)],
+    ids=["text-and-structured", "typed-return"],
+)
+@asyncio_test
+async def test_a_tool_without_a_view_reports_no_structured_content(
+    build: Build,
+    tool: Callable[..., Any],
+    arguments: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events, vendor = await round_of(build, tool, arguments, monkeypatch, viewed=False)
+
+    [result] = [event for event in events if isinstance(event, ToolResult)]
+    assert (result.failed, result.structured_content) == (False, None)
+    # What the model reads of it is the framework's to map; the result reports that.
+    assert sent_to_the_model(vendor) == result.raw_output

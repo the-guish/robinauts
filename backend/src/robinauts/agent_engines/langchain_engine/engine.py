@@ -60,7 +60,7 @@ from robinauts.agent_engines.langchain_engine.clients import (
     force_tracing_off,
 )
 from robinauts.agent_engines.langchain_engine.session_store import SessionStore
-from robinauts.agent_engines.langchain_engine.tools import function_tools, tools_for
+from robinauts.agent_engines.langchain_engine.tools import function_tools, has_view, tools_for
 
 FASTEST_MODEL_CALL = 1.0
 """Seconds: a turn may make one model call per second of its timeout. Real rounds are slower;
@@ -122,9 +122,11 @@ class LangChainEngine(AgentEngine):
                 raise CheckpointNotFoundError(checkpoint_id)
 
         chat = chat_model(model, self._settings)
+        tools = await tools_for(agent, self._settings)
+        viewed = frozenset(tool.name for tool in tools if has_view(tool))
         graph = create_agent(
             chat,
-            [*await tools_for(agent, self._settings), *function_tools(agent.functions)],
+            [*tools, *function_tools(agent.functions)],
             system_prompt=agent.system_prompt,
             checkpointer=self._session_store.saver,
             middleware=middleware_for(chat, model, self._settings),
@@ -152,7 +154,7 @@ class LangChainEngine(AgentEngine):
                     item = await anext(stream, None)
                 if item is None:
                     break
-                for event in events_of(*item):
+                for event in events_of(*item, viewed):
                     yield event
         yield done_of(await graph.aget_state(thread))
 
@@ -248,7 +250,9 @@ AGENT_STEPS = ("model", "tools")
 call, and the messages a summary keeps, which it writes again."""
 
 
-def events_of(mode: str, payload: Any) -> Iterator[Event]:
+def events_of(mode: str, payload: Any, viewed: frozenset[str]) -> Iterator[Event]:
+    """The turn's events in what the graph streamed. ``viewed`` names the tools with a view,
+    whose results report their structured content."""
     if mode == "messages":
         chunk, metadata = payload
         if metadata.get("langgraph_node") not in AGENT_STEPS:
@@ -273,13 +277,14 @@ def events_of(mode: str, payload: Any) -> Iterator[Event]:
                     str(message.name),
                     message.text,
                     message.status == "error",
-                    structured_content_of(message),
+                    structured_content_of(message) if message.name in viewed else None,
                 )
 
 
 def structured_content_of(message: ToolMessage) -> Mapping[str, Any] | None:
     """The structured content of an MCP result, which the adapter keeps on the message's
-    artifact, beside the content the model reads."""
+    artifact, beside the content the model reads. It keeps one for any tool; only a view draws
+    it, so only the result of a tool with a view reports it."""
     artifact = message.artifact
     structured = artifact.get("structured_content") if isinstance(artifact, Mapping) else None
     return structured if isinstance(structured, Mapping) else None

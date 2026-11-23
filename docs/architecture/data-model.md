@@ -244,8 +244,8 @@ read. `tool` is a reserved role: no message has it yet.
   kept, and nothing needs it.
 - **A tool result's `text` is the output as the model saw it.** It is not parsed, even
   when it looks like JSON. `is_error` is what the tool reported.
-- **`structured` is an MCP result's structured content**: a JSON object, which a view
-  draws ([mcp-apps.md](mcp-apps.md)). It is written only when the result has one.
+- **`structured` is the structured content a tool with a view answered**: a JSON object,
+  which the view draws ([mcp-apps.md](mcp-apps.md)). It is written only when the result has one.
   Structured content above 1 MiB of JSON is left out, and the result keeps its text.
 - **`reasoning` is in the format, and not written yet.** The runner streams reasoning
   as events and keeps none of it in the answer (`docs/specs/wire.md`). Keeping it is a

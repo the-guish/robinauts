@@ -142,8 +142,10 @@ sequenceDiagram
 The engine receives the server's answer (step 12). The model reads its text. The view needs its
 structured content.
 
-1. **The engine reports both.** A tool result has the text for the model and the server's
-   structured content, apart ([agent-engines.md](../specs/agent-engines.md)).
+1. **The engine reports both.** The result of a tool with a view has the text for the model and
+   the server's structured content, apart ([agent-engines.md](../specs/agent-engines.md)). Each
+   framework's MCP client keeps the server's answer to such a call, and the engine reads it
+   there: Pydantic AI on the tool's return, LangChain on the tool message.
 2. **The transcript keeps both.** The `tool_result` part has an optional `structured` field
    ([data-model.md](data-model.md)).
 3. **The panel asks for one call's result**:
@@ -196,6 +198,9 @@ The view runs next to a page that holds a signed-in person's session.
 - **`hostContext.toolInfo` is not sent.**
 - **Each request to a server opens an MCP session and ends it.** A view that polls costs four
   requests to its server per read.
+- **The result of a tool without a view is as the framework gives it to the model.** Pydantic
+  AI gives the structured content in the text's place when a result has both and all its content
+  is text. LangChain gives the text. Neither reports that structured content: no view draws it.
 - **The engines do not read `_meta.ui.visibility`.** A tool with `app` alone is still given to
   the model, unless the server's `exclude` names it, which hides it from views too.
 - **Robinauts does not advertise the extension** in its clients' capabilities. A server that
