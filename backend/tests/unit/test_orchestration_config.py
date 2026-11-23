@@ -75,11 +75,20 @@ def test_every_problem_is_named_at_once() -> None:
     assert str(refused.value).count("\n") == 1
 
 
+def test_the_worker_serves_the_other_flows_when_a_flow_s_handlers_left_the_folder() -> None:
+    """neorc keeps a flow whose file was removed. Its handlers do not fit any more, and the
+    worker must not end on them."""
+    described = OrchestrationConfig(code_location=CODE, flows=FOLDER)
+    command = worker_command(described, command=NEORC, manager_url="http://127.0.0.1:8001")
+    assert "--allow-unfit-handlers" in command
+
+
 def test_the_worker_runs_against_the_manager_on_this_server_s_worker_listener() -> None:
     described = OrchestrationConfig(code_location=CODE, flows=FOLDER)
     assert worker_command(described, command=NEORC, manager_url="http://127.0.0.1:8001") == (
         *(*NEORC, "worker", "start", "--manager-address", "http://127.0.0.1:8001"),
         *("--code-location", str(CODE), "--queue", "default"),
+        "--allow-unfit-handlers",
     )
 
 

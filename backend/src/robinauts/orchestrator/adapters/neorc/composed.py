@@ -186,7 +186,9 @@ def worker_environment(
 def worker_command(
     orchestration: OrchestrationConfig, *, command: tuple[str, ...], manager_url: str
 ) -> tuple[str, ...]:
-    """The worker's command: neorc's, against the manager on this backend's worker listener."""
+    """The worker's command: neorc's, against the manager on this backend's worker listener.
+    neorc keeps a flow whose file left the folder, and its handlers left with it: the worker
+    reports the handlers that do not fit and serves the other flows."""
     return (
         *command,
         "worker",
@@ -197,6 +199,7 @@ def worker_command(
         str(orchestration.code_location),
         "--queue",
         DEFAULT_QUEUE,
+        "--allow-unfit-handlers",
     )
 
 

@@ -167,6 +167,16 @@ things put it outside the server's process:
 
 It costs one process and a long-poll over the loopback interface.
 
+### A flow removed from the folder
+
+neorc keeps every flow it was given: a flow file removed from the folder stays
+in its records, with its runs. Its handlers leave the folder with it, so they
+no longer fit its tasks. neorc's worker checks the handlers of every flow at
+its start, and ends on one that does not fit. Robinauts starts it with
+`--allow-unfit-handlers`: the worker logs those handlers and serves the other
+flows. A run of the removed flow fails at its first task, with the handler's
+name in the error. The flow stays listed until neorc can remove one.
+
 ### Whose a run is
 
 A run is the person's who started it, and so are the conversations its handlers open for it.
