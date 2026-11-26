@@ -62,6 +62,15 @@ updates:
     commit-message:
       prefix: "claude-code-worker"
   - package-ecosystem: "uv"
+    directory: "/extra-workers/fabric-worker"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 10
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "fabric-worker"
+  - package-ecosystem: "uv"
     directory: "/extra-workers/worker-common"
     schedule:
       interval: "weekly"
