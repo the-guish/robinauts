@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'linux'",
@@ -1862,6 +1862,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "black" },
+    { name = "httpx" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -1872,6 +1873,7 @@ requires-dist = [{ name = "robinauts", editable = "../../backend" }]
 [package.metadata.requires-dev]
 dev = [
     { name = "black", specifier = ">=24.0" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "ruff", specifier = ">=0.6" },
 ]

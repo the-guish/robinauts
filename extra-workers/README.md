@@ -66,12 +66,14 @@ The workers:
 | --- | --- | --- |
 | [base-worker/](base-worker/README.md) | the backend's worker module, through the shared start, and git: any engine the backend ships, for the agents of its worker | in memory, as long as the container; on the desktop, in its folder |
 | [claude-code-worker/](claude-code-worker/README.md) | the same, with the engine `claude-code` plugged in: each turn a query of the Claude Agent SDK, which drives the Claude Code binary it bundles, in a directory of the conversation's own | Claude Code's transcripts and the conversations' workspaces, in two volumes; on the desktop, in its folder |
+| [codex-worker/](codex-worker/README.md) | the same, with the engine `codex` plugged in: each turn one turn of a Codex thread, run by a `codex app-server` of its own, in a directory of the conversation's own | Codex's threads and the conversations' workspaces, in two volumes; on the desktop, in its folder |
+| [opencode-worker/](opencode-worker/README.md) | the same, with the engine `opencode` plugged in: one `opencode serve` on loopback, and each turn one prompt of an OpenCode session, in a directory of the conversation's own | OpenCode's sessions and the conversations' workspaces, in two volumes; on the desktop, in its folder |
 
 Beside them, [worker-common/](worker-common/README.md) is not a worker but the
 library they share, with no image of its own; the checks run over it as over
 the workers.
 
 `base-worker/` is what a new extra worker starts from: copy it, add the package
-that brings the engine, keep the rest. `claude-code-worker/` is one made that
-way; its [CREDENTIALS.md](claude-code-worker/CREDENTIALS.md) is the rule above
-on credentials, spelled out for Claude Code's two.
+that brings the engine, keep the rest. `claude-code-worker/`, `codex-worker/`
+and `opencode-worker/` are made that way. Each one's `CREDENTIALS.md` is the
+rule above on credentials, spelled out for that agent's own.
