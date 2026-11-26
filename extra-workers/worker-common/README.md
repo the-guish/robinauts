@@ -13,6 +13,9 @@ repository's own.
 | `robinauts_worker_common.clone` | cloning a GitHub repository inside the container, with that token; `run_git`, every other git command the same way |
 | `robinauts_worker_common.worktrees` | the repositories of the flows' settings: one shared clone of each, and a worktree of each per session, on `rb/<session id>` |
 | `robinauts_worker_common.tasks` | the task payloads the extra workers know: `code_task/1`, which repositories a session works on and the branch each starts from |
+| `robinauts_worker_common.tool_servers` | the configured tool servers as an agent's own MCP client reaches them: the header each table's `auth` implies |
+| `robinauts_worker_common.function_server` | the tools run in the worker's process, served as an MCP server on loopback, under a token per turn, for an agent's CLI that has no other way to call back |
+| `robinauts_worker_common.network` | whether the server a worker serves is on this machine, as a worker on one person's own credential requires |
 
 ## Using it from a worker
 
@@ -245,10 +248,35 @@ await repositories.add_worktrees(session_id, folder, starts=starts, first=checkp
   (one repository, the permissions it needs, a short expiry) keeps the two
   apart.
 
+## The tools run in the worker's process
+
+Some tools run in the worker's process, such as the search of a person's
+conversations (`AgentDefinition.functions`). An agent's CLI that reaches tools
+over MCP alone, such as OpenCode's server, calls them through
+`FunctionServer`. It is an MCP server on loopback, on a port the operating
+system picks. Each turn binds its tools under a token of its own, and the CLI
+sends the token as a bearer token. A request with another token is refused, so
+no other process on the machine calls a turn's tools.
+
+```python
+from robinauts_worker_common.function_server import FunctionServer
+
+server = FunctionServer()
+await server.start()
+token = server.bind(agent.functions)      # the CLI gets server.url and the token
+...
+server.unbind(token)                      # when the turn ends
+```
+
+It speaks MCP's streamable HTTP transport in its plainest form: each message
+is a POST, and each answer one JSON body. It needs no web server.
+
 ## The tests
 
 `tests/test_github.py` checks the pure parts: the token, the server, the
-repository names, git's command line and environment. `tests/test_clone.py`
+repository names, git's command line and environment.
+`tests/test_function_server.py` lists and calls a turn's tools over real HTTP on
+loopback, and checks that another token is refused. `tests/test_clone.py`
 and `tests/test_worktrees.py` run the real git against a local stand-in for
 GitHub, `tests/github_stand_in.py`: git's own `http-backend` behind HTTPS, with
 a certificate made for the test, which asks for the token when it is told to

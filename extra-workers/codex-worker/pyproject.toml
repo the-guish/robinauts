@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright The Robinauts Authors
+
+[project]
+name = "robinauts-codex-worker"
+version = "0.1.0"
+description = "A Robinauts worker that runs its turns on OpenAI's Codex, through its app server."
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "The Robinauts Authors" }]
+dependencies = [
+    # The worker module, the broker's HTTP client and the engine contract, from the backend
+    # beside this folder (tool.uv.sources below): the same build as the server it serves.
+    "robinauts",
+    # What the extra workers share: their start, the GitHub token, cloning a repository
+    # (../worker-common/README.md).
+    "robinauts-worker-common",
+    # Nothing else: Codex is a binary the image installs (Dockerfile), driven over its app
+    # server's JSON-RPC on standard input and output (src/robinauts_codex_worker/rpc.py).
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+    "ruff>=0.6",
+    "black>=24.0",
+]
+
+# The engine, by the name a configuration uses: the worker module finds it here
+# (robinauts.agent_engines.contract.ports.ENTRY_POINTS), beside the engines the backend ships.
+[project.entry-points."robinauts.engines"]
+codex = "robinauts_codex_worker.engine:init_codex"
+
+[tool.uv]
+# neorc-from-source: the backend depends on neorc and oneberth, which uv builds from source.
+no-binary-package = ["neorc", "neorc-core", "oneberth"]
+environments = [
+    "sys_platform == 'linux'",
+    "sys_platform == 'darwin'",
+]
+
+[tool.uv.sources]
+# Editable, from the checkout: backend/hatch_build.py refuses a wheel built without the
+# interface, which a worker never serves.
+robinauts = { path = "../../backend", editable = true }
+# Editable from the checkout too, beside this folder; the image copies it to the same place.
+robinauts-worker-common = { path = "../worker-common", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/robinauts_codex_worker"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error"]
+
+# The backend's rules, word for word (backend/pyproject.toml), with this package first-party
+# beside robinauts: scripts/check-extra-workers.sh runs them over this folder.
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "PT018"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["robinauts", "robinauts_codex_worker", "robinauts_worker_common"]

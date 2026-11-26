@@ -44,7 +44,7 @@ for project in "$root"/extra-workers/*/; do
 done
 
 printf '\n== backend/src names no extra worker ==\n'
-if grep -rn "robinauts_claude_worker\|robinauts_worker_common\|claude_agent_sdk\|extra_workers" \
+if grep -rn "robinauts_claude_worker\|robinauts_codex_worker\|robinauts_opencode_worker\|robinauts_worker_common\|claude_agent_sdk\|extra_workers" \
     "$root/backend/src"; then
     printf 'backend/src names an extra worker: the layers are the other way round\n' >&2
     exit 1

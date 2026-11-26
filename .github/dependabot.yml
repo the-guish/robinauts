@@ -62,6 +62,24 @@ updates:
     commit-message:
       prefix: "claude-code-worker"
   - package-ecosystem: "uv"
+    directory: "/extra-workers/codex-worker"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 10
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "codex-worker"
+  - package-ecosystem: "uv"
+    directory: "/extra-workers/opencode-worker"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 10
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "opencode-worker"
+  - package-ecosystem: "uv"
     directory: "/extra-workers/worker-common"
     schedule:
       interval: "weekly"
